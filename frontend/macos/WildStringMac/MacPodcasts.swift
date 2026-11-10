@@ -1178,7 +1178,7 @@ private struct MacPodcastUnifiedQueue: View {
                 .padding(.vertical, 20)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(items) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         HStack(alignment: .center, spacing: 12) {
                             Button {
                                 play(item.episodeId, cloud: cloud)
@@ -1204,6 +1204,26 @@ private struct MacPodcastUnifiedQueue: View {
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+
+                            VStack(spacing: 2) {
+                                Button {
+                                    reorder(items, from: index, to: index - 1, cloud: cloud)
+                                } label: {
+                                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(index == 0)
+                                .help(L10n("macPodcasts.moveUp"))
+                                Button {
+                                    reorder(items, from: index, to: index + 1, cloud: cloud)
+                                } label: {
+                                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(index == items.count - 1)
+                                .help(L10n("macPodcasts.moveDown"))
+                            }
+                            .foregroundStyle(MacTheme.muted)
 
                             Button(L10n("macPodcasts.remove")) {
                                 cloud.removeEpisode(item.episodeId)
@@ -1248,6 +1268,18 @@ private struct MacPodcastUnifiedQueue: View {
                 playback.playPodcastEpisode(item)
             }
         }
+    }
+
+    private func reorder(
+        _ items: [PodcastCloudQueue.UnifiedPendingEpisode],
+        from: Int,
+        to: Int,
+        cloud: PodcastCloudQueue
+    ) {
+        guard items.indices.contains(from), items.indices.contains(to) else { return }
+        var ids = items.map(\.episodeId)
+        ids.insert(ids.remove(at: from), at: to)
+        cloud.reorderPending(ids)
     }
 
     private func playFirst(_ cloud: PodcastCloudQueue) {

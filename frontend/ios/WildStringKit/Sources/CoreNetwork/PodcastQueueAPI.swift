@@ -22,16 +22,27 @@ public enum WildstringDeviceID {
 public struct PodcastQueueItem: Codable, Equatable, Sendable, Identifiable {
     public var episodeId: String
     public var origin: String
+    public var addedAt: String
     public var id: String { episodeId }
 
-    public init(episodeId: String, origin: String = "manual") {
+    public init(episodeId: String, origin: String = "manual", addedAt: String = "") {
         self.episodeId = episodeId
         self.origin = origin
+        self.addedAt = addedAt
     }
 
     enum CodingKeys: String, CodingKey {
         case episodeId = "episode_id"
         case origin
+        case addedAt = "added_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        episodeId = try container.decode(String.self, forKey: .episodeId)
+        origin = try container.decodeIfPresent(String.self, forKey: .origin) ?? "manual"
+        // Older servers and fixtures omit added_at; treat them as undated legacy rows.
+        addedAt = try container.decodeIfPresent(String.self, forKey: .addedAt) ?? ""
     }
 }
 

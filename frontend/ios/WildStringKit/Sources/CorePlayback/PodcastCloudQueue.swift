@@ -49,12 +49,20 @@ public final class PodcastCloudQueue {
         public let origin: String
         public let source: Source
         public let episode: PodcastEpisode?
+        public let addedAt: String
 
-        public init(episodeId: String, origin: String, source: Source, episode: PodcastEpisode?) {
+        public init(
+            episodeId: String,
+            origin: String,
+            source: Source,
+            episode: PodcastEpisode?,
+            addedAt: String = ""
+        ) {
             self.episodeId = episodeId
             self.origin = origin
             self.source = source
             self.episode = episode
+            self.addedAt = addedAt
         }
     }
 
@@ -223,7 +231,8 @@ public final class PodcastCloudQueue {
                     episodeId: item.episodeId,
                     origin: item.origin,
                     source: .queue,
-                    episode: episodes[item.episodeId]
+                    episode: episodes[item.episodeId],
+                    addedAt: item.addedAt
                 )
             )
         }
@@ -235,12 +244,20 @@ public final class PodcastCloudQueue {
                         episodeId: item.episodeId,
                         origin: "manual",
                         source: .inbox,
-                        episode: inboxEpisodes[item.episodeId] ?? episodes[item.episodeId]
+                        episode: inboxEpisodes[item.episodeId] ?? episodes[item.episodeId],
+                        addedAt: item.addedAt
                     )
                 )
             }
         }
-        return result
+        // Ascending join time keeps the next item first; equal or missing timestamps keep their input order.
+        return result.enumerated()
+            .sorted { lhs, rhs in
+                lhs.element.addedAt == rhs.element.addedAt
+                    ? lhs.offset < rhs.offset
+                    : lhs.element.addedAt < rhs.element.addedAt
+            }
+            .map(\.element)
     }
 
     public func moveItems(from offsets: IndexSet, to destination: Int) {
@@ -446,6 +463,25 @@ public final class PodcastCloudQueue {
             self.syncError = nil
             self.pendingWrite = true
             await self.flushOnce()
+        }
+    }
+
+    /// Rewrites the whole pending list in the given order; inbox rows join the queue as manual entries.
+    public func reorderPending(_ orderedIDs: [String]) {
+        perform {
+            let queued = Dictionary(uniqueKeysWithValues: self.items.map { ($0.episodeId, $0) })
+            let pool = Dictionary(uniqueKeysWithValues: self.inbox.items.map { ($0.episodeId, $0) })
+            let rebuilt: [PodcastQueueItem] = orderedIDs.compactMap { id in
+                if let item = queued[id] { return item }
+                if let entry = pool[id] {
+                    return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: entry.addedAt)
+                }
+                return nil
+            }
+            guard rebuilt.count == orderedIDs.count, rebuilt.map(\.episodeId) != self.items.map(\.episodeId) else { return }
+            await self.edit { items in
+                items = rebuilt
+            }
         }
     }
 

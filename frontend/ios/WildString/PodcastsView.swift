@@ -574,6 +574,18 @@ private struct PodcastUnifiedQueueView: View {
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(L10n("podcasts.remove"))
                             }
+                            // Finger drag: drop a row on another to move it there.
+                            .draggable(item.episodeId)
+                            .dropDestination(for: String.self) { dropped, _ in
+                                guard let sourceId = dropped.first,
+                                      let from = items.firstIndex(where: { $0.episodeId == sourceId }),
+                                      let to = items.firstIndex(where: { $0.episodeId == item.episodeId }),
+                                      from != to else { return false }
+                                var ids = items.map(\.episodeId)
+                                ids.insert(ids.remove(at: from), at: to)
+                                cloud.reorderPending(ids)
+                                return true
+                            }
                         }
                     }
                 }
