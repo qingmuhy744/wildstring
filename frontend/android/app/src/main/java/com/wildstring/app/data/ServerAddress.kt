@@ -36,7 +36,7 @@ object ServerAddress {
 
 data class RequestOwner(val profile: String?)
 
-class OriginGuard(private val endpoint: () -> HttpUrl?, private val profile: () -> String? = { null }, private val unauthorized: () -> Unit = {}) : Interceptor {
+class OriginGuard(private val endpoint: () -> HttpUrl?, private val profile: () -> String? = { "" }, private val unauthorized: () -> Unit = {}) : Interceptor {
     @Volatile private var legacyOrigin: String? = null
     override fun intercept(chain: Interceptor.Chain): Response {
         val base = endpoint() ?: throw IOException(AppLanguage.string(R.string.srv_addr_server_not_configured))
@@ -51,7 +51,7 @@ class OriginGuard(private val endpoint: () -> HttpUrl?, private val profile: () 
             legacyOrigin = base.toString()
             response = chain.proceed(chain.request().newBuilder().header("X-Wildstring-Client", "web").build())
         }
-        if (response.code == 401 && !response.request.url.encodedPath.endsWith("/auth/login") && !response.request.url.encodedPath.endsWith("/auth/logout") && endpoint() == base && profile() == requestProfile) unauthorized()
+        if (response.code == 401 && !response.request.url.encodedPath.endsWith("/auth/login") && !response.request.url.encodedPath.endsWith("/auth/logout") && requestProfile != null && endpoint() == base && profile() == requestProfile) unauthorized()
         return response
     }
 }

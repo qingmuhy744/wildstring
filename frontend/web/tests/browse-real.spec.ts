@@ -71,14 +71,6 @@ test('字母拖动只预览，松手定位；增量失败保留列表并支持�
   page.on('request', (request) => {
     if (new URL(request.url()).pathname.endsWith('/tracks')) requests.push(request.url());
   });
-  await page.mouse.move(a!.x + a!.width / 2, a!.y + a!.height / 2);
-  await page.mouse.down();
-  await expect(page.locator('.alphabet-preview')).toHaveText('C');
-  await page.mouse.move(z!.x + z!.width / 2, z!.y + z!.height / 2, { steps: 8 });
-  await expect(page.locator('.alphabet-preview')).toHaveText('Z');
-  expect(requests).toHaveLength(0);
-  await page.mouse.up();
-  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('最后');
   let failed = false;
   await page.route('**/api/v1/tracks?*', (route) => {
     const url = new URL(route.request().url());
@@ -88,6 +80,14 @@ test('字母拖动只预览，松手定位；增量失败保留列表并支持�
     }
     return route.continue();
   });
+  await page.mouse.move(a!.x + a!.width / 2, a!.y + a!.height / 2);
+  await page.mouse.down();
+  await expect(page.locator('.alphabet-preview')).toHaveText('C');
+  await page.mouse.move(z!.x + z!.width / 2, z!.y + z!.height / 2, { steps: 8 });
+  await expect(page.locator('.alphabet-preview')).toHaveText('Z');
+  expect(requests).toHaveLength(0);
+  await page.mouse.up();
+  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('最后');
   await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
   await expect(page.getByRole('button', { name: '重试加载', exact: true })).toBeVisible();
   await expect(page.getByRole('table')).toBeVisible();
