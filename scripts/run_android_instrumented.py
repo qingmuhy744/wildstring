@@ -292,7 +292,10 @@ def run_class(
     (directory / "raw").mkdir(parents=True, exist_ok=True)
     (directory / "raw" / f"{short}.txt").write_text(output)
     (directory / "logcat").mkdir(parents=True, exist_ok=True)
-    logcat = adb("logcat", "-d", "-v", "threadtime", timeout=120, check=False)
+    # Once adb has reported the device gone, logcat would only wait for its timeout.
+    logcat = (
+        "" if DEVICE_TROUBLE else adb("logcat", "-d", "-v", "threadtime", timeout=120, check=False)
+    )
     (directory / "logcat" / f"{short}.txt").write_text(logcat)
     screenshots = directory / "screenshots"
     screenshots.mkdir(parents=True, exist_ok=True)
