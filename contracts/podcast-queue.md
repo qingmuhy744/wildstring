@@ -33,6 +33,7 @@
 12. 待播列表、队列、偏好按账号隔离并跨设备同步；自动续播预览不同步。
 13. 音乐接续快照 `playback_states` 不接收播客条目；播客队列走独立端点，`available_tracks()` 的曲目校验保持不变。
 14. 加入待播或收藏不隐式关注节目，只建立单集级引用。
+15. 统一待播列表按 `added_at` 升序展示（先加入的先播）：队列条目在入队时记录 `added_at`，每次整份 `PUT` 沿用原值；稍后听条目沿用自身 `added_at`。拖动即把当前顺序整体写回有序队列，来源统一为 `manual`，并入队列的稍后听条目由服务端从池中删除；自动续播预览不参与排序与拖拽。
 
 ## 3. 基线与新集分发
 
@@ -78,9 +79,9 @@
 
 `PUT /podcasts/inbox/items/{episode_id}` 幂等加入，`DELETE` 同路径移除。单集不存在返回 404。
 
-`GET /podcasts/queue` 返回 `{version, device_id, items:[{episode_id, origin}], updated_at}`。
+`GET /podcasts/queue` 返回 `{version, device_id, items:[{episode_id, origin, added_at}], updated_at}`；`added_at` 为服务端入队时间，历史条目缺失时退回该队列的 `updated_at`。
 
-`PUT /podcasts/queue` 请求 `{version, device_id, items:[{episode_id, origin}]}`，整份 CAS 替换。版本落后返回 409 `{"detail":{"code":"podcast_queue_conflict","current":{...}}}`；条目不是真实可访问单集返回 422。冲突后客户端保留本机队列并提示，不静默覆盖。
+`PUT /podcasts/queue` 请求 `{version, device_id, items:[{episode_id, origin, added_at?}]}`，整份 CAS 替换，已存在的 `added_at` 保留、新条目由服务端补写；提交的 ID 会同时从稍后听池中移除，保证同一单集只出现在一处。版本落后返回 409 `{"detail":{"code":"podcast_queue_conflict","current":{...}}}`；条目不是真实可访问单集返回 422。冲突后客户端保留本机队列并提示，不静默覆盖。
 
 `GET /podcasts/queue/preferences` 与 `PUT /podcasts/queue/preferences` 读写 `{default_action, auto_limit, auto_continue, shows:{[podcast_id]:{action, auto_limit, order, skip_completed, auto_continue}}}`，标量后写覆盖，`shows` 按提交映射同步。客户端读取续播偏好的优先级统一为：**节目单独设置 → 账号默认值 → 网络不可用时使用对应账号的本地缓存**。
 
@@ -118,6 +119,7 @@
 10. 播放某集后原有队列保留；播完自动出队并标记已听完；队列空时自动续播接上。
 11. 队列里只出现显式条目，自动续播不写入队列；关闭自动续播后播完即停。
 12. 加入待播或稍后听不产生关注；播客队列不污染音乐接续快照。
+13. 待播列表按加入时间升序排列；拖动两行后顺序立即生效，刷新或换设备后保持一致。对稍后听条目拖动会把它并入队列并从池中移出。
 13. 四端空、加载、错误、权限不足状态与窄屏、浅深主题逐张核对。
 
 ## 9. 实现与验证状态

@@ -142,7 +142,7 @@ def distribute_new_episodes(connection, podcast_id, episode_ids) -> int:
             continue
         items, version, device_id, _ = _queue_rows(connection, user_id)
         for episode_id in episode_ids:
-            entry = {"episode_id": episode_id, "origin": "rule"}
+            entry = {"episode_id": episode_id, "origin": "rule", "added_at": _now()}
             if action == "queue_next":
                 items.insert(min(1, len(items)), entry)
             else:
@@ -170,6 +170,8 @@ class QueueItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     episode_id: str = Field(min_length=1, max_length=128)
     origin: str = Field(default="manual", pattern="^(manual|rule)$")
+    # Preserved across rewrites so the unified pending list can sort by join time.
+    added_at: str = Field(default="", max_length=64)
 
 
 class QueueUpdate(BaseModel):
@@ -294,7 +296,7 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
     def put_queue(body: QueueUpdate, user: Annotated[dict, Depends(session)]):
         with database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            items, version, _, _ = _queue_rows(connection, user["id"])
+            items, version, _, updated_at = _queue_rows(connection, user["id"])
             if body.version != version:
                 raise HTTPException(
                     409,
@@ -303,12 +305,29 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
                         "current": {"version": version, "items": items},
                     },
                 )
+            previous = {
+                entry.get("episode_id"): entry.get("added_at", "")
+                for entry in items
+                if isinstance(entry, dict)
+            }
+            # Legacy entries carry no timestamp; keep them ahead of newly joined ones.
+            fallback = updated_at or _now()
             clean = []
             for item in body.items:
                 if _episode_podcast(connection, user["id"], item.episode_id) is None:
                     raise HTTPException(422, "episode_unavailable")
-                clean.append({"episode_id": item.episode_id, "origin": item.origin})
+                clean.append(
+                    {
+                        "episode_id": item.episode_id,
+                        "origin": item.origin,
+                        "added_at": item.added_at or previous.get(item.episode_id) or fallback,
+                    }
+                )
             _save_queue(connection, user["id"], clean, body.device_id, version + 1)
+            connection.executemany(
+                "DELETE FROM podcast_inbox WHERE user_id=? AND episode_id=?",
+                [(user["id"], entry["episode_id"]) for entry in clean],
+            )
         return {"version": version + 1, "items": clean}
 
     @router.get("/queue/preferences")
