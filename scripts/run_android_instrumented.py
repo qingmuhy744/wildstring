@@ -36,6 +36,16 @@ STATUS_CODE_PREFIX = "INSTRUMENTATION_STATUS_CODE: "
 RESULT_PREFIX = "INSTRUMENTATION_RESULT: "
 CODE_PREFIX = "INSTRUMENTATION_CODE: "
 FAILED_PREFIX = "INSTRUMENTATION_FAILED: "
+# adb prints one of these when the emulator is gone; retrying against it only burns the step
+# timeout, so the first one ends the run.
+DEVICE_GONE_MARKERS = (
+    "device offline",
+    "no devices/emulators found",
+    "device not found",
+    "device unauthorized",
+    "error: closed",
+    "cannot connect to daemon",
+)
 # AndroidJUnitRunner status codes.
 START, OK, ERROR, FAILURE, IGNORED, ASSUMPTION = 1, 0, -1, -2, -3, -4
 
@@ -115,31 +125,58 @@ def parse_instrumentation(output: str) -> Instrumentation:
     return parsed
 
 
+class DeviceLost(Exception):
+    """The emulator stopped answering; every class that has not run yet is reported as not run."""
+
+
+# Set by adb() when a best-effort command times out or reports a missing device, so the caller
+# can stop instead of waiting on the next command.
+DEVICE_TROUBLE: list[str] = []
+
+
+def device_gone(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in DEVICE_GONE_MARKERS)
+
+
 def adb(*arguments: str, timeout: float = 120, check: bool = True) -> str:
+    command = f"adb {' '.join(arguments)}"
     try:
         completed = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
             ["adb", *arguments], capture_output=True, text=True, timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired:
+        DEVICE_TROUBLE.append(f"{command} timed out after {timeout:.0f}s")
         if check:
             raise
         # Evidence collection (logcat, pulls) must never abort the run.
-        print(f"adb {' '.join(arguments)} timed out after {timeout:.0f}s", flush=True)
+        print(f"{command} timed out after {timeout:.0f}s", flush=True)
         return ""
+    if completed.returncode and device_gone(completed.stderr):
+        DEVICE_TROUBLE.append(f"{command}: {completed.stderr.strip()}")
     if check and completed.returncode:
-        raise RuntimeError(f"adb {' '.join(arguments)} failed: {completed.stderr.strip()}")
+        raise RuntimeError(f"{command} failed: {completed.stderr.strip()}")
     return completed.stdout
 
 
-def device_ready() -> bool:
-    """True once the emulator answers again; False if it is gone (for example it crashed)."""
+def device_ready(timeout: float = 60) -> bool:
+    """True if the emulator answers; False if it is gone (for example it crashed or hung)."""
     try:
         subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
-            ["adb", "wait-for-device"], capture_output=True, timeout=120, check=False
+            ["adb", "wait-for-device"], capture_output=True, timeout=timeout, check=False
+        )
+        state = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
+            ["adb", "get-state"], capture_output=True, text=True, timeout=30, check=False
+        )
+        if state.stdout.strip() != "device":
+            return False
+        # get-state only asks adbd; a hung system server still fails a real shell command.
+        echo = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
+            ["adb", "shell", "echo", "ok"], capture_output=True, text=True, timeout=30, check=False
         )
     except subprocess.TimeoutExpired:
         return False
-    return adb("get-state", timeout=30, check=False).strip() == "device"
+    return echo.stdout.strip() == "ok"
 
 
 def instrument(runner: str, extras: list[tuple[str, str]], timeout: float) -> tuple[str, bool]:
@@ -147,10 +184,15 @@ def instrument(runner: str, extras: list[tuple[str, str]], timeout: float) -> tu
     for key, value in extras:
         command += ["-e", key, shlex.quote(value)]
     try:
-        return adb(*command, runner, timeout=timeout, check=False), False
+        completed = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
+            ["adb", *command, runner], capture_output=True, text=True, timeout=timeout, check=False
+        )
     except subprocess.TimeoutExpired as error:
         output = error.stdout or ""
         return output.decode() if isinstance(output, bytes) else output, True
+    if completed.returncode and device_gone(completed.stderr):
+        DEVICE_TROUBLE.append(f"am instrument: {completed.stderr.strip()[:200]}")
+    return completed.stdout, False
 
 
 def discover(runner: str, extras: list[tuple[str, str]]) -> dict[str, list[str]]:
@@ -174,6 +216,7 @@ class ClassRun:
     crash: str
     timed_out: bool
     seconds: float
+    device_lost: bool = False
 
     @property
     def passed(self) -> bool:
@@ -223,16 +266,21 @@ def run_class(
     short = klass.removeprefix(TEST_PACKAGE_PREFIX)
     directory = options.output / f"iteration-{iteration}" / f"attempt-{attempt}"
     device_output = f"/sdcard/Android/media/{options.app_package}/additional_test_output/{short}"
-    adb("logcat", "-c", check=False)
-    adb("shell", "rm", "-rf", device_output, check=False)
+    DEVICE_TROUBLE.clear()
+    adb("logcat", "-c", timeout=30, check=False)
+    adb("shell", "rm", "-rf", device_output, timeout=30, check=False)
+    if DEVICE_TROUBLE:
+        raise DeviceLost(DEVICE_TROUBLE[-1])
     began = time.monotonic()
     extras = [*options.extras, ("class", klass), ("additionalTestOutputDir", device_output)]
     output, timed_out = instrument(options.runner, extras, options.class_timeout)
     seconds = round(time.monotonic() - began, 3)
     if timed_out:
-        adb("shell", "am", "force-stop", options.app_package, check=False)
-        adb("shell", "am", "force-stop", options.test_package, check=False)
+        adb("shell", "am", "force-stop", options.app_package, timeout=30, check=False)
+        adb("shell", "am", "force-stop", options.test_package, timeout=30, check=False)
     parsed = parse_instrumentation(output)
+    if not parsed.tests and device_gone(output):
+        DEVICE_TROUBLE.append(f"am instrument: {output.strip()[:200]}")
     crash = f"Timed out after {options.class_timeout:.0f}s" if timed_out else parsed.crash
     reported = {case.name for case in parsed.tests}
     tests = parsed.tests + [
@@ -248,7 +296,17 @@ def run_class(
     (directory / "logcat" / f"{short}.txt").write_text(logcat)
     screenshots = directory / "screenshots"
     screenshots.mkdir(parents=True, exist_ok=True)
-    adb("pull", device_output, str(screenshots), timeout=300, check=False)
+    if not DEVICE_TROUBLE:
+        adb("pull", device_output, str(screenshots), timeout=300, check=False)
+    if DEVICE_TROUBLE:
+        # The class ran (or hung) and then the device stopped answering: keep what the class
+        # reported and tell the caller to stop instead of waiting on the next class.
+        reason = f"Device lost after this class ({DEVICE_TROUBLE[-1]})"
+        for case in tests:
+            if case.status == "not-run":
+                case.message = reason
+        run.crash = f"{run.crash}; {reason}" if run.crash else reason
+        run.device_lost = True
     write_junit(run, directory / f"TEST-{short}.xml")
     counts = run.counts
     verdict = "PASS" if run.passed else "FAIL"
@@ -263,10 +321,9 @@ def run_class(
     return run
 
 
-def device_lost(klass: str, expected: list[str], iteration: int, attempt: int) -> ClassRun:
-    reason = "Device lost (emulator stopped responding)"
+def not_run(klass: str, expected: list[str], iteration: int, attempt: int, reason: str) -> ClassRun:
     tests = [TestCase(klass, name, "not-run", reason) for name in expected]
-    return ClassRun(klass, attempt, iteration, tests, reason, False, 0.0)
+    return ClassRun(klass, attempt, iteration, tests, reason, False, 0.0, device_lost=True)
 
 
 def select(classes: dict[str, list[str]], wanted: str) -> dict[str, list[str]]:
@@ -311,6 +368,13 @@ def summarize(runs: list[ClassRun], options: argparse.Namespace) -> bool:
             f"| {run.seconds:.0f} | {run.crash.replace('|', '/')[:120]} |"
         )
     lines += ["", f"Passed tests in final attempts: {executed}"]
+    if lost := next((run for run in runs if run.device_lost), None):
+        skipped = sum(1 for run in runs if run.device_lost and run.seconds == 0)
+        lines.append(
+            f"Device lost during iteration {lost.iteration} attempt {lost.attempt} at "
+            f"{lost.klass.removeprefix(TEST_PACKAGE_PREFIX)}; {skipped} class runs were not "
+            "started and no retries were attempted after that."
+        )
     if flaky:
         lines.append(f"Passed only after a retry: {', '.join(flaky)}")
     if failed:
@@ -400,28 +464,52 @@ def main() -> None:
     print(f"Discovered {total} tests in {len(classes)} classes", flush=True)
 
     runs: list[ClassRun] = []
+    try:
+        execute(options, classes, runs)
+    finally:
+        # Always leave a summary behind, whatever stopped the loop.
+        ok = summarize(runs, options)
+    if not ok:
+        sys.exit(1)
+
+
+def execute(
+    options: argparse.Namespace, classes: dict[str, list[str]], runs: list[ClassRun]
+) -> None:
+    lost = ""
     for iteration in range(1, options.repeat + 1):
         pending = list(classes)
         for attempt in range(1, options.retries + 2):
             if attempt > 1:
-                if not pending:
+                if not pending or lost:
                     break
                 if options.before_retry:
                     print(f"Before retry: {options.before_retry}", flush=True)
                     subprocess.run(  # nosec B603 - CI-provided hook, split without a shell
                         shlex.split(options.before_retry), check=True, timeout=300
                     )
-            results = []
+            results: list[ClassRun] = []
             for klass in pending:
-                if not device_ready():
-                    print(f"::error::Device lost before {klass}; remaining classes not run")
-                    results.append(device_lost(klass, classes[klass], iteration, attempt))
+                if not lost and not device_ready():
+                    lost = f"Device lost before {klass.removeprefix(TEST_PACKAGE_PREFIX)}"
+                    print(f"::error::{lost}; remaining classes not run", flush=True)
+                if lost:
+                    reason = f"Not run: {lost}"
+                    results.append(not_run(klass, classes[klass], iteration, attempt, reason))
                     continue
-                results.append(run_class(options, klass, classes[klass], iteration, attempt))
+                try:
+                    run = run_class(options, klass, classes[klass], iteration, attempt)
+                except DeviceLost as error:
+                    lost = f"Device lost before {klass.removeprefix(TEST_PACKAGE_PREFIX)} ({error})"
+                    print(f"::error::{lost}; remaining classes not run", flush=True)
+                    results.append(not_run(klass, classes[klass], iteration, attempt, lost))
+                    continue
+                results.append(run)
+                if run.device_lost:
+                    lost = f"Device lost after {klass.removeprefix(TEST_PACKAGE_PREFIX)}"
+                    print(f"::error::{lost}; remaining classes not run", flush=True)
             runs += results
             pending = [run.klass for run in results if not run.passed]
-    if not summarize(runs, options):
-        sys.exit(1)
 
 
 if __name__ == "__main__":
