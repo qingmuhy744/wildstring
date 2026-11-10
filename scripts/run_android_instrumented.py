@@ -116,12 +116,30 @@ def parse_instrumentation(output: str) -> Instrumentation:
 
 
 def adb(*arguments: str, timeout: float = 120, check: bool = True) -> str:
-    completed = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
-        ["adb", *arguments], capture_output=True, text=True, timeout=timeout, check=False
-    )
+    try:
+        completed = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
+            ["adb", *arguments], capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except subprocess.TimeoutExpired:
+        if check:
+            raise
+        # Evidence collection (logcat, pulls) must never abort the run.
+        print(f"adb {' '.join(arguments)} timed out after {timeout:.0f}s", flush=True)
+        return ""
     if check and completed.returncode:
         raise RuntimeError(f"adb {' '.join(arguments)} failed: {completed.stderr.strip()}")
     return completed.stdout
+
+
+def device_ready() -> bool:
+    """True once the emulator answers again; False if it is gone (for example it crashed)."""
+    try:
+        subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
+            ["adb", "wait-for-device"], capture_output=True, timeout=120, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return adb("get-state", timeout=30, check=False).strip() == "device"
 
 
 def instrument(runner: str, extras: list[tuple[str, str]], timeout: float) -> tuple[str, bool]:
@@ -243,6 +261,12 @@ def run_class(
         flush=True,
     )
     return run
+
+
+def device_lost(klass: str, expected: list[str], iteration: int, attempt: int) -> ClassRun:
+    reason = "Device lost (emulator stopped responding)"
+    tests = [TestCase(klass, name, "not-run", reason) for name in expected]
+    return ClassRun(klass, attempt, iteration, tests, reason, False, 0.0)
 
 
 def select(classes: dict[str, list[str]], wanted: str) -> dict[str, list[str]]:
@@ -387,9 +411,13 @@ def main() -> None:
                     subprocess.run(  # nosec B603 - CI-provided hook, split without a shell
                         shlex.split(options.before_retry), check=True, timeout=300
                     )
-            results = [
-                run_class(options, klass, classes[klass], iteration, attempt) for klass in pending
-            ]
+            results = []
+            for klass in pending:
+                if not device_ready():
+                    print(f"::error::Device lost before {klass}; remaining classes not run")
+                    results.append(device_lost(klass, classes[klass], iteration, attempt))
+                    continue
+                results.append(run_class(options, klass, classes[klass], iteration, attempt))
             runs += results
             pending = [run.klass for run in results if not run.passed]
     if not summarize(runs, options):
