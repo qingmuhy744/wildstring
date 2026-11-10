@@ -32,6 +32,10 @@ on:
         description: "Retries for classes that fail (0 measures the raw failure rate)"
         type: string
         default: "1"
+      test_arguments:
+        description: "Extra instrumentation arguments, space-separated KEY=VALUE"
+        type: string
+        default: ""
   workflow_call:
     inputs:
       run_emulator:
@@ -46,6 +50,9 @@ on:
       test_retries:
         type: string
         default: "1"
+      test_arguments:
+        type: string
+        default: ""
   schedule:
     # Weekly emulator regression baseline on main (Mondays 09:00 Asia/Shanghai)
     # so flaky tests surface on a known-good ref instead of during releases.
@@ -69,6 +76,7 @@ jobs:
       ANDROID_TEST_CLASSES: ${{ inputs.test_classes || '' }}
       ANDROID_TEST_REPEAT: ${{ inputs.test_repeat || '1' }}
       ANDROID_TEST_RETRIES: ${{ inputs.test_retries || '1' }}
+      ANDROID_TEST_ARGUMENTS: ${{ inputs.test_arguments || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

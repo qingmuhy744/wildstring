@@ -335,7 +335,10 @@ def main() -> None:
     parser.add_argument("--test-package", default="com.wildstring.app.dev.test")
     parser.add_argument("--no-install", action="store_true", help="Reuse installed APKs")
     parser.add_argument(
-        "--arg", action="append", default=[], help="Instrumentation argument KEY=VALUE"
+        "--arg",
+        action="append",
+        default=[],
+        help="Instrumentation argument KEY=VALUE (also read from $ANDROID_TEST_ARGUMENTS)",
     )
     parser.add_argument("--classes", default="", help="Comma-separated classes; default all")
     parser.add_argument("--repeat", type=int, default=1, help="Run the selection N times")
@@ -350,7 +353,9 @@ def main() -> None:
     options = parser.parse_args()
     options.runner = f"{options.test_package}/{RUNNER}"
     options.extras = []
-    for item in options.arg:
+    # CI passes extra arguments through the environment to avoid shell quoting in the
+    # emulator runner's one-line script.
+    for item in [*shlex.split(os.environ.get("ANDROID_TEST_ARGUMENTS", "")), *options.arg]:
         key, separator, value = item.partition("=")
         if not separator or not key:
             raise SystemExit(f"Instrumentation arguments must be KEY=VALUE: {item}")
