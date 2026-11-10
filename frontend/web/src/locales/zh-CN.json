@@ -3394,6 +3394,7 @@
     "followed": "已关注节目",
     "followedByTitle": "已关注《{{title}}》",
     "gentleDownload": "平缓下载",
+    "antiRateLimitStrategy": "防限流策略",
     "gentleDownloadHint": "降低下载速度，并在单集之间稍作等待，减少被源站限流的机会。",
     "importOpml": "导入 OPML",
     "inbox": "待播列表",

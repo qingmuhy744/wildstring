@@ -3394,6 +3394,7 @@
     "followed": "Followed",
     "followedByTitle": "Followed {{title}}",
     "gentleDownload": "Gentle download",
+    "antiRateLimitStrategy": "Rate-limit protection",
     "gentleDownloadHint": "Slows the download and waits a bit between episodes to reduce the chance of source rate limiting.",
     "importOpml": "Import OPML",
     "inbox": "Queue",
