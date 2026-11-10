@@ -46,9 +46,10 @@ public final class PlaybackService {
         }
         public var streamPath: String
         public var unavailableReason: String?
+        public var resumePositionSeconds: Double
 
         private enum CodingKeys: String, CodingKey {
-            case id, trackID, title, artist, album, hasCover, streamPath, unavailableReason
+            case id, trackID, title, artist, album, hasCover, streamPath, unavailableReason, resumePositionSeconds
         }
 
         public init(
@@ -59,7 +60,8 @@ public final class PlaybackService {
             album: String? = nil,
             hasCover: Bool = false,
             streamPath: String,
-            unavailableReason: String? = nil
+            unavailableReason: String? = nil,
+            resumePositionSeconds: Double = 0
         ) {
             self.id = id
             self.trackID = trackID
@@ -69,6 +71,7 @@ public final class PlaybackService {
             self.hasCover = hasCover
             self.streamPath = streamPath
             self.unavailableReason = unavailableReason
+            self.resumePositionSeconds = resumePositionSeconds
         }
 
         public init(from decoder: Decoder) throws {
@@ -81,6 +84,7 @@ public final class PlaybackService {
             hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
             streamPath = try container.decode(String.self, forKey: .streamPath)
             unavailableReason = try container.decodeIfPresent(String.self, forKey: .unavailableReason)
+            resumePositionSeconds = try container.decodeIfPresent(Double.self, forKey: .resumePositionSeconds) ?? 0
         }
     }
 
@@ -273,8 +277,8 @@ public final class PlaybackService {
     /// Plays one explicitly chosen episode. With a cloud queue attached, only
     /// that episode is inserted at the head of the cloud queue (origin manual);
     /// the rest of the show is not added. Music already in the local queue stays.
-    public func playPodcastEpisode(_ item: Item, position: Double = 0) {
-        startPodcastEpisode(item, position: position, recordInCloudQueue: true)
+    public func playPodcastEpisode(_ item: Item, position: Double? = nil) {
+        startPodcastEpisode(item, position: position ?? item.resumePositionSeconds, recordInCloudQueue: true)
     }
 
     private func startPodcastEpisode(_ item: Item, position: Double, recordInCloudQueue: Bool) {
@@ -418,6 +422,7 @@ public final class PlaybackService {
             startCurrent(autoplay: true, startAt: currentTime)
         } else {
             beginPlayback()
+            checkpointPodcast(event: "play", force: true)
         }
     }
 
@@ -805,7 +810,7 @@ public final class PlaybackService {
             )
             return
         }
-        if planProvider != nil, preferredBitrateKbps != nil {
+        if Self.podcastEpisodeID(item.trackID) == nil, planProvider != nil, preferredBitrateKbps != nil {
             player.replaceCurrentItem(with: nil)
             currentTime = startAt
             isPlaying = false
@@ -1073,7 +1078,9 @@ public final class PlaybackService {
         ) {
             deliver(report)
         }
-        checkpointPodcast(event: isPlaying ? "progress" : "pause", force: false)
+        if isPlaying {
+            checkpointPodcast(event: "progress", force: false)
+        }
     }
 
     func handleItemEnded() {
@@ -1307,8 +1314,23 @@ public final class PlaybackService {
         Task { @MainActor in
             let result = await submit(episode, write)
             if result == .conflict {
-                self.podcast.block()
-                self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
+                guard let load = self.loadPodcastBaseVersion,
+                      let version = await load(episode),
+                      self.currentItem?.trackID == "podcast_ep_\(episode)"
+                else { return }
+                self.podcast.begin(episodeId: episode, deviceId: self.podcastDeviceID, baseVersion: version)
+                let shouldRetry = event == "play" || event == "seek" || event == "ended"
+                    || (event == "progress" && (self.isPlaying || self.intendedPlaying))
+                if shouldRetry,
+                   let retryWrite = self.podcast.next(
+                       positionSeconds: Int(self.currentTime.rounded()),
+                       durationSeconds: Int(self.duration.rounded()),
+                       event: event,
+                       nowMs: Self.monotonicMs(),
+                       force: true
+                   ) {
+                    _ = await submit(episode, retryWrite)
+                }
             }
         }
     }

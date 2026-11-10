@@ -11,8 +11,14 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -317,6 +323,7 @@ fun PodcastChannelPage(
                 },
                 onRemoveQueued = vm::removePodcastQueueEpisode,
                 onRemoveInbox = vm::removePodcastInboxEpisode,
+                onReorder = vm::reorderPodcastPending,
                 onUpdateShowDelivery = { podcastId, action -> vm.updatePodcastShowPreference(podcastId, action, 3) },
                 onBrowse = { showQueueSheet = false; exploring = true },
                 onRetry = vm::retryPodcastQueueSync,
@@ -434,6 +441,7 @@ private fun PodcastUnifiedQueueSheet(
     onPlayAll: () -> Unit,
     onRemoveQueued: (String) -> Unit,
     onRemoveInbox: (String) -> Unit,
+    onReorder: (List<PodcastQueueRow>) -> Unit,
     onUpdateShowDelivery: (String, String) -> Unit,
     onBrowse: () -> Unit,
     onRetry: () -> Unit,
@@ -449,7 +457,8 @@ private fun PodcastUnifiedQueueSheet(
                 list.add(row to false)
             }
         }
-        list
+        // Ascending join time: the next item to play comes first; untimed legacy rows stay ahead.
+        orderPendingRows(list.map { it.first }).map { row -> row to (row.episodeId in queuedEpisodeIds) }
     }
     var sheetTab by rememberSaveable { mutableStateOf("episodes") }
     val sortedShows = remember(followedShows, cloud.preferences) {
@@ -461,6 +470,18 @@ private fun PodcastUnifiedQueueSheet(
                 else -> 2
             }
         }
+    }
+
+    val listState = rememberLazyListState()
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+
+    fun dropAt(index: Int, offset: Float): Int {
+        val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return index
+        val center = item.offset + item.size / 2f + offset
+        return listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { center >= it.offset && center < it.offset + it.size }
+            ?.index ?: index
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -523,6 +544,7 @@ private fun PodcastUnifiedQueueSheet(
                 }
 
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -558,16 +580,47 @@ private fun PodcastUnifiedQueueSheet(
                                 }
                             }
                         } else {
-                            items(combinedPendingRows, key = { it.first.episodeId }) { (row, isQueue) ->
+                            itemsIndexed(combinedPendingRows, key = { _, entry -> entry.first.episodeId }) { index, entry ->
+                                val (row, isQueue) = entry
+                                val dragging = draggingIndex == index
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .zIndex(if (dragging) 1f else 0f)
+                                        .graphicsLayer { translationY = if (dragging) dragOffset else 0f }
+                                        .pointerInput(combinedPendingRows) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { draggingIndex = index; dragOffset = 0f },
+                                                onDrag = { change, amount -> change.consume(); dragOffset += amount.y },
+                                                onDragEnd = {
+                                                    val from = draggingIndex
+                                                    val target = if (from == null) index else dropAt(from, dragOffset)
+                                                    if (from != null && target != from) {
+                                                        val next = combinedPendingRows.toMutableList()
+                                                        val moved = next.removeAt(from)
+                                                        next.add(target, moved)
+                                                        onReorder(next.map { it.first })
+                                                    }
+                                                    draggingIndex = null
+                                                    dragOffset = 0f
+                                                },
+                                                onDragCancel = { draggingIndex = null; dragOffset = 0f },
+                                            )
+                                        }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Icon(
+                                            Icons.Default.DragHandle,
+                                            contentDescription = stringResource(R.string.podcast_pending_drag_handle),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text(
                                                 text = row.title.ifBlank { stringResource(R.string.pod_scr_episode_fallback) },

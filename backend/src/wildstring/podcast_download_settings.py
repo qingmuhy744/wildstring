@@ -16,6 +16,7 @@ class DownloadSettingsUpdate(BaseModel):
     version: int = Field(ge=1, strict=True)
     download_policy: Literal["none", "latest_3", "latest_5", "latest_10", "unplayed", "all"]
     retention_policy: Literal["keep", "delete_after_played"] = "keep"
+    slow_download: bool | None = None
 
 
 def date_value(value):
@@ -78,11 +79,16 @@ class PodcastAutoDownloads:
                 "SELECT 1 FROM podcast_follows f JOIN users u ON u.id=f.user_id WHERE f.user_id=? AND f.podcast_id=? AND u.enabled=1",
                 (user_id, podcast_id),
             ).fetchone()
+            slow_row = db.execute(
+                "SELECT COALESCE(slow_download, 0) FROM podcasts WHERE id=?",
+                (podcast_id,),
+            ).fetchone()
         return {
             "download_policy": row[0] if row else "none",
             "retention_policy": row[1] if row else "keep",
             "version": row[2] if row else 1,
             "active": bool(active),
+            "slow_download": bool(slow_row[0]) if slow_row else False,
         }
 
     def configure(self, user_id, podcast_id, body):
@@ -107,6 +113,11 @@ class PodcastAutoDownloads:
             ).rowcount
             if not changed:
                 raise HTTPException(409, "podcast_download_settings_conflict")
+            if body.slow_download is not None:
+                db.execute(
+                    "UPDATE podcasts SET slow_download=? WHERE id=?",
+                    (1 if body.slow_download else 0, podcast_id),
+                )
         self.reconcile(user_id, podcast_id)
         return self.settings(user_id, podcast_id)
 

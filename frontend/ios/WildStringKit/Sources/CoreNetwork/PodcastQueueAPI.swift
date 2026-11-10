@@ -22,16 +22,36 @@ public enum WildstringDeviceID {
 public struct PodcastQueueItem: Codable, Equatable, Sendable, Identifiable {
     public var episodeId: String
     public var origin: String
+    public var addedAt: String
     public var id: String { episodeId }
 
-    public init(episodeId: String, origin: String = "manual") {
+    public init(episodeId: String, origin: String = "manual", addedAt: String = "") {
         self.episodeId = episodeId
         self.origin = origin
+        self.addedAt = addedAt
     }
 
     enum CodingKeys: String, CodingKey {
         case episodeId = "episode_id"
         case origin
+        case addedAt = "added_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        episodeId = try container.decode(String.self, forKey: .episodeId)
+        origin = try container.decodeIfPresent(String.self, forKey: .origin) ?? "manual"
+        // Older servers and fixtures omit added_at; treat them as undated legacy rows.
+        addedAt = try container.decodeIfPresent(String.self, forKey: .addedAt) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(episodeId, forKey: .episodeId)
+        try container.encode(origin, forKey: .origin)
+        if !addedAt.isEmpty {
+            try container.encode(addedAt, forKey: .addedAt)
+        }
     }
 }
 
@@ -369,6 +389,21 @@ extension WildstringClient {
                 throw conflict
             }
             throw error
+        } catch let error as APIError where error.statusCode == 422 && update.items.contains(where: { !$0.addedAt.isEmpty }) {
+            let legacy = PodcastQueueUpdate(
+                version: update.version,
+                deviceId: update.deviceId,
+                items: update.items.map { PodcastQueueItem(episodeId: $0.episodeId, origin: $0.origin, addedAt: "") }
+            )
+            let data = try await perform(
+                Request(
+                    method: "PUT",
+                    path: "api/v1/podcasts/queue",
+                    body: try JSONEncoder().encode(legacy),
+                    contentType: "application/json"
+                )
+            )
+            return try JSONDecoder().decode(PodcastQueueState.self, from: data)
         }
     }
 

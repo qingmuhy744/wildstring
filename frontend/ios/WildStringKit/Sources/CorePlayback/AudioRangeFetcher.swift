@@ -29,11 +29,19 @@ public struct AudioRangeFetcher: Sendable {
     }
 
     public func probe(path: String) async throws -> Probe {
-        let (_, response) = try await send(path: path, method: "HEAD", range: nil)
-        return Probe(
-            totalLength: Self.contentLength(of: response),
-            contentType: response.value(forHTTPHeaderField: "Content-Type")
-        )
+        do {
+            let (_, response) = try await send(path: path, method: "HEAD", range: nil)
+            return Probe(
+                totalLength: Self.contentLength(of: response) ?? Self.totalLength(of: response),
+                contentType: response.value(forHTTPHeaderField: "Content-Type")
+            )
+        } catch let error as APIError where error.statusCode == 405 {
+            let chunk = try await fetch(path: path, offset: 0, length: 1)
+            return Probe(
+                totalLength: chunk.totalLength,
+                contentType: chunk.contentType
+            )
+        }
     }
 
     public func fetch(path: String, offset: Int64, length: Int64) async throws -> Chunk {

@@ -57,7 +57,7 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             if (it.code == 403 && it.peekBody(4096).string().contains("https_required")) throw IOException(AppLanguage.string(R.string.srv_route_https_required))
             if (it.code >= 500) throw IOException(AppLanguage.string(R.string.srv_route_server_unavailable))
             if (!it.isSuccessful) return null
-            try { gson.fromJson(it.body!!.string(), AuthStatus::class.java) }
+            try { gson.fromJson(it.body.string(), AuthStatus::class.java) }
             catch (error: com.google.gson.JsonParseException) { throw IOException(AppLanguage.string(R.string.srv_route_invalid_response), error) }
         }
     }
@@ -71,13 +71,13 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             require(name.trim().length in 1..80) { AppLanguage.string(R.string.srv_route_name_length) }
             val existing = store.routeRecords().firstOrNull { it.url == base.toString() }
             val info = client.newCall(Request.Builder().url(base.resolve("api/v1/server")!!).build()).execute().use {
-                check(it.isSuccessful) { AppLanguage.string(R.string.srv_route_cannot_read_info) }; gson.fromJson(it.body!!.string(), ServerInfo::class.java)
+                check(it.isSuccessful) { AppLanguage.string(R.string.srv_route_cannot_read_info) }; gson.fromJson(it.body.string(), ServerInfo::class.java)
             }
             check(info.instance_id == server.instanceId) { AppLanguage.string(R.string.srv_route_mismatched_server) }
             val payload = gson.toJson(LoginRequest(username.trim(), password)).toRequestBody("application/json".toMediaType())
             val cookie = client.newCall(Request.Builder().url(base.resolve("api/v1/auth/login")!!).header("X-Wildstring-Client", "android").post(payload).build()).execute().use {
                 check(it.isSuccessful) { AppLanguage.string(R.string.srv_route_login_failed) }
-                val account = gson.fromJson(it.body!!.string(), Account::class.java)
+                val account = gson.fromJson(it.body.string(), Account::class.java)
                 check(account.id == user.id) { AppLanguage.string(R.string.srv_route_mismatched_account) }
                 Cookie.parseAll(base, it.headers).lastOrNull { cookie -> cookie.name in setOf("wildstring_session", "wildstring_session_http", "wildstring_session_https") && cookie.matches(base) }
                     ?: error(AppLanguage.string(R.string.srv_route_no_session_returned))

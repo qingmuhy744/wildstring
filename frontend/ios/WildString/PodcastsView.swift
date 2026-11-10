@@ -4,13 +4,15 @@ import SwiftUI
 
 extension PodcastEpisode {
     var playbackItem: PlaybackService.Item {
-        PlaybackService.Item(
+        let isDone = completed || (positionSeconds > 0 && durationSeconds > 0 && positionSeconds >= durationSeconds)
+        return PlaybackService.Item(
             trackID: "podcast_ep_\(id)",
             title: title,
             artist: L10n("podcasts.defaultArtist"),
             album: nil,
             hasCover: false,
-            streamPath: "api/v1/podcasts/episodes/\(id)/stream?proxy=1&cache=1"
+            streamPath: "api/v1/podcasts/episodes/\(id)/stream?proxy=1&cache=1",
+            resumePositionSeconds: isDone ? 0 : Double(max(0, positionSeconds))
         )
     }
 }
@@ -315,7 +317,8 @@ private struct PodcastDetailView: View {
         if episode.positionSeconds > 15, episode.durationSeconds == 0 || remaining > 30 {
             resumeEpisode = episode
         } else {
-            start(episode, in: episodes, at: 0)
+            let startPos = isCompleted(episode) ? 0 : Double(max(0, episode.positionSeconds))
+            start(episode, in: episodes, at: startPos)
         }
     }
 
@@ -506,6 +509,7 @@ private struct PodcastIntakeSettingsIOS: View {
 private struct PodcastUnifiedQueueView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    @State private var tab: String = "episodes"
     @State private var shows: [PodcastSummary] = []
     @State private var loadingShows = false
 
@@ -519,73 +523,106 @@ private struct PodcastUnifiedQueueView: View {
                     }
                 }
 
-                Section(L10n("podcasts.pendingEpisodesSection")) {
-                    let items = cloud.unifiedPendingEpisodes
-                    if cloud.loading && items.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text(L10n("podcasts.syncingQueue")).foregroundStyle(.secondary)
-                        }
-                    } else if items.isEmpty {
-                        ContentUnavailableView(
-                            L10n("podcasts.emptyQueueTitle"),
-                            systemImage: "list.bullet",
-                            description: Text(L10n("podcasts.emptyQueueDescription"))
-                        )
-                    } else {
-                        HStack {
-                            Text(L10n("podcasts.pendingCount", items.count))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                playFirst(cloud)
-                            } label: {
-                                Label(L10n("podcasts.playAll"), systemImage: "play.fill")
-                                    .font(.caption.weight(.semibold))
-                            }
-                        }
-                        ForEach(items) { item in
-                            HStack(spacing: 10) {
-                                Button {
-                                    play(item.episodeId, cloud: cloud)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(item.episode?.title ?? cloud.title(for: item.episodeId))
-                                            .lineLimit(2)
-                                            .foregroundStyle(Color.primary)
-                                        if item.source == .inbox {
-                                            Text(L10n("podcasts.listenLater"))
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.plain)
+                Section {
+                    Picker(L10n("podcasts.pendingQueue"), selection: $tab) {
+                        Text("\(L10n("podcasts.pendingEpisodesSection")) (\(cloud.unifiedPendingEpisodes.count))").tag("episodes")
+                        Text("\(L10n("podcasts.intakeSection")) (\(shows.count))").tag("rules")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
 
+                if tab == "episodes" {
+                    Section(L10n("podcasts.pendingEpisodesSection")) {
+                        let items = cloud.unifiedPendingEpisodes
+                        if cloud.loading && items.isEmpty {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text(L10n("podcasts.syncingQueue")).foregroundStyle(.secondary)
+                            }
+                        } else if items.isEmpty {
+                            ContentUnavailableView(
+                                L10n("podcasts.emptyQueueTitle"),
+                                systemImage: "list.bullet",
+                                description: Text(L10n("podcasts.emptyQueueDescription"))
+                            )
+                        } else {
+                            HStack {
+                                Text(L10n("podcasts.pendingCount", items.count))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
                                 Button {
-                                    cloud.removeEpisode(item.episodeId)
+                                    playFirst(cloud)
                                 } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    Label(L10n("podcasts.playAll"), systemImage: "play.fill")
+                                        .font(.caption.weight(.semibold))
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(L10n("podcasts.remove"))
+                            }
+                            ForEach(items) { item in
+                                HStack(spacing: 10) {
+                                    Button {
+                                        play(item.episodeId, cloud: cloud)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.episode?.title ?? cloud.title(for: item.episodeId))
+                                                .lineLimit(2)
+                                                .foregroundStyle(Color.primary)
+                                            if item.source == .inbox {
+                                                Text(L10n("podcasts.listenLater"))
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        cloud.removeEpisode(item.episodeId)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(L10n("podcasts.remove"))
+                                }
+                                // Finger drag: drop a row on another to move it there.
+                                .draggable(item.episodeId)
+                                .dropDestination(for: String.self) { dropped, _ in
+                                    guard let sourceId = dropped.first,
+                                          let from = items.firstIndex(where: { $0.episodeId == sourceId }),
+                                          let to = items.firstIndex(where: { $0.episodeId == item.episodeId }),
+                                          from != to else { return false }
+                                    var ids = items.map(\.episodeId)
+                                    ids.insert(ids.remove(at: from), at: to)
+                                    cloud.reorderPending(ids)
+                                    return true
+                                }
                             }
                         }
                     }
-                }
-
-                Section(L10n("podcasts.intakeSection")) {
-                    if loadingShows && shows.isEmpty {
-                        ProgressView()
-                    } else if shows.isEmpty {
-                        Text(L10n("podcasts.noFollowedShows")).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(shows) { show in
-                            PodcastDeliveryIOSRow(cloud: cloud, show: show)
+                } else {
+                    Section(L10n("podcasts.intakeSection")) {
+                        if loadingShows && shows.isEmpty {
+                            ProgressView()
+                        } else if shows.isEmpty {
+                            Text(L10n("podcasts.noFollowedShows")).foregroundStyle(.secondary)
+                        } else {
+                            let sortedShows = shows.sorted { a, b in
+                                let actA = cloud.showPreference(a.id).action
+                                let actB = cloud.showPreference(b.id).action
+                                let activeA = !actA.isEmpty && actA != "ignore"
+                                let activeB = !actB.isEmpty && actB != "ignore"
+                                if activeA != activeB { return activeA }
+                                return false
+                            }
+                            ForEach(sortedShows) { show in
+                                PodcastDeliveryIOSRow(cloud: cloud, show: show)
+                            }
                         }
                     }
                 }

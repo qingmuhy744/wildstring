@@ -3025,7 +3025,11 @@
     "showDeliveryAria": "{{title}} auto-queue new episodes",
     "unfollowedStatus": "Not followed · Effective after following",
     "unreadableEpisode": "This episode is no longer available",
-    "unreadableEpisodeHelp": "This episode is no longer available. You can remove it or try again later."
+    "unreadableEpisodeHelp": "This episode is no longer available. You can remove it or try again later.",
+    "reorderAria": "Reorder {{title}}",
+    "moveUp": "Move {{title}} up",
+    "moveDown": "Move {{title}} down",
+    "reorderFailed": "The order could not be saved. The list was restored; try again."
   },
   "podcastOpml": {
     "closeDialog": "Close OPML import",
@@ -3390,6 +3394,7 @@
     "followed": "Followed",
     "followedByTitle": "Followed {{title}}",
     "gentleDownload": "Gentle download",
+    "antiRateLimitStrategy": "Rate-limit protection",
     "gentleDownloadHint": "Slows the download and waits a bit between episodes to reduce the chance of source rate limiting.",
     "importOpml": "Import OPML",
     "inbox": "Queue",

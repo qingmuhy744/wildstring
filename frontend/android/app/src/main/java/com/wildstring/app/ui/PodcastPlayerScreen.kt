@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -93,6 +95,7 @@ internal fun PodcastPlayerScreen(
                 IconButton(tactile(onBack)) {
                     Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
                 }
+                val aiComingSoon = stringResource(R.string.pod_player_ai_notes_coming_soon)
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
@@ -113,6 +116,13 @@ internal fun PodcastPlayerScreen(
                             label = stringResource(R.string.pod_player_tab_article),
                             tag = "podcast-article-tab",
                             onClick = tactile { article = true },
+                        )
+                        PodcastModeTab(
+                            selected = false,
+                            label = stringResource(R.string.pod_player_tab_ai_notes),
+                            tag = "podcast-ai-tab",
+                            muted = true,
+                            onClick = tactile { vm.notify(aiComingSoon) },
                         )
                     }
                 }
@@ -222,6 +232,12 @@ internal fun PodcastPlayerScreen(
                     }
                 }
             }
+            val tabSwipeModifier = Modifier.podcastTabSwipe(
+                enabled = !wide,
+                article = article,
+                onSwitchToArticle = { article = true; feedback(TactileKind.Tap) },
+                onSwitchToCover = { article = false; feedback(TactileKind.Tap) },
+            )
             if (wide) Row(
                 Modifier.weight(1f).fillMaxWidth().padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -230,7 +246,7 @@ internal fun PodcastPlayerScreen(
                 content(Modifier.weight(1.5f).fillMaxHeight())
                 PodcastPlayerControls(vm, state, duration, onQueue, compact = false, Modifier.weight(1f).then(swipeModifier))
             } else {
-                content(Modifier.weight(1f).fillMaxWidth())
+                content(Modifier.weight(1f).fillMaxWidth().then(tabSwipeModifier))
                 PodcastPlayerControls(
                     vm,
                     state,
@@ -245,15 +261,62 @@ internal fun PodcastPlayerScreen(
     if (preview) ArtworkPreview(vm, track) { preview = false }
 }
 
+/**
+ * Horizontal swipe switches only between Cover and Article (never into AI Notes),
+ * while ignoring touches near screen edges so Android's system back gesture stays untouched.
+ */
+private fun Modifier.podcastTabSwipe(
+    enabled: Boolean,
+    article: Boolean,
+    onSwitchToArticle: () -> Unit,
+    onSwitchToCover: () -> Unit,
+): Modifier = if (!enabled) this else pointerInput(article) {
+    val edgeGuardPx = 28.dp.toPx()
+    val thresholdPx = 56.dp.toPx()
+    var distance = 0f
+    var active = false
+    detectHorizontalDragGestures(
+        onDragStart = { start ->
+            distance = 0f
+            active = start.x >= edgeGuardPx && start.x <= (size.width - edgeGuardPx)
+        },
+        onHorizontalDrag = { change, amount ->
+            if (!active) return@detectHorizontalDragGestures
+            // Only accumulate drags in the valid direction: left on Cover -> Article, right on Article -> Cover.
+            if ((!article && distance + amount <= 0f) || (article && distance + amount >= 0f)) {
+                distance += amount
+                change.consume()
+            }
+        },
+        onDragEnd = {
+            if (active) {
+                if (!article && distance <= -thresholdPx) onSwitchToArticle()
+                else if (article && distance >= thresholdPx) onSwitchToCover()
+            }
+            active = false
+            distance = 0f
+        },
+        onDragCancel = {
+            active = false
+            distance = 0f
+        },
+    )
+}
+
 @Composable
 private fun PodcastModeTab(
     selected: Boolean,
     label: String,
     tag: String,
+    muted: Boolean = false,
     onClick: () -> Unit,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else Color.Transparent
-    val fg = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    val fg = when {
+        selected -> MaterialTheme.colorScheme.onSurface
+        muted -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(15.dp))
@@ -263,7 +326,7 @@ private fun PodcastModeTab(
                 role = Role.Tab
                 this.selected = selected
             }
-            .padding(horizontal = 18.dp, vertical = 6.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
             .testTag(tag),
         contentAlignment = Alignment.Center,
     ) {
@@ -489,13 +552,25 @@ private fun PodcastPlayerControls(
                 )
             }
         }
-        val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
-        val displayMessage = state.playbackError ?: progressMessage
-        displayMessage?.let { message ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = if (state.playbackError != null) MaterialTheme.colorScheme.error else Color(0xFFE98A6D))
-                if (state.playbackError != null) {
-                    TextButton(tactile(vm::toggle)) { Text(stringResource(R.string.pod_player_retry)) }
+        state.playbackError?.let { message ->
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        message,
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    TextButton(tactile(vm::toggle)) {
+                        Text(stringResource(R.string.pod_player_retry))
+                    }
                 }
             }
         }

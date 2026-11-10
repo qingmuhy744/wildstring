@@ -13,6 +13,8 @@ const taskErrorExactKeys: Record<string, string> = {
     'podcastDownloads.errFakeIp',
   播客音频地址指向非公网资源: 'podcastDownloads.errNonPublicUrl',
   '源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却': 'podcastDownloads.errHttp429',
+  '源站频繁请求限流 (HTTP 429 Too Many Requests)，已自动切换平缓下载并启动防限流冷却':
+    'podcastDownloads.errHttp429',
   '源站防盗链或拒绝访问 (HTTP 403 Forbidden)': 'podcastDownloads.errHttp403',
   '音频资源文件不存在 (HTTP 404 Not Found)': 'podcastDownloads.errHttp404',
   '源站服务过载不可用 (HTTP 503)': 'podcastDownloads.errHttp503',
@@ -21,7 +23,7 @@ const taskErrorExactKeys: Record<string, string> = {
   '源站 SSL 证书校验失败': 'podcastDownloads.errSsl',
 };
 
-function localizeTaskError(
+export function localizeTaskError(
   t: (key: string, options?: Record<string, unknown>) => string,
   error?: string | null,
 ): string {

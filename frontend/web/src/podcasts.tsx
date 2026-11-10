@@ -1,4 +1,5 @@
 import { PodcastDownloadDialog } from './podcast-download-settings';
+import { localizeTaskError } from './podcast-downloads';
 import { PodcastCleanupCandidatesDialog, type Cleanup } from './podcast-resources';
 import { PodcastDeliverySelect, PodcastInboxDialog, PodcastQueueDefaults } from './podcast-inbox';
 import { useCanAddPodcast } from './podcast-catalog-settings';
@@ -767,7 +768,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
 
   const fetchQueue = async () => {
     try {
-      const q = await api<DownloadQueueInfo>('/podcasts/downloads/queue');
+      const q = await api<DownloadQueueInfo>(
+        canManageSources ? '/podcasts/downloads/queue' : '/podcasts/downloads/mine',
+      );
       setQueueInfo(q);
     } catch {
       // Polling only refreshes completed downloads; keep the last known queue on failure.
@@ -775,14 +778,13 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   };
 
   useEffect(() => {
-    if (!canManageSources) return;
     void fetchQueue();
-    const intervalTime = queueInfo && queueInfo.total_pending > 0 ? 5000 : 12000;
+    const intervalTime = queueInfo && queueInfo.total_pending > 0 ? 3000 : 10000;
     const timer = setInterval(() => {
       void fetchQueue();
     }, intervalTime);
     return () => clearInterval(timer);
-  }, [queueInfo?.total_pending, canManageSources]);
+  }, [queueInfo?.total_pending, canManageSources, selectedPodcast?.id]);
 
   const handleDownloadAll = async (p: PodcastSummary) => {
     setContextMenu(null);
@@ -802,10 +804,14 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     }
   };
 
-  const handleDownloadSingleEpisode = async (ep: PodcastEpisode, e?: React.MouseEvent) => {
+  const handleDownloadSingleEpisode = async (
+    ep: PodcastEpisode,
+    e?: React.MouseEvent,
+    forceSave = false,
+  ) => {
     e?.stopPropagation();
     try {
-      const saved = !ep.resource_saved;
+      const saved = forceSave ? true : !ep.resource_saved;
       const result = await api<{ saved: boolean; reused?: boolean }>(
         `/podcasts/episodes/${encodeURIComponent(ep.id)}/download`,
         { method: saved ? 'POST' : 'DELETE' },
@@ -820,6 +826,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           : item;
       setSelectedDetail((detail) => detail && { ...detail, episodes: detail.episodes.map(patch) });
       setSelectedEpisode((item) => item && patch(item));
+      void fetchQueue();
       showNotice(
         !saved
           ? t('podcasts.unsavedNotice')
@@ -1463,9 +1470,52 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                             {t('podcasts.serverBadge')}
                           </span>
                         )}
-                        {['downloading', 'queued'].includes(ep.download_status || '') && (
-                          <span className="ep-download-badge">{t('podcasts.preparing')}</span>
-                        )}
+                        {(() => {
+                          const activeTask = queueInfo?.downloading.find(
+                            (d) => d.episode_id === ep.id,
+                          );
+                          const queuedTask = queueInfo?.queued.find((d) => d.episode_id === ep.id);
+                          const failedTask = queueInfo?.failed.find((d) => d.episode_id === ep.id);
+                          if (activeTask) {
+                            const label =
+                              activeTask.status === 'retrying'
+                                ? localizeTaskError(t, activeTask.error)
+                                : `${t('podcasts.preparing')}${
+                                    activeTask.progress_pct != null
+                                      ? ` ${Math.round(activeTask.progress_pct)}%`
+                                      : ''
+                                  }${activeTask.speed_human ? ` · ${activeTask.speed_human}` : ''}`;
+                            return <span className="ep-download-badge">{label}</span>;
+                          }
+                          if (
+                            queuedTask ||
+                            ['downloading', 'queued'].includes(ep.download_status || '')
+                          ) {
+                            return (
+                              <span className="ep-download-badge">{t('podcasts.preparing')}</span>
+                            );
+                          }
+                          if (failedTask || ep.download_status === 'failed') {
+                            return (
+                              <>
+                                <span
+                                  className="ep-status-tag"
+                                  title={localizeTaskError(t, failedTask?.error)}
+                                >
+                                  {localizeTaskError(t, failedTask?.error)}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ep-download-btn"
+                                  onClick={(e) => void handleDownloadSingleEpisode(ep, e, true)}
+                                >
+                                  {t('podcastDownloads.retrySingle')}
+                                </button>
+                              </>
+                            );
+                          }
+                          return null;
+                        })()}
                         {ep.resource_playback_cached &&
                           !ep.resource_saved &&
                           !ep.resource_automatic && (

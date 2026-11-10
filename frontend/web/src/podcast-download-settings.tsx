@@ -9,6 +9,7 @@ export interface PodcastDownloadSettings {
   download_policy: 'none' | 'latest_3' | 'latest_5' | 'latest_10' | 'unplayed' | 'all';
   retention_policy: 'keep' | 'delete_after_played';
   active: boolean;
+  slow_download?: boolean;
 }
 const POLICY_CHOICES: PodcastDownloadSettings['download_policy'][] = [
   'none',
@@ -74,6 +75,9 @@ export function PodcastDownloadDialog({
             version: value.version,
             download_policy: value.download_policy,
             retention_policy: value.retention_policy,
+            ...(value.slow_download !== undefined
+              ? { slow_download: Boolean(value.slow_download) }
+              : {}),
           }),
         },
       );
@@ -174,6 +178,20 @@ export function PodcastDownloadDialog({
                 <p className="podcast-settings-desc">
                   {t('podcastDownloadSettings.retentionHelp')}
                 </p>
+              </fieldset>
+              <fieldset className="storage-policy-group" disabled={busy || !value.active}>
+                <legend>{t('podcasts.antiRateLimitStrategy')}</legend>
+                <label className="storage-choice">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(value.slow_download)}
+                    onChange={(event) =>
+                      setValue({ ...value, slow_download: event.target.checked })
+                    }
+                  />
+                  <span>{t('podcasts.gentleDownload')}</span>
+                </label>
+                <p className="podcast-settings-desc">{t('podcasts.gentleDownloadHint')}</p>
               </fieldset>
             </>
           )}

@@ -194,19 +194,18 @@ class PodcastResources:
             if path is None:
                 return None
             lease = self.acquire(db, identity)
-        media_type = "audio/mpeg"
-        if filename:
-            # Minimal container images may have no system MIME database.
-            media_type = {
-                ".mp3": "audio/mpeg",
-                ".m4a": "audio/mp4",
-                ".aac": "audio/aac",
-                ".ogg": "audio/ogg",
-                ".opus": "audio/opus",
-                ".flac": "audio/flac",
-                ".wav": "audio/wav",
-                ".webm": "audio/webm",
-            }.get(Path(filename).suffix.lower(), "application/octet-stream")
+        suffix = Path(filename or path.name).suffix.lower()
+        # Minimal container images may have no system MIME database.
+        media_type = {
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/mp4",
+            ".aac": "audio/aac",
+            ".ogg": "audio/ogg",
+            ".opus": "audio/opus",
+            ".flac": "audio/flac",
+            ".wav": "audio/wav",
+            ".webm": "audio/webm",
+        }.get(suffix, "application/octet-stream" if filename else "audio/mpeg")
         return FileResponse(
             path,
             media_type=media_type,
