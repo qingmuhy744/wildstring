@@ -290,7 +290,7 @@ class PodcastQueueController(
                 retry = { playEpisodeNow(episode, podcast, positionMs) }
             } else if (pushOrKeep(prepared.items)) {
                 dropInbox = true
-                retry = { mutex.withLock { pushOrKeep(snapshot.items); Unit } }
+                retry = { mutex.withLock { pushOrKeep(snapshot.items) } }
             } else {
                 retry = { playEpisodeNow(episode, podcast, positionMs) }
             }
