@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreNetwork
 import Foundation
 import Testing
@@ -91,7 +92,9 @@ struct PlaybackServiceTests {
         PlaybackService(
             server: try ServerAddress(input: "music.example.com"),
             store: store,
-            cookieHeader: { nil }
+            cookieHeader: { nil },
+            // Audio loads never leave the process; see StalledAudioURLProtocol.
+            resourceConfiguration: StalledAudioURLProtocol.configuration()
         )
     }
 
@@ -567,6 +570,14 @@ struct PlaybackServiceTests {
         service.handleItemEnded()
         await service.waitForPodcastTasks()
         #expect(service.didFinishQueue)
-        #expect(service.errorMessage?.contains("暂时读不到节目单集") == true)
+        let episodesReadFailed = KitL10n("kit.playback.episodesReadFailed")
+        #expect(service.errorMessage == episodesReadFailed)
+        #expect(episodesReadFailed.contains("暂时读不到节目单集"))
+
+        // 5. The finished episode's player item failing to load afterwards (a slow network
+        // reporting late) must not replace the retryable message with a playback error.
+        service.itemStatusChanged(status: .failed, error: nil)
+        #expect(service.didFinishQueue)
+        #expect(service.errorMessage == episodesReadFailed)
     }
 }
