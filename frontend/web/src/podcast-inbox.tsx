@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type Track } from './api';
 import type { PodcastEpisode, PodcastSummary } from './podcasts';
@@ -221,6 +221,7 @@ export function PodcastInboxDialog({
   const [showLimits, setShowLimits] = useState<Record<string, number>>({});
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [problem, setProblem] = useState('');
+  const pointerDrag = useRef<number | null>(null);
 
   async function load() {
     setStatus('loading');
@@ -520,22 +521,29 @@ export function PodcastInboxDialog({
             </div>
             <ul className="podcast-inbox-list">
               {rows.map((item, index) => (
-                <li
-                  className="podcast-inbox-item"
-                  key={item.episode_id}
-                  draggable
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData('text/plain', String(index));
-                    event.dataTransfer.effectAllowed = 'move';
-                  }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const from = Number(event.dataTransfer.getData('text/plain'));
-                    if (Number.isInteger(from)) void moveRow(from, index);
-                  }}
-                >
-                  <span className="podcast-inbox-handle" aria-hidden="true">
+                <li className="podcast-inbox-item" key={item.episode_id} data-pending-index={index}>
+                  <span
+                    className="podcast-inbox-handle"
+                    aria-hidden="true"
+                    onPointerDown={(event) => {
+                      if (event.pointerType === 'mouse') return;
+                      pointerDrag.current = index;
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerUp={(event) => {
+                      const from = pointerDrag.current;
+                      pointerDrag.current = null;
+                      if (from === null) return;
+                      const target = document
+                        .elementFromPoint(event.clientX, event.clientY)
+                        ?.closest<HTMLElement>('[data-pending-index]');
+                      const to = Number(target?.dataset.pendingIndex);
+                      if (Number.isInteger(to) && to !== from) void moveRow(from, to);
+                    }}
+                    onPointerCancel={() => {
+                      pointerDrag.current = null;
+                    }}
+                  >
                     ⠿
                   </span>
                   <div className="podcast-inbox-copy">

@@ -4001,11 +4001,18 @@
   background: var(--podcast-panel);
 }
 .podcast-inbox-handle {
+  display: none;
   color: var(--podcast-subtle);
   cursor: grab;
   font-size: 0.9rem;
   line-height: 1;
+  touch-action: none;
   user-select: none;
+}
+@media (pointer: coarse) {
+  .podcast-inbox-handle {
+    display: inline-block;
+  }
 }
 .podcast-inbox-reorder {
   display: inline-flex;
