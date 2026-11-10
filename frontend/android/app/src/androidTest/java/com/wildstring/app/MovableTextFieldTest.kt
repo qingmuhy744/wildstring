@@ -3,6 +3,7 @@ package com.wildstring.app
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -105,7 +106,7 @@ class MovableTextFieldTest {
             val field = remember {
                 movableContentOf {
                     BoxWithConstraints {
-                        BasicTextField(text, { text = it }, Modifier.testTag("moved-field"),
+                        BasicTextField(text, { text = it }, Modifier.testTag("moved-field").widthIn(max = maxWidth),
                             textStyle = TextStyle(fontSize = if (large) 20.sp else 14.sp))
                     }
                 }
