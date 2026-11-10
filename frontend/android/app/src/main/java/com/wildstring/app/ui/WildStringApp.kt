@@ -503,14 +503,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     val podcastRetry = stringResource(R.string.podcast_sync_retry)
     LaunchedEffect(state.error, state.mutationMessage, podcastCloud.syncError) {
         val syncError = podcastCloud.syncError
-        val message = state.error ?: state.mutationMessage ?: syncError
+        val message = nextSnackbarMessage(state.error, state.mutationMessage, syncError)
         if (message != null) {
             try {
                 if (syncError != null && message == syncError) {
                     val result = mutationSnackbar.showSnackbar(message, podcastRetry, duration = SnackbarDuration.Long)
                     if (result == SnackbarResult.ActionPerformed) vm.retryPodcastQueueSync()
                 } else mutationSnackbar.showSnackbar(message)
-            } finally { if (state.error == null) vm.acknowledgeMessage(message) }
+            } finally { if (message == state.mutationMessage) vm.acknowledgeMessage(message) }
         }
     }
     if (podcastCloud.conflict != null) AlertDialog(

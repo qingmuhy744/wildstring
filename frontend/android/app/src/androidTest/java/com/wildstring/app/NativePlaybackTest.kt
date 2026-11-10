@@ -203,18 +203,344 @@ class NativePlaybackTest {
         }
     }
 
-    @Test fun loginCookieStreamingAndFullscreenLyrics() {
-        stage("test begin")
+
+    /**
+     * Everything one test needs after signing in against its own fixture server and starting
+     * the fixture track: each test builds this from scratch, so a failure in one area no longer
+     * hides (or poisons) the others.
+     */
+    private class Session(
+        val vm: MusicViewModel,
+        val requests: ConcurrentLinkedQueue<RecordedRequest>,
+        val offline: AtomicBoolean,
+        val unauthorized: AtomicBoolean,
+        val audio: ByteArray,
+        val player: MediaController,
+        val release: () -> Unit,
+    ) {
+        fun streamRequests() = requests.count { it.path?.contains("/stream") == true }
+    }
+
+    private var activeVm: MusicViewModel? = null
+
+    private fun withPlayback(name: String, body: (Session) -> Unit) {
+        stage("test begin $name")
         val previousNight = shellForTest("cmd uimode night").substringAfter("Night mode: ", "auto").trim().substringBefore('\n').let { if (it in listOf("yes", "no", "auto")) it else "auto" }
-        try { exercisePlayback() } catch (failure: Throwable) {
-            android.util.Log.e("NativeStage", "test failed", failure)
+        try {
+            MockWebServer().use { server ->
+                val session = startPlayback(server)
+                try { body(session) } finally { runCatching { session.release() } }
+            }
+        } catch (failure: Throwable) {
+            android.util.Log.e("NativeStage", "test failed: $name", failure)
+            // The view-model state explains most UI waits that time out (lingering error,
+            // offline flag, queue contents), so keep it next to the screenshot.
+            runCatching { android.util.Log.e("NativeStage", "vm state at failure: ${activeVm?.state?.value}") }
             runCatching { captureFailure() }
             throw failure
         } finally {
             runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
-            stage("test cleanup complete")
+            activeVm = null
+            stage("test cleanup complete $name")
         }
+    }
+
+    /** Signs in, plays the fixture track, then pauses on the phone player (lyrics hidden). */
+    @Test fun loginCookieStreamingAndFullscreenLyrics() = withPlayback("lyrics") { session ->
+        val vm = session.vm
+        val player = session.player
+        compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+        compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
+        compose.onNodeWithTag("player-phone").assertExists()
+        compose.onAllNodesWithText("示例曲库").assertCountEquals(0)
+        compose.onAllNodesWithText("原创示例歌词").assertCountEquals(0)
+        capture("phone-lyrics.png")
+        compose.waitUntil(20_000) { vm.audioCache.bytes() >= session.audio.size }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
+        val nightPosition = compose.runOnIdle { player.currentPosition }
+        compose.runOnIdle { vm.settings.appearance("system") }
+        changeSystemNightMode("yes")
+        waitForConfigurationTag("appearance-dark")
+        compose.onNodeWithTag("player-phone").assertExists()
+        capture("classic-dark-phone.png")
+        changeSystemNightMode("no")
+        waitForConfigurationTag("appearance-light")
+        compose.onNodeWithTag("player-phone").assertExists()
+        assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
+        capture("classic-light-phone.png")
+        assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
+        assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
+        assertTrue(session.requests.filter { it.path?.contains("/stream") == true }.all { it.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true })
+        assertTrue(session.requests.filter { it.path?.contains("/auth/login") == true }.all { it.getHeader("X-Wildstring-Client") == "android" })
+    }
+
+    /** One display change for every tablet check: the record and tape styles, then lyrics. */
+    @Test fun tabletLayoutKeepsStylesLyricsAndPosition() = withPlayback("tablet") { session ->
+        val vm = session.vm
+        val player = session.player
+        val before = compose.runOnIdle { player.currentPosition }
+        try {
+            shellForTest("wm density 160"); shellForTest("wm size 1600x1000")
+            waitForConfigurationTag("player-tablet")
+            capture("tablet-player.png", resized = true)
+            for (style in listOf("vinyl", "cassette")) {
+                compose.runOnIdle { vm.settings.playbackStyle(style) }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-visual-$style").fetchSemanticsNodes().isNotEmpty() }
+                compose.mainClock.advanceTimeBy(450)
+                compose.waitForIdle()
+                capture("player-$style-tablet.png", resized = true, style = style)
+            }
+            compose.runOnIdle { vm.settings.playbackStyle("cover") }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-visual-cover").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
+            assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
+            capture("tablet-lyrics.png", resized = true)
+        } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+        waitForConfigurationTag("player-phone")
+    }
+
+    /** Styles share the same Media3 entry and fully cached audio while paused. */
+    @Test fun playbackStylesKeepTheSameAudioAndArtworkPreview() = withPlayback("styles") { session ->
+        val vm = session.vm
+        val player = session.player
+        compose.waitUntil(20_000) { vm.audioCache.bytes() >= session.audio.size }
+        compose.runOnIdle { vm.settings.appearance("system") }
+        val styleEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
+        val stylePosition = compose.runOnIdle { player.currentPosition }
+        val styleStreams = session.streamRequests()
+        for ((key, labelResource) in listOf("vinyl" to R.string.style_vinyl, "cassette" to R.string.style_cassette, "cover" to R.string.style_cover)) {
+            val label = compose.activity.getString(labelResource)
+            stage("style begin $key")
+            val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
+            compose.onNodeWithContentDescription(playerBack).performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+            if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
+                compose.onNodeWithTag("mini-player-open").performClick()
+            } else if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
+            }
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+            compose.onNodeWithTag("setting-category-appearance").performClick()
+            compose.onNodeWithTag("setting-playback-style").performScrollTo().performClick()
+            waitForDialogWindow("style choice $key")
+            compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
+            waitForActivityWindow()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("mini-player-open").performClick()
+            compose.mainClock.advanceTimeBy(250)
+            compose.waitForIdle()
+            // The platform dialog exits on Android's clock, independently of Compose's clock.
+            compose.waitUntil(10_000) {
+                runCatching { compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed() }.isSuccess
+            }
+            compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
+            compose.onNodeWithContentDescription(uiString(R.string.settings_playback_style)).assertDoesNotExist()
+            assertEquals(key, vm.settings.state.value.playbackStyle)
+            assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+            assertFalse(compose.runOnIdle { player.playWhenReady })
+            assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
+            compose.onNodeWithTag("playback-visual-$key").performTouchInput { longClick() }
+            waitForArtworkWindow()
+            if (key == "vinyl") capture("player-artwork-preview.png")
+            if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            else compose.onNodeWithContentDescription(uiString(R.string.art_prev_close)).performClick()
+            waitForActivityWindow()
+            compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
+            compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
+            assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+            assertFalse(compose.runOnIdle { player.playWhenReady })
+            assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
+            if (key != "cover") {
+                capture("player-$key-phone.png", style = key)
+            }
+            if (key == "vinyl") {
+                changeSystemNightMode("yes")
+                waitForConfigurationTag("appearance-dark")
+                compose.onNodeWithTag("playback-visual-vinyl").assertIsDisplayed()
+                capture("player-vinyl-dark-phone.png", style = key)
+                changeSystemNightMode("no")
+                waitForConfigurationTag("appearance-light")
+            }
+            stage("style complete $key")
+        }
+        assertEquals("Changing style must not reopen audio", styleStreams, session.streamRequests())
+    }
+
+    /** Plays fully buffered audio on repeat; returns once prebuffering is over. */
+    private fun playBuffered(player: MediaController) {
+        compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play() }
+        // Measure UI work after resume and prebuffering have completed, not startup loading.
+        compose.waitUntil(20_000) { compose.runOnIdle {
+            player.isPlaying && player.playbackState == Player.STATE_READY && !player.isLoading &&
+                player.currentPosition > 1000 && player.bufferedPosition >= player.duration - 100
+        } }
+    }
+
+    @Test fun queueReorderKeepsPlaybackOnPhoneAndTablet() = withPlayback("queue") { session ->
+        val vm = session.vm
+        val player = session.player
+        playBuffered(player)
+        val playingEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
+        compose.runOnIdle { repeat(2) { vm.addToQueue(vm.state.value.current!!) } }
+        compose.waitUntil(10_000) { vm.state.value.queue.size == 3 }
+        val originalOrder = vm.state.value.queue.map { it.entryId }
+        fun dragEntry(from: String, to: String) {
+            val queue = compose.onNodeWithTag("playback-queue")
+            val bounds = queue.fetchSemanticsNode().boundsInRoot
+            val start = compose.onNodeWithTag("queue-handle-$from").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
+            val end = compose.onNodeWithTag("queue-handle-$to").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
+            // Let the real layout consume pickup and movement before releasing. A single
+            // injected batch can be coalesced on a busy emulator after a density change.
+            queue.performTouchInput { down(start); moveTo(start + (end - start) * .2f, delayMillis = 150) }
+            queue.performTouchInput {
+                moveTo(end + androidx.compose.ui.geometry.Offset(0f, if (end.y > start.y) 8f else -8f), delayMillis = 450)
+            }
+            queue.performTouchInput { up() }
+        }
+        compose.runOnIdle { vm.notify("播放队列操作反馈") }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("播放队列操作反馈").fetchSemanticsNodes().isNotEmpty() }
+        val feedbackBounds = compose.onNodeWithTag("mutation-feedback").fetchSemanticsNode().boundsInRoot
+        val queueButtonBounds = compose.onNodeWithContentDescription(uiString(R.string.play_queue)).fetchSemanticsNode().boundsInRoot
+        assertFalse("Feedback must leave playback controls reachable", feedbackBounds.overlaps(queueButtonBounds))
+        capture("phone-player-before-queue.png")
+        compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+        try { compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() } }
+        catch (failure: Throwable) {
+            runCatching { captureFailure("phone-queue-failure.png") }
+            throw failure
+        }
+        waitForActivityWindow()
+        val queuePosition = compose.runOnIdle { player.currentPosition }
+        dragEntry(playingEntry, originalOrder.last())
+        compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
+        assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+        assertTrue(compose.runOnIdle { player.isPlaying })
+        assertTrue("Reordering must retain playback position", compose.runOnIdle { player.currentPosition } >= queuePosition)
+        compose.waitUntil(10_000) { runBlocking { vm.repository.database.queue().entries().map { it.entryId } } == vm.state.value.queue.map { it.entryId } }
+        capture("phone-queue.png")
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        waitForActivityWindow()
+        compose.onNodeWithTag("playback-queue").assertDoesNotExist()
+        try {
+            shellForTest("wm density 160"); shellForTest("wm size 1600x1000")
+            waitForConfigurationTag("player-tablet")
+            capture("tablet-player-before-queue.png", resized = true)
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
+            // wm size and wm density recreate the activity separately. Wait for the new
+            // SurfaceFlinger buffer as well as semantics before injecting coordinates.
+            capture("tablet-queue-before-drag.png", resized = true)
+            dragEntry(playingEntry, originalOrder[1])
+            compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
+            assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+            capture("tablet-queue.png", resized = true)
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+        } catch (failure: Throwable) {
+            runCatching { captureFailure("tablet-queue-failure.png") }
+            throw failure
+        } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+        waitForConfigurationTag("player-phone")
+        compose.runOnIdle { player.pause() }
+    }
+
+    @Test fun appearanceControlsDuringPlaybackDoNotRebuffer() = withPlayback("appearance") { session ->
+        val vm = session.vm
+        val player = session.player
+        val buffers = AtomicInteger(0)
+        val playbackEvents = ConcurrentLinkedQueue<String>()
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                playbackEvents += "state=$playbackState position=${player.currentPosition}/${player.duration} loading=${player.isLoading}"
+                if (playbackState == Player.STATE_BUFFERING) buffers.incrementAndGet()
+            }
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                playbackEvents += "discontinuity=$reason ${oldPosition.positionMs}->${newPosition.positionMs}"
+            }
+        }
+        compose.waitUntil(20_000) { vm.audioCache.bytes() >= session.audio.size }
+        playBuffered(player)
+        val underrunsBefore = compose.runOnIdle { player.addListener(listener); vm.playbackHealth.audioUnderruns.get() }
+        try {
+            stage("appearance controls begin")
+            // Exercise actual controls during playback and inspect both appearance options.
+            val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
+            compose.onNodeWithContentDescription(appearanceBack).performClick()
+            if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription(uiString(R.string.player_collapse)).fetchSemanticsNodes().isNotEmpty())
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+            compose.onNodeWithTag("setting-category-appearance").performClick()
+            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
+            waitForDialogWindow("dark choice")
+            compose.onNode(hasText(compose.activity.getString(R.string.appearance_dark)) and hasAnyAncestor(isDialog())).performClick()
+            waitForActivityWindow()
+            compose.onNodeWithTag("appearance-dark").assertExists()
+            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
+            waitForDialogWindow("light choice")
+            compose.onNode(hasText(compose.activity.getString(R.string.appearance_light)) and hasAnyAncestor(isDialog())).performClick()
+            waitForActivityWindow()
+            compose.onNodeWithTag("appearance-light").assertExists()
+            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
+            waitForDialogWindow("system choice")
+            compose.onNode(hasText(compose.activity.getString(R.string.appearance_system)) and hasAnyAncestor(isDialog())).performClick()
+            waitForActivityWindow()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("setting-category-storage").performClick()
+            compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
+            waitForDialogWindow("cache choice")
+            compose.onNode(hasText("128 MB") and hasAnyAncestor(isDialog())).performClick()
+            waitForActivityWindow()
+            compose.waitUntil(10_000) { vm.settings.state.value.audioMb == 128 }
+            capture("appearance-settings.png")
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+            capture("player-phone-after-settings.png")
+            for (iteration in 0..2) {
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+            }
+            compose.waitUntil(10_000) { compose.runOnIdle { player.isPlaying && player.playbackState == Player.STATE_READY } }
+            assertEquals("UI actions should not trigger audio rebuffering: ${playbackEvents.toList()}", 0, buffers.get())
+            assertEquals("UI actions should not cause AudioTrack underruns", underrunsBefore, vm.playbackHealth.audioUnderruns.get())
+        } finally {
+            compose.runOnIdle { player.removeListener(listener); player.pause() }
+        }
+    }
+
+    @Test fun cachedReplayWorksOfflineAndUnauthorizedClearsTheSession() = withPlayback("offline") { session ->
+        val vm = session.vm
+        val player = session.player
+        compose.waitUntil(20_000) { vm.audioCache.bytes() >= session.audio.size }
+        compose.waitUntil(10_000) { runBlocking { vm.repository.cachedCatalog(CatalogQuery()) } != null }
+        stage("offline begin")
+        val streamCount = session.streamRequests()
+        session.offline.set(true)
+        compose.runOnIdle { player.stop(); player.seekTo(0); player.prepare(); player.play() }
+        compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
+        assertEquals("Replaying cached audio must not require a stream request", streamCount, session.streamRequests())
+        compose.runOnIdle { player.pause(); vm.back(); vm.load() }
+        compose.waitUntil(30_000) { vm.state.value.offline && !vm.state.value.loading }
+        assertTrue(vm.state.value.hasContent)
+        assertEquals("接口测试专辑", vm.state.value.albums.single().title)
+        session.offline.set(false); session.unauthorized.set(true)
+        val requestsBeforeReload = session.requests.size
+        compose.runOnIdle { vm.load() }
+        // If this times out, the reload never reached the fixture server (see the request
+        // count in the message): the app did not retry after the network came back.
+        try { compose.waitUntil(20_000) { !vm.state.value.connected } }
+        catch (failure: Throwable) {
+            throw AssertionError("Still connected after reload; requests since reload=${session.requests.size - requestsBeforeReload} state=${vm.state.value}", failure)
+        }
+        assertNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
+        compose.waitUntil(10_000) { vm.audioCache.bytes() == 0L && runBlocking { vm.repository.database.queue().entries().isEmpty() } }
+        stage("playback assertions complete")
     }
 
     private fun shellForTest(command: String): String {
@@ -266,13 +592,15 @@ class NativePlaybackTest {
         compose.onNodeWithContentDescription(uiString(R.string.art_prev_download)).assertIsDisplayed()
     }
 
-    private fun exercisePlayback() {
+
+    private fun startPlayback(server: MockWebServer): Session {
         phoneWindow = onAndroidMain {
             val activity = checkNotNull(resumedActivity())
             WindowSpec(activity.window.decorView.width, activity.window.decorView.height, activity.resources.configuration.densityDpi)
         }
         expectedWindow = phoneWindow
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        activeVm = vm
         compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
@@ -289,320 +617,62 @@ class NativePlaybackTest {
         val cover = ByteArrayOutputStream().also { coverBitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         coverBitmap.recycle()
         val track = """{"id":"fixture-track","title":"接口测试歌曲","artists":["接口测试艺人"],"album":"接口测试专辑","duration_ms":12000,"has_cover":true,"loved":false,"format":"mp3","status":"available"}"""
-        MockWebServer().use { server ->
-            server.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse {
-                    requests += request
-                    android.util.Log.i("NativeFixture", "${request.method} ${request.requestUrl!!.encodedPath}")
-                    val path = request.requestUrl!!.encodedPath
-                    if (offline.get()) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
-                    if (unauthorized.get()) return MockResponse().setResponseCode(401)
-                    val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true
-                    fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
-                    if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated}""")
-                    if (path.endsWith("/auth/login")) return json("""{"username":"admin"}""").setHeader("Set-Cookie", "wildstring_session=instrumentation; Path=/; Max-Age=3600; HttpOnly")
-                    if (!authenticated) return json("""{"detail":"authentication_required"}""").setResponseCode(401)
-                    if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204).setHeader("Set-Cookie", "wildstring_session=; Max-Age=0; Path=/")
-                    if (path.endsWith("/stream")) {
-                        return audioStreamFixture(request, audio, "audio/mpeg", "\"fixture-v1\"")
-                    }
-                    if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
-                    if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词"},{"time_ms":5000,"text":"下一行测试歌词"}]}""")
-                    if (path.endsWith("/listening")) return json("""{"accepted_ms":5000}""")
-                    if (path.endsWith("/albums")) return json("""{"items":[{"id":"fixture-album","title":"接口测试专辑","artists":["接口测试艺人"],"track_count":1,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
-                    if (path.endsWith("/tracks")) return json("""{"items":[$track],"total":1,"limit":50,"offset":0}""")
-                    if (path.endsWith("/fixture-track")) return json(track)
-                    return MockResponse().setResponseCode(404)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                android.util.Log.i("NativeFixture", "${request.method} ${request.requestUrl!!.encodedPath}")
+                val path = request.requestUrl!!.encodedPath
+                if (offline.get()) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                if (unauthorized.get()) return MockResponse().setResponseCode(401)
+                val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true
+                fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
+                if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated}""")
+                if (path.endsWith("/auth/login")) return json("""{"username":"admin"}""").setHeader("Set-Cookie", "wildstring_session=instrumentation; Path=/; Max-Age=3600; HttpOnly")
+                if (!authenticated) return json("""{"detail":"authentication_required"}""").setResponseCode(401)
+                if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204).setHeader("Set-Cookie", "wildstring_session=; Max-Age=0; Path=/")
+                if (path.endsWith("/stream")) {
+                    return audioStreamFixture(request, audio, "audio/mpeg", "\"fixture-v1\"")
                 }
+                if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
+                if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词"},{"time_ms":5000,"text":"下一行测试歌词"}]}""")
+                if (path.endsWith("/listening")) return json("""{"accepted_ms":5000}""")
+                if (path.endsWith("/albums")) return json("""{"items":[{"id":"fixture-album","title":"接口测试专辑","artists":["接口测试艺人"],"track_count":1,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
+                if (path.endsWith("/tracks")) return json("""{"items":[$track],"total":1,"limit":50,"offset":0}""")
+                if (path.endsWith("/fixture-track")) return json(track)
+                return MockResponse().setResponseCode(404)
             }
-            server.start()
-            stage("login begin")
-            compose.onNodeWithText(uiString(R.string.server_address)).performTextReplacement(server.url("/").toString())
-            compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("admin")
-            compose.onNodeWithText(uiString(R.string.password), useUnmergedTree = true).assertExists()
-            compose.onAllNodes(hasSetTextAction())[2].performTextInput("test-only-password")
-            compose.activityRule.scenario.onActivity { activity ->
-                WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
-            }
-            // Use the actual control action without racing IME/window movement during setup.
-            compose.onNode(isToggleable()).apply {
-                if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On)
-                    performSemanticsAction(SemanticsActions.OnClick) { it() }
-                assertIsOn()
-            }
-            compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
-            compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
-            stage("login complete")
-            compose.onNodeWithText("接口测试专辑").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("接口测试歌曲").performClick()
-            compose.waitUntil(20_000) { requests.any { it.path?.startsWith("/api/v1/tracks/fixture-track/stream") == true } }
-            val context = InstrumentationRegistry.getInstrumentation().targetContext
-            val future = compose.runOnIdle { MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync() }
-            val player = future.get(15, TimeUnit.SECONDS)
-            compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
-            stage("audio ready")
-            compose.runOnIdle { player.pause() }
-            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
-            compose.onNodeWithTag("player-phone").assertExists()
-            compose.onAllNodesWithText("示例曲库").assertCountEquals(0)
-            compose.onAllNodesWithText("原创示例歌词").assertCountEquals(0)
-            capture("phone-lyrics.png")
-            val before = compose.runOnIdle { player.currentPosition }
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            fun shell(command: String) {
-                ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
-            }
-            try {
-                shell("wm size 1600x1000")
-                shell("wm density 160")
-                waitForConfigurationTag("player-tablet")
-                compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
-                assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
-                capture("tablet-lyrics.png", resized = true)
-            } finally {
-                shell("wm size reset")
-                shell("wm density reset")
-
-            }
-            waitForConfigurationTag("player-phone")
-            compose.waitUntil(10_000) { vm.audioCache.bytes() >= audio.size }
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
-            val nightPosition = compose.runOnIdle { player.currentPosition }
-            compose.runOnIdle { vm.settings.appearance("system") }
-            changeSystemNightMode("yes")
-            waitForConfigurationTag("appearance-dark")
-            compose.onNodeWithTag("player-phone").assertExists()
-            capture("classic-dark-phone.png")
-            changeSystemNightMode("no")
-            waitForConfigurationTag("appearance-light")
-            compose.onNodeWithTag("player-phone").assertExists()
-            assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
-            capture("classic-light-phone.png")
-            // Styles share the same Media3 entry and fully cached audio while paused.
-            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            val styleEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
-            val stylePosition = compose.runOnIdle { player.currentPosition }
-            val styleStreams = requests.count { it.path?.contains("/stream") == true }
-            for ((key, labelResource) in listOf("vinyl" to R.string.style_vinyl, "cassette" to R.string.style_cassette, "cover" to R.string.style_cover)) {
-                val label = compose.activity.getString(labelResource)
-                stage("style begin $key")
-                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
-                compose.onNodeWithContentDescription(playerBack).performClick()
-                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
-                if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
-                    compose.onNodeWithTag("mini-player-open").performClick()
-                } else if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
-                    compose.onNodeWithTag("player-visual-stage").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
-                }
-                compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
-                compose.onNodeWithTag("setting-category-appearance").performClick()
-                compose.onNodeWithTag("setting-playback-style").performScrollTo().performClick()
-                waitForDialogWindow("style choice $key")
-                compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
-                waitForActivityWindow()
-                compose.onNodeWithTag("settings-back").performClick()
-                compose.onNodeWithTag("settings-back").performClick()
-                compose.onNodeWithTag("mini-player-open").performClick()
-                compose.mainClock.advanceTimeBy(250)
-                compose.waitForIdle()
-                // The platform dialog exits on Android's clock, independently of Compose's clock.
-                compose.waitUntil(5_000) {
-                    runCatching { compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed() }.isSuccess
-                }
-                compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
-                compose.onNodeWithContentDescription(uiString(R.string.settings_playback_style)).assertDoesNotExist()
-                assertEquals(key, vm.settings.state.value.playbackStyle)
-                assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
-                assertFalse(compose.runOnIdle { player.playWhenReady })
-                assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
-                compose.onNodeWithTag("playback-visual-$key").performTouchInput { longClick() }
-                waitForArtworkWindow()
-                if (key == "vinyl") capture("player-artwork-preview.png")
-                if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                else compose.onNodeWithContentDescription(uiString(R.string.art_prev_close)).performClick()
-                waitForActivityWindow()
-                compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
-                compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
-                assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
-                assertFalse(compose.runOnIdle { player.playWhenReady })
-                assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
-                if (key != "cover") {
-                    capture("player-$key-phone.png", style = key)
-                }
-                if (key == "vinyl") {
-                    changeSystemNightMode("yes")
-                    waitForConfigurationTag("appearance-dark")
-                    compose.onNodeWithTag("playback-visual-vinyl").assertIsDisplayed()
-                    capture("player-vinyl-dark-phone.png", style = key)
-                    changeSystemNightMode("no")
-                    waitForConfigurationTag("appearance-light")
-                }
-                stage("style complete $key")
-            }
-            assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
-            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
-            assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
-            val buffers = AtomicInteger(0)
-            val playbackEvents = ConcurrentLinkedQueue<String>()
-            val listener = object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    playbackEvents += "state=$playbackState position=${player.currentPosition}/${player.duration} loading=${player.isLoading}"
-                    if (playbackState == Player.STATE_BUFFERING) buffers.incrementAndGet()
-                }
-                override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-                    playbackEvents += "discontinuity=$reason ${oldPosition.positionMs}->${newPosition.positionMs}"
-                }
-            }
-            compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play() }
-            // Measure UI work after resume and prebuffering have completed, not startup loading.
-            compose.waitUntil(10_000) { compose.runOnIdle {
-                player.isPlaying && player.playbackState == Player.STATE_READY && !player.isLoading &&
-                    player.currentPosition > 1000 && player.bufferedPosition >= player.duration - 100
-            } }
-            val underrunsBefore = compose.runOnIdle { player.addListener(listener); vm.playbackHealth.audioUnderruns.get() }
-            val playingEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
-            compose.runOnIdle { repeat(2) { vm.addToQueue(vm.state.value.current!!) } }
-            compose.waitUntil(10_000) { vm.state.value.queue.size == 3 }
-            val originalOrder = vm.state.value.queue.map { it.entryId }
-            fun dragEntry(from: String, to: String) {
-                val queue = compose.onNodeWithTag("playback-queue")
-                val bounds = queue.fetchSemanticsNode().boundsInRoot
-                val start = compose.onNodeWithTag("queue-handle-$from").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
-                val end = compose.onNodeWithTag("queue-handle-$to").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
-                // Let the real layout consume pickup and movement before releasing. A single
-                // injected batch can be coalesced on a busy emulator after a density change.
-                queue.performTouchInput { down(start); moveTo(start + (end - start) * .2f, delayMillis = 150) }
-                queue.performTouchInput {
-                    moveTo(end + androidx.compose.ui.geometry.Offset(0f, if (end.y > start.y) 8f else -8f), delayMillis = 450)
-                }
-                queue.performTouchInput { up() }
-            }
-            compose.runOnIdle { vm.notify("播放队列操作反馈") }
-            compose.waitUntil(5_000) { compose.onAllNodesWithText("播放队列操作反馈").fetchSemanticsNodes().isNotEmpty() }
-            val feedbackBounds = compose.onNodeWithTag("mutation-feedback").fetchSemanticsNode().boundsInRoot
-            val queueButtonBounds = compose.onNodeWithContentDescription(uiString(R.string.play_queue)).fetchSemanticsNode().boundsInRoot
-            assertFalse("Feedback must leave playback controls reachable", feedbackBounds.overlaps(queueButtonBounds))
-            capture("phone-player-before-queue.png")
-            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
-            try { compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() } }
-            catch (failure: Throwable) {
-                runCatching { captureFailure("phone-queue-failure.png") }
-                throw failure
-            }
-            waitForActivityWindow()
-            val queuePosition = compose.runOnIdle { player.currentPosition }
-            dragEntry(playingEntry, originalOrder.last())
-            compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
-            assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
-            assertTrue(compose.runOnIdle { player.isPlaying })
-            assertTrue("Reordering must retain playback position", compose.runOnIdle { player.currentPosition } >= queuePosition)
-            compose.waitUntil(10_000) { runBlocking { vm.repository.database.queue().entries().map { it.entryId } } == vm.state.value.queue.map { it.entryId } }
-            capture("phone-queue.png")
-            compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
-            waitForActivityWindow()
-            compose.onNodeWithTag("playback-queue").assertDoesNotExist()
-            try {
-                shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
-                waitForConfigurationTag("player-tablet")
-                capture("tablet-player-before-queue.png", resized = true)
-                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
-                // wm size and wm density recreate the activity separately. Wait for the new
-                // SurfaceFlinger buffer as well as semantics before injecting coordinates.
-                capture("tablet-queue-before-drag.png", resized = true)
-                dragEntry(playingEntry, originalOrder[1])
-                compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
-                assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
-                capture("tablet-queue.png", resized = true)
-                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
-            } catch (failure: Throwable) {
-                runCatching { captureFailure("tablet-queue-failure.png") }
-                throw failure
-            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
-            waitForConfigurationTag("player-phone")
-            stage("appearance controls begin")
-            compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
-            // Exercise actual controls during playback and inspect both appearance options.
-            val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
-            compose.onNodeWithContentDescription(appearanceBack).performClick()
-            if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription(uiString(R.string.player_collapse)).fetchSemanticsNodes().isNotEmpty())
-                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
-            compose.onNodeWithTag("setting-category-appearance").performClick()
-            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
-            waitForDialogWindow("dark choice")
-            compose.onNode(hasText(compose.activity.getString(R.string.appearance_dark)) and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
-            compose.onNodeWithTag("appearance-dark").assertExists()
-            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
-            waitForDialogWindow("light choice")
-            compose.onNode(hasText(compose.activity.getString(R.string.appearance_light)) and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
-            compose.onNodeWithTag("appearance-light").assertExists()
-            compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
-            waitForDialogWindow("system choice")
-            compose.onNode(hasText(compose.activity.getString(R.string.appearance_system)) and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
-            compose.onNodeWithTag("settings-back").performClick()
-            compose.onNodeWithTag("setting-category-storage").performClick()
-            compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
-            waitForDialogWindow("cache choice")
-            compose.onNode(hasText("128 MB") and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
-            compose.waitUntil { vm.settings.state.value.audioMb == 128 }
-            capture("appearance-settings.png")
-            compose.onNodeWithTag("settings-back").performClick()
-            compose.onNodeWithTag("settings-back").performClick()
-            compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
-            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            capture("player-phone-after-settings.png")
-            for (iteration in 0..2) {
-                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            }
-            compose.waitUntil(5_000) { compose.runOnIdle { player.isPlaying && player.playbackState == Player.STATE_READY } }
-            assertEquals("UI actions should not trigger audio rebuffering: ${playbackEvents.toList()}", 0, buffers.get())
-            assertEquals("UI actions should not cause AudioTrack underruns", underrunsBefore, vm.playbackHealth.audioUnderruns.get())
-            compose.runOnIdle { player.removeListener(listener); player.pause() }
-            try {
-                shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
-                waitForConfigurationTag("player-tablet")
-                capture("player-tablet-after-settings.png", resized = true)
-                for (style in listOf("vinyl", "cassette")) {
-                    compose.runOnIdle { vm.settings.playbackStyle(style) }
-                    compose.waitUntil(5_000) { compose.onAllNodesWithTag("playback-visual-$style").fetchSemanticsNodes().isNotEmpty() }
-                    compose.mainClock.advanceTimeBy(450)
-                    compose.waitForIdle()
-                    capture("player-$style-tablet.png", resized = true, style = style)
-                }
-                compose.runOnIdle { vm.settings.playbackStyle("cover") }
-            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
-            waitForConfigurationTag("player-phone")
-            stage("offline begin")
-            val streamCount = requests.count { it.path?.contains("/stream") == true }
-            offline.set(true)
-            compose.runOnIdle { player.stop(); player.seekTo(0); player.prepare(); player.play() }
-            compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
-            assertEquals("Replaying cached audio must not require a stream request", streamCount, requests.count { it.path?.contains("/stream") == true })
-            compose.runOnIdle { player.pause(); vm.back(); vm.load() }
-            compose.waitUntil(30_000) { vm.state.value.offline && !vm.state.value.loading }
-            assertTrue(vm.state.value.hasContent)
-            assertEquals("接口测试专辑", vm.state.value.albums.single().title)
-            offline.set(false); unauthorized.set(true)
-            compose.runOnIdle { vm.load() }
-            compose.waitUntil(15_000) { !vm.state.value.connected }
-            assertNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
-            compose.waitUntil(10_000) { vm.audioCache.bytes() == 0L && runBlocking { vm.repository.database.queue().entries().isEmpty() } }
-            assertTrue(requests.filter { it.path?.contains("/stream") == true }.all { it.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true })
-            assertTrue(requests.filter { it.path?.contains("/auth/login") == true }.all { it.getHeader("X-Wildstring-Client") == "android" })
+        }
+        server.start()
+        stage("login begin")
+        compose.onNodeWithText(uiString(R.string.server_address)).performTextReplacement(server.url("/").toString())
+        compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("admin")
+        compose.onNodeWithText(uiString(R.string.password), useUnmergedTree = true).assertExists()
+        compose.onAllNodes(hasSetTextAction())[2].performTextInput("test-only-password")
+        compose.activityRule.scenario.onActivity { activity ->
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+        }
+        // Use the actual control action without racing IME/window movement during setup.
+        compose.onNode(isToggleable()).apply {
+            if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On)
+                performSemanticsAction(SemanticsActions.OnClick) { it() }
+            assertIsOn()
+        }
+        compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
+        stage("login complete")
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
+        compose.onNodeWithText("接口测试专辑").performClick()
+        compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("接口测试歌曲").performClick()
+        compose.waitUntil(20_000) { requests.any { it.path?.startsWith("/api/v1/tracks/fixture-track/stream") == true } }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val future = compose.runOnIdle { MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync() }
+        val player = future.get(15, TimeUnit.SECONDS)
+        compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
+        stage("audio ready")
+        compose.runOnIdle { player.pause() }
+        return Session(vm, requests, offline, unauthorized, audio, player) {
             compose.runOnIdle { MediaController.releaseFuture(future) }
-            stage("playback assertions complete")
         }
     }
 }

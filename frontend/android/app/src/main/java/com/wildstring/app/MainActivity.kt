@@ -13,6 +13,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import com.wildstring.app.ui.MusicViewModel
@@ -30,8 +31,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val preferences by model.settings.state.collectAsStateWithLifecycle()
             val playerLandscape by model.playerLandscape.collectAsStateWithLifecycle()
-            LaunchedEffect(preferences.orientation, playerLandscape) {
-                val isTablet = resources.configuration.smallestScreenWidthDp >= 600
+            val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
+            LaunchedEffect(preferences.orientation, playerLandscape, isTablet) {
                 requestedOrientation = if (playerLandscape) ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE else when (preferences.orientation) {
                     "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     "sensor" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR
