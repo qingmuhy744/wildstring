@@ -19,6 +19,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.Cookie
@@ -37,7 +38,7 @@ data class ServerConfiguration(val id: String, val url: String, val name: String
 class SessionStore @Inject constructor(@ApplicationContext context: Context) : CookieVault, ServerRouteSessions {
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val gson = Gson()
-    private val invalid = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val invalid = MutableSharedFlow<String>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val invalidations = invalid.asSharedFlow()
     private var generation = UUID.randomUUID().toString()
     private val profile = MutableStateFlow<String?>(null)

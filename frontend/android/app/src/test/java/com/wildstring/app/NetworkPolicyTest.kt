@@ -90,4 +90,18 @@ class NetworkPolicyTest {
         }
     }
 
+    @Test fun unauthenticatedRequestsAfterSignOutDoNotReInvalidate() {
+        MockWebServer().use { server ->
+            server.start(); val base = server.url("/")
+            var activeProfile: String? = "signed-in"
+            var invalidations = 0
+            val client = OkHttpClient.Builder().addInterceptor(
+                OriginGuard({ base }, profile = { activeProfile }, unauthorized = { activeProfile = null; invalidations++ })
+            ).build()
+            repeat(4) { server.enqueue(MockResponse().setResponseCode(401)) }
+            repeat(4) { client.newCall(Request.Builder().url(base.resolve("api/v1/tracks/fixture/cover")!!).build()).execute().close() }
+            assertEquals(1, invalidations)
+        }
+    }
+
 }
