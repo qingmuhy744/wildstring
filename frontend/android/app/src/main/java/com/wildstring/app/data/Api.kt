@@ -90,6 +90,7 @@ interface Api {
     @PUT("api/v1/podcasts/{id}/download-settings") suspend fun updatePodcastDownloadSettings(@Path("id") id: String, @Body body: PodcastDownloadSettingsUpdate, @Tag owner: RequestOwner): PodcastDownloadSettings
     @PUT("api/v1/podcasts/{id}/settings") suspend fun updatePodcastServerSettings(@Path("id") id: String, @Body body: PodcastServerSettingsUpdate, @Tag owner: RequestOwner): PodcastDetail
     @GET("api/v1/podcasts/downloads/queue") suspend fun podcastDownloadQueue(@Tag owner: RequestOwner): PodcastDownloadQueueInfo
+    @GET("api/v1/podcasts/downloads/mine") suspend fun myPodcastDownloadQueue(@Tag owner: RequestOwner): PodcastDownloadQueueInfo
     @POST("api/v1/podcasts/downloads/retry-failed") suspend fun retryFailedPodcastDownloads(@Tag owner: RequestOwner): PodcastRetryFailedResult
     @POST("api/v1/podcasts/downloads/clear-completed") suspend fun clearCompletedPodcastDownloads(@Tag owner: RequestOwner): JsonObject
     @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(@Tag owner: RequestOwner): PodcastPlaybackSettings

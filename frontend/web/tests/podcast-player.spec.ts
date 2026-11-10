@@ -956,11 +956,13 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   await expect(pendingRegion).toContainText('第 6 集');
   await expect(pendingRegion).toContainText('第 4 集');
   await expect(dialog.getByRole('button', { name: '▶ 播放全部', exact: true })).toBeVisible();
+  await dialog.getByRole('tab', { name: /新集自动加入待播/ }).click();
   const deliveryRegion = dialog.getByRole('region', { name: '新集自动加入待播' });
   await expect(deliveryRegion).toBeVisible();
   await expect(deliveryRegion.getByLabel('午后广播测试新集自动待播')).toBeVisible();
   await deliveryRegion.getByLabel('午后广播测试新集自动待播').selectOption('ignore');
   await expect(deliveryRegion.getByLabel('午后广播测试新集自动待播')).toHaveValue('ignore');
+  await dialog.getByRole('tab', { name: /待播单集/ }).click();
   await dialog.screenshot({
     path: `../../artifacts/podcast-inbox-dialog-${info.project.name}.png`,
   });

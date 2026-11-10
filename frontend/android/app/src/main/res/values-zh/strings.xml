@@ -95,6 +95,7 @@
     <string name="podcast_queue_added">✓ 已待播</string>
     <string name="podcast_queue_add">+ 待播</string>
     <string name="podcast_playing">正在播放</string>
+    <string name="podcast_pending_drag_handle">拖动排序</string>
     <string name="podcast_unified_queue_empty">待播列表为空。在单集右侧点「+ 待播」，或开启下方「新集自动加入待播」。</string>
     <string name="podcast_favorites_empty">暂无收藏单集，在单集菜单中点击「单集收藏」可标记并保护音频</string>
     <string name="podcast_auto_limit">自动入队上限</string>
@@ -1586,8 +1587,10 @@
     <string name="pod_player_rewind_15">后退 15 秒</string>
     <string name="pod_player_saved_article">当前显示已保存的文章。</string>
     <string name="pod_player_sleep_timer">睡眠定时</string>
+    <string name="pod_player_tab_ai_notes">AI 导读</string>
     <string name="pod_player_tab_article">文章</string>
     <string name="pod_player_tab_cover">封面</string>
+    <string name="pod_player_ai_notes_coming_soon">AI 识别与总结即将推出</string>
     <string name="pod_prog_conflict_resolution_notice">另一台设备更新了本集。本机进度已保留，下次播放时请选择接续位置。</string>
     <string name="pod_prog_load_failed_retry">暂时无法读取单集进度，请重试。</string>
     <string name="pod_prog_newer_on_other_device">这集在其他设备有更新的进度</string>

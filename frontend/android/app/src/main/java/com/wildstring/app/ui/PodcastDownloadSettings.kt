@@ -47,12 +47,16 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
     var error by remember(owner, podcast.id) { mutableStateOf<String?>(null) }
     var busy by remember(owner, podcast.id) { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
+    var showQueueDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(owner, podcast.id, reload) {
         value = null; error = null
         try {
             val loaded = vm.repository.podcastDownloadSettings(podcast.id)
-            if (owner == vm.repository.session.cacheScope()) value = loaded
+            if (owner == vm.repository.session.cacheScope()) {
+                value = loaded
+                slowDownload = loaded.slowDownload || podcast.slowDownload
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { if (owner == vm.repository.session.cacheScope()) error = friendlyError(e) }
     }
@@ -116,15 +120,22 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                         }
                     }
                 }
-                if (canManageServer) {
+                if (current != null || canManageServer) {
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(stringResource(R.string.pod_dl_slow_download), style = MaterialTheme.typography.bodyLarge)
                         Switch(
                             checked = slowDownload,
                             onCheckedChange = { slowDownload = it },
-                            enabled = !busy,
+                            enabled = !busy && (current?.active == true || canManageServer),
                             modifier = Modifier.testTag("podcast-slow-download-switch"),
                         )
+                    }
+                    TextButton(
+                        onClick = { showQueueDialog = true },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.testTag("podcast-open-download-queue"),
+                    ) {
+                        Text(stringResource(R.string.pod_dl_tasks_title))
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = { reload++ }, enabled = !busy) { Text(stringResource(R.string.pod_dl_reload_settings)) } }
@@ -136,7 +147,7 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                 try {
                     val current = value
                     if (current != null && current.active) {
-                        vm.repository.updatePodcastDownloadSettings(podcast.id, current, owner)
+                        vm.repository.updatePodcastDownloadSettings(podcast.id, current.copy(slowDownload = slowDownload), owner)
                     }
                     if (canManageServer && slowDownload != podcast.slowDownload) {
                         val updated = vm.repository.updatePodcastServerSettings(podcast.id, slowDownload, podcast.maxRetries, podcast.retryBackoffBase, owner)
@@ -149,6 +160,9 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
             }
         }) { Text(if (busy) stringResource(R.string.pod_dl_saving) else stringResource(R.string.pod_dl_save)) } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.pod_dl_cancel)) } })
+    if (showQueueDialog) {
+        PodcastDownloadQueueDialog(vm = vm, onDismiss = { showQueueDialog = false })
+    }
 }
 
 @Composable
@@ -156,6 +170,8 @@ fun PodcastDownloadQueueDialog(
     vm: MusicViewModel,
     onDismiss: () -> Unit,
 ) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val canManageServer = state.account?.profile in listOf("owner", "librarian")
     val scope = rememberCoroutineScope()
     var queueInfo by remember { mutableStateOf<PodcastDownloadQueueInfo?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -165,7 +181,11 @@ fun PodcastDownloadQueueDialog(
 
     val loadQueue: suspend () -> Unit = {
         try {
-            queueInfo = vm.repository.podcastDownloadQueue()
+            queueInfo = if (canManageServer) {
+                vm.repository.podcastDownloadQueue()
+            } else {
+                vm.repository.myPodcastDownloadQueue()
+            }
             error = null
         } catch (e: CancellationException) {
             throw e
@@ -466,10 +486,17 @@ fun PodcastDownloadQueueDialog(
                                             scope.launch {
                                                 retrying = true
                                                 try {
-                                                    val res = vm.repository.retryFailedPodcastDownloads()
-                                                    notice = AppLanguage.string(R.string.pod_dl_retry_all_notice, res.retriedCount)
+                                                    val retriedCount = if (canManageServer) {
+                                                        vm.repository.retryFailedPodcastDownloads().retriedCount
+                                                    } else {
+                                                        failed.forEach { task ->
+                                                            vm.repository.savePodcastEpisode(task.episodeId, true)
+                                                        }
+                                                        failed.size
+                                                    }
+                                                    notice = AppLanguage.string(R.string.pod_dl_retry_all_notice, retriedCount)
                                                     loadQueue()
-                                                    if (res.retriedCount > 0) tab = "active"
+                                                    if (retriedCount > 0) tab = "active"
                                                 } catch (e: CancellationException) {
                                                     throw e
                                                 } catch (e: Exception) {
@@ -575,22 +602,24 @@ fun PodcastDownloadQueueDialog(
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    TextButton(
-                                        onClick = {
-                                            scope.launch {
-                                                try {
-                                                    vm.repository.clearCompletedPodcastDownloads()
-                                                    notice = AppLanguage.string(R.string.pod_dl_clear_completed_notice)
-                                                    loadQueue()
-                                                } catch (e: CancellationException) {
-                                                    throw e
-                                                } catch (e: Exception) {
-                                                    error = friendlyError(e)
+                                    if (canManageServer) {
+                                        TextButton(
+                                            onClick = {
+                                                scope.launch {
+                                                    try {
+                                                        vm.repository.clearCompletedPodcastDownloads()
+                                                        notice = AppLanguage.string(R.string.pod_dl_clear_completed_notice)
+                                                        loadQueue()
+                                                    } catch (e: CancellationException) {
+                                                        throw e
+                                                    } catch (e: Exception) {
+                                                        error = friendlyError(e)
+                                                    }
                                                 }
-                                            }
-                                        },
-                                    ) {
-                                        Text(stringResource(R.string.pod_dl_clear_records), fontSize = 12.sp)
+                                            },
+                                        ) {
+                                            Text(stringResource(R.string.pod_dl_clear_records), fontSize = 12.sp)
+                                        }
                                     }
                                 }
                             }
@@ -645,7 +674,8 @@ internal fun localizePodcastTaskError(raw: String?): String {
         "音频文件为空" -> return AppLanguage.string(R.string.pod_dl_err_empty_file)
         "源站域名被解析为 fake-ip 地址（198.18.0.0/15），请在服务端开启 WILDSTRING_PODCAST_ALLOW_FAKE_IP 或配置出站代理" -> return AppLanguage.string(R.string.pod_dl_err_fake_ip)
         "播客音频地址指向非公网资源" -> return AppLanguage.string(R.string.pod_dl_err_non_public_url)
-        "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却" -> return AppLanguage.string(R.string.pod_dl_err_http_429)
+        "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却",
+        "源站频繁请求限流 (HTTP 429 Too Many Requests)，已自动切换平缓下载并启动防限流冷却" -> return AppLanguage.string(R.string.pod_dl_err_http_429)
         "源站防盗链或拒绝访问 (HTTP 403 Forbidden)" -> return AppLanguage.string(R.string.pod_dl_err_http_403)
         "音频资源文件不存在 (HTTP 404 Not Found)" -> return AppLanguage.string(R.string.pod_dl_err_http_404)
         "源站服务过载不可用 (HTTP 503)" -> return AppLanguage.string(R.string.pod_dl_err_http_503)

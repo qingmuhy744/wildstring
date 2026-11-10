@@ -38,6 +38,13 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
     }
     fun clear(expected: String? = session.cacheScope()) { synchronized(cache) { session.withStorageScope(expected) { owner -> cache.keys.filter { key -> key.startsWith("$owner:") }.forEach(cache::removeResource) } } }
     fun bytes(): Long = session.storageScope()?.let { owner -> cache.keys.filter { it.startsWith("$owner:") }.sumOf { key -> cache.getCachedSpans(key).sumOf { it.length } } } ?: 0
+    internal fun cacheKey(storage: String, uri: Uri): String {
+        val parsed = uri.toString().toHttpUrlOrNull()
+        val normalized = if (parsed != null && parsed.queryParameter("network") != null) {
+            parsed.newBuilder().removeAllQueryParameters("network").build().toString()
+        } else uri.toString()
+        return "$storage:$normalized"
+    }
     private fun validateCached(key: String, url: String, client: OkHttpClient) {
         if (cache.getCachedSpans(key).isEmpty()) return
         val metadata = cache.getContentMetadata(key)
@@ -50,8 +57,13 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
             if (it.code in listOf(401, 403, 404, 409)) { cache.removeResource(key); throw IOException(AppLanguage.string(R.string.aud_cache_invalid_or_unauthorized)) }
             if (!it.isSuccessful) return
             val etag = it.header("ETag")
-            if (etag == null || etag != metadata.get("wildstring-etag", "")) cache.removeResource(key)
-            else cache.applyContentMetadataMutations(key, ContentMetadataMutations().set("wildstring-verified", System.currentTimeMillis()))
+            val storedEtag = metadata.get("wildstring-etag", null as String?).orEmpty()
+            if (storedEtag.isNotEmpty() && etag != null && etag != storedEtag) cache.removeResource(key)
+            else {
+                val mutations = ContentMetadataMutations().set("wildstring-verified", System.currentTimeMillis())
+                if (etag != null) mutations.set("wildstring-etag", etag)
+                cache.applyContentMetadataMutations(key, mutations)
+            }
         }
     }
     fun factory(client: OkHttpClient): DataSource.Factory = DataSource.Factory {
@@ -60,7 +72,7 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
         var key: String? = null
         val upstream = OkHttpDataSource.Factory(client)
         val cached = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
-            .setCacheKeyFactory { spec -> "${storage ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))}:${spec.uri}" }
+            .setCacheKeyFactory { spec -> cacheKey(storage ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired)), spec.uri) }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val source = if (settings.state.value.audioMb == 0) upstream.createDataSource() else cached.createDataSource()
         object : DataSource {
@@ -71,13 +83,16 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
                 profile = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
                 if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw IOException(AppLanguage.string(R.string.aud_cache_foreign_source_rejected))
                 storage = session.storageScope() ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
-                key = "$storage:${dataSpec.uri}"
+                key = cacheKey(storage, dataSpec.uri)
                 if (settings.state.value.audioMb > 0) validateCached(key, dataSpec.uri.toString(), client)
                 if (profile != session.cacheScope()) throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
                 val length = source.open(dataSpec)
                 val etag = source.responseHeaders.entries.firstOrNull { it.key.equals("ETag", true) }?.value?.firstOrNull()
-                if (etag != null && profile == session.cacheScope()) cache.applyContentMetadataMutations(key, ContentMetadataMutations()
-                    .set("wildstring-etag", etag).set("wildstring-verified", System.currentTimeMillis()))
+                if (profile == session.cacheScope()) {
+                    val mutations = ContentMetadataMutations().set("wildstring-verified", System.currentTimeMillis())
+                    if (etag != null) mutations.set("wildstring-etag", etag)
+                    cache.applyContentMetadataMutations(key, mutations)
+                }
                 return length
             }
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {

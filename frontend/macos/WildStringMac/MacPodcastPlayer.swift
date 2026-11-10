@@ -132,7 +132,7 @@ struct MacPodcastPlayer: View {
                 Spacer(minLength: 8)
             }.buttonStyle(.plain)
             MacSleepMenu(playback: playback, podcast: true)
-            if let message = actionError ?? playback.errorMessage ?? playback.podcastProgressMessage {
+            if let message = actionError ?? playback.errorMessage {
                 Text(message).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             Divider()

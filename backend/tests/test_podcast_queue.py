@@ -134,7 +134,10 @@ def test_queue_last_and_queue_next(context):
     assert [item["episode_id"] for item in queue(client)["items"]] == ["ep-a"]
     set_preference(client, "queue_next")
     deliver(database, ["ep-b"])
-    assert [item["episode_id"] for item in queue(client)["items"]] == ["ep-a", "ep-b"]
+    items = queue(client)["items"]
+    assert [item["episode_id"] for item in items] == ["ep-a", "ep-b"]
+    assert all(item["added_at"] for item in items)
+    assert items[0]["added_at"] <= items[1]["added_at"]
 
 
 def test_ignore_delivers_nothing(context):
@@ -239,3 +242,54 @@ def test_unavailable_episode_rejected(context):
     client, _ = context
     response = client.put("/api/v1/podcasts/inbox/items/does-not-exist", headers=HEADERS, json={})
     assert response.status_code == 422
+
+
+def test_queue_put_stamps_preserves_added_at_and_drains_inbox(context):
+    client, database = context
+    follow(client)
+    for episode_id in ("ep-join-1", "ep-join-2"):
+        add_episode(database, episode_id)
+
+    version = queue(client)["version"]
+    saved = client.put(
+        "/api/v1/podcasts/queue",
+        headers=HEADERS,
+        json={
+            "version": version,
+            "device_id": "web",
+            "items": [{"episode_id": "ep-join-1"}, {"episode_id": "ep-join-2"}],
+        },
+    ).json()
+    stamps = [item["added_at"] for item in saved["items"]]
+    assert all(stamps)
+    assert stamps[0] <= stamps[1]
+
+    reordered = client.put(
+        "/api/v1/podcasts/queue",
+        headers=HEADERS,
+        json={
+            "version": saved["version"],
+            "device_id": "web",
+            "items": [
+                {"episode_id": "ep-join-2", "origin": "manual", "added_at": stamps[1]},
+                {"episode_id": "ep-join-1", "origin": "manual", "added_at": stamps[0]},
+            ],
+        },
+    ).json()
+    assert [item["added_at"] for item in reordered["items"]] == [stamps[1], stamps[0]]
+
+    client.put("/api/v1/podcasts/inbox/items/ep-join-2", headers=HEADERS)
+    assert "ep-join-2" in [item["episode_id"] for item in inbox(client)]
+    client.put(
+        "/api/v1/podcasts/queue",
+        headers=HEADERS,
+        json={
+            "version": reordered["version"],
+            "device_id": "web",
+            "items": [
+                {"episode_id": "ep-join-2", "origin": "manual", "added_at": stamps[1]},
+                {"episode_id": "ep-join-1", "origin": "manual", "added_at": stamps[0]},
+            ],
+        },
+    )
+    assert "ep-join-2" not in [item["episode_id"] for item in inbox(client)]

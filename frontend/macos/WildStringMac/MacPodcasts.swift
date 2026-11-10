@@ -1111,20 +1111,54 @@ private struct MacPodcastUnifiedQueue: View {
     let shows: [PodcastSummary]
     var browseShows: () -> Void
 
+    @State private var tab: String = "episodes"
+
     var body: some View {
         let cloud = playback.podcastCloud
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text(L10n("macPodcasts.upNext"))
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(MacTheme.ink)
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center) {
+                    Text(L10n("macPodcasts.upNext"))
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(MacTheme.ink)
+                    Spacer()
+                    if let cloud, !cloud.unifiedPendingEpisodes.isEmpty {
+                        Button {
+                            playFirst(cloud)
+                        } label: {
+                            Label(L10n("macPodcasts.playAll"), systemImage: "play.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(MacTheme.onAccent)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(MacTheme.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
 
                 if let cloud {
-                    pendingEpisodesSection(cloud)
+                    HStack(spacing: 4) {
+                        tabButton(
+                            id: "episodes",
+                            title: L10n("macPodcasts.pendingEpisodes"),
+                            count: cloud.unifiedPendingEpisodes.count
+                        )
+                        tabButton(
+                            id: "rules",
+                            title: L10n("macPodcasts.autoIntakeSectionTitle"),
+                            count: shows.count
+                        )
+                    }
+                    .padding(4)
+                    .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(MacTheme.border, lineWidth: 1))
 
-                    Rectangle().fill(MacTheme.border).frame(height: 1)
-
-                    autoIntakeSection(cloud)
+                    if tab == "episodes" {
+                        pendingEpisodesSection(cloud)
+                    } else {
+                        autoIntakeSection(cloud)
+                    }
                 } else {
                     Text(L10n("macPodcasts.cannotLoadQueue")).foregroundStyle(.secondary)
                 }
@@ -1136,34 +1170,36 @@ private struct MacPodcastUnifiedQueue: View {
         .background(MacTheme.canvas)
     }
 
+    private func tabButton(id: String, title: String, count: Int) -> some View {
+        let selected = tab == id
+        return Button {
+            tab = id
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? MacTheme.ink : MacTheme.muted)
+                Text("\(count)")
+                    .font(MacTheme.mono(11))
+                    .foregroundStyle(MacTheme.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                selected ? MacTheme.canvas : Color.clear,
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(selected ? MacTheme.border : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func pendingEpisodesSection(_ cloud: PodcastCloudQueue) -> some View {
         let items = cloud.unifiedPendingEpisodes
         return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 6) {
-                    Text(L10n("macPodcasts.pendingEpisodes"))
-                        .font(MacTheme.section(16))
-                        .foregroundStyle(MacTheme.ink)
-                    Text("\(items.count)")
-                        .font(MacTheme.mono(12))
-                        .foregroundStyle(MacTheme.muted)
-                }
-                Spacer()
-                if !items.isEmpty {
-                    Button {
-                        playFirst(cloud)
-                    } label: {
-                        Label(L10n("macPodcasts.playAll"), systemImage: "play.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(MacTheme.onAccent)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(MacTheme.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
             if cloud.loading && items.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -1178,7 +1214,7 @@ private struct MacPodcastUnifiedQueue: View {
                 .padding(.vertical, 20)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(items) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         HStack(alignment: .center, spacing: 12) {
                             Button {
                                 play(item.episodeId, cloud: cloud)
@@ -1205,6 +1241,26 @@ private struct MacPodcastUnifiedQueue: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
+                            VStack(spacing: 2) {
+                                Button {
+                                    reorder(items, from: index, to: index - 1, cloud: cloud)
+                                } label: {
+                                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(index == 0)
+                                .help(L10n("macPodcasts.moveUp"))
+                                Button {
+                                    reorder(items, from: index, to: index + 1, cloud: cloud)
+                                } label: {
+                                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(index == items.count - 1)
+                                .help(L10n("macPodcasts.moveDown"))
+                            }
+                            .foregroundStyle(MacTheme.muted)
+
                             Button(L10n("macPodcasts.remove")) {
                                 cloud.removeEpisode(item.episodeId)
                             }
@@ -1223,18 +1279,22 @@ private struct MacPodcastUnifiedQueue: View {
     }
 
     private func autoIntakeSection(_ cloud: PodcastCloudQueue) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L10n("macPodcasts.autoIntakeSectionTitle"))
-                .font(MacTheme.section(16))
-                .foregroundStyle(MacTheme.ink)
-
-            if shows.isEmpty {
+        let sortedShows = shows.sorted { a, b in
+            let actA = normalizeDeliveryAction(cloud.showPreference(a.id).action)
+            let actB = normalizeDeliveryAction(cloud.showPreference(b.id).action)
+            let activeA = actA != "ignore"
+            let activeB = actB != "ignore"
+            if activeA != activeB { return activeA }
+            return false
+        }
+        return VStack(alignment: .leading, spacing: 14) {
+            if sortedShows.isEmpty {
                 Text(L10n("macPodcasts.autoIntakeEmptyShows"))
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(shows) { show in
+                VStack(spacing: 6) {
+                    ForEach(sortedShows) { show in
                         MacShowDeliveryRow(cloud: cloud, show: show)
                     }
                 }
@@ -1248,6 +1308,18 @@ private struct MacPodcastUnifiedQueue: View {
                 playback.playPodcastEpisode(item)
             }
         }
+    }
+
+    private func reorder(
+        _ items: [PodcastCloudQueue.UnifiedPendingEpisode],
+        from: Int,
+        to: Int,
+        cloud: PodcastCloudQueue
+    ) {
+        guard items.indices.contains(from), items.indices.contains(to) else { return }
+        var ids = items.map(\.episodeId)
+        ids.insert(ids.remove(at: from), at: to)
+        cloud.reorderPending(ids)
     }
 
     private func playFirst(_ cloud: PodcastCloudQueue) {
@@ -1264,17 +1336,11 @@ private struct MacShowDeliveryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(show.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(MacTheme.ink)
-                    .lineLimit(1)
-                Text(show.author.isEmpty ? L10n("macPodcasts.defaultArtist") : show.author)
-                    .font(MacTheme.caption)
-                    .foregroundStyle(MacTheme.muted)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(show.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(MacTheme.ink)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Picker(L10n("macPodcasts.intakeRulePicker"), selection: $action) {
                 Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")

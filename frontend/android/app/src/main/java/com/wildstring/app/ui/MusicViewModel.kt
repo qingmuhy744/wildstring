@@ -84,6 +84,9 @@ class MusicViewModel @Inject constructor(
     private var progressJob: Job? = null
     private var handoffJob: Job? = null
     private var localPlaybackEpoch = 0L
+    private var pendingSeekTargetMs: Long? = null
+    private var pendingSeekAtElapsedMs = 0L
+    private var lastPositionEntryId: String? = null
     private var offlineSyncJob: Job? = null
     private val offlineSyncLock = kotlinx.coroutines.sync.Mutex()
     private val mutableOfflineSync = MutableStateFlow("")
@@ -526,6 +529,7 @@ class MusicViewModel @Inject constructor(
     fun addPodcastEpisodeToInbox(episode: PodcastEpisode) = podcastQueues.addInbox(episode)
     fun removePodcastInboxEpisode(episodeId: String) = podcastQueues.removeInbox(episodeId)
     fun removePodcastQueueEpisode(episodeId: String) = podcastQueues.removeQueued(episodeId)
+    fun reorderPodcastPending(rows: List<PodcastQueueRow>) = podcastQueues.reorderPending(rows)
     fun movePodcastInboxToQueue(episodeId: String) = podcastQueues.moveInboxToQueue(episodeId)
     fun updatePodcastShowPreference(podcastId: String, action: String, autoLimit: Int = 3) = podcastQueues.updateShow(podcastId, action, autoLimit)
     fun updatePodcastAutoContinue(enabled: Boolean) = podcastQueues.updateAutoContinue(enabled)
@@ -888,6 +892,7 @@ class MusicViewModel @Inject constructor(
         require(tracks.size <= 5000) { AppLanguage.string(R.string.vm_queue_limit_exceeded) }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
+        val startPos = (positionMs ?: target.podcast?.resumePositionMs?.takeIf { it > 0L } ?: 0L).coerceAtLeast(0L)
         val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { item ->
             if (itemIndex == index && track.podcastEpisodeId != null && positionMs != null) {
                 val extras = android.os.Bundle(item.mediaMetadata.extras).apply { putLong("podcast_requested_position", positionMs) }
@@ -896,6 +901,8 @@ class MusicViewModel @Inject constructor(
         } }
         val previous = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
         localPlaybackEpoch++
+        pendingSeekTargetMs = if (startPos > 0L) startPos else null
+        pendingSeekAtElapsedMs = if (startPos > 0L) android.os.SystemClock.elapsedRealtime() else 0L
         val previousIndex = c.currentMediaItemIndex; val position = c.currentPosition; val previousAutoplay = c.playWhenReady
         try {
             if (preserveQueue) {
@@ -904,15 +911,15 @@ class MusicViewModel @Inject constructor(
                 // the playlist, so manually queued items survive.
                 c.pause()
                 c.addMediaItems(0, items)
-                c.seekTo(0, (positionMs ?: 0).coerceAtLeast(0))
+                c.seekTo(0, startPos)
                 c.prepare(); c.playWhenReady = autoplay; refreshPlayer()
                 return
             }
             val batches = items.chunked(100)
             c.pause()
-            c.setMediaItems(batches.first(), index.coerceIn(batches.first().indices), (positionMs ?: 0).coerceAtLeast(0))
+            c.setMediaItems(batches.first(), index.coerceIn(batches.first().indices), startPos)
             batches.drop(1).forEach { c.addMediaItems(it) }
-            if (index >= 100) c.seekTo(index.coerceIn(tracks.indices), (positionMs ?: 0).coerceAtLeast(0))
+            if (index >= 100) c.seekTo(index.coerceIn(tracks.indices), startPos)
             c.prepare(); c.playWhenReady = autoplay; refreshPlayer()
         } catch (e: Exception) {
             if (previous.isNotEmpty()) { c.setMediaItems(previous.take(100), 0, 0); previous.drop(100).chunked(100).forEach { c.addMediaItems(it) }; c.seekTo(previousIndex, position); c.prepare(); c.playWhenReady = previousAutoplay }
@@ -988,7 +995,14 @@ class MusicViewModel @Inject constructor(
     fun notify(message: String) { mutable.update { it.copy(mutationMessage = message) } }
     fun acknowledgeMessage(message: String) { mutable.update { if (it.mutationMessage == message) it.copy(mutationMessage = null) else it } }
     fun toggle() { localPlaybackEpoch++; controller?.let { if (it.playWhenReady) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
-    fun seek(ms: Long) { localPlaybackEpoch++; controller?.seekTo(ms.coerceAtLeast(0)) }
+    fun seek(ms: Long) {
+        val target = ms.coerceAtLeast(0L)
+        localPlaybackEpoch++
+        pendingSeekTargetMs = target
+        pendingSeekAtElapsedMs = android.os.SystemClock.elapsedRealtime()
+        mutablePosition.value = target
+        controller?.seekTo(target)
+    }
     fun next() {
         localPlaybackEpoch++
         val c = controller ?: return
@@ -1174,7 +1188,21 @@ class MusicViewModel @Inject constructor(
         val id = item?.mediaMetadata?.extras?.getString("track_id")
         val track = id?.let { repository.knownTracks[it] }?.let { t -> optimisticFavorites[t.id]?.let { t.copy(loved = it) } ?: t }
         val queue = queueSnapshot
-        mutablePosition.value = c.currentPosition.coerceAtLeast(0)
+        val rawPos = c.currentPosition.coerceAtLeast(0L)
+        val now = android.os.SystemClock.elapsedRealtime()
+        val seekTarget = pendingSeekTargetMs
+        val currentEntry = item?.mediaId
+        val resolvedPos = when {
+            seekTarget != null && now - pendingSeekAtElapsedMs < 1500L && kotlin.math.abs(rawPos - seekTarget) > 500L -> seekTarget
+            else -> {
+                if (seekTarget != null) pendingSeekTargetMs = null
+                val prevPos = mutablePosition.value
+                if (currentEntry != null && currentEntry == lastPositionEntryId && c.isPlaying && rawPos < prevPos && prevPos - rawPos < 1500L) prevPos
+                else rawPos
+            }
+        }
+        lastPositionEntryId = currentEntry
+        mutablePosition.value = resolvedPos
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,

@@ -3025,7 +3025,11 @@
     "showDeliveryAria": "{{title}}新集自动待播",
     "unfollowedStatus": "未关注 · 关注后生效",
     "unreadableEpisode": "这一集已经无法读取",
-    "unreadableEpisodeHelp": "这一集已经无法读取。可以移除它，或稍后重试。"
+    "unreadableEpisodeHelp": "这一集已经无法读取。可以移除它，或稍后重试。",
+    "reorderAria": "调整 {{title}} 的顺序",
+    "moveUp": "上移 {{title}}",
+    "moveDown": "下移 {{title}}",
+    "reorderFailed": "顺序保存失败，已恢复原顺序，请重试。"
   },
   "podcastOpml": {
     "closeDialog": "关闭 OPML 导入",
@@ -3390,6 +3394,7 @@
     "followed": "已关注节目",
     "followedByTitle": "已关注《{{title}}》",
     "gentleDownload": "平缓下载",
+    "antiRateLimitStrategy": "防限流策略",
     "gentleDownloadHint": "降低下载速度，并在单集之间稍作等待，减少被源站限流的机会。",
     "importOpml": "导入 OPML",
     "inbox": "待播列表",

@@ -578,7 +578,9 @@ export function usePlayer(userId: string) {
     void (async () => {
       const store = podcastProgress.current;
       if (!store || !id) return;
-      checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+      if (!audio.current?.paused || audio.current?.ended) {
+        checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+      }
       element.pause();
       const { remote, local, conflict } = await store.inspect(id);
       if (intent !== podcastIntent.current) return;
@@ -949,6 +951,9 @@ export function usePlayer(userId: string) {
         loading.current ? desiredPlay.current : !audio.current.paused,
         150,
       );
+    } else if (audio.current.readyState < 1 || pendingSeek.current !== null) {
+      pendingSeek.current = target;
+      setPosition(target);
     } else {
       tracker.current.beforeSeek(audio.current);
       audio.current.currentTime = target;
@@ -1347,7 +1352,7 @@ export function usePlayer(userId: string) {
         if (!audio.current?.paused || (loading.current && desiredPlay.current)) setBuffering(true);
       },
       onTimeUpdate: () => {
-        if (loading.current) return;
+        if (loading.current || pendingSeek.current !== null) return;
         if (typeof sleep === 'number' && Date.now() >= sleep) {
           desiredPlay.current = false;
           audio.current?.pause();
