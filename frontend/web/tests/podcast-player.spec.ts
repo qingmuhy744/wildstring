@@ -82,6 +82,17 @@ async function openRadio(page: Page) {
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();
 }
 
+async function audioDuration(page: Page) {
+  let duration = NaN;
+  await expect
+    .poll(async () => {
+      duration = (await audio(page)).duration;
+      return Number.isFinite(duration) && duration > 0;
+    })
+    .toBe(true);
+  return duration;
+}
+
 test('待播列表可从节目列表和详情直接打开', async ({ page }) => {
   await login(page);
   await podcastCatalog(page);
@@ -681,7 +692,7 @@ test('自然播完标记完成并自动接续，手动添加优先且半途单�
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.locator('.programme-track').first()).toContainText('第 3 集');
   await expect(page.locator('.programme-track').first()).toContainText('手动添加');
-  const duration = (await audio(page)).duration;
+  const duration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
@@ -874,7 +885,7 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
   await expect(page.locator('.programme-track').first()).toContainText('夜间第 1 集');
 
   // 1. Finishing radio-6 (Show A) must NOT repeat radio-6 despite music repeat_one; it advances to queued radio-1 (Show B).
-  const firstDuration = (await audio(page)).duration;
+  const firstDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
@@ -885,7 +896,7 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
   await page.getByRole('button', { name: '收音机暂停' }).click();
 
   // 2. Now on Show B (radio-1) with explicit queue empty after radio-1 finishes: must auto-continue to radio-2 per Show B's 'asc' preference.
-  const secondDuration = (await audio(page)).duration;
+  const secondDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
