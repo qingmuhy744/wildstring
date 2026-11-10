@@ -1,6 +1,7 @@
 package com.wildstring.app
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.CompositionLocalProvider
@@ -84,6 +85,38 @@ class MovableTextFieldTest {
         compose.onNodeWithTag("moved-field").assertIsDisplayed()
         repeat(4) { round ->
             compose.runOnIdle { host = 1 - host }
+            compose.onNodeWithTag("moved-field").assertIsDisplayed()
+            compose.runOnIdle { text = "野弦 $round" }
+            compose.onNodeWithTag("moved-field").assertTextEquals("野弦 $round")
+        }
+        compose.runOnIdle { shown = false }
+        compose.waitForIdle()
+    }
+
+    @Test fun textFieldInsideASubcompositionMovedDuringAStyleChangeDisposesCleanly() {
+        // The app's destinations contain a Scaffold (a SubcomposeLayout). Its slot content is a
+        // separate composition, so it can recompose and set the field's modifier while the moved
+        // subtree is detached and still waiting for its late insertion.
+        var host by mutableStateOf(0)
+        var large by mutableStateOf(false)
+        var shown by mutableStateOf(true)
+        var text by mutableStateOf("野弦")
+        compose.setContent {
+            val field = remember {
+                movableContentOf {
+                    BoxWithConstraints {
+                        BasicTextField(text, { text = it }, Modifier.testTag("moved-field"),
+                            textStyle = TextStyle(fontSize = if (large) 20.sp else 14.sp))
+                    }
+                }
+            }
+            if (shown) {
+                if (host == 0) Box { field() } else Column { field() }
+            }
+        }
+        compose.onNodeWithTag("moved-field").assertIsDisplayed()
+        repeat(6) { round ->
+            compose.runOnIdle { host = 1 - host; large = !large }
             compose.onNodeWithTag("moved-field").assertIsDisplayed()
             compose.runOnIdle { text = "野弦 $round" }
             compose.onNodeWithTag("moved-field").assertTextEquals("野弦 $round")
