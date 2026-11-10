@@ -3,6 +3,8 @@ package com.wildstring.app
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +29,8 @@ import org.junit.Test
  * and later crashes Activity teardown with "Must run runDetachLifecycle() once after
  * runAttachLifecycle() and before markAsDetached()".
  */
+private val LocalFieldSize = compositionLocalOf { 14.sp }
+
 class MovableTextFieldTest {
     @get:Rule val compose = createComposeRule()
 
@@ -55,6 +59,35 @@ class MovableTextFieldTest {
             compose.onNodeWithTag("moved-field").assertTextEquals("野弦 $round")
         }
         // Disposing runs the same detach lifecycle that crashed MainActivity's teardown.
+        compose.runOnIdle { shown = false }
+        compose.waitForIdle()
+    }
+
+    @Test fun textFieldMovedIntoAHostWithADifferentTextStyleKeepsComposingAndDisposesCleanly() {
+        // In the app the style difference comes from where the page lands (page vs. player
+        // backdrop), so the moved content recomposes at its new location while still detached.
+        var host by mutableStateOf(0)
+        var shown by mutableStateOf(true)
+        var text by mutableStateOf("野弦")
+        compose.setContent {
+            val field = remember {
+                movableContentOf {
+                    BasicTextField(text, { text = it }, Modifier.testTag("moved-field"),
+                        textStyle = TextStyle(fontSize = LocalFieldSize.current))
+                }
+            }
+            if (shown) {
+                if (host == 0) CompositionLocalProvider(LocalFieldSize provides 14.sp) { Box { field() } }
+                else CompositionLocalProvider(LocalFieldSize provides 20.sp) { Column { field() } }
+            }
+        }
+        compose.onNodeWithTag("moved-field").assertIsDisplayed()
+        repeat(4) { round ->
+            compose.runOnIdle { host = 1 - host }
+            compose.onNodeWithTag("moved-field").assertIsDisplayed()
+            compose.runOnIdle { text = "野弦 $round" }
+            compose.onNodeWithTag("moved-field").assertTextEquals("野弦 $round")
+        }
         compose.runOnIdle { shown = false }
         compose.waitForIdle()
     }
