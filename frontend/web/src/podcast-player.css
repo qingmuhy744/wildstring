@@ -894,12 +894,16 @@
   scroll-padding-block: 4px;
 }
 .programme-list li {
-  display: flex;
-  align-items: center;
+  display: grid;
+  /* Number, title, reorder, dismiss: one column set for both hand-queued and auto rows. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: start;
   gap: 14px;
   padding: 12px 8px;
   border-top: 1px solid color-mix(in srgb, var(--paper-line) 45%, transparent);
   border-radius: 6px;
+  /* Dragging a row must move it, not select its title. */
+  user-select: none;
 }
 .programme-list li:hover {
   background: color-mix(in srgb, var(--paper-ink) 4%, transparent);
@@ -914,8 +918,8 @@
   font-variant-numeric: tabular-nums;
 }
 .fullscreen-player[data-player-kind='podcast'] .programme-track {
+  grid-column: 2;
   min-width: 0;
-  flex: 1;
   padding: 2px 0;
   border: 0;
   border-radius: 0;
@@ -941,6 +945,8 @@
   font-variant-numeric: tabular-nums;
 }
 .fullscreen-player[data-player-kind='podcast'] .programme-remove {
+  grid-column: 4;
+  align-self: start;
   padding: 4px;
   width: 24px;
   height: 28px;
@@ -1019,6 +1025,8 @@
   font-size: 12px;
 }
 .programme-reorder {
+  grid-column: 3;
+  align-self: start;
   flex: none;
   gap: 4px;
 }
