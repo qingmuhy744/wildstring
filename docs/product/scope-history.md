@@ -2,6 +2,8 @@
 
 按批次记录各版本的实现与验证边界，新条目放最前。当前产品范围见 [scope.md](scope.md)；此处内容是历史，不代表当前状态，当前数据库 schema 以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准。
 
+0.8.10 发布：修复 Android 播客待播队列同步因 `"added_at": null` 触发的 HTTP 422，统一四端（Web／Android／iOS／macOS）待播列表保持 `podcast_queue` 显式顺序、仅对未入队 `podcast_inbox` 按 `added_at` 升序追加（消除手动拖拽与插队回弹）；后端播客目录搜索、查询与排行榜补齐传递 `ALLOW_FAKE_IP`；修复 Web 空闲播放器加入待播后播放按钮禁用及切歌瞬间总时长闪烁；修复 Android 横屏卡带／黑胶控制坞布局与常驻错误阻塞提示条问题，并收口 Android 模拟器、Apple `WildStringKit` 与 Web 播客时长等待测试稳定性。Android versionCode 46，Apple 构建号 45，数据库 schema 仍为 50。实现与验证边界见 [0.8.10 发布说明](../releases/v0.8.10.md)。
+
 0.8.9 发布：待播列表按加入时间升序并可手动调整顺序（桌面上下按钮，移动端拖拽），待播面板改为单集／规则两个标签页；播客平缓下载与快慢通道隔离；四端修复跳转进度。Android versionCode 45，Apple 构建号 44。数据库 schema 仍为 50，`slow_download` 列由建表语句与运行时 ALTER 补齐，未单独升版本。实现与验证边界见 [0.8.9 发布说明](../releases/v0.8.9.md)。
 
 0.8.8 发布：四端界面语言统一（账号级 zh／en、稳定错误码与英文通知／推荐文案）、Warm Carbon 暗色与 Warm Paper 浅色对齐、播客待播列表与单集收藏（schema 50）、歌词视图跨端契约，以及 Android 卡带播放器与横屏卡座、macOS 助手工具栏改版。Android versionCode 44，Apple 构建号 43。实现与验证边界见 [0.8.8 发布说明](../releases/v0.8.8.md)：本地覆盖 `make check`、后端受影响 230 项、Web 受影响 19 个 spec、iOS 105 项、macOS 37 项、Android 单测 143 项与模拟器 104 项；卡带横屏、深色与平板的截图走查和真机支架验证未完成。
