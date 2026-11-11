@@ -45,7 +45,7 @@
     font-size: 12px;
     font-weight: 400;
   }
-  .desktop-help-label,
+  .desktop-help-marker[data-help],
   .desktop-help-term[data-help] {
     cursor: help;
   }
