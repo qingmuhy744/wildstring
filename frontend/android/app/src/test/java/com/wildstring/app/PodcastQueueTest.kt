@@ -403,4 +403,27 @@ class PodcastQueueTest {
         assertEquals(42.5, info.downloading.single().progressPct!!, 0.0)
         assertEquals(96.5, info.recentCompleted.single().progressPct!!, 0.0)
     }
+
+    @Test fun queueWriteBodyOmitsBlankAddedAtEvenWithSerializeNulls() {
+        val update = PodcastQueueUpdate(
+            version = 3,
+            deviceId = "android-phone",
+            items = listOf(
+                PodcastQueueWriteItem("fresh", "manual", null),
+                PodcastQueueWriteItem("blank", "manual", "  "),
+                PodcastQueueWriteItem("kept", "rule", "2026-11-10T08:00:00+00:00"),
+            ),
+        )
+        val withTimestamps = networkGson().toJson(update.writeBody(includeAddedAt = true))
+        assertFalse(withTimestamps.contains("null"))
+        val parsed = com.google.gson.JsonParser.parseString(withTimestamps).asJsonObject
+        val items = parsed.getAsJsonArray("items")
+        assertFalse(items[0].asJsonObject.has("added_at"))
+        assertFalse(items[1].asJsonObject.has("added_at"))
+        assertEquals("2026-11-10T08:00:00+00:00", items[2].asJsonObject.get("added_at").asString)
+
+        val legacy = networkGson().toJson(update.writeBody(includeAddedAt = false))
+        assertFalse(legacy.contains("added_at"))
+        assertFalse(legacy.contains("null"))
+    }
 }

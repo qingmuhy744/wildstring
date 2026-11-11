@@ -577,7 +577,7 @@ class MusicViewModel @Inject constructor(
     fun playPodcastPendingQueue() = viewModelScope.launch {
         val cloud = podcastCloud.value
         val firstQueueId = cloud.queue.firstOrNull()?.episodeId
-        val targetId = firstQueueId ?: cloud.inbox.firstOrNull()?.episodeId ?: return@launch
+        val targetId = firstQueueId ?: cloud.inbox.minByOrNull { it.addedAt }?.episodeId ?: return@launch
         try {
             val episode = repository.podcastEpisode(targetId)
             val detail = repository.podcastDetail(episode.podcastId)

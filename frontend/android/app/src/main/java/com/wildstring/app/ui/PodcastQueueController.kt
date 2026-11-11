@@ -130,11 +130,25 @@ class PodcastQueueController(
 
     /** Rewrites the whole pending list in the given order; queued rows win over the inbox copy. */
     fun reorderPending(rows: List<PodcastQueueRow>) = scope.launch {
+        val ids = rows.map { it.episodeId }.toSet()
         val items = rows.map { PodcastQueueItem(episodeId = it.episodeId, origin = "manual", addedAt = it.addedAt) }
+        mutable.update { state ->
+            state.copy(
+                queue = items,
+                queueRows = rows,
+                inboxRows = state.inboxRows.filterNot { it.episodeId in ids },
+            )
+        }
         val saved = mutex.withLock { pushOrKeep(items) }
         if (saved) {
-            val ids = rows.map { it.episodeId }.toSet()
-            mutable.update { state -> state.copy(inboxRows = state.inboxRows.filterNot { it.episodeId in ids }) }
+            inbox = inbox.filterNot { it.episodeId in ids }
+            mutable.update { state ->
+                state.copy(
+                    inbox = inbox,
+                    inboxRows = state.inboxRows.filterNot { it.episodeId in ids },
+                )
+            }
+            alignPlayer(items)
         }
     }
 

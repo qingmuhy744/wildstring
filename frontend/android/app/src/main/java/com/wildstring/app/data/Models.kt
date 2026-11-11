@@ -369,6 +369,28 @@ data class PodcastQueueUpdate(
     val items: List<PodcastQueueWriteItem>,
 )
 
+fun PodcastQueueUpdate.writeBody(includeAddedAt: Boolean = true): com.google.gson.JsonObject =
+    com.google.gson.JsonObject().apply {
+        addProperty("version", version)
+        addProperty("device_id", deviceId)
+        add(
+            "items",
+            com.google.gson.JsonArray().apply {
+                for (item in items) {
+                    add(
+                        com.google.gson.JsonObject().apply {
+                            addProperty("episode_id", item.episodeId)
+                            addProperty("origin", item.origin)
+                            if (includeAddedAt && !item.addedAt.isNullOrBlank()) {
+                                addProperty("added_at", item.addedAt)
+                            }
+                        },
+                    )
+                }
+            },
+        )
+    }
+
 data class PodcastInboxItem(
     @SerializedName("episode_id") val episodeId: String = "",
     @SerializedName("podcast_id") val podcastId: String = "",

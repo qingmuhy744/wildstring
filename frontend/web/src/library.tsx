@@ -1292,7 +1292,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 onFocusHandled={() => setFocusPodcastId(null)}
                 onQueueTrack={(track, next) => {
                   if (next) return player.playNext(track);
-                  if (!player.current) return player.playPodcastEpisode(track, false);
                   return player.enqueue(track);
                 }}
                 onPlayTrack={(track) => {

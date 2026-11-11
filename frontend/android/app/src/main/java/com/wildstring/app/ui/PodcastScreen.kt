@@ -446,19 +446,8 @@ private fun PodcastUnifiedQueueSheet(
     onBrowse: () -> Unit,
     onRetry: () -> Unit,
 ) {
-    val queuedEpisodeIds = remember(cloud.queueRows) { cloud.queueRows.map { it.episodeId }.toSet() }
     val combinedPendingRows = remember(cloud.queueRows, cloud.inboxRows) {
-        val list = mutableListOf<Pair<PodcastQueueRow, Boolean>>()
-        for (row in cloud.queueRows) {
-            list.add(row to true)
-        }
-        for (row in cloud.inboxRows) {
-            if (!queuedEpisodeIds.contains(row.episodeId)) {
-                list.add(row to false)
-            }
-        }
-        // Ascending join time: the next item to play comes first; untimed legacy rows stay ahead.
-        orderPendingRows(list.map { it.first }).map { row -> row to (row.episodeId in queuedEpisodeIds) }
+        mergePendingRows(cloud.queueRows, cloud.inboxRows)
     }
     var sheetTab by rememberSaveable { mutableStateOf("episodes") }
     val sortedShows = remember(followedShows, cloud.preferences) {
@@ -480,7 +469,8 @@ private fun PodcastUnifiedQueueSheet(
         val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return index
         val center = item.offset + item.size / 2f + offset
         return listState.layoutInfo.visibleItemsInfo
-            .firstOrNull { center >= it.offset && center < it.offset + it.size }
+            .filter { it.index in combinedPendingRows.indices }
+            .minByOrNull { kotlin.math.abs((it.offset + it.size / 2f) - center) }
             ?.index ?: index
     }
 
