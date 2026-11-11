@@ -1,85 +1,89 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title">
+  <title id="title">WildString 野弦 · Personal Sound Archive 个人声音档案</title>
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#11130d" />
-      <stop offset="50%" stop-color="#181a13" />
-      <stop offset="100%" stop-color="#20231b" />
+    <clipPath id="frame"><rect width="1200" height="380" rx="20"/></clipPath>
+    <linearGradient id="paper" x2="1" y2="1">
+      <stop stop-color="#27231C"/>
+      <stop offset=".5" stop-color="#1A1815"/>
+      <stop offset="1" stop-color="#161512"/>
     </linearGradient>
-    <linearGradient id="stringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#d87738" stop-opacity="0.1" />
-      <stop offset="40%" stop-color="#e98a6d" stop-opacity="0.8" />
-      <stop offset="70%" stop-color="#f59e0b" stop-opacity="0.8" />
-      <stop offset="100%" stop-color="#d87738" stop-opacity="0.1" />
+    <radialGradient id="light" cx=".78" cy=".35" r=".65">
+      <stop stop-color="#9C573D" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#9C573D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="strings" x2="1" y2="0">
+      <stop stop-color="#E98A6D" stop-opacity="0"/>
+      <stop offset=".52" stop-color="#E98A6D" stop-opacity=".43"/>
+      <stop offset=".79" stop-color="#D6A37C" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#D6A37C" stop-opacity=".12"/>
     </linearGradient>
-    <radialGradient id="glowLeft" cx="20%" cy="40%" r="50%">
-      <stop offset="0%" stop-color="#d87738" stop-opacity="0.22" />
-      <stop offset="100%" stop-color="#11130d" stop-opacity="0" />
-    </radialGradient>
-    <radialGradient id="glowRight" cx="80%" cy="60%" r="50%">
-      <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.16" />
-      <stop offset="100%" stop-color="#11130d" stop-opacity="0" />
-    </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    <linearGradient id="vinyl" x2="1" y2="1">
+      <stop stop-color="#0D0D0C"/>
+      <stop offset=".36" stop-color="#35312A"/>
+      <stop offset=".55" stop-color="#151410"/>
+      <stop offset=".78" stop-color="#27241F"/>
+      <stop offset="1" stop-color="#11100E"/>
+    </linearGradient>
+    <linearGradient id="sheen" x2="1" y2="0">
+      <stop stop-color="#DDB693" stop-opacity="0"/>
+      <stop offset=".51" stop-color="#DDB693" stop-opacity=".29"/>
+      <stop offset="1" stop-color="#DDB693" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="label" x2="1" y2="1">
+      <stop stop-color="#AD6148"/>
+      <stop offset="1" stop-color="#653827"/>
+    </linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" seed="19" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
     </filter>
+    <path id="string" d="M-32 364C189 326 294 364 477 305S683 151 810 140s235 92 418-19"/>
   </defs>
 
-  <!-- Background -->
-  <rect width="1200" height="380" fill="url(#bg)" rx="16" />
-  <rect width="1200" height="380" fill="url(#glowLeft)" rx="16" />
-  <rect width="1200" height="380" fill="url(#glowRight)" rx="16" />
+  <g clip-path="url(#frame)">
+    <path d="M0 0h1200v380H0z" fill="url(#paper)"/>
+    <path d="M0 0h1200v380H0z" fill="url(#light)"/>
 
-  <!-- Ambient Sound Waves / Guitar Strings -->
-  <g fill="none" stroke="url(#stringGrad)" stroke-width="2.5" opacity="0.65">
-    <path d="M-50 140 C 250 80, 450 200, 750 140 C 950 100, 1100 180, 1250 120" />
-    <path d="M-50 165 C 200 110, 500 230, 800 165 C 1000 120, 1150 210, 1250 150" stroke-width="2" opacity="0.8" />
-    <path d="M-50 190 C 220 140, 520 250, 820 190 C 1020 150, 1170 230, 1250 180" stroke-width="1.5" opacity="0.5" />
-    <path d="M-50 215 C 240 170, 540 270, 840 215 C 1040 180, 1190 250, 1250 210" stroke-width="1" opacity="0.35" />
+    <g transform="translate(949 195)">
+      <circle r="196" fill="#100E0C" opacity=".36" cy="11"/>
+      <circle r="188" fill="url(#vinyl)" stroke="#635046"/>
+      <g fill="none" stroke="#BBAB93" stroke-opacity=".19" stroke-width="1">
+        <circle r="183"/><circle r="179"/><circle r="173"/><circle r="168"/>
+        <circle r="164"/><circle r="157"/><circle r="152"/><circle r="148"/>
+        <circle r="141"/><circle r="136"/><circle r="132"/><circle r="125"/>
+        <circle r="120"/><circle r="116"/><circle r="109"/><circle r="104"/>
+        <circle r="100"/><circle r="93"/><circle r="88"/><circle r="84"/>
+      </g>
+      <path d="M-170-80A188 188 0 0 1-105-156L0 0l169 82a188 188 0 0 1-68 76Z" fill="url(#sheen)"/>
+      <circle r="74" fill="#1B1612" stroke="#6A4F41"/>
+      <circle r="67" fill="url(#label)"/>
+      <circle r="58" fill="none" stroke="#F1B89C" stroke-opacity=".42"/>
+      <circle r="50" fill="none" stroke="#F1B89C" stroke-opacity=".24"/>
+      <g transform="translate(0 -18) rotate(-14)" fill="none" stroke="#F8D5BD" stroke-width="2.5" stroke-linecap="round">
+        <path d="M-23-8c15-14 31 14 46 0M-23 0c15-14 31 14 46 0M-23 8c15-14 31 14 46 0"/>
+      </g>
+      <circle r="4" fill="#241913"/>
+      <path d="M-22 25h44m-30 6h16" stroke="#F8D5BD" stroke-opacity=".65"/>
+    </g>
+
+    <g fill="none" stroke="url(#strings)" stroke-width="1.4">
+      <use href="#string"/>
+      <use href="#string" y="10" opacity=".75"/>
+      <use href="#string" y="20" opacity=".5"/>
+      <use href="#string" y="30" opacity=".28"/>
+    </g>
+    <rect width="1200" height="380" filter="url(#grain)" opacity=".08"/>
+    <rect x="16.5" y="16.5" width="1167" height="347" rx="10" fill="none" stroke="#DEC4A8" stroke-opacity=".19"/>
   </g>
 
-  <!-- Brand Mark Icon -->
-  <g transform="translate(100, 125) scale(1.6)" filter="url(#shadow)">
-    <g transform="rotate(-16 32 32)" stroke="#e98a6d" stroke-width="6" stroke-linecap="round" fill="none">
-      <path d="M12 23c13-14 27 14 40 0" />
-      <path d="M12 33c13-14 27 14 40 0" />
-      <path d="M12 43c13-14 27 14 40 0" />
-    </g>
+  <g transform="translate(77 62)" fill="none" stroke="#E98A6D" stroke-width="3" stroke-linecap="round">
+    <path d="M0 0c12-12 25 12 37 0M0 9c12-12 25 12 37 0M0 18c12-12 25 12 37 0"/>
   </g>
-
-  <!-- Title & Slogans -->
-  <g transform="translate(235, 140)">
-    <text x="0" y="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif" font-weight="900" font-size="52" fill="#f4ede2" letter-spacing="2">
-      野弦 <tspan fill="#e98a6d" font-weight="800">WILDSTRING</tspan>
-    </text>
-    <text x="3" y="68" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="700" font-size="14" fill="#a8a396" letter-spacing="4">
-      AI-NATIVE SELF-HOSTED MUSIC PLAYER
-    </text>
-    <text x="3" y="102" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-weight="400" font-size="18" fill="#d1cbbf" letter-spacing="1">
-      音乐不设限，自由有回响。 <tspan fill="#7a756b">| Music Knows No Bounds, Freedom Echoes.</tspan>
-    </text>
-  </g>
-
-  <!-- Feature Pills -->
-  <g transform="translate(100, 280)">
-    <!-- Pill 1 -->
-    <g transform="translate(0, 0)">
-      <rect width="210" height="38" rx="19" fill="#24281f" stroke="#373c30" stroke-width="1"/>
-      <text x="105" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="13" font-weight="600" fill="#e4ded5" text-anchor="middle">🎸 摇滚精神 · Rock Spirit</text>
-    </g>
-    <!-- Pill 2 -->
-    <g transform="translate(225, 0)">
-      <rect width="220" height="38" rx="19" fill="#24281f" stroke="#373c30" stroke-width="1"/>
-      <text x="110" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="13" font-weight="600" fill="#e4ded5" text-anchor="middle">💿 原音串流 · Hi-Res Lossless</text>
-    </g>
-    <!-- Pill 3 -->
-    <g transform="translate(460, 0)">
-      <rect width="240" height="38" rx="19" fill="#24281f" stroke="#373c30" stroke-width="1"/>
-      <text x="120" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="13" font-weight="600" fill="#e4ded5" text-anchor="middle">🧠 自然语言找歌 · AI Playlists</text>
-    </g>
-    <!-- Pill 4 -->
-    <g transform="translate(715, 0)">
-      <rect width="240" height="38" rx="19" fill="#24281f" stroke="#373c30" stroke-width="1"/>
-      <text x="120" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="13" font-weight="600" fill="#e4ded5" text-anchor="middle">🔒 数据私有 · 100% Self-Hosted</text>
-    </g>
+  <text x="70" y="180" fill="#F6EEE0" font-family="Georgia, serif" font-size="105" letter-spacing="-3">WildString</text>
+  <text x="73" y="258" fill="#F6EEE0" font-family="'Songti SC', 'Noto Serif CJK SC', serif" font-size="68" letter-spacing="5" lang="zh-CN">野弦</text>
+  <path d="M248 207v49" stroke="#B78067" stroke-opacity=".7"/>
+  <g fill="#EDB297" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="27">
+    <text x="271" y="222" lang="zh-CN" letter-spacing="3">个人声音档案</text>
+    <text x="271" y="257" letter-spacing=".65">Personal Sound Archive</text>
   </g>
 </svg>

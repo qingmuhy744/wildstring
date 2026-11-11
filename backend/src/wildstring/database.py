@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -675,6 +675,18 @@ class Database:
                 )
 
                 migrate_podcast_favorites(connection)
+            if current < 51:
+                connection.executescript("""
+                    BEGIN IMMEDIATE;
+                    UPDATE recommendation_preferences
+                    SET connection_id='local', use_ai=0
+                    WHERE connection_id='legacy';
+                    UPDATE agent_conversations
+                    SET connection_id=NULL
+                    WHERE connection_id='legacy';
+                    PRAGMA user_version=51;
+                    COMMIT;
+                """)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

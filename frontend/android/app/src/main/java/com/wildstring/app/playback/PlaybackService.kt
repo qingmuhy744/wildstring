@@ -16,7 +16,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -478,7 +477,10 @@ private class AuthenticatedBitmapLoader(private val repository: Repository, priv
         BitmapFactory.decodeByteArray(data, 0, data.size) ?: throw IOException("Invalid cover")
     }
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
-        repository.imageClient(uri.toString()).newCall(Request.Builder().url(uri.toString()).build()).execute().use { response ->
+        fetchBitmap(uri.toString())
+    }
+    private fun fetchBitmap(uri: String): Bitmap =
+        repository.client.newCall(Request.Builder().url(uri).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Cover unavailable")
             val body = response.body
             if (body.contentLength() > 2 * 1024 * 1024) throw IOException("Cover too large")
@@ -488,5 +490,4 @@ private class AuthenticatedBitmapLoader(private val repository: Repository, priv
             val bytes = source.readByteArray()
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IOException("Invalid cover")
         }
-    }
 }

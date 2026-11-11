@@ -209,7 +209,16 @@ def test_empty_and_tiny_libraries_date_boundary_and_preferences_cas(
                 ).status_code
                 == 422
             )
-        preference = {"version": 1, "use_ai": True, "use_lastfm": True, "count": 20}
+        legacy_preference = {"version": 1, "use_ai": True, "use_lastfm": True, "count": 20}
+        assert (
+            client.put(
+                BASE + "/recommendations/preferences",
+                headers=HEADERS,
+                json=legacy_preference,
+            ).status_code
+            == 422
+        )
+        preference = {"version": 1, "use_ai": False, "use_lastfm": True, "count": 20}
         assert (
             client.put(
                 BASE + "/recommendations/preferences", headers=HEADERS, json=preference
@@ -325,18 +334,19 @@ def model_server():
 
 
 def configure_model(client, address):
-    response = client.put(
-        BASE + "/manage/ai",
+    response = client.post(
+        BASE + "/agent/connections",
         headers=HEADERS,
         json={
-            "version": 1,
+            "name": "合成找歌模型",
             "base_url": address,
             "model": "test-selector",
             "timeout": 2,
             "api_key": "private-test-model-secret",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
 
 
 def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_playlist(
@@ -344,18 +354,18 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
 ):
     seed(settings, 10)
     with authenticated_client(settings) as client, model_server() as (state, address):
-        configure_model(client, address)
+        model_id = configure_model(client, address)
         before = client.get(BASE + "/playlists").json()
         assert (
             client.post(
-                BASE + "/ai/discover", json={"connection_id": "legacy", "prompt": "找歌"}
+                BASE + "/ai/discover", json={"connection_id": model_id, "prompt": "找歌"}
             ).status_code
             == 403
         )
         result = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "找几首艺人1的歌", "limit": 3},
+            json={"connection_id": model_id, "prompt": "找几首艺人1的歌", "limit": 3},
         ).json()
         assert result["mode"] == "ai" and len(result["items"]) == 1
         assert result["items"][0]["track"]["id"] in {item["id"] for item in tracks(client)}
@@ -376,7 +386,7 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
         fallback = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "找歌", "limit": 2},
+            json={"connection_id": model_id, "prompt": "找歌", "limit": 2},
         ).json()
         assert (
             fallback["mode"] == "local" and fallback["warning"] == "ai_unavailable_local_fallback"
@@ -391,14 +401,14 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
         safe = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "找歌"},
+            json={"connection_id": model_id, "prompt": "找歌"},
         )
         assert "private-test-model-secret" not in safe.text
         state["content"] = '{"title":"没有符合条件的歌曲","items":[]}'
         empty = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "找歌"},
+            json={"connection_id": model_id, "prompt": "找歌"},
         ).json()
         assert empty["mode"] == "ai" and empty["items"] == []
         state["status"] = 302
@@ -406,7 +416,7 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
         failed = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "找歌"},
+            json={"connection_id": model_id, "prompt": "找歌"},
         )
         assert failed.json()["mode"] == "local" and "private-test-model-secret" not in failed.text
         assert len(state["requests"]) == request_count + 1
@@ -415,7 +425,7 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
                 client.post(
                     BASE + "/ai/discover",
                     headers=HEADERS,
-                    json={"connection_id": "legacy", "prompt": value},
+                    json={"connection_id": model_id, "prompt": value},
                 ).status_code
                 == 422
             )
@@ -424,13 +434,13 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
 def test_daily_ai_requires_opt_in_and_stays_cached(settings, authenticated_client):
     seed(settings, 5)
     with authenticated_client(settings) as client, model_server() as (state, address):
-        configure_model(client, address)
+        model_id = configure_model(client, address)
         assert client.get(BASE + "/recommendations/daily").json()["engine"] == "local"
         assert state["requests"] == []
         client.put(
             BASE + "/recommendations/preferences",
             headers=HEADERS,
-            json={"version": 1, "use_ai": True},
+            json={"version": 1, "use_ai": True, "connection_id": model_id},
         )
         first = client.post(BASE + "/recommendations/daily/refresh", headers=HEADERS).json()
         assert first["engine"] == "ai" and len(first["items"]) == 1
@@ -683,13 +693,13 @@ def test_model_read_timeout_returns_local_results_without_credential_error(
 ):
     seed(settings, 2)
     with authenticated_client(settings) as client, model_server() as (state, address):
-        configure_model(client, address)
+        model_id = configure_model(client, address)
         state["delay"] = 2.5
         started = time.monotonic()
         response = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "来两首歌"},
+            json={"connection_id": model_id, "prompt": "来两首歌"},
         )
         assert 1.5 < time.monotonic() - started < 5
         assert response.status_code == 200 and response.json()["mode"] == "local"
@@ -706,13 +716,27 @@ def test_simultaneous_daily_requests_generate_once_and_report_busy(
     from fastapi import HTTPException
 
     from wildstring.library.repository import LibraryRepository
-    from wildstring.providers import Providers
     from wildstring.recommendations import Preferences
 
     seed(settings, 3)
     repository = LibraryRepository(Database(settings.data_dir), settings.library_dir)
-    service = recommendations.Recommendations(repository, Providers(repository))
-    service.save_preferences(repository, Preferences(version=1, use_ai=True))
+    with authenticated_client(settings) as client:
+        model = client.post(
+            BASE + "/agent/connections",
+            headers=HEADERS,
+            json={
+                "name": "并发合成模型",
+                "base_url": "https://fixture.invalid/v1",
+                "model": "synthetic",
+            },
+        )
+        assert model.status_code == 200, model.text
+        service = recommendations.Recommendations(
+            repository, client.app.state.providers, client.app.state.agent_platform
+        )
+        service.save_preferences(
+            repository, Preferences(version=1, connection_id=model.json()["id"])
+        )
     entered, release = threading.Event(), threading.Event()
     calls = []
 
@@ -752,14 +776,14 @@ def test_personal_api_results_are_private_and_never_cacheable(settings, authenti
 def test_untrusted_model_json_depth_and_fenced_output_stay_bounded(settings, authenticated_client):
     seed(settings, 2)
     with authenticated_client(settings) as client, model_server() as (state, address):
-        configure_model(client, address)
+        model_id = configure_model(client, address)
         for text in ("[" * 1500 + "]" * 1500, "x" + " " * 60_000 + "z"):
             state["content"] = text
             started = time.monotonic()
             response = client.post(
                 BASE + "/ai/discover",
                 headers=HEADERS,
-                json={"connection_id": "legacy", "prompt": "来点歌"},
+                json={"connection_id": model_id, "prompt": "来点歌"},
             )
             assert time.monotonic() - started < 3
             assert response.status_code == 200 and response.json()["mode"] == "local"
@@ -768,7 +792,7 @@ def test_untrusted_model_json_depth_and_fenced_output_stay_bounded(settings, aut
         response = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "来点歌"},
+            json={"connection_id": model_id, "prompt": "来点歌"},
         ).json()
         assert response["mode"] == "ai" and response["items"][0]["track"]["id"] == identity
 
@@ -800,7 +824,7 @@ def test_daily_deduplicates_known_recordings_but_keeps_distinct_live_and_unknown
         discovery = client.post(
             BASE + "/ai/discover",
             headers=HEADERS,
-            json={"connection_id": "legacy", "prompt": "同名歌曲"},
+            json={"connection_id": "local", "prompt": "同名歌曲"},
         ).json()
         assert len(discovery["items"]) == 5
         # An explicit metadata repair can reveal a duplicate inside a cached daily set.

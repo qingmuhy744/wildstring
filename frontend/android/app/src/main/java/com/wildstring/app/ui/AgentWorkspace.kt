@@ -1043,7 +1043,6 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") stringResource(R.string.agent_ws_scope_instance) else stringResource(R.string.agent_ws_scope_personal)}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.agent_ws_connection_status_budget, if (connection.flag("enabled")) stringResource(R.string.agent_ws_enabled) else stringResource(R.string.agent_ws_disabled), connection.number("daily_call_budget")), style = MaterialTheme.typography.bodySmall)
-            if (connection.text("id") == "legacy") Text(stringResource(R.string.agent_ws_legacy_connection_hint), style = MaterialTheme.typography.bodySmall)
             connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text(stringResource(R.string.agent_ws_field_key_value, fieldName(name), displayValue(value)), style = MaterialTheme.typography.labelSmall) } }
             Row {
                 TextButton({ scope.launch { action.run {

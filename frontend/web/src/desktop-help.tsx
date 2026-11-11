@@ -16,14 +16,19 @@ const QUERY = '(min-width: 761px) and (hover: hover) and (pointer: fine)';
 const Desktop = createContext(false);
 type Target = { source: HTMLElement; anchor: HTMLElement; owner: HTMLElement; text: string };
 
-function findHelp(target: EventTarget | null): Target | null {
+function findHelp(target: EventTarget | null, fieldHelp = false): Target | null {
   if (!(target instanceof Element)) return null;
   const field = target.closest('input,select,textarea') as HTMLInputElement | null;
-  const label = target.closest('label') || field?.labels?.[0];
   const source =
-    target.closest<HTMLElement>('[data-help]') || label?.querySelector<HTMLElement>('[data-help]');
+    target.closest<HTMLElement>('[data-help]') ||
+    (fieldHelp ? field?.labels?.[0]?.querySelector<HTMLElement>('[data-help]') : null);
   if (source?.dataset.help)
-    return { source, anchor: source, owner: field || source, text: source.dataset.help };
+    return {
+      source,
+      anchor: source,
+      owner: field || source.closest('label')?.control || source,
+      text: source.dataset.help,
+    };
   const button = target.closest<HTMLElement>('button[aria-label],summary[aria-label]');
   // Give icon-only controls the same readable name they already expose to assistive technology.
   // Full-area dismiss layers are not controls worth labelling on hover.
@@ -41,7 +46,7 @@ function visible(target: Target) {
   return (
     target.source.isConnected &&
     target.anchor.getClientRects().length > 0 &&
-    !target.source.closest('[hidden],[inert],[aria-hidden="true"]') &&
+    !target.source.parentElement?.closest('[hidden],[inert],[aria-hidden="true"]') &&
     (!target.source.closest('dialog') || target.source.closest('dialog')!.open)
   );
 }
@@ -63,15 +68,31 @@ function Bubble({
     const rect = el.getBoundingClientRect();
     const width = document.documentElement.clientWidth;
     const height = window.innerHeight;
-    const left = Math.max(
+    const clampTop = (value: number) => Math.max(12, Math.min(height - rect.height - 12, value));
+    let left = Math.max(
       12,
       Math.min(width - rect.width - 12, anchor.left + (anchor.width - rect.width) / 2),
     );
-    const below = anchor.bottom + 8;
-    const top =
-      below + rect.height <= height - 12
-        ? below
-        : Math.max(12, Math.min(height - rect.height - 12, anchor.top - rect.height - 8));
+    let top: number;
+    if (target.owner !== target.source) {
+      const field = target.owner.getBoundingClientRect();
+      const right = field.right + 8;
+      const leftOfField = field.left - rect.width - 8;
+      const centered = clampTop(anchor.top + (anchor.height - rect.height) / 2);
+      if (right + rect.width <= width - 12) left = right;
+      else if (leftOfField >= 12) left = leftOfField;
+      const overlapsField = (y: number) =>
+        left < field.right &&
+        left + rect.width > field.left &&
+        y < field.bottom &&
+        y + rect.height > field.top;
+      const below = clampTop(anchor.bottom + 8);
+      const above = clampTop(anchor.top - rect.height - 8);
+      top = !overlapsField(centered) ? centered : !overlapsField(below) ? below : above;
+    } else {
+      const below = anchor.bottom + 8;
+      top = below + rect.height <= height - 12 ? below : clampTop(anchor.top - rect.height - 8);
+    }
     setPosition({ left, top });
     const owner = target.owner;
     const old = (owner.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
@@ -190,7 +211,7 @@ export function DesktopHelpProvider({ children }: { children: ReactNode }) {
     }
     function focus(event: FocusEvent) {
       dismissed = null;
-      const next = findHelp(event.target);
+      const next = findHelp(event.target, true);
       // Opening a dialog by mouse must not show a tip on its automatic focus target.
       if (next && (keyboard.current || active?.source === next.source)) {
         focused = next;
@@ -300,10 +321,11 @@ export function HelpLabel({
   text?: string;
   children: ReactNode;
 }) {
+  const value = text || (hint ? hints[hint] : undefined);
   return (
-    <span className="desktop-help-label" data-help={text || (hint ? hints[hint] : undefined)}>
+    <span className="desktop-help-label">
       {children}
-      <span className="desktop-help-marker" aria-hidden="true" />
+      {value && <span className="desktop-help-marker" data-help={value} aria-hidden="true" />}
     </span>
   );
 }

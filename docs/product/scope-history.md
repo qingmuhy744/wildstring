@@ -2,7 +2,9 @@
 
 按批次记录各版本的实现与验证边界，新条目放最前。当前产品范围见 [scope.md](scope.md)；此处内容是历史，不代表当前状态，当前数据库 schema 以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准。
 
-0.8.11 发布：Android 新增手机／平板（Phone／Pad）自适应布局（侧边导航栏、目录网格、多列曲目、订阅／单集与对话并排、设置双栏，跨模式保留滚动锚点、选中项与草稿）；关闭共享图片加载器的 Coil 网络监听，修复无已注册系统网络时封面冷加载 HTTP 504 与封面氛围间歇超时；Android／iOS 待播常驻拖动手柄、松手一次写回，iOS 落位触感反馈；后端元数据任务新增合并 `queue` 视图并作为默认，Web 元数据任务改为单一队列支持批量应用；Web 播客网格宽屏拉伸；Android 模拟器回归与 Release 冒烟改为 2 核／4 GB。Android versionCode 47，Apple 构建号 46，数据库 schema 仍为 50。物理折叠屏与平板真机未验证。实现与验证边界见 [0.8.11 发布说明](../releases/v0.8.11.md)。
+0.8.12 发布：`v0.8.11` Release 因 Android 模拟器回归失败未发布产物，其内容（PR #108）随本版发布；Android 播客音频与封面统一经服务器（`stream?proxy=1&cache=1`、新增 `GET /api/v1/podcasts/{id}/cover` 与未入库节目 `directory-cover/{key}`），不再直连源站；修复平板设置默认分类被写入保存导航的问题，平板发现页与播客探索布局调整，曲目艺人／专辑可跳转；移除旧版实例级 AI 配置与 `/api/v1/manage/ai`（破坏性变更），schema 升至 51 并迁移旧配置引用；Web 字段帮助锚定信息图标；修复播客模块循环导入，CI 音频依赖缓存优先离线安装。Android versionCode 48，Apple 构建号 47，数据库 schema 51。物理折叠屏与平板真机未验证。实现与验证边界见 [0.8.12 发布说明](../releases/v0.8.12.md)。
+
+0.8.11（标签已创建，Release 未完成，内容并入 0.8.12）：Android 新增手机／平板（Phone／Pad）自适应布局（侧边导航栏、目录网格、多列曲目、订阅／单集与对话并排、设置双栏，跨模式保留滚动锚点、选中项与草稿）；关闭共享图片加载器的 Coil 网络监听，修复无已注册系统网络时封面冷加载 HTTP 504 与封面氛围间歇超时；Android／iOS 待播常驻拖动手柄、松手一次写回，iOS 落位触感反馈；后端元数据任务新增合并 `queue` 视图并作为默认，Web 元数据任务改为单一队列支持批量应用；Web 播客网格宽屏拉伸；Android 模拟器回归与 Release 冒烟改为 2 核／4 GB。Android versionCode 47，Apple 构建号 46，数据库 schema 仍为 50。物理折叠屏与平板真机未验证。实现与验证边界见 [0.8.11 发布说明](../releases/v0.8.11.md)。
 
 0.8.10 发布：修复 Android 播客待播队列同步因 `"added_at": null` 触发的 HTTP 422，统一四端（Web／Android／iOS／macOS）待播列表保持 `podcast_queue` 显式顺序、仅对未入队 `podcast_inbox` 按 `added_at` 升序追加（消除手动拖拽与插队回弹）；后端播客目录搜索、查询与排行榜补齐传递 `ALLOW_FAKE_IP`；修复 Web 空闲播放器加入待播后播放按钮禁用及切歌瞬间总时长闪烁；修复 Android 横屏卡带／黑胶控制坞布局与常驻错误阻塞提示条问题，并收口 Android 模拟器、Apple `WildStringKit` 与 Web 播客时长等待测试稳定性。Android versionCode 46，Apple 构建号 45，数据库 schema 仍为 50。实现与验证边界见 [0.8.10 发布说明](../releases/v0.8.10.md)。
 

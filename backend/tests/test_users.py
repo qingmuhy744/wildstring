@@ -337,7 +337,7 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
     with TestClient(create_app(settings)) as librarian:
         assert login(librarian, "librarian", "librarian-password-123").status_code == 200
         assert librarian.get("/api/v1/manage/overview").status_code == 200
-        assert librarian.get("/api/v1/manage/ai").status_code == 403
+        assert librarian.get("/api/v1/manage/ai").status_code == 404
         assert librarian.get("/api/v1/manage/library/sources").status_code == 200
         assert librarian.get("/api/v1/scans").status_code == 200
         assert librarian.get("/api/v1/manage/transcoding").status_code == 403
@@ -346,7 +346,7 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
     with TestClient(create_app(settings)) as editor:
         assert login(editor, "editor", "editor-password-123").status_code == 200
         assert editor.get("/api/v1/manage/metadata/folders").status_code == 200
-        assert editor.get("/api/v1/manage/ai").status_code == 403
+        assert editor.get("/api/v1/manage/ai").status_code == 404
         assert editor.get("/api/v1/scans").status_code == 200
         assert editor.get("/api/v1/manage/lyric-scans").status_code == 403
     with TestClient(create_app(settings)) as listener:

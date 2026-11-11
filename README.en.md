@@ -1,37 +1,88 @@
-<div align="center">
-
-<p>
-  <a href="README.md">中文</a> | <strong><a href="README.en.md">English</a></strong>
-</p>
-
-[![WildString Banner](assets/banner.svg)](https://github.com/qingmuhy744/wildstring)
-
 # WildString (野弦)
 
-**An AI-Native, Self-Hosted Personal Music Player.**
-Revisit your curated music collection through natural language search, contextual playlist curation, and bit-perfect playback.
+[简体中文](README.md)
 
-> *“Music knows no bounds, freedom echoes.”*
+![WildString · Personal Sound Archive / 野弦 · 个人声音档案](assets/banner.svg)
 
-[![Latest Release](https://img.shields.io/github/v/release/qingmuhy744/wildstring?logo=github&color=5865F2)](https://github.com/qingmuhy744/wildstring/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/qingmuhy744/wildstring/actions)
-[![CodeQL](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/codeql.yml?branch=main&label=CodeQL&logo=github&logoColor=white)](https://github.com/qingmuhy744/wildstring/security/code-scanning)
-[![Architecture](https://img.shields.io/badge/Architecture-Self--Hosted%20%7C%20AI--Native-E25A24.svg)](docs/product/scope.md)
-[![Audio Engine](https://img.shields.io/badge/Audio-Lossless%20%2F%20Hi--Res-00BCD4.svg)](docs/product/scope.md)
-[![Web](https://img.shields.io/badge/Web-React%20%7C%20TypeScript-61DAFB.svg?logo=react&logoColor=black)](frontend/web)
-[![macOS](https://img.shields.io/badge/macOS-SwiftUI-000000.svg?logo=apple&logoColor=white)](frontend/macos)
-[![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000.svg?logo=apple&logoColor=white)](frontend/ios)
-[![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84.svg?logo=android&logoColor=white)](frontend/android)
-[![Desktop](https://img.shields.io/badge/Desktop-Tauri%20%7C%20Rust%20(Roadmap)-FFC107.svg?logo=tauri&logoColor=white)](#roadmap)
-[![Backend](https://img.shields.io/badge/Backend-Python%203.12%20%7C%20FastAPI-3776AB.svg?logo=python&logoColor=white)](backend)
-[![Database](https://img.shields.io/badge/Database-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](backend/src/wildstring/database.py)
-[![License](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
+**An AI-native, self-hosted music and podcast player.** Keep your music and podcasts on your own server, listen on Web, Android, macOS, or iOS, and ask the assistant to find tracks or build playlists from your library.
 
-</div>
+[Quick start](#quick-start) · [Clients](#clients) · [Screenshots](#screenshots) · [Downloads and release notes](https://github.com/qingmuhy744/wildstring/releases/latest)
 
----
+## Features
 
-## Acknowledgements & Developer Note
+- **Music** · Import from read-only folders into a managed library. Set access per library and keep favorites and cross-library playlists per account.
+- **Playback** · Play lossless formats such as FLAC and ALAC, use ReplayGain, follow synchronized and bilingual lyrics, or switch to the vinyl or cassette fullscreen player.
+- **Podcasts** · Find shows in the directory or add an RSS feed. Import or export OPML, download episodes in the background, save favorites, reorder Up Next, and resume across devices.
+- **Music assistant** · Find tracks in your library with natural language and draft playlists or metadata changes. Configure a model connection or connect an external client via [MCP](contracts/agent-platform.md). Playback works without a model.
+
+## Quick start
+
+Install Git, Make, and Docker Compose. From the repository root, run:
+
+```sh
+make env
+```
+
+Set `WILDSTRING_MUSIC_DIR` in `.env` to the folder you want to import, then run:
+
+```sh
+make docker-up
+make docker-admin
+make docker-import
+```
+
+Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Compose binds to the host loopback address by default, mounts the source folder read-only, and stores the database and managed library in a persistent volume. Use `make docker-down` to stop the service and keep its data. Set `WILDSTRING_COOKIE_SECURE=true` for HTTPS deployments.
+
+## Clients
+
+| Platform | How to get it |
+| --- | --- |
+| Web | Open your server address in a browser. The server includes the Web app. |
+| Android | Download the APK from [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases/latest) or see the [build instructions](frontend/android/README.md). |
+| macOS | Download the DMG from [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases/latest) or see the [build instructions](frontend/macos/README.md). |
+| iOS | Build and install with Xcode using the [iOS build instructions](frontend/ios/README.md). |
+
+## Screenshots
+
+**Music recommendations**
+
+![English Web interface with music recommendations and playback controls](assets/readme-discover-en.webp)
+
+**Fullscreen playback**
+
+![English Web vinyl player with synchronized lyrics](assets/readme-player-en.webp)
+
+## Release highlights
+
+- **Latest release [v0.8.12](docs/releases/v0.8.12.md)** · Android gets podcast audio and artwork through your WildString server; episodes already downloaded to the device still play offline, and artwork for shows not yet added is cached and served by the server. Tablet Discover and podcast exploration layouts are refined, artists and albums open from wide song rows, and tablet settings navigation is fixed. This release also ships the planned 0.8.11 changes: adaptive Android phone and tablet layouts, queue drag-and-drop across clients, and a single Web metadata task queue. Legacy instance-wide AI settings are removed; recreate your model connection in assistant settings after upgrading.
+
+Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
+
+## Local development
+
+Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node 22.12+, and Make.
+
+```sh
+make setup
+make dev       # Backend API · http://127.0.0.1:18780
+make dev-web   # Web development server · http://127.0.0.1:18781
+make check
+```
+
+In a separate terminal, use `make admin` to set the administrator password and `make import-music` to import your library. Run `make browser-install` before your first browser test and use `make ci` for the full checks.
+
+[Backend](backend) · [Web](frontend/web) · [API contracts](contracts) · [Container configuration](deploy) · [Design guide](DESIGN.md)
+
+## Project and community
+
+The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese rock music.
+
+**野 (Wild)** echoes the unrestrained, free-spirited energy of pioneers like Cui Jian.
+**弦 (String)** pays homage to the electric guitars of Tang Dynasty Band and represents the pure essence of music.
+**WildString** binds these symbols together: a *string* vibrates as an acoustic chord and executes as code, bridging musical passion with software craftsmanship.
+
+<details>
+<summary>Developer note and AI acknowledgements</summary>
 
 AI has helped me a lot while building WildString. I'd like to thank the ones I've enjoyed using, and say a few words about the trouble along the way.
 
@@ -69,121 +120,7 @@ Sometimes the AI these big companies make feels more human than the companies th
 
 All of the above is pure rambling. Please don't take it personally.
 
----
-
-## Screenshots & Visuals
-
-<div align="center">
-
-![WildString Discover Home](assets/主页.jpg)
-
-![WildString Fullscreen Playback & Synced Lyrics](assets/全屏播放.png)
-
-</div>
-
----
-
-## Origins of the Name
-
-The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese rock music.
-
-**野 (Wild)** echoes the unrestrained, free-spirited energy of pioneers like Cui Jian.
-**弦 (String)** pays homage to the electric guitars of Tang Dynasty Band and represents the pure essence of music.
-**WildString** binds these symbols together: a *string* vibrates as an acoustic chord and executes as code, bridging musical passion with software craftsmanship.
-
----
-
-## Recent Highlights
-
-- **v0.8.7**: macOS fullscreen frosted-glass Up Next queue drawer (three-column zero-occlusion layout on wide screens); native macOS auto-update checker (`MacUpdater`) with one-click DMG download; remote high-bitrate FLAC streaming buffer fix on macOS; unified track-to-album artwork inheritance across Web, Android, iOS, and macOS; route renaming and server deletion across native clients; Android crash log collector & diagnostic export; unified automatic podcast bookmark continuation across all four platforms. See [v0.8.7 Release Notes](docs/releases/v0.8.7.md).
-- **v0.8.6**: Mac server switching with separate queues; multiple connection routes and local server aliases on Mac, iOS, and Android; server naming, access policies, and MCP setup guides on Web; unavailable-track indicators and playback filtering across clients; web diagnostics with configurable log levels and call-stack capture; improvements to Mac settings and podcast speed controls, Android navigation and Daily Mix, and bilingual Web UI. See [v0.8.6 Release Notes](docs/releases/v0.8.6.md); check the corresponding Actions runs for validation and release status.
-- **v0.8.5**: Deep fix for album metadata modification & cover upload pipeline; podcast zero-reference cleanup preview modal & breakdown; Apple playback dynamic duration sync; management center & download cards dual-theme refinement; complete wiki overhaul with fresh web captures; dependency & CI/CD upgrades. See [v0.8.5 Release Notes](docs/releases/v0.8.5.md).
-- **v0.8.4**: Unified cross-platform versioning to 0.8.4; reinforced bilingual release automation and resilient test gates. See [v0.8.4 Release Notes](docs/releases/v0.8.4.md).
-- **v0.8.3**: Podcast regional top charts discovery and preview-before-follow across Web, Android, and Mac; direct raw audio downloads; content vs. settings sidebar re-organization; wide folder picker. See [v0.8.3 Release Notes](docs/releases/v0.8.3.md).
-- **v0.8.2**: All-new Native macOS Client (desktop floating lyrics, menu bar mini-player, AI assistant); Apple Podcasts multi-region parallel search & deduplication; OPML import/export. See [v0.8.2 Release Notes](docs/releases/v0.8.2.md).
-- **v0.8.1**: Podcast stream proxy security hardening (sandbox & XSS defense); AI assistant configurable turns and automated thread title synthesis; cross-platform responsiveness. See [v0.8.1 Release Notes](docs/releases/v0.8.1.md).
-- **v0.8.0**: Multi-library support with granular user authorization; personalized podcast feeds & offline downloads; dedicated podcast playback overlay. See [v0.8.0 Release Notes](docs/releases/v0.8.0.md).
-- **Ongoing Refinements**:
-  - Wide preview modal in Podcast Shared Audio Management to review zero-reference cleanup candidates before recycling disk space;
-  - Restrained warm, high-contrast visual redesign for download task queues and completion cards across dark and light themes;
-  - Bit-perfect seeking on lyric line clicks, and seamless in-app client navigation for Brand logo to preserve continuous background audio playback.
-
----
-
-## Core Capabilities
-
-- **🎧 Pure, Bit-Perfect Audio**: Native bitstream playback for FLAC, WAV, APE, ALAC, MP3, AAC, OGG, Opus; optional ReplayGain loudness normalization.
-- **🧠 AI-Native Curation**: Search tracks, generate thematic playlists, and explore sonic connections using natural language grounded strictly in your verified local library.
-- **🏠 100% Self-Hosted & Local-First**: Import folders remain strictly read-only; managed libraries and metadata live locally in SQLite with zero telemetry or audio leakage.
-- **📻 Podcasts & Radio Streams**: Subscribe to RSS feeds, orchestrate background downloads, and enjoy automatic zero-reference garbage collection.
-- **📜 Rich Synchronized Lyrics**: Synced word-by-word LRC display, side-by-side bilingual lyrics, dynamic album color extraction, and nostalgic vinyl / cassette playback styles.
-- **📱 True Multi-Platform**: Responsive modern Web frontend alongside native macOS (SwiftUI / AppKit), Android (Kotlin / Jetpack Compose / Media3), and iOS (SwiftUI) applications.
-
----
-
-## Roadmap
-
-WildString is dedicated to delivering a premier, cross-platform personal music streaming and curation experience. Our immediate roadmap ahead:
-
-- [ ] **Native Desktop Client with Tauri + Rust**:
-  - **Ubuntu (Linux) & Windows First**: Priority release of official Linux (.deb / AppImage) and Windows (.msi / portable) desktop distributions;
-  - **Ultra-Lightweight & Zero-Bloat**: Bypassing heavy Electron frameworks in favor of Tauri v2 and Rust, ensuring tiny bundle sizes and instant sub-second startup;
-  - **OS-Level Media Integration**: Native bindings for Linux MPRIS and Windows SMTC, supporting global multimedia keys, system tray control, lock-screen widgets, and native toasts;
-  - **Audiophile Low-Latency Output**: Utilizing modern Rust audio crates (cpal / rodio) to explore bit-perfect PipeWire / ALSA and exclusive WASAPI audio pipelines.
-- [ ] **LAN Smart Synchronization & P2P Caching**: High-speed, zero-cellular local network sync and background pre-fetching between mobile and desktop devices.
-- [ ] **Deep Multimodal & Contextual Semantic Understanding**: Advancing local AI reasoning over musical arrangement, harmonic mood contours, and lyrical subtext.
-
----
-
-## Local Development
-
-Prerequisites: Git, [uv 0.13.1+](https://docs.astral.sh/uv/), Node 22.12+, and Make.
-
-```sh
-make setup           # Install locked dependencies, initialize .env & hooks
-make dev             # Backend API: http://127.0.0.1:18780
-make dev-web         # Web UI: http://127.0.0.1:18781
-make import-music    # Copy from read-only intake into managed library
-make scan            # Rescan managed tracks
-make admin           # Interactively set admin password
-make browser-install # Install Playwright Chromium for testing
-make ci              # Linting, backend tests, web build & lockfile check
-```
-
----
-
-## Docker Deployment
-
-```sh
-make docker-up       # Build, launch, and wait for health check
-make docker-test     # Test backend audio decoding with FFmpeg in container
-make docker-smoke    # Smoke test API, Web, read-only permissions & storage
-make docker-import   # Intake audio files into persistent volume /data/library
-make docker-scan     # Rescan library in container
-make docker-admin    # Set container admin password
-make docker-status   # Inspect container status
-make docker-down     # Stop containers (preserves data volumes)
-```
-
-Access your instance at [http://127.0.0.1:18780](http://127.0.0.1:18780). For production HTTPS setups, remember to set `WILDSTRING_COOKIE_SECURE=true`.
-
----
-
-## Directory Structure
-
-```text
-backend/          Python 3.12, FastAPI backend, tests, and uv.lock
-frontend/web/     React 19 + TypeScript + Vite web app
-frontend/macos/   SwiftUI + AppKit native macOS app
-frontend/android/ Kotlin + Jetpack Compose + Media3 native app
-frontend/ios/     SwiftUI native iOS app
-contracts/        API contracts and structured schemas
-docs/             Architecture designs, product specs, and guides
-deploy/           Production Dockerfile and Docker Compose manifests
-scripts/          Dev setup, git hooks, and packaging scripts
-```
-
----
+</details>
 
 ## Community Acknowledgements
 
@@ -199,15 +136,11 @@ WildString builds on the generous efforts of open-source projects:
 
 Special thanks to [MusicBrainz](https://musicbrainz.org/), [Cover Art Archive](https://coverartarchive.org/), [AcoustID](https://acoustid.org/), [Last.fm](https://www.last.fm/api), and [FFmpeg](https://ffmpeg.org/).
 
----
-
 ## Community
 
 WildString supports and recognizes the [LINUX DO](https://linux.do/) community and welcomes open, friendly technical discussions and open-source sharing.
 
 Find the author on LINUX DO: [@qingmuhy](https://linux.do/u/qingmuhy/summary).
-
----
 
 ## License
 

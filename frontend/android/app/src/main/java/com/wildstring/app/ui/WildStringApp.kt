@@ -652,7 +652,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 MusicLibraryChoice(vm)
                                 if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
                                 // Keep the editor outside query-keyed pages and discover/result branches.
-                                if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
+                                if (state.tab == "search" && state.collection == null && state.kind != "recent") {
+                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        CatalogSearch(state.query, modifier = if (rail) Modifier.widthIn(max = 1040.dp) else Modifier,
+                                            horizontalPadding = if (rail) 20.dp else 16.dp, search = vm::search)
+                                    }
+                                }
                                 val header: @Composable () -> Unit = {
                                 Column(Modifier.fillMaxWidth()) {
                                     if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
@@ -676,7 +681,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                         FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text(stringResource(R.string.albums)) })
                                         FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text(stringResource(R.string.tracks)) })
                                     }
-                                    if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
+                                    if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true, compactWidth = rail) { feature = it }
                                     state.error?.let { ErrorMessage(it, vm::load) }
                                     if (state.offline) Text(stringResource(R.string.catalog_offline), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp, vertical = 6.dp))
                                     if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1141,7 +1146,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
     val fallback = painterResource(R.drawable.ic_wildstring)
     // The player swaps covers on track change; holding the last image avoids flashing the app logo in between.
     var previous by remember { mutableStateOf<androidx.compose.ui.graphics.painter.Painter?>(null) }
-    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(if (keepPrevious) 0 else 180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
+    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(if (keepPrevious) 0 else 180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
         placeholder = if (keepPrevious) previous ?: fallback else fallback, error = fallback, fallback = fallback,
         onSuccess = { if (keepPrevious) previous = it.painter },
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
@@ -1178,16 +1183,42 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (columns) {
-            Text(track.artist, Modifier.weight(1.4f).heightIn(min = 48.dp).testTag("track-artist-$index")
-                .clickable { vm.openArtistName(track.artists.firstOrNull().orEmpty()) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
-                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.album.orEmpty(), Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("track-album-$index")
-                .clickable(enabled = track.album != null) { vm.openTrackAlbum(track) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
-                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TrackMetadataColumns(vm, track, "track", index.toString())
             Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }
+    }
+}
+
+@Composable
+internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tagPrefix: String, index: String) {
+    var artistMenu by remember(track.id) { mutableStateOf(false) }
+    val artists = track.artists.filter { it.isNotBlank() }
+    val artistLabel = stringResource(R.string.open_artist_named, track.artist)
+    Box(Modifier.weight(1.4f)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("$tagPrefix-artist-$index")
+            .clickable(enabled = artists.isNotEmpty(), role = Role.Button) {
+                if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true
+            }.semantics { contentDescription = artistLabel }.padding(end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (artists.isNotEmpty()) Icon(Icons.Default.Person, null, Modifier.size(18.dp), tint = Muted)
+            Text(track.artist, color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        DropdownMenu(artistMenu, { artistMenu = false }) {
+            artists.forEachIndexed { artistIndex, name ->
+                DropdownMenuItem(text = { Text(name) }, modifier = Modifier.testTag("$tagPrefix-artist-choice-$index-$artistIndex"),
+                    onClick = { artistMenu = false; vm.openArtistName(name) })
+            }
+        }
+    }
+    val albumLabel = listOfNotNull(stringResource(R.string.open_album), track.album?.takeIf { it.isNotBlank() }).joinToString(" · ")
+    Row(Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("$tagPrefix-album-$index")
+        .clickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button) { vm.openTrackAlbum(track) }
+        .semantics { contentDescription = albumLabel }.padding(end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!track.album.isNullOrBlank() || !track.albumId.isNullOrBlank()) Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = Muted)
+        Text(track.album?.takeIf { it.isNotBlank() } ?: "—", color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

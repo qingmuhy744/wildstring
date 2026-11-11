@@ -295,6 +295,7 @@ data class PodcastDirectoryResult(
     @SerializedName("feed_url") val feedUrl: String, @SerializedName("artwork_url") val artworkUrl: String,
     val genres: List<String>, val explicit: Boolean, val followed: Boolean,
     @SerializedName("catalog_podcast_id") val catalogPodcastId: String?,
+    @SerializedName("artwork_key") val artworkKey: String? = null,
 )
 data class PodcastDirectoryPage(val results: List<PodcastDirectoryResult>, val regions: List<String>,
     @SerializedName("failed_regions") val failedRegions: List<PodcastDirectoryFailure>,

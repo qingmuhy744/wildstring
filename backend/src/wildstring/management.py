@@ -17,10 +17,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from filelock import FileLock, Timeout
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring import get_app_version
-from wildstring.ai_config import AIService, AIUpdate
 from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
 from wildstring.library.assets import MAX_COVER_BYTES, TrackAssets
@@ -1079,14 +1078,13 @@ class Management:
         }
 
 
-def management_router(service, auth, providers=None):
+def management_router(service, auth):
     # The management shell is visible to librarian/editor profiles; sensitive
     # settings and account operations still have their own owner check.
     inspect = Depends(auth.require_permission("library:inspect"))
     router = APIRouter(prefix="/api/v1/manage", dependencies=[inspect])
     editor = MetadataEditor(service.repository)
     lyrics = LyricsEditor(service.repository)
-    ai = AIService(service.settings.data_dir, providers)
 
     @router.get("/intake/settings")
     def intake_settings():
@@ -1166,25 +1164,6 @@ def management_router(service, auth, providers=None):
             if error.status_code != 409:
                 raise
         return service.intake.public(service.intake.item(item_id))
-
-    @router.get("/ai", dependencies=[Depends(auth.require_owner)])
-    def ai_settings():
-        return ai.get()
-
-    @router.put("/ai", dependencies=[Depends(auth.require_client), Depends(auth.require_owner)])
-    def update_ai(body: object = Body(...)):
-        try:
-            validated = AIUpdate.model_validate(body)
-        except ValidationError:
-            # Validation errors must not echo a submitted API key.
-            raise HTTPException(422, "invalid_ai_settings") from None
-        return ai.save(validated)
-
-    @router.post(
-        "/ai/test", dependencies=[Depends(auth.require_client), Depends(auth.require_owner)]
-    )
-    def test_ai():
-        return ai.probe()
 
     @router.get("/overview")
     def overview(request: Request):

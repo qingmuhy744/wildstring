@@ -88,7 +88,7 @@ class ClientCache @Inject constructor(@ApplicationContext context: Context, priv
 
 }
 
-/** Bounded per-account artwork cache; public podcast images use a separate cookie-free client. */
+/** Bounded per-account artwork cache. */
 class CoverCacheInterceptor(private val cache: ClientCache, private val session: SessionStore,
     private val accepts: (okhttp3.Request) -> Boolean = { it.url.encodedPath.endsWith("/cover") }) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {

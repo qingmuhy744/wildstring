@@ -59,7 +59,6 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     var section by rememberSaveable(settingsOwner) { mutableStateOf<SettingsSection?>(null) }
     val activeSection = section ?: if (wide) SettingsSection.Account else null
     val sidebarScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
-    LaunchedEffect(wide, settingsOwner) { if (wide && section == null) section = SettingsSection.Account }
     val pages = rememberSaveableStateHolder()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current

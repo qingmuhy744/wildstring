@@ -30,6 +30,7 @@ from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
 from wildstring.mcp_http import HTTPMCP
 from wildstring.mobile_experience import experience_router
+from wildstring.podcast_artwork import artwork_router
 from wildstring.podcast_identity_backfill import IdentityBackfill
 from wildstring.podcast_search import PodcastSearch
 from wildstring.podcasts import PodcastManager, podcast_router
@@ -181,9 +182,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(transcoding.router(auth))
     app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
-    app.include_router(management_router(management, auth, providers))
+    app.include_router(management_router(management, auth))
     app.include_router(experience_router(repository, auth, providers, platform))
     app.include_router(podcasts.resources.router(auth))
+    app.include_router(artwork_router(podcasts, auth))
     app.include_router(
         podcast_router(
             podcasts,

@@ -49,11 +49,11 @@ def favorites_setup(settings, authenticated_client):
             listener.close()
 
 
-def test_schema50_version_and_cascade(settings):
+def test_schema51_version_and_cascade(settings):
     db = Database(settings.data_dir)
     db.initialize()
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 50
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 51
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         # Check table structure
         columns = {row[1] for row in conn.execute("PRAGMA table_info(podcast_episode_favorites)")}

@@ -48,6 +48,27 @@ async function resetPodcastQueue(page: Page) {
 }
 
 async function openRadio(page: Page) {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (new URL(url, window.location.href).pathname === '/api/v1/podcasts/discover') {
+        return new Response(
+          JSON.stringify({
+            query: '',
+            provider: 'itunes',
+            regions: [],
+            failed_regions: [],
+            cached: true,
+            explicit_hidden: 0,
+            results: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return originalFetch(input, init);
+    };
+  });
   await login(page);
   for (let i = 1; i <= 6; i++) {
     const current = await (

@@ -16,7 +16,6 @@ from fastapi import HTTPException
 
 from wildstring.agent_common import encoded, future, tool_definitions
 from wildstring.agent_research import SEARCH_TOOLS, public_url
-from wildstring.ai_config import AIService
 from wildstring.library.repository import now
 from wildstring.model_protocol import continuation
 from wildstring.model_protocol import parse as parse_model
@@ -184,13 +183,13 @@ class Assistant:
             )
         return self.endpoint_policy()
 
-    def check_endpoint(self, actor, endpoint, *, legacy=False):
+    def check_endpoint(self, actor, endpoint, *, trusted_shared=False):
         host = urlsplit(endpoint).hostname
         if not host:
             raise HTTPException(422, "invalid_ai_endpoint")
         # Instance admins explicitly choose their own endpoint; non-admin users need an
         # exact host allowlist before DNS or any network request can be attempted.
-        if actor.profile == "owner" or legacy:
+        if actor.profile == "owner" or trusted_shared:
             return
         policy = self.endpoint_policy()
         if host.lower() not in policy["allowed_hosts"]:
@@ -211,29 +210,6 @@ class Assistant:
             and any(not address.is_global for address in addresses)
         ):
             raise HTTPException(403, "ai_private_endpoint_not_allowed")
-
-    def legacy_connection(self):
-        config = AIService(self.database.path.parent).read()
-        if not config["base_url"] or not config["model"]:
-            return None
-        return {
-            "id": "legacy",
-            "user_id": "admin",
-            "name": "实例 AI（已有配置）",
-            "scope": "instance",
-            "base_url": config["base_url"],
-            "model": config["model"],
-            "timeout": config["timeout"],
-            "version": config["version"],
-            "has_api_key": bool(config["api_key"]),
-            "shared": True,
-            "background_allowed": False,
-            "enabled": True,
-            "daily_call_budget": 100,
-            "capabilities": {},
-            "created_at": None,
-            "read_only": True,
-        }
 
     @staticmethod
     def connection_public(row):
@@ -259,9 +235,6 @@ class Assistant:
             }
             for row in rows
         ]
-        legacy = self.legacy_connection()
-        if legacy:
-            result.append({key: value for key, value in legacy.items() if key != "user_id"})
         for item in result:
             item.update(self.usage_summary(actor, item["id"], item["daily_call_budget"]))
         return result
@@ -294,20 +267,15 @@ class Assistant:
         }
 
     def connection_for(self, actor, identity, *, background=False):
-        if identity == "legacy":
-            configuration = self.legacy_connection()
-            if configuration is None:
-                raise HTTPException(404, "ai_connection_not_found")
-        else:
-            with self.database.connect() as connection:
-                row = connection.execute(
-                    "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.id=? AND u.enabled=1 AND (c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.profile='owner'))",
-                    (identity, actor.user_id),
-                ).fetchone()
-            if row is None:
-                raise HTTPException(404, "ai_connection_not_found")
-            configuration = dict(row)
-            configuration["capabilities"] = json.loads(configuration["capabilities"])
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.id=? AND u.enabled=1 AND (c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.profile='owner'))",
+                (identity, actor.user_id),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(404, "ai_connection_not_found")
+        configuration = dict(row)
+        configuration["capabilities"] = json.loads(configuration["capabilities"])
         if not configuration["enabled"]:
             raise HTTPException(403, "ai_connection_disabled")
         if background and not configuration.get("background_allowed"):
@@ -317,9 +285,7 @@ class Assistant:
             and configuration.get("shared")
             and configuration.get("user_id") != actor.user_id
         )
-        self.check_endpoint(
-            actor, configuration["base_url"], legacy=identity == "legacy" or trusted_shared
-        )
+        self.check_endpoint(actor, configuration["base_url"], trusted_shared=trusted_shared)
         return configuration
 
     def save_connection(self, actor, body, identity=None):
@@ -329,8 +295,6 @@ class Assistant:
         old_secret = None
         previous = None
         if identity:
-            if identity == "legacy":
-                raise HTTPException(409, "legacy_connection_readonly")
             with self.database.connect() as connection:
                 previous = connection.execute(
                     "SELECT * FROM agent_connections WHERE id=? AND user_id=?",
@@ -484,11 +448,7 @@ class Assistant:
         day = self.reserve_call(actor, configuration)
         if on_call is not None:
             on_call()
-        key = (
-            AIService(self.database.path.parent).read()["api_key"]
-            if configuration["id"] == "legacy"
-            else self.read_secret(configuration["secret_ref"])
-        )
+        key = self.read_secret(configuration["secret_ref"])
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         mode, proxy = self.network_policy()
         from wildstring.outbound import OutboundError, json_request
@@ -693,12 +653,11 @@ class Assistant:
                     status["error_code"] = "ai_tools_roundtrip_not_verified"
         except HTTPException as failure:
             status["error_code"] = failure.detail
-        if identity != "legacy":
-            with self.database.connect(write=True) as connection:
-                connection.execute(
-                    "UPDATE agent_connections SET capabilities=? WHERE id=? AND version=?",
-                    (encoded(status), identity, configuration["version"]),
-                )
+        with self.database.connect(write=True) as connection:
+            connection.execute(
+                "UPDATE agent_connections SET capabilities=? WHERE id=? AND version=?",
+                (encoded(status), identity, configuration["version"]),
+            )
         return status
 
     def model_loop(
