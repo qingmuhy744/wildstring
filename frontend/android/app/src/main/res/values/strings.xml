@@ -112,6 +112,10 @@
     <string name="podcast_previous_episode">Previous episode</string>
     <string name="podcast_next_episode">Next episode</string>
     <string name="podcast_cache_network">Podcast cache network</string>
+    <string name="podcast_resource_source">Podcast resource source</string>
+    <string name="podcast_source_origin">Prefer original source</string>
+    <string name="podcast_source_server">Prefer server</string>
+    <string name="podcast_resource_source_hint">For podcast audio and artwork on this device. Cached files come first; switch sources if the preferred one fails.</string>
     <string name="network_off">Auto-cache off</string>
     <string name="network_any">Wi‑Fi and mobile data</string>
     <string name="network_wifi">Wi‑Fi only</string>

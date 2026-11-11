@@ -112,6 +112,10 @@
     <string name="podcast_previous_episode">上一集</string>
     <string name="podcast_next_episode">下一集</string>
     <string name="podcast_cache_network">播客缓存网络</string>
+    <string name="podcast_resource_source">播客资源来源</string>
+    <string name="podcast_source_origin">优先源站</string>
+    <string name="podcast_source_server">优先服务器</string>
+    <string name="podcast_resource_source_hint">用于本机的播客音频和封面；优先使用已有缓存，所选来源失败时自动切换。</string>
     <string name="network_off">关闭自动缓存</string>
     <string name="network_any">Wi‑Fi 和移动网络</string>
     <string name="network_wifi">仅 Wi‑Fi</string>

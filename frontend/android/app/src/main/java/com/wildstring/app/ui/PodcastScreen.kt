@@ -39,8 +39,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.wildstring.app.AppLanguage
@@ -53,8 +51,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.text.HtmlCompat
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.wildstring.app.data.PodcastDetail
 import com.wildstring.app.data.PodcastEpisode
 import com.wildstring.app.data.PodcastShowQueuePreference
@@ -157,6 +153,7 @@ fun PodcastChannelPage(
                     Box(if (split) Modifier.width(260.dp).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
                         pageStates.SaveableStateProvider("list") {
                             PodcastListView(
+                                vm = vm,
                                 podcasts = podcasts.filter { it.followed },
                                 selectedId = selectedId,
                                 canManage = false,
@@ -203,6 +200,7 @@ fun PodcastChannelPage(
                             if (selectedPodcast != null) {
                                 pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
                                     PodcastDetailView(
+                                        vm = vm,
                                         podcast = selectedPodcast,
                                         detail = selectedDetail,
                                         positions = positions,
@@ -325,6 +323,7 @@ fun PodcastChannelPage(
         }
         if (showQueueSheet) {
             PodcastUnifiedQueueSheet(
+                vm = vm,
                 cloud = cloud,
                 followedShows = podcasts.filter { it.followed },
                 onDismiss = { showQueueSheet = false },
@@ -456,6 +455,7 @@ private fun PodcastUnifiedQueueBanner(
 
 @Composable
 private fun PodcastUnifiedQueueSheet(
+    vm: MusicViewModel,
     cloud: PodcastCloudState,
     followedShows: List<PodcastSummary>,
     onDismiss: () -> Unit,
@@ -731,24 +731,7 @@ private fun PodcastUnifiedQueueSheet(
                                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            if (show.coverUrl.isNotBlank()) {
-                                                AsyncImage(
-                                                    model = ImageRequest.Builder(LocalContext.current)
-                                                        .data(show.coverUrl)
-                                                        .crossfade(true)
-                                                        .build(),
-                                                    contentDescription = show.title,
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                )
-                                            } else {
-                                                Icon(
-                                                    Icons.Default.Podcasts,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
+                                            PodcastArtworkImage(vm, show, Modifier.fillMaxSize())
                                         }
                                         Spacer(Modifier.width(12.dp))
                                         Column(Modifier.weight(1f)) {
@@ -891,6 +874,7 @@ private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: Stri
 
 @Composable
 private fun PodcastListView(
+    vm: MusicViewModel,
     podcasts: List<PodcastSummary>,
     canManage: Boolean,
     canAdd: Boolean,
@@ -945,6 +929,7 @@ private fun PodcastListView(
                 }
                 items(podcasts, key = { it.id }) { podcast ->
                     PodcastCardItem(
+                        vm = vm,
                         podcast = podcast,
                         onClick = { onSelect(podcast) },
                         onDelete = { onDelete(podcast) },
@@ -962,6 +947,7 @@ private fun PodcastListView(
 
 @Composable
 private fun PodcastCardItem(
+    vm: MusicViewModel,
     podcast: PodcastSummary,
     onClick: () -> Unit,
     onDelete: () -> Unit,
@@ -990,24 +976,7 @@ private fun PodcastCardItem(
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
-                if (podcast.coverUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(podcast.coverUrl)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = podcast.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Podcasts,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(30.dp),
-                    )
-                }
+                PodcastArtworkImage(vm, podcast, Modifier.fillMaxSize())
             }
 
             Spacer(Modifier.width(14.dp))
@@ -1183,6 +1152,7 @@ private fun EmptyPodcastState(
 
 @Composable
 private fun PodcastDetailView(
+    vm: MusicViewModel,
     podcast: PodcastSummary,
     detail: PodcastDetail?,
     positions: Map<String, EpisodeProgress>,
@@ -1279,24 +1249,7 @@ private fun PodcastDetailView(
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                if (podcast.coverUrl.isNotBlank()) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(podcast.coverUrl)
-                                            .crossfade(true)
-                                            .build(),
-                                        contentDescription = podcast.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.Podcasts,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(44.dp),
-                                    )
-                                }
+                                PodcastArtworkImage(vm, podcast, Modifier.fillMaxSize())
                             }
 
                             Spacer(Modifier.width(16.dp))

@@ -1,6 +1,7 @@
 package com.wildstring.app
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -14,10 +15,12 @@ import com.wildstring.app.ui.MusicViewModel
 import com.wildstring.app.data.*
 import com.google.gson.Gson
 import java.io.File
+import java.io.ByteArrayOutputStream
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okio.Buffer
 import org.junit.Assert.*
 import org.junit.AfterClass
 import org.junit.BeforeClass
@@ -85,8 +88,16 @@ class PadLayoutTest {
         )) }
         private val artists = (0..11).joinToString(",") { gson.toJson(Artist("artist-$it", "合成艺人 $it", 40, null)) }
         private val playlists = (0..7).joinToString(",") { gson.toJson(Playlist("playlist-$it", "合成歌单 $it", "manual", 1, 40, null)) }
-        private val shows = (0..7).map { gson.toJson(PodcastSummary(
+        private val cover = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).let { bitmap ->
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.drawColor(Color.rgb(143, 91, 57))
+            val paint = android.graphics.Paint().apply { color = Color.rgb(232, 209, 169) }
+            canvas.drawCircle(48f, 48f, 26f, paint)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it); bitmap.recycle() }.toByteArray()
+        }
+        private val shows get() = (0..7).map { gson.toJson(PodcastSummary(
             "show-$it", "合成节目 $it", author = "合成主播", feedUrl = "https://example.invalid/$it",
+            coverUrl = server.url("/source/show-$it.png").toString(),
             description = "用于布局验证的节目简介。", followed = true, totalEpisodes = 40, unplayedEpisodes = 40,
         )) }
         private val conversation = """{"id":"history-one","title":"合成历史会话","messages":[${(0..39).joinToString(",") { """{"id":"message-$it","role":"assistant","content":"历史消息 $it：这是合成会话，用于检查阅读宽度与滚动位置。"}""" }}],"runs":[]}"""
@@ -103,6 +114,9 @@ class PadLayoutTest {
                         return json("""{"items":[$slice],"total":$total,"limit":$limit,"offset":$offset}""")
                     }
                     return when {
+                        path.startsWith("/source/") -> MockResponse().setResponseCode(503)
+                        path == "/api/v1/podcasts/show-0/cover" -> MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
+                        path.endsWith("/cover") -> MockResponse().setResponseCode(502)
                         path.endsWith("/auth/status") -> json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"pad-user","username":"pad","profile":"listener"}}""")
                         path.endsWith("/auth/login") -> json("{}").setHeader("Set-Cookie", "wildstring_session=pad; Path=/; Max-Age=3600")
                         path.endsWith("/tracks") -> when (request.requestUrl!!.queryParameter("q")) {
@@ -214,6 +228,7 @@ class PadLayoutTest {
             compose.onNodeWithTag("podcast-show-show-0").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("podcast-episodes").fetchSemanticsNodes().isNotEmpty() }
             compose.waitUntil(15_000) { vm.podcastBrowser.state.value.details["show-0"]?.episodes?.size == 40 }
+            compose.waitUntil(15_000) { fixture.requests.any { it.contains("/api/v1/podcasts/show-0/cover") } }
             compose.onNodeWithTag("podcast-show-show-0").assertIsSelected()
             compose.onNodeWithTag("podcast-episodes").performScrollToIndex(16)
             val episode = compose.onNodeWithTag("podcast-episodes").onChildren().filter(hasText("合成单集", substring = true)).onFirst().fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].first().text
@@ -281,6 +296,59 @@ class PadLayoutTest {
             throw error
         } finally {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+        } }
+    }
+
+    @Test fun defaultTabletSettingsReturnToCategoriesOnPhone() {
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        Fixture().use { fixture -> try {
+            compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto") }
+            window(390, 844)
+            val address = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(address, "pad", "synthetic-password", true) }
+            compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
+            window(1200, 800)
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+            compose.onNodeWithTag("setting-category-account").assertIsSelected()
+            capture("settings-default-tablet-light")
+            window(390, 844)
+            compose.onNodeWithTag("setting-category-storage").performScrollTo().assertIsDisplayed()
+            capture("settings-default-phone-light")
+            appearance(vm, "dark")
+            capture("settings-default-phone-dark")
+            window(1200, 800)
+            compose.onNodeWithTag("setting-category-account").assertIsSelected()
+            capture("settings-default-tablet-dark")
+            // An explicit choice must still survive resizing.
+            compose.onNodeWithTag("setting-category-storage").performClick()
+            compose.onNodeWithTag("setting-audio-cache").performScrollTo().assertIsDisplayed()
+            window(390, 844)
+            compose.onNodeWithTag("setting-audio-cache").assertIsDisplayed()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("setting-category-storage").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("setting-category-podcast").performScrollTo().performClick()
+            window(1200, 800)
+            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
+            compose.onNodeWithTag("setting-option-podcast-resource-source-source").assertIsSelected()
+            capture("podcast-source-tablet-dark")
+            compose.onNodeWithTag("setting-option-podcast-resource-source-server").performClick()
+            compose.runOnIdle { assertEquals("server", vm.settings.state.value.podcastResourceSource) }
+            window(390, 844)
+            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
+            compose.onNodeWithTag("setting-option-podcast-resource-source-server").assertIsSelected()
+            capture("podcast-source-phone-dark")
+            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+            appearance(vm, "light")
+            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
+            capture("podcast-source-phone-light")
+            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+            window(1200, 800)
+            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
+            capture("podcast-source-tablet-light")
+            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+        } finally {
+            compose.runOnIdle { vm.settings.podcastResourceSource("source"); vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+            window(390, 844)
         } }
     }
 }

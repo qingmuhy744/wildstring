@@ -2852,6 +2852,12 @@ def podcast_router(
     ):
         return manager.auto_downloads.configure(user["id"], podcast_id, payload)
 
+    @router.get("/{podcast_id}/cover")
+    def get_podcast_cover(podcast_id: str, user: Annotated[dict, Depends(auth.require_session)]):
+        from wildstring.podcast_artwork import cover
+
+        return cover(manager, user["id"], podcast_id)
+
     @router.get("/{podcast_id}", response_model=PodcastDetailResponse)
     def get_podcast(
         podcast_id: str,

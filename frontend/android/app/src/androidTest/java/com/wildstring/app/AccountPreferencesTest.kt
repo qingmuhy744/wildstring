@@ -22,6 +22,20 @@ class AccountPreferencesTest {
         try { action(context) } finally { names.forEach(original::deleteSharedPreferences) }
     }
 
+    @Test fun podcastSourceDefaultsToOriginAndPersistsPerAccountAndServer() = isolated { context ->
+        val settings = AppSettings(context)
+        settings.bindAccount("server-a", "first")
+        assertEquals("source", settings.state.value.podcastResourceSource)
+        settings.podcastResourceSource("server")
+        settings.bindAccount("server-a", "second")
+        assertEquals("source", settings.state.value.podcastResourceSource)
+        settings.bindAccount("server-b", "first")
+        assertEquals("source", settings.state.value.podcastResourceSource)
+        val reopened = AppSettings(context)
+        reopened.bindAccount("server-a", "first")
+        assertEquals("server", reopened.state.value.podcastResourceSource)
+    }
+
     @Test fun preferencesMigrateOnceAndRestoreAcrossAccountsServersAndRestarts() = isolated { context ->
         val legacy = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
         legacy.edit().putString("appearance", "dark").putInt("aac_bitrate", 192).commit()

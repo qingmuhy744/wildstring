@@ -13,7 +13,7 @@ data class Preferences(
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
     val playbackStyle: String = "vinyl", val songListSize: SongListSize = SongListSize.MEDIUM,
     val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
-    val orientation: String = "auto")
+    val orientation: String = "auto", val podcastResourceSource: String = "source")
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
@@ -30,7 +30,8 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
         LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull()),
-        prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto")
+        prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto",
+        prefs.getString("podcast_resource_source", "source").takeIf { it in listOf("source", "server") } ?: "source")
     }
     private val mutable = MutableStateFlow(preferences())
 
@@ -117,6 +118,11 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     fun orientation(mode: String) {
         require(mode in listOf("auto", "portrait", "sensor"))
         prefs.edit().putString("screen_orientation", mode).apply(); mutable.value = mutable.value.copy(orientation = mode)
+    }
+    fun podcastResourceSource(source: String) {
+        require(source in listOf("source", "server"))
+        prefs.edit().putString("podcast_resource_source", source).apply()
+        mutable.value = mutable.value.copy(podcastResourceSource = source)
     }
     /** Cache of the account default auto-continue. The server copy is preferences.auto_continue. */
     fun podcastContinuePreference(): PodcastContinuePreference = PodcastContinuePreference(

@@ -62,7 +62,7 @@ data class Track(
     val unavailableReason: String? get() = unavailableReasonRes?.let { AppLanguage.string(it) }
     val isAvailable: Boolean get() = unavailableReason == null
 }
-data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "", val resumePositionMs: Long = 0L)
+data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "", val resumePositionMs: Long = 0L, val audioUrl: String = "")
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,
     @SerializedName("cover_track_id") val coverTrackId: String?)
@@ -257,7 +257,7 @@ data class PodcastEpisode(
         hasCover = podcastArtworkUrl(podcast.coverUrl) != null,
         format = "mp3",
         status = "available",
-        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty(), resumePositionMs),
+        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty(), resumePositionMs, podcastArtworkUrl(audioUrl).orEmpty()),
     )
 }
 
