@@ -91,8 +91,8 @@ import kotlin.math.roundToInt
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Spacer(Modifier.width(if (state.collection == "albums" || state.albumFilter != null) 30.dp else LocalSongListSize.current.coverDp.dp))
                             Text(stringResource(R.string.sort_track_name), Modifier.weight(2.4f).padding(start = 14.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(stringResource(R.string.artists), Modifier.weight(1.4f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(stringResource(R.string.agent_ws_field_album), Modifier.weight(1.7f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.artists), Modifier.weight(1.4f).padding(start = 24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.agent_ws_field_album), Modifier.weight(1.7f).padding(start = 24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(stringResource(R.string.sort_duration), Modifier.width(52.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(48.dp))
                         }

@@ -83,8 +83,9 @@ class PadLayoutTest {
         val searchGate = java.util.concurrent.CountDownLatch(1)
         private val gson = Gson()
         private val tracks = (0..39).joinToString(",") { gson.toJson(Track(
-            "track-$it", "合成歌曲 ${it.toString().padStart(2, '0')}", listOf("艺人甲与一个很长的名字"),
-            "合成专辑与较长的副标题", 195000, format = "mp3", albumId = "album",
+            "track-$it", "合成歌曲 ${it.toString().padStart(2, '0')}",
+            when (it) { 0 -> listOf("艺人甲", "艺人乙"); 2 -> emptyList(); else -> listOf("艺人甲与一个很长的名字") },
+            if (it == 2) null else "合成专辑与较长的副标题", 195000, format = "mp3", albumId = if (it == 2) null else "album",
         )) }
         private val artists = (0..11).joinToString(",") { gson.toJson(Artist("artist-$it", "合成艺人 $it", 40, null)) }
         private val playlists = (0..7).joinToString(",") { gson.toJson(Playlist("playlist-$it", "合成歌单 $it", "manual", 1, 40, null)) }
@@ -125,7 +126,10 @@ class PadLayoutTest {
                             "loading" -> { searchGate.await(15, java.util.concurrent.TimeUnit.SECONDS); page(tracks, 40) }
                             else -> page(tracks, 40)
                         }
-                        path.endsWith("/artists") -> page(artists, 12)
+                        path.endsWith("/artists") -> when (val name = request.requestUrl!!.queryParameter("q")) {
+                            "艺人甲", "艺人乙", "艺人甲与一个很长的名字" -> page(gson.toJson(Artist("matched-artist", name, 40, null)), 1)
+                            else -> page(artists, 12)
+                        }
                         path.endsWith("/albums") -> page("", 0)
                         path.endsWith("/playlists") -> page(playlists, 8)
                         path == "/api/v1/podcasts" -> json(shows.joinToString(prefix = "[", postfix = "]"))
@@ -151,6 +155,42 @@ class PadLayoutTest {
             server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
         }
         override fun close() { searchGate.countDown(); server.close() }
+    }
+    @Test fun tabletSongColumnsNavigateToArtistAndAlbum() {
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        Fixture().use { fixture -> try {
+            compose.runOnIdle { vm.settings.orientation("auto") }
+            window(390, 844)
+            val serverUrl = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(serverUrl, "pad", "synthetic-password", true) }
+            compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
+            compose.onNodeWithTag("nav-library").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-tracks").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("catalog-tracks").performClick()
+            compose.waitUntil(15_000) { vm.state.value.tracks.size == 40 }
+            compose.onNodeWithTag("track-artist-0", useUnmergedTree = true).assertDoesNotExist()
+            window(1200, 800)
+            compose.onNodeWithTag("track-artist-0", useUnmergedTree = true).assertHasClickAction().performClick()
+            compose.onNodeWithTag("track-artist-choice-0-1").performClick()
+            compose.waitUntil(15_000) { vm.state.value.collectionId == "matched-artist" && !vm.state.value.loading }
+            assertEquals("艺人乙", vm.state.value.title)
+            compose.runOnIdle { vm.back() }
+            compose.waitUntil(15_000) { vm.state.value.collection == null && !vm.state.value.loading }
+            compose.onNodeWithTag("track-album-0", useUnmergedTree = true).assertHasClickAction().performClick()
+            compose.waitUntil(15_000) { vm.state.value.collectionId == "album" && !vm.state.value.loading }
+            compose.runOnIdle { vm.back() }
+            compose.waitUntil(15_000) { vm.state.value.collection == null && !vm.state.value.loading }
+            compose.onNodeWithTag("track-artist-1", useUnmergedTree = true).performClick()
+            compose.waitUntil(15_000) { vm.state.value.collectionId == "matched-artist" && !vm.state.value.loading }
+            assertEquals("艺人甲与一个很长的名字", vm.state.value.title)
+            compose.runOnIdle { vm.back() }
+            compose.waitUntil(15_000) { vm.state.value.collection == null && !vm.state.value.loading }
+            compose.onNodeWithTag("track-artist-2", useUnmergedTree = true).assertIsNotEnabled()
+            compose.onNodeWithTag("track-album-2", useUnmergedTree = true).assertIsNotEnabled()
+        } finally {
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.orientation("auto") }
+            window(390, 844)
+        } }
     }
     @Test fun phonePadAndNarrowWindowsKeepCatalogPodcastAndChatState() {
         val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }

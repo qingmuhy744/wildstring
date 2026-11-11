@@ -1178,12 +1178,33 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (columns) {
-            Text(track.artist, Modifier.weight(1.4f).heightIn(min = 48.dp).testTag("track-artist-$index")
-                .clickable { vm.openArtistName(track.artists.firstOrNull().orEmpty()) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
-                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.album.orEmpty(), Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("track-album-$index")
-                .clickable(enabled = track.album != null) { vm.openTrackAlbum(track) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
-                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            var artistMenu by remember(track.id) { mutableStateOf(false) }
+            val artists = track.artists.filter { it.isNotBlank() }
+            val artistLabel = stringResource(R.string.open_artist_named, track.artist)
+            Box(Modifier.weight(1.4f)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("track-artist-$index")
+                    .clickable(enabled = artists.isNotEmpty(), role = Role.Button) {
+                        if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true
+                    }.semantics { contentDescription = artistLabel }.padding(end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (artists.isNotEmpty()) Icon(Icons.Default.Person, null, Modifier.size(18.dp), tint = Muted)
+                    Text(track.artist, color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                DropdownMenu(artistMenu, { artistMenu = false }) {
+                    artists.forEachIndexed { artistIndex, name ->
+                        DropdownMenuItem(text = { Text(name) }, modifier = Modifier.testTag("track-artist-choice-$index-$artistIndex"),
+                            onClick = { artistMenu = false; vm.openArtistName(name) })
+                    }
+                }
+            }
+            val albumLabel = listOfNotNull(stringResource(R.string.open_album), track.album?.takeIf { it.isNotBlank() }).joinToString(" · ")
+            Row(Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("track-album-$index")
+                .clickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button) { vm.openTrackAlbum(track) }
+                .semantics { contentDescription = albumLabel }.padding(end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!track.album.isNullOrBlank() || !track.albumId.isNullOrBlank()) Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = Muted)
+                Text(track.album?.takeIf { it.isNotBlank() } ?: "—", color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
