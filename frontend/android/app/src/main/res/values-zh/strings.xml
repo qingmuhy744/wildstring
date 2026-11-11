@@ -2139,4 +2139,5 @@
     </string-array>
     <string name="player_landscape_prompt">手机已横放，开启横屏播放？</string>
     <string name="player_landscape_prompt_action">开启</string>
+    <string name="podcast_select_show">选择一个节目</string>
 </resources>

@@ -87,10 +87,43 @@ internal fun PodcastQueuePanel(
     val cloud by vm.podcastCloud.collectAsState()
     val feedback = LocalTactileFeedback.current
     val autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue
+    val list = rememberLazyListState()
+    val drag = remember(list) { QueueDragState(list) { row: PodcastQueueRow -> row.episodeId } }
+    val handles = remember { mutableMapOf<String, Rect>() }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val currentRows by rememberUpdatedState(cloud.queueRows)
+    val rows = drag.order ?: cloud.queueRows
+    val density = LocalDensity.current
+    val elevation = with(density) { 6.dp.toPx() }
+    val edge = with(density) { 64.dp.toPx() }
+    val speed = with(density) { 900.dp.toPx() }
+    // A refresh that reorders behind the finger cancels the gesture rather than applying a stale index.
+    val ids = remember(cloud.queueRows) { cloud.queueRows.map { it.episodeId } }
+    LaunchedEffect(ids) { if (drag.entryId != null && drag.originalIds != ids) drag.cancel() }
+    DisposableEffect(Unit) { onDispose { drag.cancel() } }
 
     LaunchedEffect(Unit) {
         vm.refreshPodcastCloud()
         vm.refreshPodcastAutoPreview()
+    }
+    // Dragging near an edge keeps scrolling, so long queues can move a row past the viewport.
+    LaunchedEffect(drag.entryId) {
+        if (drag.entryId == null) return@LaunchedEffect
+        var previous = System.nanoTime()
+        while (drag.entryId != null) {
+            delay(16)
+            val frame = System.nanoTime()
+            val elapsed = ((frame - previous) / 1_000_000_000f).coerceAtMost(.05f)
+            previous = frame
+            val layout = list.layoutInfo
+            val zone = edge.coerceAtMost((layout.viewportEndOffset - layout.viewportStartOffset) / 3f)
+            val direction = when {
+                drag.pointerY < layout.viewportStartOffset + zone -> -((layout.viewportStartOffset + zone - drag.pointerY) / zone).coerceIn(0f, 1f)
+                drag.pointerY > layout.viewportEndOffset - zone -> ((drag.pointerY - layout.viewportEndOffset + zone) / zone).coerceIn(0f, 1f)
+                else -> 0f
+            }
+            if (direction != 0f) { list.scrollBy(direction * speed * elapsed); drag.reorder() }
+        }
     }
 
     Column(
@@ -119,7 +152,42 @@ internal fun PodcastQueuePanel(
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                .onGloballyPositioned { coordinates = it }
+                .pointerInput(drag) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val id = handles.entries.firstOrNull { it.value.contains(down.position) }?.key
+                            ?: return@awaitEachGesture
+                        if (currentRows.size < 2) return@awaitEachGesture
+                        val startIds = currentRows.map { it.episodeId }
+                        var change = down
+                        while (abs(change.position.y - down.position.y) <= viewConfiguration.touchSlop) {
+                            change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id }
+                                ?: return@awaitEachGesture
+                            if (change.isConsumed || !change.pressed) return@awaitEachGesture
+                        }
+                        change.consume()
+                        if (!drag.start(id, currentRows, down.position.y)) return@awaitEachGesture
+                        feedback(TactileKind.DragStart)
+                        drag.move(change.position.y)
+                        awaitPointerEvent(PointerEventPass.Final)
+                        var dropped = false
+                        try {
+                            dropped = verticalDrag(change.id) { event -> drag.move(event.position.y); event.consume() }
+                        } finally {
+                            if (dropped && drag.originalIds == startIds) drag.order?.let { ordered ->
+                                if (ordered.map { it.episodeId } != startIds) {
+                                    vm.reorderPodcastPending(ordered)
+                                    feedback(TactileKind.DragEnd)
+                                }
+                            }
+                            drag.cancel()
+                        }
+                    }
+                },
+            state = list,
+            userScrollEnabled = drag.entryId == null,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -133,19 +201,31 @@ internal fun PodcastQueuePanel(
                     )
                 }
             } else {
-                items(cloud.queueRows, key = { it.episodeId }) { row ->
+                itemsIndexed(rows, key = { _, row -> row.episodeId }) { index, row ->
+                    val active = drag.entryId == row.episodeId
+                    DisposableEffect(row.episodeId) { onDispose { handles.remove(row.episodeId) } }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth()
+                        color = if (active) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.fillMaxWidth().animateItem().zIndex(if (active) 1f else 0f).graphicsLayer {
+                            translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.episodeId }?.offset ?: 0) else 0f
+                            shadowElevation = if (active) elevation else 0f
+                        }
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(Modifier.weight(1f)) {
+                            // The handle stays visible so the list reads as reorderable without a gesture.
+                            val dragLabel = stringResource(R.string.queue_drag_named, row.title)
+                            Box(Modifier.size(48.dp).testTag("podcast-queue-handle-${row.episodeId}")
+                                .onGloballyPositioned { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.episodeId] = it.localBoundingBoxOf(handle, clipBounds = false) } }
+                                .semantics { contentDescription = dragLabel },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                                 Text(
                                     text = row.title,
                                     style = MaterialTheme.typography.bodyMedium,
@@ -167,6 +247,7 @@ internal fun PodcastQueuePanel(
                                     feedback(TactileKind.Tap)
                                     vm.removePodcastQueueEpisode(row.episodeId)
                                 },
+                                enabled = drag.entryId == null,
                                 modifier = Modifier.size(32.dp),
                             ) {
                                 Icon(
@@ -261,7 +342,7 @@ internal fun QueueList(
     val resources = androidx.compose.ui.platform.LocalResources.current
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val drag = remember(list) { QueueDragState(list) }
+    val drag = remember(list) { QueueDragState(list) { row: QueueRow -> row.entryId } }
     val ids = remember(rows) { rows.map { it.entryId } }
     val currentRows by rememberUpdatedState(rows)
     val move by rememberUpdatedState(onMove)
@@ -353,7 +434,7 @@ internal fun QueueList(
                         try {
                             dropped = verticalDrag(change.id) { event -> drag.move(event.position.y); event.consume() }
                         } finally {
-                            val destination = drag.order?.indexOfFirst { it.entryId == id } ?: -1
+                            val destination = drag.destinationOf(id)
                             if (dropped && currentRows.map { it.entryId } == startIds && destination >= 0 && destination != startIds.indexOf(id)) {
                                 move(id, destination)
                                 haptic(TactileKind.DragEnd)
@@ -408,10 +489,14 @@ internal fun QueueList(
     }
 }
 
-private class QueueDragState(private val list: LazyListState) {
+/**
+ * Handle-drag state shared by the music and podcast queues. It reorders rows locally by their stable id;
+ * the caller persists the new order once, after the drop.
+ */
+private class QueueDragState<T>(private val list: LazyListState, private val key: (T) -> String) {
     var entryId by mutableStateOf<String?>(null)
         private set
-    var order by mutableStateOf<List<QueueRow>?>(null)
+    var order by mutableStateOf<List<T>?>(null)
         private set
     var top by mutableFloatStateOf(0f)
         private set
@@ -422,9 +507,12 @@ private class QueueDragState(private val list: LazyListState) {
     private var grabOffset = 0f
     private var height = 0
 
-    fun start(id: String, rows: List<QueueRow>, y: Float): Boolean {
+    /** Index of [id] in the dragged order, or -1 when it would not move. */
+    fun destinationOf(id: String): Int = order?.indexOfFirst { key(it) == id } ?: -1
+
+    fun start(id: String, rows: List<T>, y: Float): Boolean {
         val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return false
-        originalIds = rows.map { it.entryId }
+        originalIds = rows.map(key)
         order = rows; top = item.offset.toFloat(); pointerY = y
         grabOffset = y - item.offset; height = item.size; entryId = id
         return true
@@ -438,15 +526,22 @@ private class QueueDragState(private val list: LazyListState) {
     }
     fun reorder() {
         val rows = order ?: return
-        val from = rows.indexOfFirst { it.entryId == entryId }
-        if (from < 0) return
+        // Resolve positions by row key: a list may interleave items that are not part of [order].
+        val positions = rows.withIndex().associate { (index, row) -> key(row) to index }
+        val from = positions[entryId] ?: return
         val center = top + height / 2f
-        val candidates = list.layoutInfo.visibleItemsInfo.filter { it.key != entryId &&
-            ((it.index > from && center >= it.offset + it.size / 2f) || (it.index < from && center <= it.offset + it.size / 2f)) }
-        val target = candidates.minByOrNull { abs(center - (it.offset + it.size / 2f)) } ?: return
+        val target = list.layoutInfo.visibleItemsInfo.mapNotNull { info ->
+            val index = positions[info.key] ?: return@mapNotNull null
+            val middle = info.offset + info.size / 2f
+            when {
+                index > from && center >= middle -> index to info
+                index < from && center <= middle -> index to info
+                else -> null
+            }
+        }.minByOrNull { abs(center - (it.second.offset + it.second.size / 2f)) } ?: return
         val first = list.firstVisibleItemIndex
         val offset = list.firstVisibleItemScrollOffset
-        order = rows.toMutableList().apply { add(target.index, removeAt(from)) }
+        order = rows.toMutableList().apply { add(target.first, removeAt(from)) }
         // Stable keys normally anchor the first item; moving that item must not scroll the viewport.
         list.requestScrollToItem(first, offset)
     }

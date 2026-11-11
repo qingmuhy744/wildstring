@@ -34,6 +34,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -148,123 +150,143 @@ fun PodcastChannelPage(
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (selectedPodcast != null) {
-            pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
-                PodcastDetailView(
-                    podcast = selectedPodcast,
-                    detail = selectedDetail,
-                    positions = positions,
-                    loading = detailLoading,
-                    onBack = vm::back,
-                    onRefresh = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
-                    onPlayEpisode = { ep ->
-                        vm.playPodcastEpisode(ep, selectedPodcast)
-                    },
-                    onQueueEpisode = { ep, next ->
-                        vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
-                    },
-                    onRemoveQueuedEpisode = { epId ->
-                        vm.removePodcastQueueEpisode(epId)
-                        vm.removePodcastInboxEpisode(epId)
-                    },
-                    totalPendingCount = pendingCount,
-                    onPlayPendingQueue = { vm.playPodcastPendingQueue() },
-                    onOpenQueueSheet = { showQueueSheet = true },
-                    isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } || cloud.inbox.any { it.episodeId == epId } },
-                    isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
-                    isEpisodeFavorite = { epId -> epId in favoriteIds },
-                    onToggleFavorite = { episodeId, loved ->
-                        vm.togglePodcastEpisodeFavorite(episodeId, loved)
-                    },
-                    onToggleCompleted = { episodeId, completed ->
-                        vm.markPodcastEpisodeCompleted(episodeId, completed)
-                    },
-                    showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
-                    preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
-                    preferenceError = cloud.preferencesError,
-                    onShowPreference = { action, limit -> vm.updatePodcastShowPreference(selectedPodcast.id, action, limit) },
-                    onRetryPreference = vm::refreshPodcastQueuePreferences,
-                    onFollow = { vm.togglePodcastFollow(selectedPodcast) },
-                    onAutoDownload = { autoDownloadPodcast = selectedPodcast },
-                    onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
-                    onSaveEpisode = { episode -> scope.launch {
-                        try {
-                            val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
-                            if (owner != vm.repository.session.cacheScope()) return@launch
-                            val current = vm.podcastBrowser.state.value.details[episode.podcastId]
-                            current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
-                                if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
-                            })) }
-                            statusMessage = if (!result.saved) AppLanguage.string(R.string.pod_scr_unsaved_shared_retained) else if (result.reused) AppLanguage.string(R.string.pod_scr_saved_reused) else AppLanguage.string(R.string.pod_scr_saved_preparing)
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { statusMessage = friendlyError(e) }
-                    } },
-                    publisher = {
-                        PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
-                            onOpen = {
-                                publisherOriginPodcastId = selectedPodcast.id
-                                selectedPublisherId = it.id
-                                selectedPublisherName = it.name
-                                vm.back()
-                            },
-                            onSaved = { detail ->
-                                vm.podcastBrowser.remember(detail)
-                                statusMessage = AppLanguage.string(R.string.pod_scr_publisher_saved)
-                            })
-                    },
-                )
-            }
-        } else if (selectedPublisher != null) {
-            PodcastPublisherPage(
-                vm = vm,
-                publisher = selectedPublisher,
-                onBack = closePublisher,
-                onSelect = {
-                    if (it.id == publisherOriginPodcastId) {
-                        selectedPublisherId = null
-                        publisherOriginPodcastId = null
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+            Row(Modifier.fillMaxSize().testTag(if (split) "podcast-two-pane" else "podcast-single-pane")) {
+                if (split || (selectedPodcast == null && selectedPublisher == null)) {
+                    Box(if (split) Modifier.width(260.dp).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
+                        pageStates.SaveableStateProvider("list") {
+                            PodcastListView(
+                                podcasts = podcasts.filter { it.followed },
+                                selectedId = selectedId,
+                                canManage = false,
+                                canAdd = canAddPodcast,
+                                onFollow = vm::togglePodcastFollow,
+                                onAutoDownload = { autoDownloadPodcast = it },
+                                loading = loading,
+                                onSelect = { vm.openPodcast(it.id) },
+                                onAddClick = { exploring = true },
+                                onExplore = { exploring = true },
+                                onRefreshAll = {
+                                    vm.podcastBrowser.reloadList(synchronize = false)
+                                    vm.refreshPodcastCloud()
+                                },
+                                queueHeader = {
+                                    PodcastUnifiedQueueBanner(
+                                        cloud = cloud,
+                                        pendingCount = pendingCount,
+                                        onOpenQueue = { showQueueSheet = true },
+                                        onPlayAll = { vm.playPodcastPendingQueue() },
+                                        onRetry = vm::retryPodcastQueueSync,
+                                    )
+                                },
+                                onDelete = { p ->
+                                    scope.launch {
+                                        try {
+                                            vm.repository.deletePodcast(p.id)
+                                            if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
+                                            statusMessage = AppLanguage.string(R.string.pod_scr_deleted_show, p.title)
+                                        } catch (e: CancellationException) { throw e }
+                                        catch (e: Exception) {
+                                            statusMessage = AppLanguage.string(R.string.pod_scr_delete_failed, e.message.orEmpty())
+                                        }
+                                    }
+                                },
+                            )
+                        }
                     }
-                    vm.openPodcast(it.id)
-                },
-            )
-        } else {
-            pageStates.SaveableStateProvider("list") {
-                PodcastListView(
-                    podcasts = podcasts.filter { it.followed },
-                    canManage = false,
-                    canAdd = canAddPodcast,
-                    onFollow = vm::togglePodcastFollow,
-                    onAutoDownload = { autoDownloadPodcast = it },
-                    loading = loading,
-                    onSelect = { vm.openPodcast(it.id) },
-                    onAddClick = { exploring = true },
-                    onExplore = { exploring = true },
-                    onRefreshAll = {
-                        vm.podcastBrowser.reloadList(synchronize = false)
-                        vm.refreshPodcastCloud()
-                    },
-                    queueHeader = {
-                        PodcastUnifiedQueueBanner(
-                            cloud = cloud,
-                            pendingCount = pendingCount,
-                            onOpenQueue = { showQueueSheet = true },
-                            onPlayAll = { vm.playPodcastPendingQueue() },
-                            onRetry = vm::retryPodcastQueueSync,
-                        )
-                    },
-                    onDelete = { p ->
-                        scope.launch {
-                            try {
-                                vm.repository.deletePodcast(p.id)
-                                if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
-                                statusMessage = AppLanguage.string(R.string.pod_scr_deleted_show, p.title)
-                            } catch (e: CancellationException) { throw e }
-                            catch (e: Exception) {
-                                statusMessage = AppLanguage.string(R.string.pod_scr_delete_failed, e.message.orEmpty())
+                }
+                if (split) VerticalDivider()
+                if (split || selectedPodcast != null || selectedPublisher != null) {
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                        Box(Modifier.widthIn(max = 760.dp).fillMaxSize()) {
+                            if (selectedPodcast != null) {
+                                pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
+                                    PodcastDetailView(
+                                        podcast = selectedPodcast,
+                                        detail = selectedDetail,
+                                        positions = positions,
+                                        loading = detailLoading,
+                                        onBack = vm::back,
+                                        onRefresh = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                                        onPlayEpisode = { ep ->
+                                            vm.playPodcastEpisode(ep, selectedPodcast)
+                                        },
+                                        onQueueEpisode = { ep, next ->
+                                            vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
+                                        },
+                                        onRemoveQueuedEpisode = { epId ->
+                                            vm.removePodcastQueueEpisode(epId)
+                                            vm.removePodcastInboxEpisode(epId)
+                                        },
+                                        totalPendingCount = pendingCount,
+                                        onPlayPendingQueue = { vm.playPodcastPendingQueue() },
+                                        onOpenQueueSheet = { showQueueSheet = true },
+                                        isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } || cloud.inbox.any { it.episodeId == epId } },
+                                        isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
+                                        isEpisodeFavorite = { epId -> epId in favoriteIds },
+                                        onToggleFavorite = { episodeId, loved ->
+                                            vm.togglePodcastEpisodeFavorite(episodeId, loved)
+                                        },
+                                        onToggleCompleted = { episodeId, completed ->
+                                            vm.markPodcastEpisodeCompleted(episodeId, completed)
+                                        },
+                                        showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
+                                        preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
+                                        preferenceError = cloud.preferencesError,
+                                        onShowPreference = { action, limit -> vm.updatePodcastShowPreference(selectedPodcast.id, action, limit) },
+                                        onRetryPreference = vm::refreshPodcastQueuePreferences,
+                                        onFollow = { vm.togglePodcastFollow(selectedPodcast) },
+                                        onAutoDownload = { autoDownloadPodcast = selectedPodcast },
+                                        onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                                        onSaveEpisode = { episode -> scope.launch {
+                                            try {
+                                                val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
+                                                if (owner != vm.repository.session.cacheScope()) return@launch
+                                                val current = vm.podcastBrowser.state.value.details[episode.podcastId]
+                                                current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
+                                                    if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
+                                                })) }
+                                                statusMessage = if (!result.saved) AppLanguage.string(R.string.pod_scr_unsaved_shared_retained) else if (result.reused) AppLanguage.string(R.string.pod_scr_saved_reused) else AppLanguage.string(R.string.pod_scr_saved_preparing)
+                                            } catch (e: CancellationException) { throw e }
+                                            catch (e: Exception) { statusMessage = friendlyError(e) }
+                                        } },
+                                        publisher = {
+                                            PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
+                                                onOpen = {
+                                                    publisherOriginPodcastId = selectedPodcast.id
+                                                    selectedPublisherId = it.id
+                                                    selectedPublisherName = it.name
+                                                    vm.back()
+                                                },
+                                                onSaved = { detail ->
+                                                    vm.podcastBrowser.remember(detail)
+                                                    statusMessage = AppLanguage.string(R.string.pod_scr_publisher_saved)
+                                                })
+                                        },
+                                    )
+                                }
+                            } else if (selectedPublisher != null) {
+                                PodcastPublisherPage(
+                                    vm = vm,
+                                    publisher = selectedPublisher,
+                                    onBack = closePublisher,
+                                    onSelect = {
+                                        if (it.id == publisherOriginPodcastId) {
+                                            selectedPublisherId = null
+                                            publisherOriginPodcastId = null
+                                        }
+                                        vm.openPodcast(it.id)
+                                    },
+                                )
+                            } else {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(stringResource(R.string.podcast_select_show), Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
-                    },
-                )
+                    }
+                }
             }
         }
 
@@ -881,6 +903,7 @@ private fun PodcastListView(
     onRefreshAll: () -> Unit,
     onDelete: (PodcastSummary) -> Unit,
     queueHeader: @Composable () -> Unit = {},
+    selectedId: String? = null,
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -908,57 +931,29 @@ private fun PodcastListView(
             }
         }
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", stringResource(R.string.pod_scr_refresh_subscriptions)) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val columns = if (maxWidth >= 720.dp) 2 else 1
-                val rows = remember(podcasts, columns) { podcasts.chunked(columns) }
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().testTag("podcast-list"),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item { queueHeader() }
-                    if (podcasts.isEmpty() && !loading) item {
-                        Box(Modifier.fillParentMaxSize()) {
-                            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
-                                TextButton(onExplore) { Text(if (canAdd) stringResource(R.string.pod_scr_explore_or_add) else stringResource(R.string.pod_scr_explore_trending)) }
-                            }
-                        }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().testTag("podcast-list"),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp, top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item { queueHeader() }
+                if (podcasts.isEmpty() && !loading) item {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
+                        TextButton(onExplore) { Text(if (canAdd) stringResource(R.string.pod_scr_explore_or_add) else stringResource(R.string.pod_scr_explore_trending)) }
                     }
-                    items(rows, key = { row -> row.first().id }) { row ->
-                        if (columns == 1) {
-                            val podcast = row.first()
-                            PodcastCardItem(
-                                podcast = podcast,
-                                onClick = { onSelect(podcast) },
-                                onDelete = { onDelete(podcast) },
-                                onFollow = { onFollow(podcast) },
-                                onAutoDownload = { onAutoDownload(podcast) },
-                                canManage = canManage,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                row.forEach { podcast ->
-                                    PodcastCardItem(
-                                        podcast = podcast,
-                                        onClick = { onSelect(podcast) },
-                                        onDelete = { onDelete(podcast) },
-                                        onFollow = { onFollow(podcast) },
-                                        onAutoDownload = { onAutoDownload(podcast) },
-                                        canManage = canManage,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                if (row.size < columns) {
-                                    Spacer(Modifier.weight((columns - row.size).toFloat()))
-                                }
-                            }
-                        }
-                    }
+                }
+                items(podcasts, key = { it.id }) { podcast ->
+                    PodcastCardItem(
+                        podcast = podcast,
+                        onClick = { onSelect(podcast) },
+                        onDelete = { onDelete(podcast) },
+                        onFollow = { onFollow(podcast) },
+                        onAutoDownload = { onAutoDownload(podcast) },
+                        canManage = canManage,
+                        selected = podcast.id == selectedId,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -974,14 +969,15 @@ private fun PodcastCardItem(
     onAutoDownload: () -> Unit,
     canManage: Boolean,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.clickable(onClick = onClick),
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.testTag("podcast-show-${podcast.id}").semantics { this.selected = selected }.clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

@@ -65,7 +65,7 @@ test('通知进入任务后可以切换管理分类，不重复跳回旧任务',
   await login(page);
   await section(page, '通知中心');
   await page.getByRole('button', { name: '查看整理任务', exact: true }).click();
-  await expect(page.getByRole('region', { name: '元数据更新任务', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '歌曲信息补全', exact: true })).toBeVisible();
   await manageTab(page, '共享音频管理');
   await expect(page.getByRole('region', { name: '共享音频管理', exact: true })).toBeVisible();
   await leaveSettings(page);

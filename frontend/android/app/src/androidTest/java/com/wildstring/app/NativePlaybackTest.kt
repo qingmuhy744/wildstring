@@ -48,7 +48,13 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private data class WindowSpec(val width: Int, val height: Int, val density: Int, val night: Int? = null)
+    private data class WindowSpec(val width: Int, val height: Int, val density: Int, val night: Int? = null) {
+        /** `wm size` argument that produces this window on the running device. */
+        fun shellSize() = "${width}x$height"
+    }
+
+    /** The phone window every non-tablet assertion runs in, pinned instead of inherited from the device. */
+    private val phoneBaseline = WindowSpec(1080, 1920, 420)
     private lateinit var phoneWindow: WindowSpec
     private lateinit var expectedWindow: WindowSpec
     private val androidMain = Handler(Looper.getMainLooper())
@@ -58,12 +64,30 @@ class NativePlaybackTest {
     // Compose queries synchronize with its registered roots. During recreation one
     // of those roots can be an old, detached decor; its frame callback never runs.
     // Keep the Android-window prerequisite independent of Compose/Espresso and bounded.
-    private fun <T> onAndroidMain(action: () -> T): T {
+    private fun <T> onAndroidMain(action: () -> T): T? {
         val value = AtomicReference<Result<T>>()
         val done = CountDownLatch(1)
         check(androidMain.post { value.set(runCatching(action)); done.countDown() })
-        check(done.await(2, TimeUnit.SECONDS)) { "Android main thread did not answer within 2 seconds" }
+        // A starved device can hold the main thread far longer than one poll; the caller
+        // retries until its own deadline instead of failing the whole wait.
+        if (!done.await(2, TimeUnit.SECONDS)) return null
         return value.get().getOrThrow()
+    }
+
+    /** Runs [action] on the main thread, retrying while the device keeps it busy past [timeoutMillis]. */
+    private fun <T> onAndroidMainUntil(timeoutMillis: Long, action: () -> T): T {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        while (true) {
+            onAndroidMain(action)?.let { return it }
+            check(SystemClock.elapsedRealtime() < deadline) { "Android main thread stayed busy for ${timeoutMillis}ms" }
+            SystemClock.sleep(100)
+        }
+    }
+
+    /** Pin the phone window instead of inheriting whatever the device boots with. */
+    private fun resetToPhoneBaseline() {
+        shellForTest("wm size ${phoneBaseline.shellSize()}")
+        shellForTest("wm density ${phoneBaseline.density}")
     }
 
     private fun resumedActivity(): MainActivity? = ActivityLifecycleMonitorRegistry.getInstance()
@@ -130,7 +154,7 @@ class NativePlaybackTest {
                     candidate?.isAttachedToWindow == true && candidate?.hasWindowFocus() == true &&
                     (dialog || activity.window.decorView === candidate)
             }
-            if (ready) { stage("window ready $label"); return }
+            if (ready == true) { stage("window ready $label"); return }
             // Poll a real readiness condition; no guessed animation-duration delay.
             SystemClock.sleep(25)
         }
@@ -172,7 +196,7 @@ class NativePlaybackTest {
             }
             val image = checkNotNull(automation.takeScreenshot())
             // SurfaceFlinger can still expose the old portrait buffer after layout has resized.
-            val resizedFrame = !resized || (image.width == 1600 && image.height == 1000 &&
+            val resizedFrame = !resized || (image.width == expectedWindow.width && image.height == expectedWindow.height &&
                 android.graphics.Color.red(image.getPixel(image.width - 20, image.height / 2)) > 8)
             // Semantics can update before the emulator compositor presents the new visual.
             // Check a blank part of the cassette label / record surface in the real screenshot.
@@ -239,7 +263,7 @@ class NativePlaybackTest {
             runCatching { captureFailure() }
             throw failure
         } finally {
-            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
             activeVm = null
             stage("test cleanup complete $name")
@@ -284,6 +308,7 @@ class NativePlaybackTest {
         try {
             shellForTest("wm density 160"); shellForTest("wm size 1600x1000")
             waitForConfigurationTag("player-tablet")
+            compose.onNodeWithTag("player-visual-stage-tablet").assertIsDisplayed()
             capture("tablet-player.png", resized = true)
             for (style in listOf("vinyl", "cassette")) {
                 compose.runOnIdle { vm.settings.playbackStyle(style) }
@@ -298,7 +323,26 @@ class NativePlaybackTest {
             compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
             capture("tablet-lyrics.png", resized = true)
-        } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+
+            // A landscape window shows the cassette deck itself, not the wide two-column layout.
+            compose.runOnIdle { vm.settings.playbackStyle("cassette") }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("cassette-deck").fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { vm.settings.appearance("light") }
+            capture("cassette-tablet-landscape-light.png", resized = true, style = "cassette")
+            compose.runOnIdle { vm.settings.appearance("dark") }
+            capture("cassette-tablet-landscape-dark.png", resized = true, style = "cassette")
+
+            // Portrait keeps the cassette on top with a lyric frame below it.
+            shellForTest("wm size 1000x1600")
+            expectedWindow = WindowSpec(1000, 1600, 160)
+            waitForAndroidWindow("portrait tablet")
+            compose.onNodeWithTag("player-tablet").assertIsDisplayed()
+            compose.onNodeWithTag("cassette-deck").assertDoesNotExist()
+            capture("cassette-tablet-portrait-dark.png", resized = true, style = "cassette")
+            compose.runOnIdle { vm.settings.appearance("light") }
+            capture("cassette-tablet-portrait-light.png", resized = true, style = "cassette")
+            compose.runOnIdle { vm.settings.appearance("system"); vm.settings.playbackStyle("cover") }
+        } finally { resetToPhoneBaseline() }
         waitForConfigurationTag("player-phone")
     }
 
@@ -443,7 +487,7 @@ class NativePlaybackTest {
         } catch (failure: Throwable) {
             runCatching { captureFailure("tablet-queue-failure.png") }
             throw failure
-        } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+        } finally { resetToPhoneBaseline() }
         waitForConfigurationTag("player-phone")
         compose.runOnIdle { player.pause() }
     }
@@ -555,7 +599,7 @@ class NativePlaybackTest {
 
     private fun rotate(orientation: Int) {
         stage("rotate $orientation")
-        onAndroidMain { checkNotNull(resumedActivity()).requestedOrientation = orientation }
+        onAndroidMainUntil(15_000) { checkNotNull(resumedActivity()).requestedOrientation = orientation }
     }
 
     private fun waitForConfigurationTag(tag: String) {
@@ -594,14 +638,14 @@ class NativePlaybackTest {
 
 
     private fun startPlayback(server: MockWebServer): Session {
-        phoneWindow = onAndroidMain {
-            val activity = checkNotNull(resumedActivity())
-            WindowSpec(activity.window.decorView.width, activity.window.decorView.height, activity.resources.configuration.densityDpi)
-        }
+        phoneWindow = phoneBaseline
         expectedWindow = phoneWindow
+        resetToPhoneBaseline()
+        // Only the window matters here: the player screen does not exist until after login.
+        waitForAndroidWindow("phone baseline")
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         activeVm = vm
-        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)
@@ -660,7 +704,7 @@ class NativePlaybackTest {
         compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
         stage("login complete")
-        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor") }
         compose.onNodeWithText("接口测试专辑").performClick()
         compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("接口测试歌曲").performClick()

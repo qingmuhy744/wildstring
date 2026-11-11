@@ -2131,4 +2131,5 @@
     </string-array>
     <string name="player_landscape_prompt">The phone is lying sideways. Switch to landscape player?</string>
     <string name="player_landscape_prompt_action">Switch</string>
+    <string name="podcast_select_show">Select a show</string>
 </resources>

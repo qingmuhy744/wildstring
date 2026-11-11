@@ -98,14 +98,21 @@ import kotlin.math.roundToInt
     val toggleVisualsLabel = stringResource(R.string.lyric_vp_toggle_lyrics_animation)
     val viewArtworkLabel = stringResource(R.string.lyric_vp_view_artwork)
     val selectLineTimeLabel = stringResource(R.string.lyric_vp_select_line_time)
-    BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
-        detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
-    }.semantics {
+    val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
+    Column(modifier.testTag("lyrics-viewport").clipToBounds().semantics {
         customActions = listOf(CustomAccessibilityAction(toggleVisualsLabel) { onBlank(); true },
             CustomAccessibilityAction(viewArtworkLabel) { onArtwork(); true })
     }) {
-        val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
-        val baseTopPadding = if (hasLanguageChips) 48.dp else 24.dp
+        if (hasLanguageChips) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("lyric-language-toolbar"), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            if (lines.any { !it.translation.isNullOrBlank() })
+                FilterChip(showTranslation, { showTranslation = !showTranslation }, { Text(stringResource(R.string.lyric_vp_translation)) }, modifier = Modifier.testTag("lyric-translation-toggle"))
+            if (lines.any { !it.romanization.isNullOrBlank() })
+                FilterChip(showRomanization, { showRomanization = !showRomanization }, { Text(stringResource(R.string.lyric_vp_romanization)) }, modifier = Modifier.testTag("lyric-romanization-toggle"))
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).testTag("lyric-content").pointerInput(onBlank, onArtwork) {
+            detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
+        }) {
+        val baseTopPadding = 24.dp
         val baseTopPaddingPx = with(density) { baseTopPadding.toPx() }
         val viewportHeightPx = with(density) { maxHeight.toPx() }
         val textWidth = with(density) { (maxWidth - 80.dp).coerceAtLeast(1.dp).roundToPx() }
@@ -118,7 +125,7 @@ import kotlin.math.roundToInt
                 constraints = Constraints(maxWidth = textWidth)).size.height
             return original + extra.sumOf { measurer.measure(AnnotatedString(it), secondaryStyle,
                 constraints = Constraints(maxWidth = textWidth)).size.height } +
-                with(density) { (28.dp + 6.dp * extra.size).roundToPx() }
+                with(density) { (28.dp + 4.dp * extra.size).roundToPx() }
         }
         val totalContentHeightPx = remember(lines, showTranslation, showRomanization, textWidth, scale) {
             (0 until lines.size).sumOf { measuredHeight(it) }
@@ -259,16 +266,15 @@ import kotlin.math.roundToInt
                 }) {
             items(lines.size) { index ->
                 val line = lines[index]
-                val effectiveActive = if (lyrics.kind == "synced") active.coerceAtLeast(0) else -1
                 // Only the line at the playback position is emphasized. Manual browsing moves the viewport.
-                val highlighted = effectiveActive == index
+                val highlighted = active == index
                 Column(Modifier.fillMaxWidth().testTag("lyric-row-$index").padding(horizontal = 40.dp, vertical = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val text = buildAnnotatedString {
                         if (line.words.isNullOrEmpty() || !highlighted) append(line.text.ifBlank { "♪" })
                         else line.words.forEach { word ->
                             val progress = ((renderPosition - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
-                            val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), MaterialTheme.colorScheme.primary, progress)
+                            val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.primary, progress)
                             withStyle(SpanStyle(color = color)) { append(word.text) }
                         }
                     }
@@ -279,31 +285,17 @@ import kotlin.math.roundToInt
                         onClickLabel = selectLineTimeLabel, onLongClickLabel = viewArtworkLabel,
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier
                     val translation = line.translation?.takeIf { showTranslation && it.isNotBlank() }
-                    val translationFirst = translation != null && containsCjk(translation) && !containsCjk(line.text)
-                    val originalColor = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f)
-                    if (translationFirst) {
+                    val originalColor = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    val secondaryColor = if (highlighted) MaterialTheme.colorScheme.onSurface.copy(alpha = .8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle, color = originalColor)
+                    if (translation != null)
                         Text(translation, Modifier.testTag("lyric-translation-$index").then(selection), style = secondaryStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle, color = originalColor)
-                    } else {
-                        Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle, color = originalColor)
-                        if (translation != null)
-                            Text(translation, Modifier.testTag("lyric-translation-$index").then(selection), style = secondaryStyle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                            color = secondaryColor)
                     if (showRomanization && !line.romanization.isNullOrBlank())
                         Text(line.romanization, Modifier.testTag("lyric-romanization-$index").then(selection), style = secondaryStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-
+                            color = secondaryColor)
                 }
             }
-        }
-        Row(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (lines.any { !it.translation.isNullOrBlank() })
-                FilterChip(showTranslation, { showTranslation = !showTranslation }, { Text(stringResource(R.string.lyric_vp_translation)) }, modifier = Modifier.testTag("lyric-translation-toggle"))
-            if (lines.any { !it.romanization.isNullOrBlank() })
-                FilterChip(showRomanization, { showRomanization = !showRomanization }, { Text(stringResource(R.string.lyric_vp_romanization)) }, modifier = Modifier.testTag("lyric-romanization-toggle"))
         }
         if (!follow) {
             TextButton({ follow = true }, Modifier.align(Alignment.TopStart)) { Text(stringResource(R.string.lyric_vp_resume_follow), fontSize = 11.sp) }
@@ -317,9 +309,6 @@ import kotlin.math.roundToInt
                 }
             }
         }
+        }
     }
-}
-
-private fun containsCjk(value: String): Boolean = value.any {
-    it in '\u3400'..'\u4DBF' || it in '\u4E00'..'\u9FFF' || it in '\uF900'..'\uFAFF'
 }

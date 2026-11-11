@@ -1391,7 +1391,7 @@ class Providers:
         def tasks(
             user: admin,
             response: Response,
-            view: View = "active",
+            view: View = "queue",
             limit: int = Query(20, ge=1, le=50),
             offset: int = Query(0, ge=0),
             batch_id: str | None = Query(None, max_length=128),
