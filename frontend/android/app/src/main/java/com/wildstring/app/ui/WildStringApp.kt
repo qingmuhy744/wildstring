@@ -8,7 +8,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import coil.request.ImageRequest
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -219,6 +218,7 @@ fun WildStringApp(model: MusicViewModel) {
         isAppearanceLightNavigationBars = !dark
     } } }
     CompositionLocalProvider(LocalDarkAppearance provides dark,
+        LocalAndroidLayoutMode provides currentAndroidLayoutMode(),
         LocalSongListSize provides preferences.songListSize,
         LocalTactileFeedback provides rememberTactileFeedback { model.settings.state.value.haptics }) {
         MaterialTheme(colorScheme = if (dark) classicDarkColors else classicLightColors) {
@@ -260,7 +260,7 @@ fun WildStringApp(model: MusicViewModel) {
                         val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
                         val countdown = remember(saved.version) { Animatable(1f) }
                         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                        val isTablet = LocalConfiguration.current.screenWidthDp >= 600
+                        val isTablet = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
                         val miniVisible = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
                         val dockHeight = (if (miniVisible) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)
                         val assistantComposer = if (state.tab == "assistant") 72.dp else 0.dp
@@ -572,7 +572,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val wide = safeWidth >= 840.dp && safeHeight >= 480.dp
         val landscapeWindow = safeWidth > safeHeight
         val landscape = landscapeWindow && !wide
-        val rail = safeWidth >= 600.dp && safeHeight >= 480.dp
+        val rail = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val compact = safeHeight < 600.dp
         val floatingQueue = expanded && state.current?.isPodcast == false && wide && !compact
         var wasWide by rememberSaveable { mutableStateOf(wide) }
@@ -591,7 +591,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-            if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, wide = safeWidth >= 840.dp, bottomBar = {
+            if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, wide = rail && safeWidth >= 840.dp, bottomBar = {
                 MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = true) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
             }) { settings = false } }
             else {
@@ -603,7 +603,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     val showMiniPlayer = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                        topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null)) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                        topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null || rail)) CatalogTopBar(if (rail && state.tab == "podcast") state.copy(canGoBack = false) else state, vm::back, { settings = true }, compact = true, unread = unread,
                             notifications = { feature = "notifications" }) },
                         bottomBar = {
                             Surface(
@@ -612,7 +612,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             ) {
                                 Column(
                                     Modifier.fillMaxWidth().then(
-                                        if (!rail) {
+                                        if (!rail || !showMiniPlayer) {
                                             Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
                                         } else {
                                             Modifier
@@ -642,8 +642,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             if (state.tab == "podcast") {
                                 savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm) }
                             } else if (state.tab == "assistant") {
+                                savedPages.SaveableStateProvider("assistant") {
                                 MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true }) {
                                     playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+                                }
                                 }
                             } else {
                             Column(Modifier.fillMaxSize()) {
@@ -1145,7 +1147,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
 @Composable
-internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit) {
+internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false) {
     val current = state.current?.id == track.id
     val album = state.collection == "albums" || state.albumFilter != null
     val size = LocalSongListSize.current
@@ -1169,10 +1171,21 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 PlaybackIndicator(state.playing, state.buffering, color = Color.White)
             }
         }
-        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+        Column(Modifier.weight(if (columns) 2.4f else 1f).padding(start = 14.dp, end = 8.dp)) {
             Text(track.title, Modifier.testTag("track-title-$index"), color = if (!track.isAvailable) Muted else if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(track.unavailableReason, if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
+            val subtitle = listOfNotNull(track.unavailableReason, if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, if (!columns) track.artist else null, metric).joinToString(" · ")
+            if (subtitle.isNotBlank()) Text(subtitle, Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (columns) {
+            Text(track.artist, Modifier.weight(1.4f).heightIn(min = 48.dp).testTag("track-artist-$index")
+                .clickable { vm.openArtistName(track.artists.firstOrNull().orEmpty()) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
+                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.album.orEmpty(), Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("track-album-$index")
+                .clickable(enabled = track.album != null) { vm.openTrackAlbum(track) }.wrapContentHeight().padding(end = 12.dp), color = Muted,
+                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }
     }
@@ -1264,7 +1277,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val thresholdTick = { feedback(TactileKind.Tap) }
     // A phone propped on a stand reads landscape on the accelerometer even with auto-rotate off.
     val context = LocalContext.current
-    val canPrompt = LocalConfiguration.current.smallestScreenWidthDp < 600 && !wide && !landscape && preferences.playbackStyle == "cassette"
+    val canPrompt = LocalAndroidLayoutMode.current == AndroidLayoutMode.Phone && !wide && !landscape && preferences.playbackStyle == "cassette"
     val dock = remember { LandscapeDock() }
     var heldLandscape by remember { mutableStateOf(false) }
     var landscapePrompt by remember { mutableStateOf(false) }
