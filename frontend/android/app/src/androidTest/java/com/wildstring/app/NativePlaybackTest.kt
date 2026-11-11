@@ -48,7 +48,13 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private data class WindowSpec(val width: Int, val height: Int, val density: Int, val night: Int? = null)
+    private data class WindowSpec(val width: Int, val height: Int, val density: Int, val night: Int? = null) {
+        /** `wm size` and `wm density` arguments that produce this window on the running device. */
+        fun shellSize() = "${width}x$height"
+    }
+
+    /** The phone window every non-tablet assertion runs in, pinned instead of inherited from the device. */
+    private val phoneBaseline = WindowSpec(1080, 1920, 420)
     private lateinit var phoneWindow: WindowSpec
     private lateinit var expectedWindow: WindowSpec
     private val androidMain = Handler(Looper.getMainLooper())
@@ -58,12 +64,24 @@ class NativePlaybackTest {
     // Compose queries synchronize with its registered roots. During recreation one
     // of those roots can be an old, detached decor; its frame callback never runs.
     // Keep the Android-window prerequisite independent of Compose/Espresso and bounded.
-    private fun <T> onAndroidMain(action: () -> T): T {
+    private fun <T> onAndroidMain(action: () -> T): T? {
         val value = AtomicReference<Result<T>>()
         val done = CountDownLatch(1)
         check(androidMain.post { value.set(runCatching(action)); done.countDown() })
-        check(done.await(2, TimeUnit.SECONDS)) { "Android main thread did not answer within 2 seconds" }
+        // A starved device (a Play Store tablet AVD can freeze the whole window during a
+        // uiMode change) must not end the whole wait; the caller retries until its own deadline.
+        if (!done.await(2, TimeUnit.SECONDS)) return null
         return value.get().getOrThrow()
+    }
+
+    /** Runs [action] on the main thread, retrying while the device keeps it busy past [timeoutMillis]. */
+    private fun <T> onAndroidMainUntil(timeoutMillis: Long, action: () -> T): T {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        while (true) {
+            onAndroidMain(action)?.let { return it }
+            check(SystemClock.elapsedRealtime() < deadline) { "Android main thread stayed busy for ${timeoutMillis}ms" }
+            SystemClock.sleep(100)
+        }
     }
 
     private fun resumedActivity(): MainActivity? = ActivityLifecycleMonitorRegistry.getInstance()
@@ -91,7 +109,7 @@ class NativePlaybackTest {
             var observer: ViewTreeObserver? = null
             var listener: ViewTreeObserver.OnDrawListener? = null
             var candidate: View? = null
-            onAndroidMain {
+            val observedState = onAndroidMain<Unit> {
                 val activity = resumedActivity()
                 val decor = activity?.window?.decorView
                 val configuration = activity?.resources?.configuration
@@ -122,6 +140,8 @@ class NativePlaybackTest {
                     }
                 }
             }
+            // The main thread can be busy for longer than one poll on a starved device; retry until the deadline.
+            if (observedState == null) { stage("main thread busy during $label"); SystemClock.sleep(100); continue }
             if (candidate != null) rendered.await(minOf(1_500L, maxOf(1L, deadline - SystemClock.elapsedRealtime())), TimeUnit.MILLISECONDS)
             val ready = onAndroidMain {
                 if (observer?.isAlive == true && listener != null) observer!!.removeOnDrawListener(listener)
@@ -130,7 +150,7 @@ class NativePlaybackTest {
                     candidate?.isAttachedToWindow == true && candidate?.hasWindowFocus() == true &&
                     (dialog || activity.window.decorView === candidate)
             }
-            if (ready) { stage("window ready $label"); return }
+            if (ready == true) { stage("window ready $label"); return }
             // Poll a real readiness condition; no guessed animation-duration delay.
             SystemClock.sleep(25)
         }
@@ -172,7 +192,7 @@ class NativePlaybackTest {
             }
             val image = checkNotNull(automation.takeScreenshot())
             // SurfaceFlinger can still expose the old portrait buffer after layout has resized.
-            val resizedFrame = !resized || (image.width == 1600 && image.height == 1000 &&
+            val resizedFrame = !resized || (image.width == expectedWindow.width && image.height == expectedWindow.height &&
                 android.graphics.Color.red(image.getPixel(image.width - 20, image.height / 2)) > 8)
             // Semantics can update before the emulator compositor presents the new visual.
             // Check a blank part of the cassette label / record surface in the real screenshot.
@@ -212,6 +232,8 @@ class NativePlaybackTest {
             throw failure
         } finally {
             runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            // The baseline override is ours; hand the device back at its own size for the next test.
+            runCatching { shellForTest("wm size reset"); shellForTest("wm density reset") }
             shellForTest("cmd uimode night $previousNight")
             stage("test cleanup complete")
         }
@@ -229,7 +251,7 @@ class NativePlaybackTest {
 
     private fun rotate(orientation: Int) {
         stage("rotate $orientation")
-        onAndroidMain { checkNotNull(resumedActivity()).requestedOrientation = orientation }
+        onAndroidMainUntil(15_000) { checkNotNull(resumedActivity()).requestedOrientation = orientation }
     }
 
     private fun waitForConfigurationTag(tag: String) {
@@ -266,12 +288,21 @@ class NativePlaybackTest {
         compose.onNodeWithContentDescription(uiString(R.string.art_prev_download)).assertIsDisplayed()
     }
 
+    /**
+     * Pin the phone window instead of inheriting whatever the device boots with. A tablet AVD would otherwise
+     * start in the wide layout and fail on the phone-only steps before any tablet scene runs.
+     */
+    private fun resetToPhoneBaseline() {
+        shellForTest("wm size ${phoneBaseline.shellSize()}")
+        shellForTest("wm density ${phoneBaseline.density}")
+    }
+
     private fun exercisePlayback() {
-        phoneWindow = onAndroidMain {
-            val activity = checkNotNull(resumedActivity())
-            WindowSpec(activity.window.decorView.width, activity.window.decorView.height, activity.resources.configuration.densityDpi)
-        }
+        phoneWindow = phoneBaseline
         expectedWindow = phoneWindow
+        resetToPhoneBaseline()
+        // Only the window matters here: the player screen does not exist until after login.
+        waitForAndroidWindow("phone baseline")
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
@@ -307,7 +338,7 @@ class NativePlaybackTest {
                         return audioStreamFixture(request, audio, "audio/mpeg", "\"fixture-v1\"")
                     }
                     if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
-                    if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词"},{"time_ms":5000,"text":"下一行测试歌词"}]}""")
+                    if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词","translation":"Lyrics from the synthetic fixture"},{"time_ms":5000,"text":"下一行测试歌词","translation":"The next synthetic line"}]}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":5000}""")
                     if (path.endsWith("/albums")) return json("""{"items":[{"id":"fixture-album","title":"接口测试专辑","artists":["接口测试艺人"],"track_count":1,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
                     if (path.endsWith("/tracks")) return json("""{"items":[$track],"total":1,"limit":50,"offset":0}""")
@@ -363,9 +394,7 @@ class NativePlaybackTest {
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
                 capture("tablet-lyrics.png", resized = true)
             } finally {
-                shell("wm size reset")
-                shell("wm density reset")
-
+                resetToPhoneBaseline()
             }
             waitForConfigurationTag("player-phone")
             compose.waitUntil(10_000) { vm.audioCache.bytes() >= audio.size }
@@ -509,9 +538,11 @@ class NativePlaybackTest {
             try {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 waitForConfigurationTag("player-tablet")
+                compose.onNodeWithTag("player-visual-stage-tablet").assertIsDisplayed()
                 capture("tablet-player-before-queue.png", resized = true)
                 compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
                 // wm size and wm density recreate the activity separately. Wait for the new
                 // SurfaceFlinger buffer as well as semantics before injecting coordinates.
                 capture("tablet-queue-before-drag.png", resized = true)
@@ -519,11 +550,78 @@ class NativePlaybackTest {
                 compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
                 assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 capture("tablet-queue.png", resized = true)
-                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+
+                // The cassette deck uses the same floating queue and the same Media3 order.
+                compose.runOnIdle { vm.settings.playbackStyle("cassette") }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("cassette-deck").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
+                // Leave enough of the short looping fixture to compare progress across the drag.
+                compose.waitUntil(15_000) { compose.runOnIdle { player.isPlaying && player.currentPosition in 1_000..5_000 } }
+                val cassettePosition = compose.runOnIdle { player.currentPosition }
+                dragEntry(playingEntry, originalOrder.last())
+                compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
+                assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+                assertTrue(compose.runOnIdle { player.isPlaying })
+                assertTrue("Moving a queue entry must retain playback position", compose.runOnIdle { player.currentPosition } >= cassettePosition)
+                capture("cassette-tablet-queue.png", resized = true)
+                dragEntry(playingEntry, originalOrder[1])
+                compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
+                assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+
+                // Both dimensions are safe drawing dimensions; resizing keeps the open queue.
+                fun safeWindow(width: Int, height: Int) {
+                    val insets = onAndroidMainUntil(15_000) {
+                        val decor = checkNotNull(resumedActivity()).window.decorView
+                        checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(decor))
+                            .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                    }
+                    val windowWidth = width + insets.left + insets.right
+                    val windowHeight = height + insets.top + insets.bottom
+                    shellForTest("wm size ${windowWidth}x$windowHeight")
+                    expectedWindow = WindowSpec(windowWidth, windowHeight, 160)
+                    waitForAndroidWindow("queue window ${width}x$height")
+                }
+                safeWindow(839, 650)
+                compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
+                compose.onNodeWithTag("playback-queue").assertIsDisplayed()
+                capture("cassette-queue-narrow.png", resized = true)
+                safeWindow(840, 650)
+                compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
+                safeWindow(900, 599)
+                compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
+                compose.onNodeWithTag("playback-queue").assertIsDisplayed()
+                safeWindow(900, 600)
+                compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
+                compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+                compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
+                compose.onNodeWithTag("cassette-deck").assertIsDisplayed()
+
+                shellForTest("wm size 1600x1000")
+                waitForConfigurationTag("player-tablet")
+                compose.runOnIdle { vm.settings.appearance("light") }
+                capture("cassette-tablet-landscape-light.png", resized = true, style = "cassette")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                compose.onNodeWithTag("appearance-dark").assertExists()
+                capture("cassette-tablet-landscape-dark.png", resized = true, style = "cassette")
+                shellForTest("wm size 1000x1600")
+                expectedWindow = WindowSpec(1000, 1600, 160)
+                waitForAndroidWindow("portrait tablet")
+                compose.onNodeWithTag("player-tablet").assertIsDisplayed()
+                compose.onNodeWithTag("cassette-deck").assertDoesNotExist()
+                capture("cassette-tablet-portrait-dark.png", resized = true, style = "cassette")
+                compose.runOnIdle { vm.settings.appearance("light") }
+                capture("cassette-tablet-portrait-light.png", resized = true, style = "cassette")
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+                compose.onNodeWithTag("lyric-content").assertIsDisplayed()
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                compose.onNodeWithTag("lyric-content").assertIsDisplayed()
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+                compose.onNodeWithTag("playback-visual-cassette").assertIsDisplayed()
+                compose.runOnIdle { vm.settings.appearance("system"); vm.settings.playbackStyle("cover") }
             } catch (failure: Throwable) {
                 runCatching { captureFailure("tablet-queue-failure.png") }
                 throw failure
-            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            } finally { resetToPhoneBaseline() }
             waitForConfigurationTag("player-phone")
             stage("appearance controls begin")
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
@@ -582,7 +680,21 @@ class NativePlaybackTest {
                     capture("player-$style-tablet.png", resized = true, style = style)
                 }
                 compose.runOnIdle { vm.settings.playbackStyle("cover") }
-            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            } finally { resetToPhoneBaseline() }
+            waitForConfigurationTag("player-phone")
+            try {
+                compose.runOnIdle { vm.settings.playbackStyle("cassette"); vm.settings.appearance("light") }
+                shellForTest("wm size 390x844"); shellForTest("wm density 160")
+                expectedWindow = WindowSpec(390, 844, 160)
+                waitForAndroidWindow("390dp phone")
+                compose.onNodeWithTag("player-phone").assertIsDisplayed()
+                capture("cassette-phone-390-light.png", resized = true, style = "cassette")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("cassette-phone-390-dark.png", resized = true, style = "cassette")
+            } finally {
+                compose.runOnIdle { vm.settings.appearance("system"); vm.settings.playbackStyle("cover") }
+                resetToPhoneBaseline()
+            }
             waitForConfigurationTag("player-phone")
             stage("offline begin")
             val streamCount = requests.count { it.path?.contains("/stream") == true }

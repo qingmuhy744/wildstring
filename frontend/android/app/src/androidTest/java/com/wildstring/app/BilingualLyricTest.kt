@@ -57,7 +57,7 @@ class BilingualLyricTest {
         return Gson().fromJson(source, Lyrics::class.java)
     }
 
-    @Test fun chineseTranslationAppearsBeforeEnglishSourceAndCanBeHiddenWithoutSeeking() {
+    @Test fun translationFollowsSourceAndCanBeHiddenWithoutSeeking() {
         val lyrics = languageFixture()
         val index = lyrics.lines.indexOfFirst { !it.translation.isNullOrBlank() }
         assertTrue("fixture needs an aligned translation", index >= 0)
@@ -67,7 +67,10 @@ class BilingualLyricTest {
         compose.onNodeWithTag("lyric-translation-$index").assertIsDisplayed()
         val original = compose.onNodeWithTag("lyric-line-$index").fetchSemanticsNode().boundsInRoot
         val translated = compose.onNodeWithTag("lyric-translation-$index").fetchSemanticsNode().boundsInRoot
-        assertTrue("Chinese translation belongs above the English source", translated.bottom <= original.top)
+        assertTrue("The source belongs above its translation", original.bottom <= translated.top)
+        val toolbar = compose.onNodeWithTag("lyric-language-toolbar").fetchSemanticsNode().boundsInRoot
+        val content = compose.onNodeWithTag("lyric-content").fetchSemanticsNode().boundsInRoot
+        assertTrue("Language controls must not overlap scrolling lyrics", toolbar.bottom <= content.top)
         compose.onNodeWithTag("lyric-translation-toggle").performClick()
         compose.onNodeWithTag("lyric-translation-$index").assertDoesNotExist()
         compose.onNodeWithTag("lyric-translation-toggle").performClick()
@@ -119,7 +122,7 @@ class BilingualLyricTest {
         compose.runOnIdle { position.longValue = 18_000L }
         compose.onNodeWithTag("lyric-line-18").assertIsDisplayed()
         compose.onNodeWithTag("lyric-translation-18").assertIsDisplayed()
-        val viewport = compose.onNodeWithTag("lyrics-viewport").fetchSemanticsNode().boundsInRoot
+        val viewport = compose.onNodeWithTag("lyric-content").fetchSemanticsNode().boundsInRoot
         val row = compose.onNodeWithTag("lyric-row-18").fetchSemanticsNode().boundsInRoot
         assertTrue("variable-height destination is centered in the same animation", abs(row.center.y - viewport.center.y) < 3f)
     }
