@@ -130,7 +130,8 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          ram-size: 2048M
+          cores: 2
+          ram-size: 4096M
           disable-animations: true
           # The instrumented suite asserts Chinese copy, so pin the emulator to
           # zh-CN before running it; otherwise resource lookups follow the
