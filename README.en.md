@@ -54,9 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Latest release [v0.8.10](docs/releases/v0.8.10.md)** · Fixes podcast queue ordering across clients, podcast directory search with Fake-IP proxies, and starting playback from the Web queue.
-- **[v0.8.11 in preparation](docs/releases/v0.8.11.md)** · Adds adaptive Android phone and tablet layouts, improves queue drag-and-drop across clients, and combines Web metadata tasks into one queue.
-- **Development branch [PR #110](https://github.com/qingmuhy744/wildstring/pull/110)** · Android gets podcast audio and artwork through your WildString server. Episodes already downloaded to the device still play offline, and artwork for shows that have yet to be added is also cached and served by the server, with placeholders on failure. Tablet podcast exploration keeps results and preview side by side, switching to a single pane in narrow windows. On tablets, Discover aligns search, shortcuts, and the scrollable album row. In the wide layout, tap a song row to play it, or tap its artist or album to open the details. This branch also improves tablet back navigation. When upgrading from legacy instance-wide AI settings, recreate your model connection in assistant settings.
+- **Latest release [v0.8.12](docs/releases/v0.8.12.md)** · Android gets podcast audio and artwork through your WildString server; episodes already downloaded to the device still play offline, and artwork for shows not yet added is cached and served by the server. Tablet Discover and podcast exploration layouts are refined, artists and albums open from wide song rows, and tablet settings navigation is fixed. This release also ships the planned 0.8.11 changes: adaptive Android phone and tablet layouts, queue drag-and-drop across clients, and a single Web metadata task queue. Legacy instance-wide AI settings are removed; recreate your model connection in assistant settings after upgrading.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
