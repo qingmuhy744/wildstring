@@ -75,6 +75,8 @@ export function providerReason(code: unknown, httpStatus?: number): string {
   if (reasons[code]) return reasons[code];
   if (/^lastfm_error_\d+$/.test(code)) return 'providerDiagnostics.reasonLastfmErrorUnmatched';
   if (/^acoustid_error_\d+$/.test(code)) return 'providerDiagnostics.reasonAcoustidErrorUnmatched';
+  // A code outside the map is still a per-source failure, not a broken task. Say that plainly;
+  // the raw code stays available on the row for diagnosis.
   return reasons[code] || 'providerDiagnostics.reasonUnknownError';
 }
 export interface ProviderJob {
