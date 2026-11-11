@@ -154,7 +154,7 @@ class NativePlaybackTest {
                     candidate?.isAttachedToWindow == true && candidate?.hasWindowFocus() == true &&
                     (dialog || activity.window.decorView === candidate)
             }
-            if (ready) { stage("window ready $label"); return }
+            if (ready == true) { stage("window ready $label"); return }
             // Poll a real readiness condition; no guessed animation-duration delay.
             SystemClock.sleep(25)
         }
@@ -196,7 +196,7 @@ class NativePlaybackTest {
             }
             val image = checkNotNull(automation.takeScreenshot())
             // SurfaceFlinger can still expose the old portrait buffer after layout has resized.
-            val resizedFrame = !resized || (image.width == 1600 && image.height == 1000 &&
+            val resizedFrame = !resized || (image.width == expectedWindow.width && image.height == expectedWindow.height &&
                 android.graphics.Color.red(image.getPixel(image.width - 20, image.height / 2)) > 8)
             // Semantics can update before the emulator compositor presents the new visual.
             // Check a blank part of the cassette label / record surface in the real screenshot.
@@ -263,7 +263,7 @@ class NativePlaybackTest {
             runCatching { captureFailure() }
             throw failure
         } finally {
-            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
             activeVm = null
             stage("test cleanup complete $name")
@@ -487,7 +487,7 @@ class NativePlaybackTest {
         } catch (failure: Throwable) {
             runCatching { captureFailure("tablet-queue-failure.png") }
             throw failure
-        } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+        } finally { resetToPhoneBaseline() }
         waitForConfigurationTag("player-phone")
         compose.runOnIdle { player.pause() }
     }
@@ -645,7 +645,7 @@ class NativePlaybackTest {
         waitForAndroidWindow("phone baseline")
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         activeVm = vm
-        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)
@@ -704,7 +704,7 @@ class NativePlaybackTest {
         compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
         stage("login complete")
-        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor") }
         compose.onNodeWithText("接口测试专辑").performClick()
         compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("接口测试歌曲").performClick()
