@@ -14,6 +14,14 @@ save_cache() {
   sudo cp -n /var/cache/apt/archives/*.deb "$CACHE_DIR"/ 2>/dev/null || true
 }
 
+# Canonical's archive can be unreachable; add fallback mirrors after the
+# runner's official entry so apt's mirror+file method tries them in order.
+# Done before any early exit so later apt users in the job (e.g. Playwright
+# --with-deps) benefit too.
+if [ -f /etc/apt/apt-mirrors.txt ]; then
+  printf '%s\n' https://mirrors.edge.kernel.org/ubuntu https://mirror.math.princeton.edu/pub/ubuntu https://mirrors.mit.edu/ubuntu | sudo tee -a /etc/apt/apt-mirrors.txt >/dev/null
+fi
+
 if have_tools; then
   echo "ffmpeg and fpcalc already available; skipping apt."
   exit 0
