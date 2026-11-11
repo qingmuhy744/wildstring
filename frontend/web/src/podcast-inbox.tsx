@@ -220,6 +220,8 @@ export function PodcastInboxDialog({
   const [defaultLimit, setDefaultLimit] = useState(3);
   const [showActions, setShowActions] = useState<Record<string, NewEpisodeAction>>({});
   const [showLimits, setShowLimits] = useState<Record<string, number>>({});
+  const [selectedShows, setSelectedShows] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [problem, setProblem] = useState('');
   const pointerDrag = useRef<number | null>(null);
@@ -455,6 +457,41 @@ export function PodcastInboxDialog({
     }
   }
 
+  /** Applies one action to every selected show at once; rows that fail roll back individually. */
+  async function updateSelectedDelivery(nextAction: NewEpisodeAction) {
+    if (!selectedShows.length || bulkBusy) return;
+    const targets = [...selectedShows];
+    const previous = { ...showActions };
+    setBulkBusy(true);
+    setProblem('');
+    setShowActions((current) => {
+      const next = { ...current };
+      for (const id of targets) next[id] = nextAction;
+      return next;
+    });
+    const results = await Promise.allSettled(
+      targets.map((id) => saveShowDelivery(id, nextAction, showLimits[id] ?? defaultLimit)),
+    );
+    const failed = targets.filter((_, index) => results[index].status === 'rejected');
+    setShowActions((current) => {
+      const next = { ...current };
+      for (const id of failed) {
+        if (previous[id]) next[id] = previous[id];
+        else delete next[id];
+      }
+      return next;
+    });
+    setBulkBusy(false);
+    if (failed.length) setProblem(t('podcastInbox.bulkDeliveryFailed', { count: failed.length }));
+    else setSelectedShows([]);
+  }
+
+  function toggleShowSelection(showId: string) {
+    setSelectedShows((current) =>
+      current.includes(showId) ? current.filter((id) => id !== showId) : [...current, showId],
+    );
+  }
+
   const playableCount = rows.filter((item) => item.episode && item.show).length;
   const sortedRuleShows = [...followedShows].sort((a, b) => {
     const actionA = showActions[a.id] ?? defaultAction;
@@ -642,27 +679,86 @@ export function PodcastInboxDialog({
                 </button>
               </div>
             ) : (
-              <ul className="podcast-inbox-list">
-                {sortedRuleShows.map((show) => {
-                  const currentAction = showActions[show.id] ?? defaultAction;
-                  return (
-                    <li className="podcast-inbox-item compact" key={`delivery-${show.id}`}>
-                      <div className="podcast-inbox-copy">
-                        <strong>{show.title}</strong>
-                      </div>
-                      <div className="podcast-inbox-actions">
-                        <ActionSelect
-                          label={t('podcastInbox.deliveryLabel')}
-                          ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
-                          hideLabel
-                          value={currentAction}
-                          onChange={(value) => void updateShowDelivery(show.id, value)}
+              <>
+                <div className="podcast-inbox-bulk-bar">
+                  <label className="podcast-inbox-select-all">
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedShows.length > 0 && selectedShows.length === sortedRuleShows.length
+                      }
+                      onChange={(event) =>
+                        setSelectedShows(
+                          event.target.checked ? sortedRuleShows.map((show) => show.id) : [],
+                        )
+                      }
+                    />
+                    {t('podcastInbox.selectAllShows')}
+                  </label>
+                  {selectedShows.length > 0 && (
+                    <div className="podcast-inbox-bulk-actions" role="group">
+                      <span className="podcast-inbox-bulk-count">
+                        {t('podcastInbox.selectedShows', { count: selectedShows.length })}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={bulkBusy}
+                        onClick={() => void updateSelectedDelivery('queue_last')}
+                      >
+                        {t('podcastInbox.actionQueueLast')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkBusy}
+                        onClick={() => void updateSelectedDelivery('ignore')}
+                      >
+                        {t('podcastInbox.actionIgnore')}
+                      </button>
+                      <button
+                        type="button"
+                        className="podcast-inbox-bulk-clear"
+                        disabled={bulkBusy}
+                        onClick={() => setSelectedShows([])}
+                      >
+                        {t('podcastInbox.clearSelection')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <ul className="podcast-inbox-list">
+                  {sortedRuleShows.map((show) => {
+                    const currentAction = showActions[show.id] ?? defaultAction;
+                    const selected = selectedShows.includes(show.id);
+                    return (
+                      <li
+                        className={`podcast-inbox-item compact${selected ? ' selected' : ''}`}
+                        key={`delivery-${show.id}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="podcast-inbox-select"
+                          checked={selected}
+                          aria-label={t('podcastInbox.selectShowAria', { title: show.title })}
+                          onChange={() => toggleShowSelection(show.id)}
                         />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                        <div className="podcast-inbox-copy">
+                          <strong>{show.title}</strong>
+                        </div>
+                        <div className="podcast-inbox-actions">
+                          <ActionSelect
+                            label={t('podcastInbox.deliveryLabel')}
+                            ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
+                            hideLabel
+                            disabled={selected}
+                            value={currentAction}
+                            onChange={(value) => void updateShowDelivery(show.id, value)}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
           </section>
         )}

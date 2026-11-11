@@ -3023,7 +3023,12 @@
     "reorderAria": "Reorder {{title}}",
     "moveUp": "Move {{title}} up",
     "moveDown": "Move {{title}} down",
-    "reorderFailed": "The order could not be saved. The list was restored; try again."
+    "reorderFailed": "The order could not be saved. The list was restored; try again.",
+    "selectAllShows": "Select all",
+    "selectShowAria": "Select {{title}}",
+    "selectedShows": "{{count}} selected",
+    "clearSelection": "Clear selection",
+    "bulkDeliveryFailed": "{{count}} shows could not be saved; their previous setting was restored."
   },
   "podcastOpml": {
     "closeDialog": "Close OPML import",

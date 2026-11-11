@@ -3023,7 +3023,12 @@
     "reorderAria": "调整 {{title}} 的顺序",
     "moveUp": "上移 {{title}}",
     "moveDown": "下移 {{title}}",
-    "reorderFailed": "顺序保存失败，已恢复原顺序，请重试。"
+    "reorderFailed": "顺序保存失败，已恢复原顺序，请重试。",
+    "selectAllShows": "全选",
+    "selectShowAria": "选择 {{title}}",
+    "selectedShows": "已选 {{count}} 个",
+    "clearSelection": "取消选择",
+    "bulkDeliveryFailed": "有 {{count}} 个节目保存失败，已恢复原设置。"
   },
   "podcastOpml": {
     "closeDialog": "关闭 OPML 导入",
