@@ -62,5 +62,7 @@ object ApplicationModule {
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =
         Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").addMigrations(QueueDatabase.MIGRATION_1_2).build()
     @Provides @Singleton fun images(@ApplicationContext context: Context, client: OkHttpClient): ImageLoader =
-        ImageLoader.Builder(context).okHttpClient(client).diskCache(null).build()
+        // A local server can be reachable without an Android INTERNET network; let HTTP and
+        // our private cover cache decide instead of Coil forcing cache-only requests.
+        ImageLoader.Builder(context).okHttpClient(client).networkObserverEnabled(false).diskCache(null).build()
 }
