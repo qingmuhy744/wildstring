@@ -1,29 +1,89 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="300" viewBox="0 0 960 300" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title">
   <title id="title">WildString 野弦 · Personal Sound Archive 个人声音档案</title>
-  <rect width="960" height="300" rx="18" fill="#211E1B"/>
-  <path d="M55 38h850M55 262h850" stroke="#3A352F"/>
+  <defs>
+    <clipPath id="frame"><rect width="1200" height="380" rx="20"/></clipPath>
+    <linearGradient id="paper" x2="1" y2="1">
+      <stop stop-color="#27231C"/>
+      <stop offset=".5" stop-color="#1A1815"/>
+      <stop offset="1" stop-color="#161512"/>
+    </linearGradient>
+    <radialGradient id="light" cx=".78" cy=".35" r=".65">
+      <stop stop-color="#9C573D" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#9C573D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="strings" x2="1" y2="0">
+      <stop stop-color="#E98A6D" stop-opacity="0"/>
+      <stop offset=".52" stop-color="#E98A6D" stop-opacity=".43"/>
+      <stop offset=".79" stop-color="#D6A37C" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#D6A37C" stop-opacity=".12"/>
+    </linearGradient>
+    <linearGradient id="vinyl" x2="1" y2="1">
+      <stop stop-color="#0D0D0C"/>
+      <stop offset=".36" stop-color="#35312A"/>
+      <stop offset=".55" stop-color="#151410"/>
+      <stop offset=".78" stop-color="#27241F"/>
+      <stop offset="1" stop-color="#11100E"/>
+    </linearGradient>
+    <linearGradient id="sheen" x2="1" y2="0">
+      <stop stop-color="#DDB693" stop-opacity="0"/>
+      <stop offset=".51" stop-color="#DDB693" stop-opacity=".29"/>
+      <stop offset="1" stop-color="#DDB693" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="label" x2="1" y2="1">
+      <stop stop-color="#AD6148"/>
+      <stop offset="1" stop-color="#653827"/>
+    </linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" seed="19" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+    <path id="string" d="M-32 364C189 326 294 364 477 305S683 151 810 140s235 92 418-19"/>
+  </defs>
 
-  <g fill="none">
-    <circle cx="760" cy="150" r="96" fill="#181614" stroke="#514942"/>
-    <circle cx="760" cy="150" r="85" stroke="#3A352F"/>
-    <circle cx="760" cy="150" r="77" stroke="#3A352F"/>
-    <circle cx="760" cy="150" r="69" stroke="#3A352F"/>
-    <circle cx="760" cy="150" r="61" stroke="#3A352F"/>
-    <circle cx="760" cy="150" r="45" fill="#43302A" stroke="#E98A6D"/>
-    <circle cx="760" cy="150" r="3" fill="#E98A6D"/>
-    <g transform="translate(668 151) rotate(-16)" stroke="#E98A6D" stroke-width="3" stroke-linecap="round">
-      <path d="M-25-9c16-16 34 16 51 0"/>
-      <path d="M-25 0c16-16 34 16 51 0"/>
-      <path d="M-25 9c16-16 34 16 51 0"/>
+  <g clip-path="url(#frame)">
+    <path d="M0 0h1200v380H0z" fill="url(#paper)"/>
+    <path d="M0 0h1200v380H0z" fill="url(#light)"/>
+
+    <g transform="translate(949 195)">
+      <circle r="196" fill="#100E0C" opacity=".36" cy="11"/>
+      <circle r="188" fill="url(#vinyl)" stroke="#635046"/>
+      <g fill="none" stroke="#BBAB93" stroke-opacity=".19" stroke-width="1">
+        <circle r="183"/><circle r="179"/><circle r="173"/><circle r="168"/>
+        <circle r="164"/><circle r="157"/><circle r="152"/><circle r="148"/>
+        <circle r="141"/><circle r="136"/><circle r="132"/><circle r="125"/>
+        <circle r="120"/><circle r="116"/><circle r="109"/><circle r="104"/>
+        <circle r="100"/><circle r="93"/><circle r="88"/><circle r="84"/>
+      </g>
+      <path d="M-170-80A188 188 0 0 1-105-156L0 0l169 82a188 188 0 0 1-68 76Z" fill="url(#sheen)"/>
+      <circle r="74" fill="#1B1612" stroke="#6A4F41"/>
+      <circle r="67" fill="url(#label)"/>
+      <circle r="58" fill="none" stroke="#F1B89C" stroke-opacity=".42"/>
+      <circle r="50" fill="none" stroke="#F1B89C" stroke-opacity=".24"/>
+      <g transform="translate(0 -18) rotate(-14)" fill="none" stroke="#F8D5BD" stroke-width="2.5" stroke-linecap="round">
+        <path d="M-23-8c15-14 31 14 46 0M-23 0c15-14 31 14 46 0M-23 8c15-14 31 14 46 0"/>
+      </g>
+      <circle r="4" fill="#241913"/>
+      <path d="M-22 25h44m-30 6h16" stroke="#F8D5BD" stroke-opacity=".65"/>
     </g>
+
+    <g fill="none" stroke="url(#strings)" stroke-width="1.4">
+      <use href="#string"/>
+      <use href="#string" y="10" opacity=".75"/>
+      <use href="#string" y="20" opacity=".5"/>
+      <use href="#string" y="30" opacity=".28"/>
+    </g>
+    <rect width="1200" height="380" filter="url(#grain)" opacity=".08"/>
+    <rect x="16.5" y="16.5" width="1167" height="347" rx="10" fill="none" stroke="#DEC4A8" stroke-opacity=".19"/>
   </g>
 
-  <g fill="#E8E3D9" font-family="Georgia, 'Songti SC', 'Noto Serif CJK SC', serif">
-    <text x="59" y="137" font-size="66">WildString</text>
-    <text x="61" y="204" font-size="49" lang="zh-CN">野弦</text>
+  <g transform="translate(77 62)" fill="none" stroke="#E98A6D" stroke-width="3" stroke-linecap="round">
+    <path d="M0 0c12-12 25 12 37 0M0 9c12-12 25 12 37 0M0 18c12-12 25 12 37 0"/>
   </g>
-  <g fill="#E98A6D" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="25">
-    <text x="62" y="80">Personal Sound Archive</text>
-    <text x="187" y="201" lang="zh-CN">个人声音档案</text>
+  <text x="70" y="180" fill="#F6EEE0" font-family="Georgia, serif" font-size="105" letter-spacing="-3">WildString</text>
+  <text x="73" y="258" fill="#F6EEE0" font-family="'Songti SC', 'Noto Serif CJK SC', serif" font-size="68" letter-spacing="5" lang="zh-CN">野弦</text>
+  <path d="M248 207v49" stroke="#B78067" stroke-opacity=".7"/>
+  <g fill="#EDB297" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="27">
+    <text x="271" y="222" lang="zh-CN" letter-spacing="3">个人声音档案</text>
+    <text x="271" y="257" letter-spacing=".65">Personal Sound Archive</text>
   </g>
 </svg>
