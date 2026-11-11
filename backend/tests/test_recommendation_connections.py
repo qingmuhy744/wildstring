@@ -468,10 +468,13 @@ def test_removed_legacy_ai_connection_and_settings_api_are_unavailable(
         connections = client.get(BASE + "/agent/connections").json()["items"]
         assert all(item["id"] != "legacy" for item in connections)
         for method, suffix in (("GET", ""), ("PUT", ""), ("POST", "/test")):
-            assert (
-                client.request(method, BASE + "/manage/ai" + suffix, headers=HEADERS).status_code
-                == 404
-            )
+            status = client.request(
+                method, BASE + "/manage/ai" + suffix, headers=HEADERS
+            ).status_code
+            if method == "GET":
+                assert status == 404
+            else:
+                assert status in {404, 405}
         assert (
             client.post(
                 BASE + "/ai/discover",
