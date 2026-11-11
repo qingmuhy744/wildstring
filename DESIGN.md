@@ -224,6 +224,7 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
   - `保存到服务器` / `取消个人保存`.
 - **Podcast Episode Dialog (`PodcastEpisodeDialog`)**:
   - Modal view with show cover, title, metadata (pub date, duration, online/downloaded availability), rich description, and action buttons (`播放单集`, `下一集播放`, `加入待播`, `下载音频`, `保存到服务器`, `单集收藏` / `取消收藏`).
+- **Android podcast exploration**: On Pad with at least `720dp` available content width, keep equally weighted result and preview panes with a `16dp` gap and independent scrolling. Automatically preview the first result after loading; this never adds or follows a show. The result list stays in place when selecting another show. Use native touch targets from §5.2 and preserve the selected card, search draft and result scroll position when resizing. Narrower windows use list-to-preview navigation, with Back returning to the results before closing exploration; in the wide layout the close action always exits exploration. A pasted RSS address uses one centered preview with a maximum reading width of `760dp`. Preview artwork uses the existing `92dp` show-header size. On Pad, place confirmation directly after a short preview; long previews scroll within the pane while keeping confirmation available. Keep search and region controls available in both modes.
 - **Podcast Discovery & Chart Caching**:
   - 1-hour TTL in-memory caching and silent prefetch on idle (800ms debounce) for discovery charts, ensuring zero-latency reopen without loading flash.
 
