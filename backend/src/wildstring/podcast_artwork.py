@@ -4,8 +4,9 @@ import io
 import os
 import urllib.request
 from tempfile import NamedTemporaryFile
+from typing import Annotated
 
-from fastapi import HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from wildstring.library.assets import MAX_PIXELS
@@ -92,3 +93,14 @@ def image_response(data):
         media_type="image/jpeg",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
+
+
+def artwork_router(manager, auth) -> APIRouter:
+    """Expose the cover proxy separately so podcasts.py never imports this module back."""
+    router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
+
+    @router.get("/{podcast_id}/cover")
+    def get_podcast_cover(podcast_id: str, user: Annotated[dict, Depends(auth.require_session)]):
+        return cover(manager, user["id"], podcast_id)
+
+    return router
