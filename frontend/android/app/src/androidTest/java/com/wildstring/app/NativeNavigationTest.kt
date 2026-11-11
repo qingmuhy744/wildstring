@@ -27,6 +27,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
@@ -36,6 +37,8 @@ class NativeNavigationTest {
     private fun shell(command: String) {
         ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)).use { it.readBytes() }
     }
+    private fun phoneWindow() { shell("wm size 1080x1920"); shell("wm density 420") }
+    @Before fun prepareWindow() { phoneWindow() }
     private fun capture(name: String) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -190,9 +193,13 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("navigation-rail").assertIsDisplayed()
                 assertEquals("Opening and closing settings must not reload the catalog", count, requests.get())
                 capture("native-tablet-library.png")
-                shell("wm size reset"); shell("wm density reset")
+                phoneWindow()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty() }
                 capture("native-phone-library-restored.png")
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+                compose.onNodeWithTag("setting-category-storage").performScrollTo().assertIsDisplayed()
+                capture("native-phone-settings-after-tablet.png")
+                compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithTag("album-grid").performScrollToIndex(16)
                 compose.onNodeWithTag("nav-search").performClick()
                 compose.onNodeWithTag("catalog-search").performTextInput("测试")
@@ -297,7 +304,7 @@ class NativeNavigationTest {
                 // the width to the old capsule maximum.
                 assertTrue(compose.onNodeWithTag("mini-player").fetchSemanticsNode().size.width > 0)
                 capture("reference-tablet-settings-player.png")
-                shell("wm size reset"); shell("wm density reset")
+                phoneWindow()
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width == phoneSettingsWidth }
                 compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithTag("settings-back").performClick()
@@ -313,7 +320,7 @@ class NativeNavigationTest {
             } finally {
                 refreshGate.countDown()
                 compose.runOnIdle { pauseObserver?.release() }
-                shell("wm size reset"); shell("wm density reset")
+                phoneWindow()
                 compose.runOnIdle { vm.settings.appearance("system"); vm.logout() }
                 compose.waitUntil(10_000) { !vm.state.value.connected }
             }
