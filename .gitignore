@@ -25,6 +25,8 @@ playwright-report/
 test-results/
 *.log
 *.tsbuildinfo
+*.swp
+*.swo
 .idea/
 .vscode/
 .gradle/

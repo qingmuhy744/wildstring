@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
     back: () -> Unit,
     bottomBar: @Composable () -> Unit = {},
     scrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+    sidebarScrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+    sidebar: (@Composable () -> Unit)? = null,
     title: String = stringResource(R.string.settings_title),
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -38,20 +40,25 @@ import androidx.compose.ui.unit.dp
             }, windowInsets = WindowInsets(0, 0, 0, 0),
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
         }) { padding ->
-        Box(
-            Modifier.fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState, overscrollEffect = null),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            Column(
-                Modifier.widthIn(max = 720.dp).fillMaxWidth()
-                    .testTag("settings-scroll")
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                content = content,
-            )
+        Row(Modifier.fillMaxSize().padding(padding).then(if (sidebar != null) Modifier.testTag("settings-two-pane") else Modifier)) {
+            if (sidebar != null) Column(
+                Modifier.width(260.dp).fillMaxHeight().testTag("settings-categories")
+                    .verticalScroll(sidebarScrollState, overscrollEffect = null)
+                    .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            ) { sidebar() }
+            Box(
+                Modifier.weight(1f).fillMaxHeight().verticalScroll(scrollState, overscrollEffect = null),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Column(
+                    Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                        .testTag("settings-scroll")
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    content = content,
+                )
+            }
         }
     }
 }
