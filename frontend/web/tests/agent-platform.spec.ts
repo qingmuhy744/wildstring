@@ -512,25 +512,24 @@ test('连接编辑仅发送允许字段，MCP 凭据只显示一次且可撤销'
   ).toContainText('凭据已撤销');
 });
 
-test('已有实例模型可手动巡检，定时计划仍要求自动使用授权', async ({ page }, info) => {
+test('手动模型可巡检，定时计划仍要求自动使用授权', async ({ page }, info) => {
   await fixture(page);
-  const legacy = {
-    id: 'legacy',
-    name: '实例 AI（已有配置）',
+  const manual = {
+    id: 'manual',
+    name: '手动巡检模型',
     model: 'synthetic',
     enabled: true,
-    read_only: true,
+    read_only: false,
     background_allowed: false,
   };
   const automatic = {
-    ...legacy,
+    ...manual,
     id: 'automatic',
     name: '自动巡检模型',
-    read_only: false,
     background_allowed: true,
   };
   await page.route('**/api/v1/agent/connections', (r) =>
-    r.fulfill({ json: list([legacy, automatic]) }),
+    r.fulfill({ json: list([manual, automatic]) }),
   );
   let submitted: any = null;
   await page.route('**/api/v1/agent/tasks', (r) => {
@@ -543,13 +542,13 @@ test('已有实例模型可手动巡检，定时计划仍要求自动使用授�
   const submit = page.getByRole('button', { name: '提交 AI 辅助巡检', exact: true });
   await expect(submit).toBeDisabled();
   await expect(page.getByText('请选择用于本次巡检的 AI 连接。', { exact: true })).toBeVisible();
-  await page.getByLabel('巡检模型连接', { exact: true }).selectOption('legacy');
+  await page.getByLabel('巡检模型连接', { exact: true }).selectOption('manual');
   await expect(submit).toBeEnabled();
   await page.screenshot({ path: info.outputPath('manual-ai-inspection.png'), fullPage: true });
   await submit.click();
   await expect
     .poll(() => submitted)
-    .toEqual({ max_tracks: 500, max_calls: 4, use_ai: true, connection_id: 'legacy' });
+    .toEqual({ max_tracks: 500, max_calls: 4, use_ai: true, connection_id: 'manual' });
   await page.getByRole('button', { name: '定时巡检', exact: true }).click();
   const save = page.getByRole('button', { name: '保存关闭的计划', exact: true });
   await expect(save).toBeDisabled();

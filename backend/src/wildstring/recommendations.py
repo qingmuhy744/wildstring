@@ -196,7 +196,9 @@ class Recommendations(ExternalRecommendations):
         if "connection_id" in fields:
             result["connection_id"] = body.connection_id or "local"
         elif "use_ai" in fields:
-            result["connection_id"] = "legacy" if body.use_ai else "local"
+            if body.use_ai:
+                raise HTTPException(422, "ai_connection_required")
+            result["connection_id"] = "local"
         if "sources" not in fields and "use_lastfm" in fields:
             result["sources"] = [
                 source for source in current["sources"] if source != "lastfm_similar"
@@ -204,7 +206,7 @@ class Recommendations(ExternalRecommendations):
         result["sources"] = list(dict.fromkeys(result["sources"]))
         result["use_ai"] = result["connection_id"] != "local"
         result["use_lastfm"] = any(source.startswith("lastfm_") for source in result["sources"])
-        if result["connection_id"] not in {"local", "legacy"}:
+        if result["connection_id"] != "local":
             if self.platform is None:
                 raise HTTPException(503, "agent_platform_unavailable")
             self.platform.connection_for(
@@ -251,7 +253,7 @@ class Recommendations(ExternalRecommendations):
             if body.sources is not None:
                 options["sources"] = list(dict.fromkeys(body.sources))
         options["warnings"] = []
-        if options["connection_id"] not in {"local", "legacy"}:
+        if options["connection_id"] != "local":
             if self.platform is None:
                 raise HTTPException(503, "agent_platform_unavailable")
             try:
@@ -622,7 +624,7 @@ class Recommendations(ExternalRecommendations):
         # Retained method name for older integrations; generation uses explicit adapters.
         return False
 
-    def model_select(self, candidates, prompt, limit, *, repository=None, connection_id="legacy"):
+    def model_select(self, candidates, prompt, limit, *, repository=None, connection_id="local"):
         if self.platform is None or repository is None:
             raise HTTPException(503, "agent_platform_unavailable")
         actor = self.platform.current_actor(repository.database.user_id)

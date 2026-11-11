@@ -46,7 +46,7 @@ async function fixture(page: Page) {
   };
   const connection = (id: string, scope: string, shared: boolean) => ({
     id,
-    name: id === 'mine' ? '我的连接' : id === 'shared' ? '全站共享' : '原有实例',
+    name: id === 'mine' ? '我的连接' : '全站共享',
     scope,
     shared,
     model: 'synthetic-model',
@@ -61,12 +61,8 @@ async function fixture(page: Page) {
   await page.route('**/api/v1/agent/connections?*', (route) =>
     route.fulfill({
       json: {
-        items: [
-          connection('mine', 'personal', false),
-          connection('shared', 'instance', true),
-          connection('legacy', 'instance', true),
-        ],
-        total: 3,
+        items: [connection('mine', 'personal', false), connection('shared', 'instance', true)],
+        total: 2,
         limit: 100,
         offset: 0,
       },
@@ -127,7 +123,7 @@ test('统一连接和来源：保存不执行模型，显式请求共用连接�
   await panel.locator('.ai-discover > summary').click();
   const selector = panel.getByLabel('这次找歌使用的连接', { exact: true });
   await expect(selector).toHaveValue('local');
-  await expect(selector.locator('option')).toHaveCount(4);
+  await expect(selector.locator('option')).toHaveCount(3);
   await selector.selectOption('shared');
   await expect(panel.locator('.model-budget').first()).toContainText('今日剩余 16 次');
   await panel.getByText('推荐偏好', { exact: true }).click();
@@ -367,7 +363,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
   });
 });
 
-test('统一连接管理入口与旧实例配置都在助手设置中', async ({ page }) => {
+test('助手设置提供统一连接管理入口', async ({ page }) => {
   await fixture(page);
   await page.getByText('推荐偏好', { exact: true }).click();
   await page
@@ -377,9 +373,7 @@ test('统一连接管理入口与旧实例配置都在助手设置中', async ({
     .click();
   const panel = page.getByRole('region', { name: '助手与通知设置', exact: true });
   await expect(panel).toContainText('模型连接');
-  await expect(panel.getByText('原有实例连接（兼容配置）', { exact: true })).toBeVisible();
-  await panel.getByText('原有实例连接（兼容配置）', { exact: true }).click();
-  await expect(panel.getByLabel('AI 服务配置', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '添加连接', exact: true })).toBeVisible();
 });
 
 test('真实后端：账号推荐设置、本地请求和收听排行可回读', async ({ page }, info) => {

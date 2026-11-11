@@ -58,13 +58,11 @@ export function useModelConnections() {
 }
 export function connectionLabel(item: AgentConnection, t: TFunction) {
   const scope =
-    item.id === 'legacy'
-      ? t('modelConnection.legacy')
-      : item.scope === 'personal'
-        ? t('modelConnection.personal')
-        : item.shared
-          ? t('modelConnection.shared')
-          : t('modelConnection.instance');
+    item.scope === 'personal'
+      ? t('modelConnection.personal')
+      : item.shared
+        ? t('modelConnection.shared')
+        : t('modelConnection.instance');
   return `${item.name} · ${scope} · ${item.model}`;
 }
 export function ModelConnectionChoice({

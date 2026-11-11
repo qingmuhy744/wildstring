@@ -4,7 +4,7 @@
 
 ## 模型连接
 
-模型连接可选择 Chat Completions 或 Responses，及 generic / OpenAI / DeepSeek / 千问 / Gemini 兼容档案。档案负责请求参数，不能替代实际模型能力验证。已有连接、原实例 AI 的地址、密钥、权限与预算保留；旧客户端编辑新连接时，未提交的协议选项保留。
+模型连接可选择 Chat Completions 或 Responses，及 generic / OpenAI / DeepSeek / 千问 / Gemini 兼容档案。档案负责请求参数，不能替代实际模型能力验证。实例 AI 配置统一由模型连接管理；旧实例配置文件不再读取，旧偏好不会自动绑定到新连接。旧客户端编辑新连接时，未提交的协议选项保留。
 
 适配层保留 Chat 的 reasoning_content、extra_content 及工具调用内部字段；Responses 原样续接当前轮的 output items，包括推理与搜索状态。OpenAI 无状态请求显式索取加密推理内容和已启用原生搜索的来源。续接状态只在当前模型执行中使用，不展示为证据、不跨供应商转交。跨轮历史保留可见文本与来源；未持久化供应商原始推理状态，进程中断不承诺原生研究断点续接。截断响应不会当作完整回答执行。
 

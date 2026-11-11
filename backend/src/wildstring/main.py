@@ -181,7 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(transcoding.router(auth))
     app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
-    app.include_router(management_router(management, auth, providers))
+    app.include_router(management_router(management, auth))
     app.include_router(experience_router(repository, auth, providers, platform))
     app.include_router(podcasts.resources.router(auth))
     app.include_router(

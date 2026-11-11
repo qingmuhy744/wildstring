@@ -1,6 +1,6 @@
 # 库存储、迁移与播客共享资源
 
-存储契约起于 schema 43；当前开发库 schema 50，登录防护兼容迁移不改变存储与资源结构。历史验证记录见 0.8.0 发布说明，本轮见[客户端与播客探索改进](../docs/product/client-and-podcast-explore.md)。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
+存储契约起于 schema 43；当前开发库 schema 51，移除旧 AI 配置的迁移不改变存储与资源结构。历史验证记录见 0.8.0 发布说明，本轮见[客户端与播客探索改进](../docs/product/client-and-podcast-explore.md)。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
 
 ## 库配置
 

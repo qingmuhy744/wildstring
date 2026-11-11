@@ -549,7 +549,7 @@
     <string name="agent_plat_diagnostic_id">Diagnostic ID: %1$s</string>
     <string name="agent_plat_err_ai_content_filtered">Model service filtered this output. Please adjust the scope of your prompt before resuming; resuming may incur fees.</string>
     <string name="agent_plat_err_ai_output_incomplete">Model output incomplete. Please increase output token limit or narrow the question scope.</string>
-    <string name="agent_plat_err_ai_output_limit">Model reached output token limit; analysis incomplete. Please increase limit or decrease reasoning effort in AI Connections; for legacy connections, please create a new configurable connection. Resume after adjustments; resuming may incur fees.</string>
+    <string name="agent_plat_err_ai_output_limit">Model reached output token limit; analysis incomplete. Please increase the limit in this AI connection or decrease reasoning effort. Resume after adjustments; resuming may incur fees.</string>
     <string name="agent_plat_err_ai_response_failed">Model service failed to complete this response. Please check service status before resuming; resuming may incur fees.</string>
     <string name="agent_plat_err_album_membership_changed">Album track scope has changed. Please reload and generate the batch draft again.</string>
     <string name="agent_plat_err_application_policy_version_conflict">Curation settings were updated on another device. Please reload and save again.</string>
@@ -781,7 +781,6 @@
     <string name="agent_ws_issue_same_title_versions">Versions with same title need verification</string>
     <string name="agent_ws_issue_track_number_conflict">Duplicate track number on same disc</string>
     <string name="agent_ws_issue_track_number_out_of_range">Track number exceeds total tracks</string>
-    <string name="agent_ws_legacy_connection_hint">Uses the server\'s existing AI configuration for manual inspections. For scheduled inspections, please add and authorize a new connection.</string>
     <string name="agent_ws_local_search_fallback">Local keyword search · Model not invoked</string>
     <string name="agent_ws_lyrics_song_source">Track: %1$s · %2$s</string>
     <string name="agent_ws_manual_ai_budget_notice">Starting authorizes this single AI inspection only; model fees may occur, constrained by call limits and daily budget. Results are reviewed or applied according to curation settings.</string>

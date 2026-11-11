@@ -8,7 +8,7 @@
 
 | 字段 | 默认 / 约束 |
 | --- | --- |
-| `connection_id` | `local`；或本人/管理员共享实例连接 ID、只读兼容 `legacy` |
+| `connection_id` | `local`；或本人/管理员明确共享的实例连接 ID |
 | `count` | 20，1–50 |
 | `sources` | `personal,community,discovery,revisit`；可加 `lastfm_similar,lastfm_charts,lastfm_tags` |
 | `lastfm_tags` | 最多 3 个、每个 1–50 字符 |
@@ -18,7 +18,7 @@
 | `external_use_ai` | false；开启并选择非 local 连接后，外部批次生成才能调用模型 |
 | `external_call_limit` | 6，1–8 次来源网络请求/批，缓存命中不占次数 |
 
-兼容字段 `use_ai/use_lastfm` 保留：旧库中此前明确 `use_ai=true` 的偏好迁移成 `legacy`；新账户默认 local。旧客户端单独保存 `use_ai` 切换 legacy/local，单独保存 `use_lastfm` 切换 similar；新客户端以 `connection_id/sources` 为准。`null` 连接明确表示 local。
+`use_ai/use_lastfm` 是由连接和来源计算出的响应字段。旧版请求传入 `use_ai=true` 但未选择 `connection_id` 时返回 `422 ai_connection_required`，不会读取旧实例 AI 配置；数据库升级会把此前的 AI 推荐偏好迁移为 `local` 并关闭 AI。旧版 `use_lastfm` 仍映射到 `lastfm_similar`。`null` 连接明确表示 local。
 
 `POST /ai/discover`：`{prompt,limit?,connection_id?,sources?}`。`GET /recommendations/daily` 使用保存偏好和今日缓存；`POST /recommendations/daily/refresh` 可无 body，或 `{connection_id?,sources?}` 临时覆盖，数量仍来自保存偏好。一次性参数不修改偏好。未显式传 connection_id 时，已保存连接后续被删除、禁用、撤销共享或端点权限取消，返回 local 结果及 `warnings:[{source:"ai",code:"saved_ai_connection_unavailable"}]`、degraded=true；保留偏好原 ID 供用户修复。显式请求无权/失效连接仍返回 403/404，不更换其他付费连接。此警告同样合并到今日缓存与外部关闭/缓存/刷新响应。
 

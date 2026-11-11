@@ -434,7 +434,8 @@ def test_schema17_to18_is_transactional_and_migrates_only_prior_explicit_ai_opti
             row["user_id"]: dict(row)
             for row in db.execute("SELECT * FROM recommendation_preferences")
         }
-        assert prefs["admin"]["connection_id"] == "legacy"
+        assert prefs["admin"]["connection_id"] == "local"
+        assert prefs["admin"]["use_ai"] == 0
         assert "lastfm_similar" in json.loads(prefs["admin"]["sources"])
         assert prefs[account["id"]]["connection_id"] == "local"
         assert not prefs["admin"]["external_enabled"] and not prefs["admin"]["external_use_ai"]
@@ -445,6 +446,79 @@ def test_schema17_to18_is_transactional_and_migrates_only_prior_explicit_ai_opti
         assert tracks_before == [
             tuple(row) for row in db.execute("SELECT * FROM tracks ORDER BY id")
         ]
+
+
+def test_removed_legacy_ai_connection_and_settings_api_are_unavailable(
+    settings, authenticated_client
+):
+    old_config = settings.data_dir / "ai" / ".env"
+    old_config.parent.mkdir(parents=True)
+    contents = "\n".join(
+        f"WILDSTRING_AI_{key.upper()}={json.dumps(value)}"
+        for key, value in {
+            "version": 2,
+            "base_url": "https://unused.fixture.invalid/v1",
+            "model": "unused-model",
+            "timeout": 30,
+            "api_key": "disposable-removed-config-key",
+        }.items()
+    )
+    old_config.write_text(contents)
+    with authenticated_client(settings) as client:
+        connections = client.get(BASE + "/agent/connections").json()["items"]
+        assert all(item["id"] != "legacy" for item in connections)
+        for method, suffix in (("GET", ""), ("PUT", ""), ("POST", "/test")):
+            assert (
+                client.request(method, BASE + "/manage/ai" + suffix, headers=HEADERS).status_code
+                == 404
+            )
+        assert (
+            client.post(
+                BASE + "/ai/discover",
+                headers=HEADERS,
+                json={"connection_id": "legacy", "prompt": "找歌"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.put(
+                BASE + "/recommendations/preferences",
+                headers=HEADERS,
+                json={"version": 1, "use_ai": True},
+            ).status_code
+            == 422
+        )
+    assert old_config.read_text() == contents
+
+
+def test_schema51_moves_legacy_preferences_and_conversations_to_local(
+    settings, authenticated_client
+):
+    from wildstring.database import Database
+
+    with authenticated_client(settings) as client:
+        library = client.app.state.agent_platform.repository.library_id()
+        database = Database(settings.data_dir)
+        with database.connect(write=True) as connection:
+            connection.execute(
+                "INSERT INTO recommendation_preferences(user_id,library_id,version,use_ai,use_lastfm,count,connection_id) VALUES ('admin',?,2,1,0,20,'legacy')",
+                (library,),
+            )
+            connection.execute(
+                "INSERT INTO agent_conversations(id,user_id,title,connection_id,created_at,updated_at) VALUES ('legacy-conversation','admin','旧对话','legacy','2026-01-01','2026-01-01')"
+            )
+            connection.execute("PRAGMA user_version=50")
+        database.initialize()
+        with database.connect() as connection:
+            preference = connection.execute(
+                "SELECT connection_id,use_ai FROM recommendation_preferences WHERE user_id='admin' AND library_id=?",
+                (library,),
+            ).fetchone()
+            conversation = connection.execute(
+                "SELECT connection_id FROM agent_conversations WHERE id='legacy-conversation'"
+            ).fetchone()
+        assert tuple(preference) == ("local", 0)
+        assert conversation[0] is None
 
 
 def test_official_tag_json_root_cache_call_cap_and_ambiguous_local_versions(
