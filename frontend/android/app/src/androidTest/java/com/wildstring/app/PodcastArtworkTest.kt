@@ -1,75 +1,74 @@
 package com.wildstring.app
 
 import android.graphics.Bitmap
-import androidx.test.platform.app.InstrumentationRegistry
-import coil.ImageLoader
 import coil.request.ErrorResult
 import coil.request.ImageRequest
 import coil.request.SuccessResult
-import com.wildstring.app.data.PodcastArtwork
-import com.wildstring.app.data.PodcastArtworkFallback
-import com.wildstring.app.data.podcastArtworkClient
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Test
 
 class PodcastArtworkTest {
-    @Test fun reachableSourceDoesNotUseServerFallback() = verify(source = "image", serverStatus = 200, fallback = false)
-    @Test fun failedSourceUsesAuthenticatedServerOnce() = verify(source = "error", serverStatus = 200, fallback = true)
-    @Test fun invalidSourceImageUsesServerFallback() = verify(source = "invalid", serverStatus = 200, fallback = true)
-    @Test fun failedSourceAndServerStopWithoutRetrying() = verify(source = "error", serverStatus = 502, fallback = true)
-    @Test fun serverPreferenceDoesNotContactHealthySource() = verify(source = "image", serverStatus = 200, fallback = true, serverFirst = true)
-    @Test fun failedPreferredServerUsesPublicSource() = verify(source = "image", serverStatus = 502, fallback = true, serverFirst = true)
-    @Test fun missingSourceUsesServerDirectly() = verify(source = "missing", serverStatus = 200, fallback = true)
-
-    private fun verify(source: String, serverStatus: Int, fallback: Boolean, serverFirst: Boolean = false) {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
+    @Test fun podcastCoverUsesAuthenticatedServerAndPrivateCache() = PodcastRoutingFixture().use { fixture ->
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
         val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         bitmap.recycle()
-        MockWebServer().use { origin ->
-            MockWebServer().use { server ->
-                origin.start(); server.start()
-                origin.enqueue(when (source) {
-                    "image" -> MockResponse().setBody(Buffer().write(bytes)).setHeader("Content-Type", "image/png")
-                    "invalid" -> MockResponse().setBody("not an image")
-                    else -> MockResponse().setResponseCode(503)
-                })
-                server.enqueue(MockResponse().setResponseCode(serverStatus).setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes)))
-                val serverClient = OkHttpClient.Builder().addInterceptor { chain ->
-                    chain.proceed(chain.request().newBuilder().header("Cookie", "wildstring_session=synthetic-test-session").build())
-                }.build()
-                val serverLoader = ApplicationModule.images(context, serverClient)
-                val publicLoader = ImageLoader.Builder(context).okHttpClient(podcastArtworkClient())
-                    .components { add(PodcastArtworkFallback(serverLoader)) }
-                    .networkObserverEnabled(false).diskCache(null).build()
-                try {
-                    val result = runBlocking {
-                        publicLoader.execute(ImageRequest.Builder(context)
-                            .data(PodcastArtwork(origin.url("/art.png").toString().takeUnless { source == "missing" }, server.url("/api/v1/podcasts/show/cover").toString(), serverFirst))
-                            .size(96).build())
-                    }
-                    if (serverStatus == 200 || source == "image") assertTrue("${(result as? ErrorResult)?.throwable}", result is SuccessResult)
-                    else assertTrue(result is ErrorResult)
-                    val sourceRequested = source != "missing" && !(serverFirst && serverStatus == 200)
-                    assertEquals(if (sourceRequested) 1 else 0, origin.requestCount)
-                    if (sourceRequested) {
-                        val direct = origin.takeRequest(1, TimeUnit.SECONDS)!!
-                        assertNull(direct.getHeader("Cookie"))
-                        assertNull(direct.getHeader("Authorization"))
-                    }
-                    assertEquals(if (fallback) 1 else 0, server.requestCount)
-                    if (fallback) assertEquals("wildstring_session=synthetic-test-session", server.takeRequest(1, TimeUnit.SECONDS)!!.getHeader("Cookie"))
-                } finally {
-                    publicLoader.shutdown(); serverLoader.shutdown()
-                }
-            }
-        }
+        fixture.server.enqueue(MockResponse().setBody(Buffer().write(bytes)).setHeader("Content-Type", "image/png"))
+        val loader = ApplicationModule.images(fixture.context, fixture.client)
+        try {
+            val showCover = fixture.repository.podcastArtwork("show")
+            assertEquals(showCover, fixture.repository.cover("podcast_ep_episode"))
+            val request = ImageRequest.Builder(fixture.context).data(showCover).size(96).build()
+            assertTrue(runBlocking { loader.execute(request) } is SuccessResult)
+            val received = fixture.server.takeRequest()
+            assertEquals("/api/v1/podcasts/show/cover", received.path)
+            assertTrue(received.getHeader("Cookie")!!.contains("wildstring_session=synthetic"))
+            loader.memoryCache?.clear()
+            assertTrue(runBlocking { loader.execute(request) } is SuccessResult)
+            assertEquals(1, fixture.server.requestCount)
+            assertEquals(0, fixture.origin.requestCount)
+        } finally { loader.shutdown() }
+    }
+
+    @Test fun directoryCoverUsesServerBeforeTheShowIsAdded() = PodcastRoutingFixture().use { fixture ->
+        val item = com.wildstring.app.data.PodcastDirectoryResult(
+            "12345", "Directory", "Author", "https://feeds.example.test/show", fixture.origin.url("/art.jpg").toString(),
+            emptyList(), false, false, null, "directory-key",
+        )
+        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        fixture.server.enqueue(MockResponse().setBody(Buffer().write(bytes)).setHeader("Content-Type", "image/png"))
+        val loader = ApplicationModule.images(fixture.context, fixture.client)
+        try {
+            val url = fixture.repository.podcastDirectoryArtwork(item)
+            val request = ImageRequest.Builder(fixture.context).data(url).size(96).build()
+            assertTrue(runBlocking { loader.execute(request) } is SuccessResult)
+            val received = fixture.server.takeRequest()
+            assertEquals("/api/v1/podcasts/directory-cover/directory-key", received.path)
+            assertTrue(received.getHeader("Cookie")!!.contains("wildstring_session=synthetic"))
+            assertEquals(0, fixture.origin.requestCount)
+            assertEquals(fixture.repository.podcastArtwork("show"), fixture.repository.podcastDirectoryArtwork(item.copy(catalogPodcastId = "show")))
+            assertNull(fixture.repository.podcastDirectoryArtwork(item.copy(artworkKey = null)))
+        } finally { loader.shutdown() }
+    }
+
+    @Test fun failedCoverAndLegacyForeignArtworkNeverContactOrigin() = PodcastRoutingFixture().use { fixture ->
+        fixture.server.enqueue(MockResponse().setResponseCode(502))
+        val loader = ApplicationModule.images(fixture.context, fixture.client)
+        try {
+            val request = ImageRequest.Builder(fixture.context).data(fixture.repository.podcastArtwork("show")).build()
+            assertTrue(runBlocking { loader.execute(request) } is ErrorResult)
+            try {
+                fixture.client.newCall(Request.Builder().url(fixture.origin.url("/old-art.jpg")).build()).execute().close()
+                fail("Expected foreign artwork to be rejected")
+            } catch (_: java.io.IOException) { }
+            assertEquals(1, fixture.server.requestCount)
+            assertEquals(0, fixture.origin.requestCount)
+        } finally { loader.shutdown() }
     }
 }

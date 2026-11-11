@@ -170,18 +170,6 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                     }
                 }
                 SettingsSection.Podcast -> {
-                    SettingsGroup(stringResource(R.string.podcast_resource_source)) {
-                        SettingsChoice(
-                            stringResource(R.string.podcast_resource_source),
-                            stringResource(if (preferences.podcastResourceSource == "server") R.string.podcast_source_server else R.string.podcast_source_origin),
-                            Icons.Default.Cloud,
-                            listOf("source" to stringResource(R.string.podcast_source_origin), "server" to stringResource(R.string.podcast_source_server)),
-                            preferences.podcastResourceSource,
-                            stringResource(R.string.podcast_resource_source_hint),
-                            change = vm.settings::podcastResourceSource,
-                            tag = "podcast-resource-source",
-                        )
-                    }
                     SettingsGroup(stringResource(R.string.settings_podcast_resume)) {
                         val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
                         SettingsChoice(stringResource(R.string.settings_podcast_resume), stringResource(when(podcastMode) { "auto" -> R.string.podcast_resume_auto_value; "restart" -> R.string.podcast_resume_restart_value; else -> R.string.podcast_resume_ask_value }), Icons.Default.Podcasts,

@@ -131,3 +131,89 @@ def test_cover_requires_session_and_catalogue_access(artwork, monkeypatch):
         db.execute("UPDATE podcasts SET cover_url='' WHERE id='artwork-fixture'")
     assert client.get(PATH).status_code == 404
     factory.assert_not_called()
+
+
+@pytest.fixture
+def directory_artwork(artwork, monkeypatch):
+    from wildstring import podcast_search
+
+    client, manager = artwork
+
+    def records(*_args, **_kwargs):
+        return {
+            "results": [
+                {
+                    "collectionId": 12345,
+                    "collectionName": "Directory show",
+                    "feedUrl": "https://feeds.example.test/directory",
+                    "artworkUrl600": "https://images.example.test/directory.png",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(podcast_search, "fetch_itunes_json", records)
+    page = client.get("/api/v1/podcasts/search", params={"q": "directory"})
+    assert page.status_code == 200
+    item = page.json()["results"][0]
+    assert item["catalog_podcast_id"] is None
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = picture()
+    opener = MagicMock()
+    opener.open.return_value = response
+    factory = MagicMock(return_value=opener)
+    monkeypatch.setattr(podcast_artwork, "podcast_opener", factory)
+    yield client, manager, "/api/v1/podcasts/directory-cover/" + item["artwork_key"], factory
+
+
+def test_directory_artwork_caches_without_adding_or_following(directory_artwork):
+    client, manager, path, factory = directory_artwork
+    manager.get_network_policy = lambda: ("custom", "http://proxy.example.test:8080")
+    first = client.get(path)
+    assert first.status_code == 200
+    assert first.headers["content-type"] == "image/jpeg"
+    assert first.headers["cache-control"] == "private, no-store"
+    assert first.headers["x-content-type-options"] == "nosniff"
+    assert client.get(path).content == first.content
+    factory.assert_called_once_with(
+        "custom", "http://proxy.example.test:8080", manager.allow_fake_ip
+    )
+    request = factory.return_value.open.call_args.args[0]
+    assert request.full_url == "https://images.example.test/directory.png"
+    assert request.get_header("Cookie") is None
+    with manager.database.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM podcasts").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM podcast_follows").fetchone()[0] == 0
+
+
+def test_directory_artwork_unknown_key_and_session(directory_artwork):
+    client, _manager, path, factory = directory_artwork
+    assert client.get("/api/v1/podcasts/directory-cover/unknown").status_code == 404
+    assert client.get("/api/v1/podcasts/directory-cover/https:evil").status_code == 404
+    client.cookies.clear()
+    assert client.get(path).status_code == 401
+    factory.assert_not_called()
+
+
+def test_directory_artwork_expiry_and_refresh(directory_artwork):
+    client, manager, path, factory = directory_artwork
+    search = manager.identity_backfill.search
+    timestamp = search.clock()
+    search.clock = lambda: timestamp
+    assert client.get(path).status_code == 200
+    search.clock = lambda: timestamp + 3601
+    assert client.get(path).status_code == 404
+    assert client.get("/api/v1/podcasts/search", params={"q": "directory"}).status_code == 200
+    assert client.get(path).status_code == 200
+    assert factory.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"), [(b"invalid", 502), (b"x" * (MAX_COVER_BYTES + 1), 413)]
+)
+def test_directory_artwork_invalid_images_are_not_cached(directory_artwork, payload, expected):
+    client, _manager, path, factory = directory_artwork
+    factory.return_value.open.return_value.read.return_value = payload
+    assert client.get(path).status_code == expected
+    assert client.get(path).status_code == expected
+    assert factory.call_count == 2

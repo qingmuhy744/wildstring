@@ -16,8 +16,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -175,10 +173,7 @@ class PlaybackService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 180_000, 1_500, 3_000)
             .build()
         engine = ExoPlayer.Builder(this, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client, DataSource.Factory {
-                PodcastStreamDataSource(OkHttpDataSource.Factory(repository.client), OkHttpDataSource.Factory(repository.podcastAudioClient),
-                    repository::podcastAudioSource, { settings.state.value.podcastResourceSource == "server" })
-            })), extractors))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client)), extractors))
             .setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
@@ -482,17 +477,10 @@ private class AuthenticatedBitmapLoader(private val repository: Repository, priv
         BitmapFactory.decodeByteArray(data, 0, data.size) ?: throw IOException("Invalid cover")
     }
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
-        val fallback = repository.podcastCoverFallback(uri.toString())
-        val serverFirst = fallback != null && repository.settings.state.value.podcastResourceSource == "server"
-        val first = if (serverFirst) fallback else uri.toString()
-        val second = if (serverFirst) uri.toString() else fallback
-        try { fetchBitmap(first) }
-        catch (error: IOException) {
-            fetchBitmap(second ?: throw error)
-        }
+        fetchBitmap(uri.toString())
     }
     private fun fetchBitmap(uri: String): Bitmap =
-        repository.imageClient(uri).newCall(Request.Builder().url(uri).build()).execute().use { response ->
+        repository.client.newCall(Request.Builder().url(uri).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Cover unavailable")
             val body = response.body
             if (body.contentLength() > 2 * 1024 * 1024) throw IOException("Cover too large")

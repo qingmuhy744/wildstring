@@ -144,29 +144,11 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
-    val podcastAudioClient: OkHttpClient = podcastArtworkClient()
-    val podcastImageClient: OkHttpClient = podcastAudioClient.newBuilder()
-        .addInterceptor(CoverCacheInterceptor(cache, session) { true }).build()
-    fun podcastArtwork(id: String, source: String) = PodcastArtwork(
-        podcastArtworkUrl(source), url("api", "v1", "podcasts", id, "cover"), settings.state.value.podcastResourceSource == "server",
-    )
-    fun coverModel(id: String): Any = knownTracks[id]?.podcast?.let {
-        podcastArtwork(it.podcastId, it.coverUrl)
-    } ?: cover(id)
-    fun cover(id: String): String =
-        knownTracks[id]?.podcast?.let { podcastArtworkUrl(it.coverUrl) ?: url("api", "v1", "podcasts", it.podcastId, "cover") }
-            ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
-    fun podcastCoverFallback(uri: String): String? = knownTracks.values.firstOrNull {
-        it.podcast?.coverUrl?.let(::podcastArtworkUrl) == uri
-    }?.podcast?.let { url("api", "v1", "podcasts", it.podcastId, "cover") }
-    fun podcastAudioSource(uri: android.net.Uri): String? {
-        val segments = uri.pathSegments
-        val episode = segments.getOrNull(segments.lastIndex - 1) ?: return null
-        return knownTracks["podcast_ep_$episode"]?.podcast?.audioUrl?.takeIf { it.isNotBlank() }
-    }
-    fun imageClient(uri: String): OkHttpClient = if (knownTracks.values.any {
-        it.podcast?.coverUrl?.let(::podcastArtworkUrl) == uri
-    }) podcastImageClient else client
+    fun podcastDirectoryArtwork(item: PodcastDirectoryResult): String? = item.catalogPodcastId?.let { podcastArtwork(it) }
+        ?: item.artworkKey?.let { url("api", "v1", "podcasts", "directory-cover", it) }
+    fun podcastArtwork(id: String): String = url("api", "v1", "podcasts", id, "cover")
+    fun cover(id: String): String = knownTracks[id]?.podcast?.let { podcastArtwork(it.podcastId) }
+        ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
     suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
         val owner = session.cacheScope(); requireProfile(owner)
         val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->

@@ -6,6 +6,7 @@ counted against one shared, process-wide budget. Results are cached briefly and
 never persisted; only a feed the user explicitly adds becomes catalog data.
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -24,6 +25,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from wildstring import podcast_artwork
 from wildstring import podcasts as podcast_module
 from wildstring.library.repository import now
 from wildstring.outbound import OutboundError, outbound_proxies, request_bytes
@@ -335,6 +337,8 @@ class PodcastSearch:
         )
         self.previews: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self.seen_ids: dict[str, tuple[float, set[str]]] = {}
+        self.artwork_sources: OrderedDict[str, tuple[float, str]] = OrderedDict()
+        self.artwork_images: OrderedDict[str, tuple[float, bytes]] = OrderedDict()
 
     # Settings ---------------------------------------------------------------------------
     def settings(self) -> dict[str, Any]:
@@ -390,6 +394,25 @@ class PodcastSearch:
             while len(self.cache) > 512:
                 self.cache.popitem(last=False)
         self._remember(items)
+
+    def directory_cover(self, key: str):
+        with self.lock:
+            source = self.artwork_sources.get(key)
+            if source is None or source[0] <= self.clock():
+                self.artwork_sources.pop(key, None)
+                self.artwork_images.pop(key, None)
+                raise HTTPException(404, "podcast_cover_not_found")
+            hit = self.artwork_images.get(key)
+            if hit is not None and hit[0] > self.clock():
+                self.artwork_images.move_to_end(key)
+                return podcast_artwork.image_response(hit[1])
+        data = podcast_artwork.fetch(self.manager, source[1])
+        with self.lock:
+            self.artwork_images[key] = (self.clock() + CHART_TTL_SECONDS, data)
+            self.artwork_images.move_to_end(key)
+            while len(self.artwork_images) > 64:
+                self.artwork_images.popitem(last=False)
+        return podcast_artwork.image_response(data)
 
     # Upstream ---------------------------------------------------------------------------
     def _region(self, region: str, term: str, limit: int) -> list[dict[str, Any]]:
@@ -546,6 +569,16 @@ class PodcastSearch:
             if podcast_id is not None and visible is not None and podcast_id not in visible:
                 podcast_id = None
             public = {k: v for k, v in item.items() if not k.startswith("_")}
+            source = item.get("artwork_url")
+            public["artwork_key"] = None
+            if source:
+                key = hashlib.sha256(source.encode()).hexdigest()
+                with self.lock:
+                    self.artwork_sources[key] = (self.clock() + CHART_TTL_SECONDS, source)
+                    self.artwork_sources.move_to_end(key)
+                    while len(self.artwork_sources) > 512:
+                        self.artwork_sources.popitem(last=False)
+                public["artwork_key"] = key
             public["in_catalog"] = podcast_id is not None
             public["catalog_podcast_id"] = podcast_id
             public["followed"] = podcast_id in follows if podcast_id else False
@@ -739,6 +772,13 @@ class PodcastSearch:
                 return self.discover(user, region, limit)
             except SearchRateLimited as exc:
                 raise rate_limited(exc) from None
+
+        @router.get("/directory-cover/{key}")
+        def directory_cover(
+            key: str,
+            user: Annotated[dict, Depends(auth.require_session)],
+        ):
+            return self.directory_cover(key)
 
         @router.post("/preview", dependencies=[Depends(auth.require_client)])
         def preview_feed(

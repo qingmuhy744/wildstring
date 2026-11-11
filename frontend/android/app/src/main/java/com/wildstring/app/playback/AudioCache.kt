@@ -66,7 +66,8 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
             }
         }
     }
-    fun factory(client: OkHttpClient, upstream: DataSource.Factory = OkHttpDataSource.Factory(client)): DataSource.Factory = DataSource.Factory {
+    fun factory(client: OkHttpClient): DataSource.Factory = DataSource.Factory {
+        val upstream = OkHttpDataSource.Factory(client)
         var profile: String? = null
         var storage: String? = null
         var key: String? = null

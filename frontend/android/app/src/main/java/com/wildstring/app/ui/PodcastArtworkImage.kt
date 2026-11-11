@@ -12,7 +12,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
@@ -24,8 +23,7 @@ import com.wildstring.app.data.PodcastSummary
 
 @Composable
 internal fun PodcastArtworkImage(vm: MusicViewModel, podcast: PodcastSummary, modifier: Modifier) {
-    val preferences by vm.settings.state.collectAsStateWithLifecycle()
-    val artwork = vm.repository.podcastArtwork(podcast.id, podcast.coverUrl).copy(serverFirst = preferences.podcastResourceSource == "server")
+    val artwork = vm.repository.podcastArtwork(podcast.id)
     val profile = vm.repository.session.cacheScope()
     var loaded by remember(artwork, profile) { mutableStateOf(false) }
     Box(modifier, contentAlignment = Alignment.Center) {
@@ -35,7 +33,7 @@ internal fun PodcastArtworkImage(vm: MusicViewModel, podcast: PodcastSummary, mo
                 .data(artwork)
                 .memoryCacheKey("$profile:podcast:${podcast.id}:${podcast.coverUrl}")
                 .crossfade(true).build(),
-            imageLoader = vm.podcastImageLoader,
+            imageLoader = vm.imageLoader,
             contentDescription = podcast.title,
             contentScale = ContentScale.Crop,
             onLoading = { loaded = false },

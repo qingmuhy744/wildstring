@@ -1146,7 +1146,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
     val fallback = painterResource(R.drawable.ic_wildstring)
     // The player swaps covers on track change; holding the last image avoids flashing the app logo in between.
     var previous by remember { mutableStateOf<androidx.compose.ui.graphics.painter.Painter?>(null) }
-    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.coverModel(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(if (keepPrevious) 0 else 180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
+    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(if (keepPrevious) 0 else 180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
         placeholder = if (keepPrevious) previous ?: fallback else fallback, error = fallback, fallback = fallback,
         onSuccess = { if (keepPrevious) previous = it.painter },
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))

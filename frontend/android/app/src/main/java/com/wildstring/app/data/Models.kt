@@ -62,7 +62,7 @@ data class Track(
     val unavailableReason: String? get() = unavailableReasonRes?.let { AppLanguage.string(it) }
     val isAvailable: Boolean get() = unavailableReason == null
 }
-data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "", val resumePositionMs: Long = 0L, val audioUrl: String = "")
+data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "", val resumePositionMs: Long = 0L)
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,
     @SerializedName("cover_track_id") val coverTrackId: String?)
@@ -257,7 +257,7 @@ data class PodcastEpisode(
         hasCover = podcastArtworkUrl(podcast.coverUrl) != null,
         format = "mp3",
         status = "available",
-        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty(), resumePositionMs, podcastArtworkUrl(audioUrl).orEmpty()),
+        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty(), resumePositionMs),
     )
 }
 
@@ -295,6 +295,7 @@ data class PodcastDirectoryResult(
     @SerializedName("feed_url") val feedUrl: String, @SerializedName("artwork_url") val artworkUrl: String,
     val genres: List<String>, val explicit: Boolean, val followed: Boolean,
     @SerializedName("catalog_podcast_id") val catalogPodcastId: String?,
+    @SerializedName("artwork_key") val artworkKey: String? = null,
 )
 data class PodcastDirectoryPage(val results: List<PodcastDirectoryResult>, val regions: List<String>,
     @SerializedName("failed_regions") val failedRegions: List<PodcastDirectoryFailure>,

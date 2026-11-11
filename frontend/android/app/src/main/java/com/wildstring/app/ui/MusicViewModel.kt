@@ -57,10 +57,6 @@ class MusicViewModel @Inject constructor(
 ) : ViewModel() {
     /** Player-only landscape the user asked for; most phones keep system auto-rotate off. Reset when the player collapses. */
     val playerLandscape = MutableStateFlow(false)
-    val podcastImageLoader = ImageLoader.Builder(context).okHttpClient(repository.podcastImageClient)
-        .components { add(PodcastArtworkFallback(imageLoader)) }
-        .networkObserverEnabled(false).diskCache(null).build()
-    fun coverLoader(id: String?) = if (id != null && podcastEpisodeId(id) != null) podcastImageLoader else imageLoader
     val agent = AgentPlatform(repository)
     private var agentJob: Job? = null
     private var agentNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
@@ -1225,7 +1221,6 @@ class MusicViewModel @Inject constructor(
         }
     }
     override fun onCleared() {
-        podcastImageLoader.shutdown()
         agentNetworkCallback?.let { callback -> runCatching { context.getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(callback) } }
         controller?.removeListener(playerListener); MediaController.releaseFuture(controllerFuture); super.onCleared()
     }

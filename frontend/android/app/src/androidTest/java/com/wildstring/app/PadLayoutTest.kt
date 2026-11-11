@@ -367,27 +367,16 @@ class PadLayoutTest {
             compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("setting-category-storage").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("setting-category-podcast").performScrollTo().performClick()
-            window(1200, 800)
-            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
-            compose.onNodeWithTag("setting-option-podcast-resource-source-source").assertIsSelected()
-            capture("podcast-source-tablet-dark")
-            compose.onNodeWithTag("setting-option-podcast-resource-source-server").performClick()
-            compose.runOnIdle { assertEquals("server", vm.settings.state.value.podcastResourceSource) }
-            window(390, 844)
-            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
-            compose.onNodeWithTag("setting-option-podcast-resource-source-server").assertIsSelected()
-            capture("podcast-source-phone-dark")
-            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+            compose.onNodeWithTag("setting-podcast-resource-source").assertDoesNotExist()
+            capture("podcast-settings-phone-dark")
             appearance(vm, "light")
-            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
-            capture("podcast-source-phone-light")
-            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+            capture("podcast-settings-phone-light")
             window(1200, 800)
-            compose.onNodeWithTag("setting-podcast-resource-source").performScrollTo().performClick()
-            capture("podcast-source-tablet-light")
-            compose.onNodeWithTag("setting-option-podcast-resource-source-source").performClick()
+            capture("podcast-settings-tablet-light")
+            appearance(vm, "dark")
+            capture("podcast-settings-tablet-dark")
         } finally {
-            compose.runOnIdle { vm.settings.podcastResourceSource("source"); vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
             window(390, 844)
         } }
     }

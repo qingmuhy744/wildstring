@@ -1,4 +1,4 @@
-"""Authenticated fallback for public RSS artwork when clients cannot reach its host."""
+"""Serve cached RSS artwork to authenticated clients."""
 
 import io
 import os
@@ -35,6 +35,27 @@ def jpeg(data):
         return None
 
 
+def fetch(manager, source):
+    try:
+        address = validate_remote_url(source)
+        mode, proxy = manager.get_network_policy()
+        request = urllib.request.Request(address, headers={"User-Agent": USER_AGENT})
+        with podcast_opener(mode, proxy, manager.allow_fake_ip).open(
+            request, timeout=15
+        ) as response:  # nosec B310
+            data = response.read(MAX_COVER_BYTES + 1)
+    except PodcastURLRejected:
+        raise HTTPException(422, "invalid_podcast_cover_url") from None
+    except OSError:
+        raise HTTPException(502, "podcast_cover_unavailable") from None
+    if len(data) > MAX_COVER_BYTES:
+        raise HTTPException(413, "podcast_cover_too_large")
+    cached = jpeg(data)
+    if cached is None:
+        raise HTTPException(502, "podcast_cover_invalid_image")
+    return cached
+
+
 def cover(manager, user_id, podcast_id):
     with manager.database.connect() as db:
         require_programme(db, user_id, podcast_id)
@@ -51,23 +72,7 @@ def cover(manager, user_id, podcast_id):
     if cached is None:
         if not source:
             raise HTTPException(404, "podcast_cover_not_found")
-        try:
-            address = validate_remote_url(source)
-            mode, proxy = manager.get_network_policy()
-            request = urllib.request.Request(address, headers={"User-Agent": USER_AGENT})
-            with podcast_opener(mode, proxy, manager.allow_fake_ip).open(
-                request, timeout=15
-            ) as response:  # nosec B310
-                data = response.read(MAX_COVER_BYTES + 1)
-        except PodcastURLRejected:
-            raise HTTPException(422, "invalid_podcast_cover_url") from None
-        except OSError:
-            raise HTTPException(502, "podcast_cover_unavailable") from None
-        if len(data) > MAX_COVER_BYTES:
-            raise HTTPException(413, "podcast_cover_too_large")
-        cached = jpeg(data)
-        if cached is None:
-            raise HTTPException(502, "podcast_cover_invalid_image")
+        cached = fetch(manager, source)
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -78,8 +83,12 @@ def cover(manager, user_id, podcast_id):
         finally:
             if temporary is not None and os.path.exists(temporary):
                 os.unlink(temporary)
+    return image_response(cached)
+
+
+def image_response(data):
     return Response(
-        cached,
+        data,
         media_type="image/jpeg",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
