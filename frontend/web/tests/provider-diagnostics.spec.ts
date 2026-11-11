@@ -340,9 +340,9 @@ test('处理中可以关窗，任务记录和核对结果说明具体失败原�
   await management(page);
   await manageTab(page, '任务记录');
   const jobs = page.getByRole('region', { name: '歌曲信息补全', exact: true });
+  // The row speaks the first reason; the remaining codes stay in the review dialog.
   await expect(jobs).toContainText('服务端无法解析目标域名');
-  await expect(jobs).toContainText('TLS 连接提前断开');
-  await jobs.getByRole('button', { name: `核对 ${track.title} 的资料结果`, exact: true }).click();
+  await jobs.getByRole('button', { name: `处理 ${track.title} 的资料`, exact: true }).click();
   const review = page.getByRole('dialog', { name: '批量核对资料', exact: true });
   await expect(review).toContainText('代理要求认证');
   await expect(review).toContainText('TLS 连接提前断开');
