@@ -37,9 +37,11 @@ class FakeItunes:
 
     def __init__(self, failures=None):
         self.calls = []
+        self.kwargs = []
         self.failures = failures or {}
 
-    def __call__(self, url, _proxy_mode, _proxy_url):
+    def __call__(self, url, _proxy_mode, _proxy_url, **kwargs):
+        self.kwargs.append(kwargs)
         parts = urlsplit(url)
         query = {key: values[0] for key, values in parse_qs(parts.query).items()}
         self.calls.append((parts.path, query))
@@ -232,8 +234,8 @@ def test_discovery_preserves_chart_order_and_never_creates_catalog_data(
 def test_discovery_filters_cached_adult_results_and_surfaces_upstream_errors(
     settings, authenticated_client, itunes, monkeypatch
 ):
-    def explicit(url, mode, proxy):
-        body = itunes(url, mode, proxy)
+    def explicit(url, mode, proxy, **kwargs):
+        body = itunes(url, mode, proxy, **kwargs)
         for item in body.get("results", []):
             item["collectionExplicitness"] = "explicit"
         return body
@@ -251,7 +253,7 @@ def test_discovery_filters_cached_adult_results_and_surfaces_upstream_errors(
         assert body["cached"] and body["results"] == [] and body["explicit_hidden"] > 0
         assert len(itunes.calls) == 2
 
-        def failed(*args):
+        def failed(*args, **kwargs):
             raise UpstreamFailure("upstream_rate_limited", 90)
 
         monkeypatch.setattr(podcast_search, "fetch_itunes_json", failed)
@@ -562,8 +564,8 @@ def test_schema_44_adds_identity_columns(settings):
 def test_owner_settings_choose_regions_and_hide_explicit_shows(
     settings, authenticated_client, itunes, monkeypatch
 ):
-    def explicit_first(url, proxy_mode, proxy_url):
-        body = itunes(url, proxy_mode, proxy_url)
+    def explicit_first(url, proxy_mode, proxy_url, **kwargs):
+        body = itunes(url, proxy_mode, proxy_url, **kwargs)
         for item in body.get("results", [])[:1]:
             item["collectionExplicitness"] = "explicit"
         return body
@@ -709,3 +711,34 @@ def test_library_admins_change_search_settings_but_editors_cannot(
         finally:
             for session in sessions.values():
                 session.close()
+
+
+def test_fetch_passes_fake_ip_policy_to_safe_handlers(monkeypatch):
+    seen = []
+
+    def capture(_request, **kwargs):
+        opener = kwargs["opener_factory"]()
+        seen.extend(
+            handler.allow_fake_ip
+            for handler in opener.handlers
+            if hasattr(handler, "allow_fake_ip")
+        )
+        return 200, {}, b'{"resultCount":0,"results":[]}'
+
+    monkeypatch.setattr(podcast_search, "request_bytes", capture)
+    podcast_search.fetch_itunes_json("https://itunes.apple.com/search?x=1", "direct", None)
+    podcast_search.fetch_itunes_json(
+        "https://itunes.apple.com/search?x=1", "direct", None, allow_fake_ip=True
+    )
+    assert seen == [False, False, True, True]
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_search_and_discovery_follow_fake_ip_setting(
+    settings, authenticated_client, itunes, allowed
+):
+    settings.podcast_allow_fake_ip = allowed
+    with authenticated_client(settings) as client:
+        client.get("/api/v1/podcasts/search?q=history").raise_for_status()
+        client.get("/api/v1/podcasts/discover?region=tw").raise_for_status()
+    assert itunes.kwargs and all(kw == {"allow_fake_ip": allowed} for kw in itunes.kwargs)

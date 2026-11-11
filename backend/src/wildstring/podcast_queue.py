@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring.podcast_access import require_programme
 
@@ -170,8 +170,13 @@ class QueueItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     episode_id: str = Field(min_length=1, max_length=128)
     origin: str = Field(default="manual", pattern="^(manual|rule)$")
-    # Preserved across rewrites so the unified pending list can sort by join time.
+    # Preserved across rewrites; tolerate explicit null from Gson serializeNulls() clients.
     added_at: str = Field(default="", max_length=64)
+
+    @field_validator("added_at", mode="before")
+    @classmethod
+    def _coerce_null_added_at(cls, value: Any) -> Any:
+        return "" if value is None else value
 
 
 class QueueUpdate(BaseModel):

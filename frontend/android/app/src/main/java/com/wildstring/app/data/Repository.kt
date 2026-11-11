@@ -340,21 +340,21 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     suspend fun replacePodcastQueue(version: Int, deviceId: String, items: List<PodcastQueueItem>): PodcastQueueSnapshot {
         val owner = session.cacheScope(); requireProfile(owner)
         val normalized = podcastQueueNormalize(items)
-        suspend fun send(entries: List<PodcastQueueWriteItem>): PodcastQueueSnapshot =
-            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, entries), RequestOwner(owner)).normalized().also { requireProfile(owner) }
+        val entries = normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, it.addedAt.takeIf { ts -> ts.isNotBlank() }) }
+        suspend fun send(subset: List<PodcastQueueWriteItem>, includeAddedAt: Boolean = true): PodcastQueueSnapshot =
+            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, subset).writeBody(includeAddedAt), RequestOwner(owner)).normalized().also { requireProfile(owner) }
         return try {
-            send(normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, it.addedAt.takeIf { ts -> ts.isNotBlank() }) })
+            send(entries, includeAddedAt = true)
         } catch (error: HttpException) {
             if (error.code() == 409) podcastQueueConflict(error)?.let { throw it }
             if (error.code() == 422) {
-                val withoutAddedAt = normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, null) }
-                if (normalized.any { it.addedAt.isNotBlank() }) {
-                    runCatching { return send(withoutAddedAt) }.onFailure { retryErr ->
+                if (entries.any { !it.addedAt.isNullOrBlank() }) {
+                    runCatching { return send(entries, includeAddedAt = false) }.onFailure { retryErr ->
                         if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
                     }
                 }
-                if (withoutAddedAt.size > 1) {
-                    runCatching { return send(listOf(withoutAddedAt.first())) }.onFailure { retryErr ->
+                if (entries.size > 1) {
+                    runCatching { return send(listOf(entries.first()), includeAddedAt = false) }.onFailure { retryErr ->
                         if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
                     }
                 }

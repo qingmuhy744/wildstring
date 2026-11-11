@@ -580,4 +580,90 @@ struct PlaybackServiceTests {
         #expect(service.didFinishQueue)
         #expect(service.errorMessage == episodesReadFailed)
     }
+
+    @Test func unifiedPendingPreservesManualOrderAndPromotesInboxOnReorder() async throws {
+        defer { StubURLProtocol.reset() }
+        final class PendingState: @unchecked Sendable {
+            let lock = NSLock()
+            var version = 1
+            var queue: [[String: String]] = [
+                ["episode_id": "ep-newer-head", "origin": "rule", "added_at": "2026-11-10T12:00:00Z"],
+                ["episode_id": "ep-older-tail", "origin": "manual", "added_at": "2026-11-08T08:00:00Z"],
+            ]
+            var inbox: [[String: String]] = [
+                ["episode_id": "ep-inbox-late", "podcast_id": "show-a", "source": "manual", "added_at": "2026-11-10T09:00:00Z"],
+                ["episode_id": "ep-inbox-early", "podcast_id": "show-a", "source": "manual", "added_at": "2026-11-09T07:00:00Z"],
+            ]
+        }
+        let state = PendingState()
+
+        StubURLProtocol.respond { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/v1/podcasts/queue":
+                if request.httpMethod == "PUT",
+                   let body = StubURLProtocol.bodyData(of: request),
+                   let incoming = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                   let rawItems = incoming["items"] as? [[String: String]]
+                {
+                    state.lock.withLock {
+                        state.version += 1
+                        state.queue = rawItems
+                        let promoted = Set(rawItems.compactMap { $0["episode_id"] })
+                        state.inbox.removeAll { promoted.contains($0["episode_id"] ?? "") }
+                    }
+                }
+                let payload = try state.lock.withLock {
+                    try JSONSerialization.data(withJSONObject: [
+                        "version": state.version,
+                        "device_id": "mac",
+                        "items": state.queue,
+                    ])
+                }
+                return StubURLProtocol.Stub(statusCode: 200, headers: [:], body: payload)
+            case "/api/v1/podcasts/inbox":
+                let payload = try state.lock.withLock {
+                    try JSONSerialization.data(withJSONObject: [
+                        "version": state.version,
+                        "items": state.inbox,
+                    ])
+                }
+                return StubURLProtocol.Stub(statusCode: 200, headers: [:], body: payload)
+            default:
+                if url.path.hasPrefix("/api/v1/podcasts/episodes/") {
+                    let id = String(url.path.dropFirst("/api/v1/podcasts/episodes/".count))
+                    return .json(body: #"{"id":"\#(id)","podcast_id":"show-a","title":"\#(id)"}"#)
+                }
+                return .empty(status: 404)
+            }
+        }
+
+        let client = WildstringClient(
+            server: try ServerAddress(input: "music.example.com"),
+            store: InMemorySessionStore(),
+            configuration: StubURLProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "mac")
+        await cloud.refreshQueue()
+        await cloud.refreshInbox()
+
+        // Queue items keep their explicit order (newer head stays ahead of older tail), while inbox items sort by addedAt ascending.
+        #expect(cloud.unifiedPendingEpisodes.map(\.episodeId) == [
+            "ep-newer-head",
+            "ep-older-tail",
+            "ep-inbox-early",
+            "ep-inbox-late",
+        ])
+
+        // Reordering writes the whole list as manual entries and persists across reload without snapping back to addedAt order.
+        cloud.reorderPending(["ep-inbox-late", "ep-older-tail", "ep-newer-head", "ep-inbox-early"])
+        await cloud.retrySync()
+        #expect(cloud.unifiedPendingEpisodes.map(\.episodeId) == [
+            "ep-inbox-late",
+            "ep-older-tail",
+            "ep-newer-head",
+            "ep-inbox-early",
+        ])
+        #expect(cloud.items.allSatisfy { $0.origin == "manual" })
+    }
 }

@@ -222,24 +222,25 @@ public final class PodcastCloudQueue {
     }
 
     public var unifiedPendingEpisodes: [UnifiedPendingEpisode] {
-        var result: [UnifiedPendingEpisode] = []
+        var queuePart: [UnifiedPendingEpisode] = []
+        var inboxPart: [UnifiedPendingEpisode] = []
         var seen = Set<String>()
         for item in items {
-            seen.insert(item.episodeId)
-            result.append(
-                UnifiedPendingEpisode(
-                    episodeId: item.episodeId,
-                    origin: item.origin,
-                    source: .queue,
-                    episode: episodes[item.episodeId],
-                    addedAt: item.addedAt
+            if seen.insert(item.episodeId).inserted {
+                queuePart.append(
+                    UnifiedPendingEpisode(
+                        episodeId: item.episodeId,
+                        origin: item.origin,
+                        source: .queue,
+                        episode: episodes[item.episodeId],
+                        addedAt: item.addedAt
+                    )
                 )
-            )
+            }
         }
         for item in inbox.items {
-            if !seen.contains(item.episodeId) {
-                seen.insert(item.episodeId)
-                result.append(
+            if seen.insert(item.episodeId).inserted {
+                inboxPart.append(
                     UnifiedPendingEpisode(
                         episodeId: item.episodeId,
                         origin: "manual",
@@ -250,14 +251,15 @@ public final class PodcastCloudQueue {
                 )
             }
         }
-        // Ascending join time keeps the next item first; equal or missing timestamps keep their input order.
-        return result.enumerated()
+        // Explicit queue items keep their exact playback/manual order; unqueued inbox items follow by ascending join time.
+        let sortedInbox = inboxPart.enumerated()
             .sorted { lhs, rhs in
                 lhs.element.addedAt == rhs.element.addedAt
                     ? lhs.offset < rhs.offset
                     : lhs.element.addedAt < rhs.element.addedAt
             }
             .map(\.element)
+        return queuePart + sortedInbox
     }
 
     public func moveItems(from offsets: IndexSet, to destination: Int) {
@@ -471,19 +473,23 @@ public final class PodcastCloudQueue {
         }
     }
 
-    /// Rewrites the whole pending list in the given order; inbox rows join the queue as manual entries.
+    /// Rewrites the whole pending list in the given order; all entries become manual and inbox rows drain into the queue.
     public func reorderPending(_ orderedIDs: [String]) {
         perform {
             let queued = Dictionary(uniqueKeysWithValues: self.items.map { ($0.episodeId, $0) })
             let pool = Dictionary(uniqueKeysWithValues: self.inbox.items.map { ($0.episodeId, $0) })
             let rebuilt: [PodcastQueueItem] = orderedIDs.compactMap { id in
-                if let item = queued[id] { return item }
+                if let item = queued[id] {
+                    return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: item.addedAt)
+                }
                 if let entry = pool[id] {
                     return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: entry.addedAt)
                 }
                 return nil
             }
-            guard rebuilt.count == orderedIDs.count, rebuilt.map(\.episodeId) != self.items.map(\.episodeId) else { return }
+            guard rebuilt.count == orderedIDs.count, rebuilt != self.items else { return }
+            let promoted = Set(orderedIDs)
+            self.inbox.items.removeAll { promoted.contains($0.episodeId) }
             await self.edit { items in
                 items = rebuilt
             }
