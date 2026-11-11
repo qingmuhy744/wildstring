@@ -18,19 +18,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wildstring.app.data.Album
+import com.wildstring.app.data.Track
 
 /** New library arrivals and personal listening history have independent ordering and queues. */
 @Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (List<com.wildstring.app.data.Track>, Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}, albumActions: (Album) -> Unit = {}) {
     val feedback = LocalTactileFeedback.current
-    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
+        val pad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
+        val columns = pad && maxWidth >= 720.dp
         LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "discovery-header") { header() }
             item {
                 SectionHeading(stringResource(R.string.recently_added_albums), stringResource(R.string.view_all)) { vm.recentlyAdded("albums") }
             }
             item {
-                if (state.albums.isNotEmpty()) LazyRow(Modifier.testTag("discovery-albums"),
-                    contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (state.albums.isNotEmpty()) LazyRow(
+                    (if (pad) Modifier.padding(horizontal = 20.dp) else Modifier).testTag("discovery-albums"),
+                    contentPadding = PaddingValues(horizontal = if (pad) 0.dp else 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
                     items(state.albums, key = { it.id }) { album ->
                         Column(Modifier.width(116.dp).combinedClickable(
                             onClick = { vm.openAlbum(album) },
@@ -52,11 +58,7 @@ import com.wildstring.app.data.Album
             }
             items(state.addedTracks, key = { "added-${it.id}" }) { track ->
                 val playTrack = tactile { play(state.addedTracks, state.addedTracks.indexOf(track)) }
-                ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Cover(vm, track.coverId, track.title, Modifier.size(48.dp)) },
-                    trailingContent = { IconButton(playTrack) { Icon(Icons.Default.PlayCircleOutline, stringResource(R.string.play_named, track.title)) } },
-                    modifier = Modifier.fillMaxWidth().testTag("discovery-added-${track.id}").clickable(onClick = playTrack).padding(horizontal = 4.dp))
+                DiscoveryTrackRow(vm, track, "added", columns, playTrack)
             }
             item { Spacer(Modifier.height(8.dp)); SectionHeading(stringResource(R.string.recently_played), stringResource(R.string.view_more), recent) }
             if (state.tracks.isEmpty() && !state.loading && state.error == null) item {
@@ -64,14 +66,31 @@ import com.wildstring.app.data.Album
             }
             items(state.tracks.take(6), key = { "recent-${it.id}" }) { track ->
                 val playTrack = tactile { play(state.tracks, state.tracks.indexOf(track)) }
-                ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Cover(vm, track.coverId, track.title, Modifier.size(48.dp)) },
-                    trailingContent = { IconButton(playTrack) { Icon(Icons.Default.PlayCircleOutline, stringResource(R.string.play_named, track.title)) } },
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = playTrack).padding(horizontal = 4.dp))
+                DiscoveryTrackRow(vm, track, "recent", columns, playTrack)
             }
         }
         if (state.loading && state.albums.isEmpty() && state.tracks.isEmpty()) DiscoverySkeleton()
+    }
+}
+
+@Composable
+private fun DiscoveryTrackRow(vm: MusicViewModel, track: Track, section: String, columns: Boolean, play: () -> Unit) {
+    if (columns) {
+        Row(Modifier.fillMaxWidth().testTag("discovery-$section-${track.id}")
+            .clickable(onClickLabel = stringResource(R.string.play_named, track.title), onClick = play)
+            .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Cover(vm, track.coverId, track.title, Modifier.size(48.dp))
+            Text(track.title, Modifier.weight(2.4f).padding(start = 16.dp, end = 8.dp),
+                style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TrackMetadataColumns(vm, track, "discovery-$section", track.id)
+        }
+    } else {
+        ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingContent = { Cover(vm, track.coverId, track.title, Modifier.size(48.dp)) },
+            trailingContent = { IconButton(play) { Icon(Icons.Default.PlayCircleOutline, stringResource(R.string.play_named, track.title)) } },
+            modifier = Modifier.fillMaxWidth().testTag("discovery-$section-${track.id}").clickable(onClick = play).padding(horizontal = 4.dp))
     }
 }
 

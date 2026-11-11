@@ -32,7 +32,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit) {
+internal fun MobileShortcuts(discovery: Boolean = false, compactWidth: Boolean = false, open: (String) -> Unit) {
     val entries = if (discovery) listOf(
         Triple("daily", stringResource(R.string.daily_recommendations), Icons.Default.AutoAwesome),
         Triple("rankings", stringResource(R.string.listening_rankings), Icons.Default.BarChart),
@@ -43,7 +43,7 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
         Triple("settings", stringResource(R.string.settings_title), Icons.Default.Settings)
     )
     val dark = LocalDarkAppearance.current
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 20.dp, vertical = 4.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row((if (compactWidth) Modifier.widthIn(max = 720.dp) else Modifier).fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 20.dp, vertical = 4.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
             val primaryEntry = discovery && route == "daily"
             val container = if (primaryEntry) MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.16f else 0.10f) else MaterialTheme.colorScheme.surfaceContainerLow

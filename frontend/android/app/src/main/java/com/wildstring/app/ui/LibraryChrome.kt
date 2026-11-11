@@ -69,7 +69,7 @@ import androidx.compose.ui.unit.dp
     }
 }
 
-@Composable internal fun CatalogSearch(query: String, search: (String) -> Unit) {
+@Composable internal fun CatalogSearch(query: String, modifier: Modifier = Modifier, horizontalPadding: androidx.compose.ui.unit.Dp = 16.dp, search: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var input by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(query)) }
     // Query results may replace the catalogue, but must not replace an IME's composing buffer.
@@ -79,7 +79,7 @@ import androidx.compose.ui.unit.dp
     TextField(input, { value ->
         input = value
         if (value.composition == null && value.text != query) search(value.text)
-    }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("catalog-search"),
+    }, modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 4.dp).testTag("catalog-search"),
         placeholder = { Text(stringResource(R.string.search_music)) }, singleLine = true, shape = RoundedCornerShape(28.dp),
         leadingIcon = { Icon(Icons.Default.Search, null) }, trailingIcon = {
             if (input.text.isNotEmpty()) IconButton({ input = TextFieldValue(""); search("") }) { Icon(Icons.Default.Close, stringResource(R.string.clear_search)) }

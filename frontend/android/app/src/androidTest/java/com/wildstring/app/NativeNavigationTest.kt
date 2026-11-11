@@ -52,6 +52,100 @@ class NativeNavigationTest {
         File(directory, name).outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
+    @Test fun discoveryAdaptsAndOpensTrackMetadata() {
+        val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
+        val user = """{"id":"discovery-user","username":"ui-test","profile":"listener","enabled":true,"version":1}"""
+        val track = """{"id":"discovery-track","title":"布局测试歌曲","artists":["测试艺人","合作艺人"],"album":"布局测试专辑","album_id":"album-1","duration_ms":12000,"has_cover":false,"format":"mp3","status":"available"}"""
+        val albums = (1..20).joinToString(",") { """{"id":"album-$it","title":"布局测试专辑 $it","artists":["测试艺人"],"track_count":1}""" }
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.requestUrl!!.encodedPath
+                    fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
+                    val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=discovery") == true
+                    if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""")
+                    if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=discovery; Path=/; Max-Age=3600; HttpOnly")
+                    if (!authenticated) return MockResponse().setResponseCode(401)
+                    return when {
+                        path.endsWith("/auth/logout") -> MockResponse().setResponseCode(204)
+                        path.endsWith("/stream") -> audioStreamFixture(request, audio, "audio/mpeg", "\"discovery-v1\"")
+                        path.endsWith("/albums") -> json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")
+                        path.endsWith("/artists") -> json("""{"items":[{"id":"artist-1","name":"测试艺人","track_count":1},{"id":"artist-2","name":"合作艺人","track_count":1}],"total":2,"limit":50,"offset":0}""")
+                        path.endsWith("/tracks") -> json("""{"items":[$track],"total":1,"limit":50,"offset":0}""")
+                        path.endsWith("/discovery-track") -> json(track)
+                        else -> MockResponse().setResponseCode(404)
+                    }
+                }
+            }
+            server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+            try {
+                compose.runOnIdle { vm.settings.appearance("light") }
+                compose.onAllNodes(hasSetTextAction())[0].performTextReplacement(server.url("/").toString())
+                compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("ui-test")
+                compose.onAllNodes(hasSetTextAction())[2].performTextReplacement("test-password-original")
+                compose.activityRule.scenario.onActivity { activity -> WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
+                compose.onNode(isToggleable()).performScrollTo().apply {
+                    if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick()
+                }
+                compose.onNodeWithText(uiString(R.string.connect_sign_in)).performScrollTo().performClick()
+                compose.waitUntil(15_000) { vm.state.value.albums.size == 20 && vm.state.value.addedTracks.isNotEmpty() && !vm.state.value.loading }
+                shell("wm density 160")
+                for ((name, size) in listOf("phone" to "390x844", "tablet-portrait" to "800x1200", "tablet-landscape" to "1200x800")) {
+                    shell("wm size $size")
+                    val width = size.substringBefore('x').toInt()
+                    compose.waitUntil(15_000) { compose.onNodeWithTag("catalog-refresh-area").fetchSemanticsNode().size.width.let { if (name == "phone") it == width else it < width && it > 600 } }
+                    if (name == "phone") compose.onNodeWithTag("discovery-added-artist-discovery-track", useUnmergedTree = true).assertDoesNotExist()
+                    for (theme in listOf("light", "dark")) {
+                        compose.runOnIdle { vm.settings.appearance(theme) }
+                        compose.onNodeWithTag("discovery-page").performScrollToIndex(0)
+                        capture("discovery-$name-$theme.png")
+                    }
+                }
+                compose.runOnIdle { vm.settings.appearance("light") }
+                val search = compose.onNodeWithTag("catalog-search")
+                search.performClick().performTextInput("测试")
+                compose.waitUntil(15_000) { vm.state.value.kind == "tracks" && vm.state.value.query == "测试" && !vm.state.value.loading }
+                search.assertIsFocused().assertTextContains("测试")
+                compose.onNodeWithContentDescription(uiString(R.string.clear_search)).performClick()
+                compose.waitUntil(15_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                search.performImeAction()
+                compose.waitUntil(15_000) { compose.runOnIdle { ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false } }
+                val carousel = compose.onNodeWithTag("discovery-albums")
+                carousel.performScrollToIndex(0)
+                compose.onNodeWithText("布局测试专辑 1", substring = false).assertIsDisplayed()
+                carousel.performTouchInput { swipeLeft() }
+                compose.onNodeWithText("布局测试专辑 1", substring = false).assertIsNotDisplayed()
+                carousel.performScrollToIndex(19)
+                compose.onNodeWithText("布局测试专辑 20").assertIsDisplayed()
+                for (section in listOf("added", "recent")) {
+                    val row = "discovery-$section-discovery-track"
+                    compose.onNodeWithTag("discovery-page").performScrollToNode(hasTestTag(row))
+                    compose.onNodeWithTag("discovery-$section-artist-discovery-track", useUnmergedTree = true).performClick()
+                    compose.onNodeWithTag("discovery-$section-artist-choice-discovery-track-1").performClick()
+                    compose.waitUntil(15_000) { vm.state.value.collection == "artists" && vm.state.value.collectionId == "artist-2" && !vm.state.value.loading }
+                    compose.runOnIdle { vm.back() }
+                    compose.waitUntil(15_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                    compose.onNodeWithTag("discovery-page").performScrollToNode(hasTestTag(row))
+                    compose.onNodeWithTag("discovery-$section-album-discovery-track", useUnmergedTree = true).performClick()
+                    compose.waitUntil(15_000) { vm.state.value.collection == "albums" && vm.state.value.collectionId == "album-1" && !vm.state.value.loading }
+                    compose.runOnIdle { vm.back() }
+                    compose.waitUntil(15_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                }
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasTestTag("discovery-added-discovery-track"))
+                val addedRow = compose.onNodeWithTag("discovery-added-discovery-track", useUnmergedTree = true)
+                assertEquals(uiString(R.string.play_named, "布局测试歌曲"),
+                    addedRow.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.OnClick].label)
+                compose.onNode(hasText("布局测试歌曲") and hasAnyAncestor(hasTestTag("discovery-added-discovery-track")), useUnmergedTree = true)
+                    .performTouchInput { click() }
+                compose.waitUntil(15_000) { vm.state.value.current?.id == "discovery-track" && vm.state.value.playing }
+            } finally {
+                phoneWindow()
+                compose.runOnIdle { vm.settings.appearance("system"); vm.logout() }
+                compose.waitUntil(10_000) { !vm.state.value.connected }
+            }
+        }
+    }
     @Test fun nativeDestinationsPreserveCatalogAndAdaptToTablet() {
         val connectionRequests = java.util.concurrent.ConcurrentLinkedQueue<String>()
         val requests = AtomicInteger()
