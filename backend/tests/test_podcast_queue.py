@@ -293,3 +293,52 @@ def test_queue_put_stamps_preserves_added_at_and_drains_inbox(context):
         },
     )
     assert "ep-join-2" not in [item["episode_id"] for item in inbox(client)]
+
+
+def test_queue_put_accepts_null_added_at_and_preserves_manual_order(context):
+    client, database = context
+    for episode_id in ("ep-null-1", "ep-null-2"):
+        add_episode(database, episode_id)
+
+    version = queue(client)["version"]
+    response = client.put(
+        "/api/v1/podcasts/queue",
+        headers={"X-Wildstring-Client": "android"},
+        json={
+            "version": version,
+            "device_id": "android-phone",
+            "items": [
+                {"episode_id": "ep-null-1", "origin": "manual", "added_at": None},
+                {"episode_id": "ep-null-2", "origin": "manual", "added_at": None},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert [item["episode_id"] for item in saved["items"]] == ["ep-null-1", "ep-null-2"]
+    assert all(item["added_at"] for item in saved["items"])
+
+    reordered = client.put(
+        "/api/v1/podcasts/queue",
+        headers={"X-Wildstring-Client": "android"},
+        json={
+            "version": saved["version"],
+            "device_id": "android-phone",
+            "items": [
+                {
+                    "episode_id": "ep-null-2",
+                    "origin": "manual",
+                    "added_at": saved["items"][1]["added_at"],
+                },
+                {
+                    "episode_id": "ep-null-1",
+                    "origin": "manual",
+                    "added_at": None,
+                },
+            ],
+        },
+    )
+    assert reordered.status_code == 200, reordered.text
+    loaded = queue(client)
+    assert [item["episode_id"] for item in loaded["items"]] == ["ep-null-2", "ep-null-1"]
+    assert loaded["items"][1]["added_at"] == saved["items"][0]["added_at"]

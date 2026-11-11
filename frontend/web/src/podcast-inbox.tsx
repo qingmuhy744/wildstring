@@ -202,7 +202,6 @@ export function PodcastInboxDialog({
   onQueueTrack,
   onPlayTrack,
   onPlayQueue,
-  onRemoveQueuedEpisode,
 }: {
   onClose: () => void;
   onBrowse: () => void;
@@ -327,10 +326,9 @@ export function PodcastInboxDialog({
       const sortedShows = [...followed].sort((a, b) =>
         Boolean(a.followed) === Boolean(b.followed) ? 0 : a.followed ? -1 : 1,
       );
-      // Ascending join time; entries without a timestamp keep their relative order at the front.
-      setRows(
-        [...resolvedQueue, ...resolvedInbox].sort((a, b) => a.addedAt.localeCompare(b.addedAt)),
-      );
+      // Explicit queue entries keep their playback/manual order; unqueued inbox rows follow by join time.
+      const sortedInbox = [...resolvedInbox].sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+      setRows([...resolvedQueue, ...sortedInbox]);
       setQueueVersion(remoteQueue.version);
       setFollowedShows(sortedShows);
       setDefaultAction(normalizeDeliveryAction(prefs.default_action));
@@ -345,6 +343,17 @@ export function PodcastInboxDialog({
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    const synced = (event: Event) => {
+      const saved = (event as CustomEvent<{ version: number }>).detail;
+      if (saved && typeof saved.version === 'number') {
+        setQueueVersion(saved.version);
+      }
+    };
+    window.addEventListener('wildstring:podcast-queue-saved', synced);
+    return () => window.removeEventListener('wildstring:podcast-queue-saved', synced);
   }, []);
 
   async function playRow(item: UnifiedPendingRow) {
@@ -368,14 +377,19 @@ export function PodcastInboxDialog({
     try {
       if (item.source === 'inbox') {
         await removeInbox(item.episode_id);
-      } else if (onRemoveQueuedEpisode) {
-        onRemoveQueuedEpisode(item.episode_id);
       } else {
         const nextItems = rows
           .filter((entry) => entry.source === 'queue' && entry.episode_id !== item.episode_id)
-          .map((entry) => ({ episode_id: entry.episode_id, origin: entry.origin }));
+          .map((entry) => ({
+            episode_id: entry.episode_id,
+            origin: entry.origin,
+            added_at: entry.addedAt,
+          }));
         const saved = await putPodcastQueue(queueVersion, nextItems);
         setQueueVersion(saved.version);
+        window.dispatchEvent(
+          new CustomEvent('wildstring:podcast-queue-updated', { detail: saved }),
+        );
       }
       setRows((current) => current.filter((entry) => entry.episode_id !== item.episode_id));
     } catch {
@@ -401,6 +415,7 @@ export function PodcastInboxDialog({
         })),
       );
       setQueueVersion(saved.version);
+      window.dispatchEvent(new CustomEvent('wildstring:podcast-queue-updated', { detail: saved }));
       setRows(
         next.map((item) => ({ ...item, source: 'queue' as const, origin: 'manual' as const })),
       );
@@ -420,14 +435,21 @@ export function PodcastInboxDialog({
       return;
     }
     try {
-      const inboxRows = playable.filter((entry) => entry.source === 'inbox');
-      for (const item of inboxRows) {
-        await Promise.resolve(
-          onQueueTrack(podcastEpisodeToTrack(item.episode!, item.show!), false),
+      if (playable.some((entry) => entry.source === 'inbox')) {
+        const saved = await putPodcastQueue(
+          queueVersion,
+          playable.map((item) => ({
+            episode_id: item.episode_id,
+            origin: item.source === 'queue' ? item.origin : ('manual' as const),
+            added_at: item.addedAt,
+          })),
         );
-        await removeInbox(item.episode_id).catch(() => {});
+        setQueueVersion(saved.version);
+        window.dispatchEvent(
+          new CustomEvent('wildstring:podcast-queue-updated', { detail: saved }),
+        );
       }
-      if (onPlayQueue && rows.some((entry) => entry.source === 'queue')) {
+      if (onPlayQueue) {
         await Promise.resolve(onPlayQueue());
         onClose();
         return;
@@ -435,11 +457,6 @@ export function PodcastInboxDialog({
       const first = playable[0];
       if (onPlayTrack && first.episode && first.show) {
         await Promise.resolve(onPlayTrack(podcastEpisodeToTrack(first.episode, first.show)));
-        onClose();
-        return;
-      }
-      if (onPlayQueue) {
-        await Promise.resolve(onPlayQueue());
         onClose();
       }
     } catch {

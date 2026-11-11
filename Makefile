@@ -32,6 +32,10 @@ ANDROID_JAVA_HOME ?= $(shell \
 	fi)
 ANDROID = test -x "$(ANDROID_JAVA_HOME)/bin/java" && "$(ANDROID_JAVA_HOME)/bin/java" -version 2>&1 | grep -q 'version "21\.' || { echo "Android Gradle requires JDK 21; install JDK 21 or set ANDROID_JAVA_HOME" >&2; exit 1; }; JAVA_HOME="$(ANDROID_JAVA_HOME)" PATH="$(ANDROID_JAVA_HOME)/bin:$$PATH" ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
+ANDROID_TEST_CLASSES ?=
+ANDROID_TEST_REPEAT ?= 1
+ANDROID_TEST_RETRIES ?= 1
+ANDROID_TEST_BACKEND ?=
 DEV_WEB_HOST ?= 127.0.0.1
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
@@ -73,7 +77,7 @@ dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
 
-.PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-test-api android-locks android-release android-release-smoke
+.PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-instrumented-test android-test-api android-locks android-release android-release-smoke
 android-check: ## Run Android Lint (requires JDK 21 and Android SDK 37)
 	$(ANDROID) :app:lintDebug
 
@@ -110,6 +114,10 @@ android-connected-test: ## Run native UI/playback tests on a connected emulator/
 	rm -rf frontend/android/app/build/outputs/androidTest-results/connected/debug
 	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)
 	$(PYTHON) scripts/check_android_test_results.py
+
+android-instrumented-test: ## Run native UI tests one class per process with class-level retries (device required)
+	$(ANDROID) :app:assembleDebug :app:assembleDebugAndroidTest
+	$(PYTHON) scripts/run_android_instrumented.py --classes "$(ANDROID_TEST_CLASSES)" --repeat $(ANDROID_TEST_REPEAT) --retries $(ANDROID_TEST_RETRIES) $(if $(ANDROID_TEST_BACKEND),--arg realBackend=$(ANDROID_TEST_BACKEND))
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256

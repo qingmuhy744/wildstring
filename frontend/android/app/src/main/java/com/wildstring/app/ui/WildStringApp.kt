@@ -94,7 +94,6 @@ import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -505,14 +504,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     val podcastRetry = stringResource(R.string.podcast_sync_retry)
     LaunchedEffect(state.error, state.mutationMessage, podcastCloud.syncError) {
         val syncError = podcastCloud.syncError
-        val message = state.error ?: state.mutationMessage ?: syncError
+        val message = nextSnackbarMessage(state.error, state.mutationMessage, syncError)
         if (message != null) {
             try {
                 if (syncError != null && message == syncError) {
                     val result = mutationSnackbar.showSnackbar(message, podcastRetry, duration = SnackbarDuration.Long)
                     if (result == SnackbarResult.ActionPerformed) vm.retryPodcastQueueSync()
                 } else mutationSnackbar.showSnackbar(message)
-            } finally { if (state.error == null) vm.acknowledgeMessage(message) }
+            } finally { if (message == state.mutationMessage) vm.acknowledgeMessage(message) }
         }
     }
     if (podcastCloud.conflict != null) AlertDialog(
@@ -1263,9 +1262,10 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
-    // A phone propped on a stand reads landscape on the accelerometer even with auto-rotate off. Lying flat or being shaken does not count.
+    // A phone propped on a stand reads landscape on the accelerometer even with auto-rotate off.
     val context = LocalContext.current
     val canPrompt = LocalConfiguration.current.smallestScreenWidthDp < 600 && !wide && !landscape && preferences.playbackStyle == "cassette"
+    val dock = remember { LandscapeDock() }
     var heldLandscape by remember { mutableStateOf(false) }
     var landscapePrompt by remember { mutableStateOf(false) }
     DisposableEffect(canPrompt) {
@@ -1273,22 +1273,21 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         val sensor = manager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(event: android.hardware.SensorEvent) {
-                heldLandscape = isDockedLandscape(event.values[0], event.values[1], event.values[2])
+                heldLandscape = dock.update(event.values[0], event.values[1], event.values[2])
             }
             override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
         }
         if (canPrompt && sensor != null) manager.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
-        onDispose { manager.unregisterListener(listener); heldLandscape = false }
+        onDispose { manager.unregisterListener(listener); dock.stop(); heldLandscape = false }
     }
     LaunchedEffect(heldLandscape, canPrompt) {
         landscapePrompt = false
-        if (heldLandscape && canPrompt) {
+        if (heldLandscape && canPrompt && dock.armed) {
             delay(4_000)
+            dock.prompted()
             landscapePrompt = true
             delay(10_000)
             landscapePrompt = false
-            // Stay quiet until the phone has been upright again.
-            snapshotFlow { heldLandscape }.first { !it }
         }
     }
     Box(playerModifier) {

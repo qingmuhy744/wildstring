@@ -678,6 +678,9 @@ export function usePlayer(userId: string) {
         try {
           const saved = await putPodcastQueue(remoteQueue.current.version, latest);
           remoteQueue.current.version = saved.version;
+          window.dispatchEvent(
+            new CustomEvent('wildstring:podcast-queue-saved', { detail: saved }),
+          );
           if (JSON.stringify(remoteQueue.current.items) !== snapshot) continue;
           remoteQueue.current.items = saved.items;
           setPodcastQueueItems(saved.items);
@@ -727,11 +730,65 @@ export function usePlayer(userId: string) {
       setIndex(0);
       return;
     }
-    if (!currentTrack?.podcast_id) return;
+    const idlePodcast =
+      Boolean(currentTrack?.podcast_id) && !loading.current && !audio.current?.getAttribute('src');
+    if (!currentTrack?.podcast_id || idlePodcast) {
+      // Idle player: adopt queued episodes as the current item without
+      // autoplay, so add-to-queue survives reload and Play stays enabled.
+      if (audible.length && (at < 0 || idlePodcast)) {
+        setQueue(audible);
+        setIndex(0);
+      } else if (idlePodcast) {
+        setQueue([]);
+        setIndex(-1);
+      }
+      return;
+    }
     const found = audible.findIndex((track) => track.id === currentTrack.id);
     setQueue(found >= 0 ? audible : [currentTrack, ...audible]);
     setIndex(found >= 0 ? found : 0);
   }
+
+  useEffect(() => {
+    const synced = (event: Event) => {
+      const saved = (event as CustomEvent<{ version: number; items: RemoteQueueItem[] }>).detail;
+      if (!saved) return;
+      remoteQueue.current = {
+        version: saved.version,
+        items: saved.items,
+        loaded: true,
+        hold: false,
+      };
+      conflictVersion.current = null;
+      setPodcastQueueItems(saved.items);
+      setPodcastSync('ready');
+      const { queue: audible, index: at } = accessQueue.current;
+      if (!audible[at]?.podcast_id && at >= 0) return;
+      if (!saved.items.length) {
+        if (at < 0 || (audible[at]?.podcast_id && (!audio.current || audio.current.paused))) {
+          audio.current?.pause();
+          audio.current?.removeAttribute('src');
+          audio.current?.load();
+          setQueue([]);
+          setIndex(-1);
+        }
+        return;
+      }
+      if (audibleFromItems(saved.items, []).length === saved.items.length) {
+        applyAudible(saved.items, []);
+        return;
+      }
+      void resolveQueuedTracks(saved.items)
+        .then((tracks) => {
+          if (remoteQueue.current.version === saved.version) {
+            applyAudible(saved.items, tracks);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('wildstring:podcast-queue-updated', synced);
+    return () => window.removeEventListener('wildstring:podcast-queue-updated', synced);
+  }, []);
 
   function step(direction: number, automatic = false) {
     if (!queue.length) return;
@@ -901,9 +958,16 @@ export function usePlayer(userId: string) {
       setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
       return;
     }
-    if (audible.queue[audible.index]?.podcast_id || audible.index < 0) applyAudible(items, queued);
+    const shouldApply = Boolean(audible.queue[audible.index]?.podcast_id || audible.index < 0);
+    if (shouldApply && audibleFromItems(items, queued).length === items.length) {
+      applyAudible(items, queued);
+    }
     if (audible.index < 0 && next && queued[0]) start([queued[0]], 0);
     void commitQueue(items);
+    if (shouldApply && audibleFromItems(items, queued).length < items.length) {
+      const resolved = await resolveQueuedTracks(items).catch(() => queued);
+      applyAudible(remoteQueue.current.items, resolved);
+    }
   }
 
   function addToQueue(tracks: Track[], next = false) {
@@ -1364,7 +1428,7 @@ export function usePlayer(userId: string) {
       onDurationChange: () => {
         if (loading.current || planRef.current?.mode === 'transcode') return;
         const value = audio.current?.duration;
-        setDuration(value && Number.isFinite(value) ? value : 0);
+        if (value && Number.isFinite(value) && value > 0) setDuration(value);
       },
       onEnded: () => {
         if (loading.current) return;

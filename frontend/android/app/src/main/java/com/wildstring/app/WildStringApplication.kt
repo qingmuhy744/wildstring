@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.compose.foundation.ComposeFoundationFlags
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.room.Room
 import coil.ImageLoader
 import dagger.Module
@@ -20,7 +22,16 @@ import okhttp3.OkHttpClient
 
 @HiltAndroidApp
 class WildStringApplication : Application() {
+    @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate() {
+        // Compose Foundation 1.12's optimized BasicTextField min-size node reads a
+        // CompositionLocal in update() even while its layout node is detached. When a page's
+        // search field moves through movableContentOf (page <-> player backdrop) in the same frame
+        // as a text style change, attach throws, leaves half-attached modifier nodes, and the next
+        // Activity destroy crashes with "Must run runDetachLifecycle() once after
+        // runAttachLifecycle()". The legacy min-size path has no such read. Set before any Compose
+        // code loads, as the flag documentation asks; MovableTextFieldTest guards the regression.
+        ComposeFoundationFlags.isBasicTextFieldMinSizeOptimizationEnabled = false
         super.onCreate()
         AppLanguage.install(this)
         CrashHandler.install(this)

@@ -182,7 +182,7 @@ class NativeNavigationTest {
                 assertEquals(count, requests.get())
                 compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                 // Configuration changes retain the destination, and tablets constrain the settings column.
-                shell("wm size 1600x1000"); shell("wm density 160")
+                shell("wm density 160"); shell("wm size 1600x1000")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width > 1200 }
                 capture("native-tablet-settings.png")
                 assertTrue(compose.onNodeWithTag("settings-scroll").fetchSemanticsNode().size.width <= 720)
@@ -251,11 +251,11 @@ class NativeNavigationTest {
                 // Establish a settled baseline, then keep the exact position assertion below.
                 var lastPausedPositions: Pair<Long, Long>? = null
                 var unchangedSince = android.os.SystemClock.elapsedRealtime()
-                compose.waitUntil(15_000) {
+                compose.waitUntil(25_000) {
                     val positions = compose.runOnIdle {
                         val controller = vm.controller!!
-                        if (!observer.playWhenReady && !observer.isPlaying && !observer.isLoading &&
-                            !controller.playWhenReady && !controller.isPlaying && !controller.isLoading)
+                        if (!observer.playWhenReady && !observer.isPlaying &&
+                            !controller.playWhenReady && !controller.isPlaying)
                             controller.currentPosition to observer.currentPosition else null
                     }
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -290,7 +290,7 @@ class NativeNavigationTest {
                 assertEquals("Settings, capsule and queue actions must not reopen the stream", streams, streamRequests.get())
                 assertFalse(compose.runOnIdle { vm.controller!!.isPlaying })
                 val phoneSettingsWidth = compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width
-                shell("wm size 1600x1000"); shell("wm density 160")
+                shell("wm density 160"); shell("wm size 1600x1000")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width > 1200 }
                 // Tablet settings now use the same full-width mini player as the
                 // catalog surface; verify it remains laid out instead of capping

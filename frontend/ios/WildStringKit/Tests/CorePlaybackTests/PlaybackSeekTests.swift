@@ -28,11 +28,7 @@ struct PlaybackSeekTests {
         service.adopt(items: [item], startingAt: 0, position: 0, mode: "sequential")
         service.resume()
         service.pause()
-        for _ in 0..<100 {
-            if service.player.currentItem?.status == .readyToPlay { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(service.player.currentItem?.status == .readyToPlay)
+        try await waitUntil { service.player.currentItem?.status == .readyToPlay }
         let starts: [Int64] = [0, 28_349, 32_289, 36_359, 40_449, 43_859, 44_758]
         let timeline = LyricTimeline(lyrics: Lyrics(kind: "synced", lines: starts.enumerated().map {
             LyricLine(timeMs: $0.element, text: "Line \($0.offset)")
@@ -42,10 +38,8 @@ struct PlaybackSeekTests {
         for index in [2, 3, 1, 6, 4, 2] {
             let target = Double(starts[index]) / 1000
             service.seek(to: target)
-            for _ in 0..<100 {
-                if abs(service.player.currentTime().seconds - target) < 0.01 { break }
-                try await Task.sleep(for: .milliseconds(20))
-            }
+            try await waitUntil { abs(service.player.currentTime().seconds - target) < 0.01 }
+            // Let any late native time callback arrive; it must not move the line back.
             try await Task.sleep(for: .milliseconds(150))
             #expect(timeline.currentIndex(at: service.player.currentTime().seconds) == index)
             #expect(timeline.currentIndex(at: service.lyricTime) == index)
@@ -57,8 +51,22 @@ struct PlaybackSeekTests {
         service.seek(to: 40.449)
         service.seek(to: 28.349)
         service.seek(to: 32.289)
-        try await Task.sleep(for: .milliseconds(350))
+        try await waitUntil { abs(service.player.currentTime().seconds - 32.289) < 0.001 }
+        try await Task.sleep(for: .milliseconds(150))
         #expect(timeline.currentIndex(at: service.lyricTime) == 2)
         #expect(abs(service.player.currentTime().seconds - 32.289) < 0.001)
+    }
+
+    /// Polls until AVPlayer reaches the state; the deadline only bounds a real failure.
+    private func waitUntil(
+        timeout: Duration = .seconds(15),
+        _ condition: () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(condition(), "Playback did not reach the expected state")
     }
 }

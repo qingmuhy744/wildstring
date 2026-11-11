@@ -99,7 +99,7 @@ interface Api {
     @PUT("api/v1/podcasts/inbox/items/{episode_id}") suspend fun addPodcastInboxItem(@Path("episode_id") episodeId: String, @Body body: JsonObject, @Tag owner: RequestOwner): PodcastInboxWriteResult
     @DELETE("api/v1/podcasts/inbox/items/{episode_id}") suspend fun removePodcastInboxItem(@Path("episode_id") episodeId: String, @Tag owner: RequestOwner): PodcastInboxWriteResult
     @GET("api/v1/podcasts/queue") suspend fun podcastQueue(@Tag owner: RequestOwner): PodcastQueueSnapshot
-    @PUT("api/v1/podcasts/queue") suspend fun replacePodcastQueue(@Body body: PodcastQueueUpdate, @Tag owner: RequestOwner): PodcastQueueSnapshot
+    @PUT("api/v1/podcasts/queue") suspend fun replacePodcastQueue(@Body body: JsonObject, @Tag owner: RequestOwner): PodcastQueueSnapshot
     @GET("api/v1/podcasts/queue/preferences") suspend fun podcastQueuePreferences(@Tag owner: RequestOwner): PodcastQueuePreferences
     @PUT("api/v1/podcasts/queue/preferences") suspend fun savePodcastQueuePreferences(@Body body: PodcastQueuePreferences, @Tag owner: RequestOwner): PodcastQueuePreferences
     @PUT("api/v1/podcasts/episodes/{episode_id}/favorite") suspend fun favoritePodcastEpisode(@Path("episode_id") episodeId: String, @Body body: PodcastFavoriteRequest, @Tag owner: RequestOwner): PodcastFavoriteResponse

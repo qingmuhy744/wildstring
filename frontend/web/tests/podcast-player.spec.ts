@@ -82,6 +82,17 @@ async function openRadio(page: Page) {
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();
 }
 
+async function audioDuration(page: Page) {
+  let duration = NaN;
+  await expect
+    .poll(async () => {
+      duration = (await audio(page)).duration;
+      return Number.isFinite(duration) && duration > 0;
+    })
+    .toBe(true);
+  return duration;
+}
+
 test('待播列表可从节目列表和详情直接打开', async ({ page }) => {
   await login(page);
   await podcastCatalog(page);
@@ -681,7 +692,7 @@ test('自然播完标记完成并自动接续，手动添加优先且半途单�
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.locator('.programme-track').first()).toContainText('第 3 集');
   await expect(page.locator('.programme-track').first()).toContainText('手动添加');
-  const duration = (await audio(page)).duration;
+  const duration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
@@ -874,7 +885,7 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
   await expect(page.locator('.programme-track').first()).toContainText('夜间第 1 集');
 
   // 1. Finishing radio-6 (Show A) must NOT repeat radio-6 despite music repeat_one; it advances to queued radio-1 (Show B).
-  const firstDuration = (await audio(page)).duration;
+  const firstDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
@@ -885,7 +896,7 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
   await page.getByRole('button', { name: '收音机暂停' }).click();
 
   // 2. Now on Show B (radio-1) with explicit queue empty after radio-1 finishes: must auto-continue to radio-2 per Show B's 'asc' preference.
-  const secondDuration = (await audio(page)).duration;
+  const secondDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
@@ -921,12 +932,15 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   const row = (number: number) =>
     page.locator('.podcast-episode-row').filter({ hasText: `第 ${number} 集` });
 
-  // 1. Quick inline "+ 待播" on episode rows
+  // 1. Quick inline "+ 待播" on episode rows (also adopts onto idle player so Play is enabled)
   await row(6).getByRole('button', { name: '+ 待播', exact: true }).click();
   await expect(row(6).getByRole('button', { name: '✓ 已待播', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
+  await expect(
+    page.locator('.player').getByRole('button', { name: '播放', exact: true }),
+  ).toBeEnabled();
   await row(5).getByRole('button', { name: '+ 待播', exact: true }).click();
   await expect(row(5).getByRole('button', { name: '✓ 已待播', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -953,9 +967,43 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   await page.getByRole('button', { name: '待播列表', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '待播列表' });
   const pendingRegion = dialog.getByRole('region', { name: '待播单集' });
-  await expect(pendingRegion).toContainText('第 6 集');
-  await expect(pendingRegion).toContainText('第 4 集');
+  await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
+    '第 6 集：给午后的一封声音来信',
+    '第 4 集：给午后的一封声音来信',
+  ]);
   await expect(dialog.getByRole('button', { name: '▶ 播放全部', exact: true })).toBeVisible();
+
+  // Reorder "第 4 集" above "第 6 集", reopen dialog, and verify manual order does not snap back to added_at
+  const reorderSave = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
+  await pendingRegion.getByRole('button', { name: /上移.*第 4 集/ }).click();
+  await reorderSave;
+  await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
+    '第 4 集：给午后的一封声音来信',
+    '第 6 集：给午后的一封声音来信',
+  ]);
+  await expect(page.locator('.player strong')).toHaveText('第 4 集：给午后的一封声音来信');
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole('button', { name: '待播列表', exact: true }).click();
+  await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
+    '第 4 集：给午后的一封声音来信',
+    '第 6 集：给午后的一封声音来信',
+  ]);
+  const restoreSave = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
+  await pendingRegion.getByRole('button', { name: /上移.*第 6 集/ }).click();
+  await restoreSave;
+  await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
+    '第 6 集：给午后的一封声音来信',
+    '第 4 集：给午后的一封声音来信',
+  ]);
+  await expect(page.locator('.player strong')).toHaveText('第 6 集：给午后的一封声音来信');
+
   await dialog.getByRole('tab', { name: /新集自动加入待播/ }).click();
   const deliveryRegion = dialog.getByRole('region', { name: '新集自动加入待播' });
   await expect(deliveryRegion).toBeVisible();

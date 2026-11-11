@@ -200,7 +200,8 @@ public final class PlaybackService {
         fragmentCache: AudioDiskCache? = nil,
         connectionFailure: (@Sendable () async -> Void)? = nil,
         offlineLookup: @escaping @Sendable (String) -> URL? = { _ in nil },
-        planProvider: (@Sendable (String, Int?, Int64) async throws -> PlaybackPlan)? = nil
+        planProvider: (@Sendable (String, Int?, Int64) async throws -> PlaybackPlan)? = nil,
+        resourceConfiguration: URLSessionConfiguration? = nil
     ) {
         self.server = server
         self.store = store
@@ -214,6 +215,7 @@ public final class PlaybackService {
         self.resourceLoader = WildstringAudioResourceLoader(
             server: server,
             cookieHeader: cookieHeader,
+            configuration: resourceConfiguration,
             cache: fragmentCache,
             connectionFailure: connectionFailure
         )
@@ -988,7 +990,7 @@ public final class PlaybackService {
         }
     }
 
-    fileprivate func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
+    func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
         switch status {
         case .failed:
             isPlaying = false
@@ -1016,6 +1018,10 @@ public final class PlaybackService {
                 return
             }
             intendedPlaying = false
+            // The queue already ended with its own message (for example the show's episode list
+            // could not be read). A late load failure from the item that just finished must not
+            // replace it; `resume()` clears the message, so failures after a replay still show.
+            if didFinishQueue, errorMessage != nil { return }
             if let error = error as? APIError {
                 errorMessage = Self.message(for: error)
             } else if let error {

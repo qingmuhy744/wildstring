@@ -133,8 +133,14 @@ struct PlaybackLifecycleTests {
         }
     }
 
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<200 {
+    /// Polls until AVPlayer reaches the state; the deadline only bounds a real failure, so it is
+    /// generous for slow CI runners (a 4 s cap made seeks on busy macOS runners flaky).
+    private func waitUntil(
+        timeout: Duration = .seconds(15),
+        _ condition: () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
