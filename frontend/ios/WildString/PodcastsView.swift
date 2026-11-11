@@ -563,6 +563,11 @@ private struct PodcastUnifiedQueueView: View {
                             }
                             ForEach(items) { item in
                                 HStack(spacing: 10) {
+                                    // The handle stays visible so the list reads as reorderable without a gesture.
+                                    Image(systemName: "line.3.horizontal")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                        .accessibilityHidden(true)
                                     Button {
                                         play(item.episodeId, cloud: cloud)
                                     } label: {
@@ -590,7 +595,7 @@ private struct PodcastUnifiedQueueView: View {
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(L10n("podcasts.remove"))
                                 }
-                                // Finger drag: drop a row on another to move it there.
+                                // Finger drag: drop a row on another to move it. The queue is rewritten once, on drop.
                                 .draggable(item.episodeId)
                                 .dropDestination(for: String.self) { dropped, _ in
                                     guard let sourceId = dropped.first,
@@ -599,6 +604,7 @@ private struct PodcastUnifiedQueueView: View {
                                           from != to else { return false }
                                     var ids = items.map(\.episodeId)
                                     ids.insert(ids.remove(at: from), at: to)
+                                    Haptics.selection()
                                     cloud.reorderPending(ids)
                                     return true
                                 }
