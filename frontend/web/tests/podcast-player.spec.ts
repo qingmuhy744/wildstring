@@ -968,8 +968,8 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   const dialog = page.getByRole('dialog', { name: '待播列表' });
   const pendingRegion = dialog.getByRole('region', { name: '待播单集' });
   await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
-    '第 6 集',
-    '第 4 集',
+    '第 6 集：给午后的一封声音来信',
+    '第 4 集：给午后的一封声音来信',
   ]);
   await expect(dialog.getByRole('button', { name: '▶ 播放全部', exact: true })).toBeVisible();
 
@@ -981,15 +981,16 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   await pendingRegion.getByRole('button', { name: /上移.*第 4 集/ }).click();
   await reorderSave;
   await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
-    '第 4 集',
-    '第 6 集',
+    '第 4 集：给午后的一封声音来信',
+    '第 6 集：给午后的一封声音来信',
   ]);
+  await expect(page.locator('.player strong')).toHaveText('第 4 集：给午后的一封声音来信');
   await dialog.getByRole('button', { name: '关闭', exact: true }).click();
   await expect(dialog).toBeHidden();
   await page.getByRole('button', { name: '待播列表', exact: true }).click();
   await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
-    '第 4 集',
-    '第 6 集',
+    '第 4 集：给午后的一封声音来信',
+    '第 6 集：给午后的一封声音来信',
   ]);
   const restoreSave = page.waitForResponse(
     (response) =>
@@ -998,9 +999,10 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   await pendingRegion.getByRole('button', { name: /上移.*第 6 集/ }).click();
   await restoreSave;
   await expect(pendingRegion.locator('.podcast-inbox-item strong')).toHaveText([
-    '第 6 集',
-    '第 4 集',
+    '第 6 集：给午后的一封声音来信',
+    '第 4 集：给午后的一封声音来信',
   ]);
+  await expect(page.locator('.player strong')).toHaveText('第 6 集：给午后的一封声音来信');
 
   await dialog.getByRole('tab', { name: /新集自动加入待播/ }).click();
   const deliveryRegion = dialog.getByRole('region', { name: '新集自动加入待播' });
