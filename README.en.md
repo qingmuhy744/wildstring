@@ -56,7 +56,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 - **Latest release [v0.8.10](docs/releases/v0.8.10.md)** · Fixes podcast queue ordering across clients, podcast directory search with Fake-IP proxies, and starting playback from the Web queue.
 - **[v0.8.11 in preparation](docs/releases/v0.8.11.md)** · Adds adaptive Android phone and tablet layouts, improves queue drag-and-drop across clients, and combines Web metadata tasks into one queue.
-- **[PR #110](https://github.com/qingmuhy744/wildstring/pull/110)** · Adds an Android podcast audio source preference with server fallback and improves tablet back navigation and links from songs to artists and albums. When upgrading from legacy instance-wide AI settings, recreate your model connection in assistant settings.
+- **Development branch [PR #110](https://github.com/qingmuhy744/wildstring/pull/110)** · Android gets podcast audio and artwork through your WildString server. Episodes already downloaded to the device still play offline, and artwork for shows that have yet to be added is also cached and served by the server, with placeholders on failure. Tablet podcast exploration keeps results and preview side by side, switching to a single pane in narrow windows. On tablets, Discover aligns search, shortcuts, and the scrollable album row. In the wide layout, tap a song row to play it, or tap its artist or album to open the details. This branch also improves tablet back navigation. When upgrading from legacy instance-wide AI settings, recreate your model connection in assistant settings.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
