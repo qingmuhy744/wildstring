@@ -886,7 +886,7 @@ struct MacPlaylistsView: View {
     }
     .navigationTitle(L10n("macCatalog.playlists"))
     .toolbar {
-      Button(L10n("macCatalog.newPlaylist")) { creating = true }
+      MacToolbarTextButton(title: L10n("macCatalog.newPlaylist"), systemImage: "plus", accent: true) { creating = true }
     }
     .navigationDestination(for: Playlist.self) { playlist in
       MacPlaylistDetail(
@@ -1101,8 +1101,7 @@ struct MacFavoritesView: View {
     }
     .navigationTitle(L10n("macCatalog.favoritesTitle"))
     .toolbar {
-      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
-        .disabled(loading)
+      MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
     }
     .task { await load() }
   }
@@ -1151,8 +1150,7 @@ struct MacListeningView: View {
     )
     .navigationTitle(L10n("macCatalog.listeningHistoryTitle"))
     .toolbar {
-      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
-        .disabled(loading)
+      MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
     }
     .task { await load() }
   }
@@ -1200,12 +1198,9 @@ struct MacNotificationsView: View {
             .font(MacTheme.caption)
             .foregroundStyle(MacTheme.muted)
             Spacer()
-            Button(L10n("macCatalog.markAllNotificationsRead")) {
+            MacToolbarTextButton(title: L10n("macCatalog.markAllNotificationsRead"), isDisabled: page.unreadCount == 0) {
               Task { await markAll(page.highWatermark) }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(page.unreadCount == 0)
           }
           .padding(.horizontal, 24)
           .padding(.top, 20)

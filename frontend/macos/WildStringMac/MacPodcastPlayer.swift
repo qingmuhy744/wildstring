@@ -49,9 +49,7 @@ struct MacPodcastPlayer: View {
                         systemImage: "antenna.radiowaves.left.and.right")
                         .font(.callout).foregroundStyle(MacTheme.muted)
                     Spacer()
-                    Button { showQueue.toggle() } label: {
-                        Label(showQueue ? L10n("macPodcastPlayer.showNotes") : L10n("macPodcastPlayer.playQueue"), systemImage: showQueue ? "doc.text" : "list.number")
-                    }.buttonStyle(.bordered)
+                    MacToolbarTextButton(title: showQueue ? L10n("macPodcastPlayer.showNotes") : L10n("macPodcastPlayer.playQueue"), systemImage: showQueue ? "doc.text" : "list.number", accent: true) { showQueue.toggle() }
                 }
                 HStack(alignment: .top, spacing: 36) {
                     ScrollView {

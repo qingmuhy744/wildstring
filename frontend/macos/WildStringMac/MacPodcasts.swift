@@ -49,14 +49,8 @@ struct MacPodcastsView: View {
         .navigationTitle(L10n("macPodcasts.title"))
         .toolbar {
             ToolbarItemGroup {
-                Button { exploring = true } label: { Label(L10n("macPodcasts.explore"), systemImage: "safari") }
-                Button {
-                    Task { await loadShows() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help(L10n("macPodcasts.refreshShows"))
-                .disabled(loadingShows)
+                MacToolbarTextButton(title: L10n("macPodcasts.explore"), systemImage: "safari") { exploring = true }
+                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macPodcasts.refreshShows"), isDisabled: loadingShows) { Task { await loadShows() } }
             }
         }
         .task {
