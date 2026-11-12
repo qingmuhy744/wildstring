@@ -93,6 +93,7 @@ import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -486,6 +487,26 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }
     val scope = rememberCoroutineScope()
+    val playerVisibleState = remember { MutableTransitionState(false) }
+    // Collapse first, then open the show after the overlay's exit animation so
+    // catalog navigation does not start mid-slide.
+    var openShowGeneration by remember { mutableIntStateOf(0) }
+    fun openPlayingShowFromPlayer() {
+        vm.cancelAlbumNavigation()
+        vm.playerLandscape.value = false
+        expanded = false
+        queue = false
+        lyrics = false
+        settings = false
+        playerFromSettings = false
+        val generation = ++openShowGeneration
+        scope.launch {
+            snapshotFlow { playerVisibleState.isIdle && !playerVisibleState.currentState }
+                .first { it }
+            if (generation != openShowGeneration || expanded) return@launch
+            vm.openPlayingPodcast()
+        }
+    }
     val mutationSnackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crashReportOpen by rememberSaveable { mutableStateOf(false) }
@@ -748,6 +769,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             if (target == "settings") settingsContent() else catalogContent()
         }
         val showPlayer = destination == "player"
+        playerVisibleState.targetState = showPlayer
         val baseDestination = if (settings || (showPlayer && playerFromSettings)) "settings" else "catalog"
         Box(Modifier.fillMaxSize()) {
             Box(
@@ -766,7 +788,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }
             }
             AnimatedVisibility(
-                visible = showPlayer,
+                visibleState = playerVisibleState,
                 modifier = Modifier.fillMaxSize(),
                 enter = fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 },
                 exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
@@ -783,7 +805,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                         onAlbum = { state.current?.let(::openTrackAlbum) },
                         onArtist = ::openTrackArtist,
-                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true },
+                        onOpenShow = ::openPlayingShowFromPlayer)
                 }
             }
         }
@@ -1291,7 +1314,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, landscapeWindow: Boolean, tabletWindow: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
     dragOffset: State<Float>, onUpdateDrag: (Float, Boolean) -> Unit,
     onBack: () -> Unit, onDismiss: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
-    onAdd: () -> Unit, onSleep: () -> Unit) {
+    onAdd: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {}) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val sleepActive = sleep.deadline != null || sleep.entryId != null
@@ -1307,7 +1330,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     if (track.isPodcast) {
         Box(playerModifier) {
             PodcastPlayerScreen(vm, state, landscape || wide, !queue,
-                onBack, onDismiss, onUpdateDrag, onQueue, onSleep)
+                onBack, onDismiss, onUpdateDrag, onQueue, onSleep, onOpenShow)
         }
         return
     }

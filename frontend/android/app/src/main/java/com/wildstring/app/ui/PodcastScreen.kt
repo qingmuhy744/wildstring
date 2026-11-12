@@ -40,6 +40,10 @@ import com.wildstring.app.R
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -366,7 +370,7 @@ private fun PodcastUnifiedQueueBanner(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .clickable(onClick = onOpenQueue)
+                .clickable(onClickLabel = stringResource(R.string.pod_scr_open_queue), onClick = onOpenQueue)
                 .testTag("podcast-queue-banner"),
         ) {
             Row(
@@ -408,6 +412,8 @@ private fun PodcastUnifiedQueueBanner(
                         if (pendingCount > 0) stringResource(R.string.pod_scr_pending_summary, pendingCount) else stringResource(R.string.pod_scr_pending_empty_prompt),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (pendingCount > 0) {
@@ -703,6 +709,29 @@ private fun PodcastStatusCard(message: String, onAction: () -> Unit, action: Str
     }
 }
 
+
+/** Widest follow-button label in the current locale, including padding and the menu chevron. */
+@Composable
+private fun podcastFollowButtonMinWidth(): androidx.compose.ui.unit.Dp {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val style = TextStyle(fontSize = 13.sp)
+    val followed = stringResource(R.string.pod_exp_followed)
+    val labels = listOf(
+        stringResource(R.string.pod_scr_follow_show),
+        followed,
+        followed + " · " + stringResource(R.string.podcast_action_queue_last_short),
+        followed + " · " + stringResource(R.string.podcast_action_queue_next_short),
+        followed + " · " + stringResource(R.string.podcast_action_ignore_short),
+    )
+    val textMax = labels.maxOf { label ->
+        with(density) {
+            measurer.measure(AnnotatedString(label), style = style, softWrap = false, maxLines = 1).size.width.toDp()
+        }
+    }
+    return textMax + 12.dp + 6.dp + 18.dp
+}
+
 /** Follow state plus everything that only matters once a show is followed: new-episode rule, auto download, unfollow. */
 @Composable
 internal fun PodcastFollowedMenu(
@@ -728,12 +757,13 @@ internal fun PodcastFollowedMenu(
             onClick = { open = true },
             shape = RoundedCornerShape(10.dp),
             contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
-            modifier = Modifier.height(40.dp).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
+            modifier = Modifier.height(40.dp).widthIn(min = podcastFollowButtonMinWidth()).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
         ) {
             // The current rule rides on the button; "仅关注" is the quiet default and adds nothing.
             Text(
                 stringResource(R.string.pod_exp_followed) + if (action != null && action != "ignore") " · " + stringResource(label(action)) else "",
-                fontSize = 13.sp, maxLines = 1, softWrap = false,
+                fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
         }
@@ -1244,9 +1274,9 @@ private fun PodcastDetailView(
                                     onClick = onFollow,
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = (if (totalPendingCount > 0) Modifier else Modifier.weight(1f)).height(40.dp),
+                                    modifier = (if (totalPendingCount > 0) Modifier else Modifier.weight(1f)).height(40.dp).widthIn(min = podcastFollowButtonMinWidth()),
                                 ) {
-                                    Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
                             } else PodcastFollowedMenu(
                                 preference = showPreference, loading = preferenceLoading, error = preferenceError,
