@@ -69,6 +69,7 @@
     <string name="podcast_queue_overwrite">Overwrite with this device</string>
     <string name="podcast_queue_keep_local">Keep this device only, don\'t overwrite yet</string>
     <string name="podcast_queue_full">The queue is full, so these new episodes were not added. Remove some, then refresh the show.</string>
+    <string name="podcast_new_episode_summary">New episodes</string>
     <string name="podcast_new_episode_action">Auto-add new episodes</string>
     <string name="podcast_action_queue_last">Auto-add to end</string>
     <string name="podcast_action_queue_next">Auto-add to the front</string>
@@ -128,6 +129,8 @@
     <string name="style_vinyl">Vinyl</string>
     <string name="style_cassette">Cassette</string>
     <string name="settings_day_night">Day &amp; night</string>
+    <string name="settings_interface_animations">Interface transitions</string>
+    <string name="settings_interface_animations_hint">Use brief transitions when switching player views. Android system animation settings still take priority.</string>
     <string name="appearance_system">Follow system</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>

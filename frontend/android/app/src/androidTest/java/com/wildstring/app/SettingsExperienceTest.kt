@@ -203,6 +203,10 @@ class SettingsExperienceTest {
                 compose.onNodeWithText("Check for updates").assertIsDisplayed()
                 compose.onNodeWithTag("settings-back").performClick()
                 category("appearance")
+                compose.onNodeWithTag("interface-animations").assertIsDisplayed().performClick()
+                compose.runOnIdle { assertFalse(vm.settings.state.value.interfaceAnimations) }
+                compose.onNodeWithTag("interface-animations").performClick()
+                compose.runOnIdle { assertTrue(vm.settings.state.value.interfaceAnimations) }
                 compose.onNodeWithTag("setting-language").performScrollTo().performClick()
                 compose.onNodeWithTag("setting-option-language-zh").performClick()
                 compose.waitUntil(10_000) {

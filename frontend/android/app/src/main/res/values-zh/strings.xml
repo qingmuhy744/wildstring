@@ -69,6 +69,7 @@
     <string name="podcast_queue_overwrite">用本机覆盖</string>
     <string name="podcast_queue_keep_local">仅保留本机、暂不覆盖</string>
     <string name="podcast_queue_full">待播列表已满，这次的新集没有自动加入。删掉一些后再刷新节目。</string>
+    <string name="podcast_new_episode_summary">新集待播</string>
     <string name="podcast_new_episode_action">新集自动加入待播</string>
     <string name="podcast_action_queue_last">自动加到队尾</string>
     <string name="podcast_action_queue_next">自动加到最前</string>
@@ -128,6 +129,8 @@
     <string name="style_vinyl">黑胶</string>
     <string name="style_cassette">磁带</string>
     <string name="settings_day_night">日夜模式</string>
+    <string name="settings_interface_animations">界面过渡动画</string>
+    <string name="settings_interface_animations_hint">切换播放器视图时使用轻量过渡；系统关闭动画时遵循系统设置。</string>
     <string name="appearance_system">跟随系统</string>
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>

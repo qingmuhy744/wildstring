@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -257,6 +258,10 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                             styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
                         SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
                             listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
+                        ListItem(headlineContent = { Text(stringResource(R.string.settings_interface_animations)) }, supportingContent = { Text(stringResource(R.string.settings_interface_animations_hint)) },
+                            leadingContent = { Icon(Icons.Default.Animation, null) },
+                            trailingContent = { Switch(preferences.interfaceAnimations, null) },
+                            modifier = Modifier.testTag("interface-animations").toggleable(value = preferences.interfaceAnimations, role = Role.Switch, onValueChange = vm.settings::interfaceAnimations))
                         SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
                             listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
                             stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)

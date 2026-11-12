@@ -862,7 +862,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shadowElevation = 12.dp,
                 ) {
-                    Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    Column(Modifier.fillMaxWidth()) {
                         Box(
                             Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
                                 .then(queueDismissModifier),
@@ -876,6 +876,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             modifier = Modifier.fillMaxWidth(),
                             headerModifier = queueDismissModifier,
                             onClose = { queue = false },
+                            // Rows scroll to the sheet edge; only the end of the list clears the gesture bar.
+                            bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                         )
                     }
                 }
