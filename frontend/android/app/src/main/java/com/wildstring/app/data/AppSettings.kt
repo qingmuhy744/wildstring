@@ -55,6 +55,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         boundAccount = identity
         initializedBinding = true
         mutable.value = preferences()
+        gainChanged()
     }
 
     private fun copyPreference(edit: SharedPreferences.Editor, key: String, value: Any?) {
@@ -90,6 +91,15 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     }
     fun avatarChanged() { avatarMutable.value += 1 }
     fun gainChanged() { gainMutable.value += 1 }
+    /** Local to this device and the bound server/account, shared by all episodes of a show. */
+    fun podcastGainDb(podcastId: String): Int = prefs.getInt("podcast-gain:$podcastId", 0).coerceIn(0, 12)
+    fun podcastGainDb(podcastId: String, db: Int) {
+        require(podcastId.isNotBlank() && db in 0..12)
+        val edit = prefs.edit()
+        if (db == 0) edit.remove("podcast-gain:$podcastId") else edit.putInt("podcast-gain:$podcastId", db)
+        edit.apply()
+        gainChanged()
+    }
     fun lyricFollowSeconds(seconds: Int) {
         require(seconds in listOf(1, 2, 3, 5, 10))
         prefs.edit().putInt("lyric_follow_seconds", seconds).apply()

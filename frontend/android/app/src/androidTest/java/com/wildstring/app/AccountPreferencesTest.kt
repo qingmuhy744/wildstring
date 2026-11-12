@@ -71,6 +71,27 @@ class AccountPreferencesTest {
         assertEquals("cassette", reopened.state.value.playbackStyle)
     }
 
+    @Test fun podcastBoostPersistsPerShowAccountAndServerAndResetsToUnity() = isolated { context ->
+        val settings = AppSettings(context)
+        settings.bindAccount("server-a", "listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        val revision = settings.gainRevision.value
+        settings.podcastGainDb("quiet-show", 6)
+        assertTrue(settings.gainRevision.value > revision)
+        assertEquals(0, settings.podcastGainDb("another-show"))
+        settings.bindAccount("server-a", "other-listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        settings.bindAccount("server-b", "listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        val reopened = AppSettings(context)
+        reopened.bindAccount("server-a", "listener")
+        assertEquals(6, reopened.podcastGainDb("quiet-show"))
+        reopened.podcastGainDb("quiet-show", 0)
+        assertEquals(0, reopened.podcastGainDb("quiet-show"))
+        assertThrows(IllegalArgumentException::class.java) { reopened.podcastGainDb("quiet-show", 13) }
+        assertThrows(IllegalArgumentException::class.java) { reopened.podcastGainDb("quiet-show", -1) }
+    }
+
     @Test fun networkAndDownloadOptionsAreIsolatedAndKeepLegacyValuesForOneAccount() = isolated { context ->
         val name = "offline-options"
         val keys = setOf("wifi_only", "download_bitrate", "capacity_gb")

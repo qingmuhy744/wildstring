@@ -37,6 +37,7 @@ import com.wildstring.app.MainActivity
 import com.wildstring.app.data.*
 import java.io.IOException
 import java.util.UUID
+import kotlin.math.pow
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import kotlinx.coroutines.*
@@ -54,6 +55,7 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
             .setExtras(Bundle().apply {
                 putString("profile", repository.session.cacheScope())
                 putString("track_id", id)
+                podcast?.let { putString("podcast_id", it.podcastId) }
                 putLong("duration_ms", durationMs)
                 putString("format", format)
                 putString("original_stream", repository.originalStream(id))
@@ -126,11 +128,17 @@ class PlaybackService : MediaSessionService() {
 
     private fun refreshGain() {
         gainRequest?.cancel()
+        gainProcessor.factor = 1f
         val item = engine.currentMediaItem ?: return
         val track = item.mediaMetadata.extras?.getString("track_id") ?: return
-        if (podcastEpisodeId(track) != null) { gainProcessor.factor = 1f; return }
         val owner = repository.session.cacheScope() ?: return
         if (item.mediaMetadata.extras?.getString("profile") != owner) { gainProcessor.factor = 1f; return }
+        if (podcastEpisodeId(track) != null) {
+            item.mediaMetadata.extras?.getString("podcast_id")?.let { podcastId ->
+                gainProcessor.factor = 10.0.pow(settings.podcastGainDb(podcastId) / 20.0).toFloat()
+            }
+            return
+        }
         gainRequest = scope.launch {
             fun apply(value: com.google.gson.JsonObject?) {
                 if (owner == repository.session.cacheScope() && engine.currentMediaItem?.mediaId == item.mediaId)

@@ -1016,7 +1016,7 @@ func macPodcastDate(_ value: String) -> String {
     return date?.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)) ?? L10n("macPodcasts.dateNotProvided")
 }
 
-private struct PodcastIntakeSettings: View {
+struct PodcastIntakeSettings: View {
     let playback: PlaybackService
     let podcastID: String
     var onSaved: () -> Void = {}
@@ -1037,6 +1037,7 @@ private struct PodcastIntakeSettings: View {
                     Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .fixedSize()
             }
             HStack(spacing: 12) {
@@ -1050,6 +1051,7 @@ private struct PodcastIntakeSettings: View {
                     Text(L10n("macPodcasts.continueOff")).tag("off")
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .fixedSize()
             }
             if let message = playback.podcastCloud?.preferenceError {
