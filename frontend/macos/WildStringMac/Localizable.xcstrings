@@ -15267,6 +15267,23 @@
         }
       }
     },
+    "macPodcastPlayer.playAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放全部"
+          }
+        }
+      }
+    },
     "macPodcastPlayer.playbackRate": {
       "extractionState": "manual",
       "localizations": {

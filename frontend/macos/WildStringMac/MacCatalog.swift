@@ -143,7 +143,7 @@ struct MacPlayableTracks: View {
           }
           .font(MacTheme.micro)
           .foregroundStyle(MacTheme.faint)
-          .padding(.horizontal, 18)
+          .padding(.horizontal, 30)
           .padding(.vertical, 10)
           .overlay(alignment: .bottom) {
             Rectangle().fill(MacTheme.border).frame(height: 1)
@@ -369,20 +369,23 @@ struct MacPlayableTracks: View {
       .accessibilityLabel(L10n("macCatalog.moreActionsForTrack", track.title))
       .help(L10n("macCatalog.moreActionsForTrack", track.title))
     }
-    .padding(.vertical, 10)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
     .background(
-      current
-        ? MacTheme.accent.opacity(0.10)
-        : (isHovered ? MacTheme.panel.opacity(0.55) : Color.clear)
+      current ? MacTheme.accentSoft : (isHovered ? MacTheme.hover : MacTheme.panel),
+      in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
     )
-    .overlay(alignment: .bottom) {
-      Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
+    .overlay {
+      RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
+        .strokeBorder(current ? MacTheme.accent.opacity(0.45) : MacTheme.border, lineWidth: 1)
     }
+    .padding(.vertical, 3)
     .overlay(alignment: .leading) {
       if current {
         Capsule()
           .fill(MacTheme.accent)
           .frame(width: 3)
+          .padding(.horizontal, 3)
           .padding(.vertical, 12)
       }
     }
@@ -507,33 +510,42 @@ struct MacAlbumsView: View {
   @State private var total = 0
   @State private var message: String?
   @State private var loading = true
+  @FocusState private var searchFocused: Bool
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]
   }
 
   var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 22) {
-        ForEach(albums) { album in
-          MacCatalogCard(
-            client: client,
-            value: album,
-            title: album.title,
-            subtitle: album.artists.joined(separator: " / "),
-            cover: album.coverTrackId
-          )
-        }
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        MacSearchField(placeholder: L10n("macCatalog.searchAlbums"), text: $query, focused: $searchFocused)
+        Spacer(minLength: 0)
       }
-      .padding(24)
+      .padding(.horizontal, 24)
+      .padding(.top, 12)
+      .padding(.bottom, 6)
+      ScrollView {
+        LazyVGrid(columns: columns, spacing: 22) {
+          ForEach(albums) { album in
+            MacCatalogCard(
+              client: client,
+              value: album,
+              title: album.title,
+              subtitle: album.artists.joined(separator: " / "),
+              cover: album.coverTrackId
+            )
+          }
+        }
+        .padding(24)
+      }
       if albums.count < total {
-        Button(L10n("macCatalog.remainingAlbums", total - albums.count)) { Task { await load(reset: false) } }
-          .buttonStyle(.bordered)
-          .padding(.bottom, 24)
+        MacLoadMoreBar(text: L10n("macCatalog.remainingAlbums", total - albums.count)) {
+          Task { await load(reset: false) }
+        }
       }
     }
     .navigationTitle(L10n("macCatalog.albums"))
-    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchAlbums")))
     .navigationDestination(for: Album.self) { album in
       MacAlbumDetail(
         client: client,
@@ -661,6 +673,7 @@ struct MacArtistsView: View {
   @State private var total = 0
   @State private var message: String?
   @State private var loading = true
+  @FocusState private var searchFocused: Bool
     @AppStorage("macArtistRole") private var role = "album_artist"
 
   private var columns: [GridItem] {
@@ -668,23 +681,32 @@ struct MacArtistsView: View {
   }
 
   var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 22) {
-        ForEach(artists) { artist in
-          MacCatalogCard(
-            client: client,
-            value: artist,
-            title: artist.name,
-            subtitle: L10n("macCatalog.artistSubtitle", artist.albumCount, artist.trackCount),
-            cover: artist.coverTrackId
-          )
-        }
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        MacSearchField(placeholder: L10n("macCatalog.searchArtists"), text: $query, focused: $searchFocused)
+        Spacer(minLength: 0)
       }
-      .padding(24)
+      .padding(.horizontal, 24)
+      .padding(.top, 12)
+      .padding(.bottom, 6)
+      ScrollView {
+        LazyVGrid(columns: columns, spacing: 22) {
+          ForEach(artists) { artist in
+            MacCatalogCard(
+              client: client,
+              value: artist,
+              title: artist.name,
+              subtitle: L10n("macCatalog.artistSubtitle", artist.albumCount, artist.trackCount),
+              cover: artist.coverTrackId
+            )
+          }
+        }
+        .padding(24)
+      }
       if artists.count < total {
-        Button(L10n("macCatalog.remainingArtists", total - artists.count)) { Task { await load(reset: false) } }
-          .buttonStyle(.bordered)
-          .padding(.bottom, 24)
+        MacLoadMoreBar(text: L10n("macCatalog.remainingArtists", total - artists.count)) {
+          Task { await load(reset: false) }
+        }
       }
     }
     .navigationTitle(L10n("macCatalog.artists"))
@@ -700,7 +722,6 @@ struct MacArtistsView: View {
         Text(L10n("macCatalog.roleArranger")).tag("arranger")
       }.pickerStyle(.menu).help(L10n("macCatalog.roleFilterHelp"))
     }
-    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchArtists")))
     .navigationDestination(for: Artist.self) { artist in
       MacArtistDetail(
         client: client,
