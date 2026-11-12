@@ -147,15 +147,22 @@ import kotlinx.coroutines.launch
                         modifier = Modifier.fillMaxWidth().testTag("podcast-explore-search"),
                         enabled = !busy,
                     )
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val regionLabel = regions.first { it.first == region }.second
+                    val rankingLabel = page?.regions.orEmpty().map { code ->
+                        regions.firstOrNull { it.first.equals(code, ignoreCase = true) }?.second ?: code.uppercase()
+                    }.joinToString(" · ")
+                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
                         if ((selected == null || wide) && !isRssUrl) {
                             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(
-                                    text = if (query.isBlank()) stringResource(R.string.pod_exp_hot_ranking, page?.regions.orEmpty().joinToString().uppercase()) else stringResource(R.string.pod_exp_search_apple),
+                                    text = if (query.isBlank()) {
+                                        val suffix = rankingLabel.ifBlank { regionLabel }
+                                        if (suffix.isBlank()) stringResource(R.string.pod_exp_hot_ranking_plain)
+                                        else stringResource(R.string.pod_exp_hot_ranking, suffix)
+                                    } else stringResource(R.string.pod_exp_search_apple),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                 error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton({ retry++ }) { Text(stringResource(R.string.retry)) } }
                                 if (page?.failedRegions?.isNotEmpty() == true) Text(stringResource(R.string.pod_exp_partial_regions_failed), style = MaterialTheme.typography.bodySmall)
                                 if ((page?.explicitHidden ?: 0) > 0) Text(stringResource(R.string.pod_exp_explicit_hidden), style = MaterialTheme.typography.bodySmall)
@@ -176,16 +183,21 @@ import kotlinx.coroutines.launch
                                                 .selectable(selected = selected?.feedUrl == item.feedUrl, enabled = !busy, role = Role.Button) { selected = item },
                                         )
                                     }
+                                    if (loading) item { PodcastExploreResultsSkeleton() }
                                     if (!loading && error == null && page?.results?.isEmpty() == true) item { Text(stringResource(R.string.pod_exp_no_results)) }
                                 }
                             }
                         }
                         if (selected != null || isRssUrl || wide) {
                             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
-                                Column(Modifier.widthIn(max = 760.dp).fillMaxSize().testTag("podcast-explore-preview"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Column(Modifier.widthIn(max = 760.dp).fillMaxSize().testTag("podcast-explore-preview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     if (selected == null && !isRssUrl) {
-                                        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                                        else if (page?.results?.isNotEmpty() == true) Text(stringResource(R.string.podcast_select_show), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            stringResource(R.string.podcast_select_show),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        if (loading) PodcastExplorePreviewSkeleton()
                                     } else {
                                         val titleText = preview?.title?.takeIf { it.isNotBlank() } ?: selected?.title ?: trimmedQuery
                                         val feedUrlToSubscribe = activeFeedUrl.orEmpty()

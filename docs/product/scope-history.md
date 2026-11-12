@@ -2,6 +2,8 @@
 
 按批次记录各版本的实现与验证边界，新条目放最前。当前产品范围见 [scope.md](scope.md)；此处内容是历史，不代表当前状态，当前数据库 schema 以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准。
 
+0.8.15 发布：修复 Android 下滑收起全屏播放器时 Compose 1.12 的 `onReuse is only expected on attached node` 闪退（曲库／设置留在原位，播放器改为覆盖层；关闭可暂停预加载作为兜底）。打磨平板探索页加载态（保留区域名、骨架屏、右栏标题对齐），「已关注」按钮固定最小宽度，播放器节目名可进入节目页，顶栏补上单集收藏红心；待播横幅去掉「点击查看」。GitHub Release 增加 R8 mapping 以便还原崩溃堆栈。Android versionCode 51，Apple 构建号 50，数据库 schema 仍为 52。0.8.12 及更早客户端仍不能对接本版服务器。实现与验证边界见 [0.8.15 发布说明](../releases/v0.8.15.md)。
+
 0.8.14 发布：Android 播客播放器新增按节目保存的本机增益（0～+12 dB，按服务器／账号／节目隔离，不上传）；macOS 打磨待播单面板、曲目卡片行、安静工具栏（macOS 26+ 隐藏共享工具栏背景）、侧栏外观切换与唱臂弹簧过渡；macOS／iOS 线路编辑器增加不改选线的连通性探测；macOS 艺人页在专辑艺人角色下进入专辑网格，并支持按规则创建高级歌单（现有 `POST /api/v1/playlists`，无后端变更）。Android versionCode 50，Apple 构建号 49，数据库 schema 仍为 52。0.8.12 及更早客户端仍不能对接本版服务器。实现与验证边界见 [0.8.14 发布说明](../releases/v0.8.14.md)。
 
 0.8.13 发布：**破坏性变更**，服务端移除 `/podcasts/inbox`，0.8.12 及更早客户端无法正确对接 0.8.13 服务器，须四端与服务器一同升级。每个用户只保留一份有序待播列表；schema 52 升级时将稍后听按加入时间接到队尾后删表，偏好 `inbox` 改为 `queue_last`，`podcast_inbox_baseline` 保留；新集默认队尾，去掉隐藏每节目 3 条上限，全队列上限 5000；从节目点播放顺着节目，从待播点播放顺着列表。Android 打磨播客播放器 240ms 封面／文章过渡、待播面板底部适配与音乐队列卡片化，并将新集规则收进「已关注」菜单。Android versionCode 49，Apple 构建号 48，数据库 schema 52。实现与验证边界见 [0.8.13 发布说明](../releases/v0.8.13.md)。

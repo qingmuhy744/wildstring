@@ -65,7 +65,7 @@ import kotlinx.coroutines.CancellationException
 internal fun PodcastPlayerScreen(
     vm: MusicViewModel, state: MusicState, wide: Boolean, dragEnabled: Boolean,
     onBack: () -> Unit, onDismiss: () -> Unit, onDragOffset: (Float, Boolean) -> Unit,
-    onQueue: () -> Unit, onSleep: () -> Unit,
+    onQueue: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {},
 ) {
     val track = state.current ?: return
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
@@ -144,6 +144,20 @@ internal fun PodcastPlayerScreen(
                         )
                     }
                 }
+                val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
+                val pendingFavorites by vm.pendingPodcastFavorites.collectAsStateWithLifecycle()
+                val favoriteOverrides by vm.podcastFavoriteOverrides.collectAsStateWithLifecycle()
+                val episodeId = track.podcastEpisodeId
+                val loved = episodeId != null && (
+                    favoriteOverrides[episodeId] ?: (episodeId in favoriteIds || episode?.isFavorite == true)
+                )
+                if (episodeId != null) {
+                    FavoriteControl(
+                        loved = loved,
+                        pending = episodeId in pendingFavorites,
+                        click = tactile { vm.togglePodcastEpisodeFavorite(episodeId, !loved) },
+                    )
+                }
                 IconButton(tactile(onSleep)) {
                     Icon(
                         Icons.Default.Bedtime,
@@ -180,12 +194,12 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Text(
-                                    (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
-                                    style = MaterialTheme.typography.labelMedium,
+                                PodcastShowName(
+                                    name = (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
+                                    onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
                                     color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    tag = "podcast-player-article-show",
                                 )
                                 episode?.pubDate?.takeIf { it.isNotBlank() }?.let { pub ->
                                     Text(
@@ -243,17 +257,41 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(
-                                listOfNotNull(
-                                    track.album?.takeIf { it.isNotBlank() },
-                                    track.artist.takeIf { it.isNotBlank() && it != track.album },
-                                ).joinToString(" · ").ifBlank { track.artist },
-                                Modifier.fillMaxWidth(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            val showName = track.album?.takeIf { it.isNotBlank() }
+                            val authorName = track.artist.takeIf { it.isNotBlank() && it != track.album }
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                if (showName != null) {
+                                    PodcastShowName(
+                                        name = showName,
+                                        onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        tag = "podcast-player-show",
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                }
+                                if (showName != null && authorName != null) {
+                                    Text(" · ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (authorName != null) {
+                                    Text(
+                                        authorName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                } else if (showName == null) {
+                                    Text(
+                                        track.artist,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -302,6 +340,37 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         }
     }
     if (preview) ArtworkPreview(vm, track) { preview = false }
+}
+
+
+@Composable
+private fun PodcastShowName(
+    name: String,
+    onOpen: (() -> Unit)?,
+    color: androidx.compose.ui.graphics.Color,
+    style: androidx.compose.ui.text.TextStyle,
+    tag: String,
+    modifier: Modifier = Modifier,
+) {
+    val label = stringResource(R.string.open_show_named, name)
+    val open = onOpen
+    Text(
+        name,
+        style = style,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .then(
+                if (open != null && name.isNotBlank()) Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable(role = Role.Button, onClickLabel = label, onClick = open)
+                    .padding(vertical = 2.dp)
+                else Modifier
+            )
+            .testTag(tag)
+            .semantics { if (open != null && name.isNotBlank()) contentDescription = label },
+    )
 }
 
 /**

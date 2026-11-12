@@ -363,6 +363,7 @@
     <string name="artist_count">Artists: %1$d</string>
     <string name="album_count">Albums: %1$d</string>
     <string name="open_artist_named">Go to artist · %1$s</string>
+    <string name="open_show_named">Open show %1$s</string>
     <string name="track_count">Songs: %1$d</string>
     <string name="play_count_value">Plays: %1$d</string>
     <string name="minutes_value">%1$d min</string>
@@ -1557,6 +1558,7 @@
     <string name="pod_exp_followed">Followed</string>
     <string name="pod_exp_following">Following…</string>
     <string name="pod_exp_hot_ranking">Apple Podcasts top charts · %1$s</string>
+    <string name="pod_exp_hot_ranking_plain">Apple Podcasts top charts</string>
     <string name="pod_exp_latest_episodes">Latest episodes</string>
     <string name="pod_exp_no_results">No shows found. Try other regions or keywords.</string>
     <string name="pod_exp_open_show">Open show</string>
@@ -1677,7 +1679,8 @@
     <string name="pod_scr_no_followed_shows_yet">No followed shows yet</string>
     <string name="pod_scr_no_show_intro">No show description</string>
     <string name="pod_scr_pending_empty_prompt">Queue is empty · Tap to set new episode rules</string>
-    <string name="pod_scr_pending_summary">%1$d episodes in queue · Tap to view</string>
+    <string name="pod_scr_pending_summary">%1$d episodes in queue</string>
+    <string name="pod_scr_open_queue">Open the queue</string>
     <string name="pod_scr_play">Play</string>
     <string name="pod_scr_play_btn">▶ Play</string>
     <string name="pod_scr_play_episode_btn">Play episode</string>

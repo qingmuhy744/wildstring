@@ -204,7 +204,7 @@ jobs:
         working-directory: artifacts/release
         run: |
           sha256sum --check SHA256SUMS
-          sha256sum -- *.apk *.zip *.dmg android-signing-certificate.sha256 > SHA256SUMS
+          sha256sum -- *.apk *.zip *.dmg android-signing-certificate.sha256 *mapping.txt > SHA256SUMS
       - name: Image identity
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"

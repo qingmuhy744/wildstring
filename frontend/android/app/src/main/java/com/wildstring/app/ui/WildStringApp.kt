@@ -93,6 +93,7 @@ import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -486,6 +487,26 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }
     val scope = rememberCoroutineScope()
+    val playerVisibleState = remember { MutableTransitionState(false) }
+    // Collapse first, then open the show after the overlay's exit animation so
+    // catalog navigation does not start mid-slide.
+    var openShowGeneration by remember { mutableIntStateOf(0) }
+    fun openPlayingShowFromPlayer() {
+        vm.cancelAlbumNavigation()
+        vm.playerLandscape.value = false
+        expanded = false
+        queue = false
+        lyrics = false
+        settings = false
+        playerFromSettings = false
+        val generation = ++openShowGeneration
+        scope.launch {
+            snapshotFlow { playerVisibleState.isIdle && !playerVisibleState.currentState }
+                .first { it }
+            if (generation != openShowGeneration || expanded) return@launch
+            vm.openPlayingPodcast()
+        }
+    }
     val mutationSnackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crashReportOpen by rememberSaveable { mutableStateOf(false) }
@@ -734,42 +755,48 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
             }
         }
-        // Move each page between its destination and the player backdrop without recreating
-        // its saveable registry before the outgoing instance has saved its state.
+        // Catalog and settings stay in one composition slot. Through 0.8.13 they were
+        // moved with movableContentOf into the player backdrop and back again on
+        // swipe-dismiss, in the same frame as the player's exit animation. That move
+        // races Compose 1.12 lazy item reuse / pausable prefetch and crashes with
+        // "onReuse is only expected on attached node". The player is now an overlay;
+        // a downward swipe only translates and then removes it. movableContentOf is
+        // still used for the settings <-> catalog transition, where the saveable
+        // registry must not be recreated mid-flight.
         val settingsContent = remember { movableContentOf { baseDestinationContent("settings") } }
         val catalogContent = remember { movableContentOf { baseDestinationContent("catalog") } }
         @Composable fun BaseDestination(target: String) {
             if (target == "settings") settingsContent() else catalogContent()
         }
-        AnimatedContent(destination, transitionSpec = {
-            if (targetState == "settings" || initialState == "settings") {
-                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
-            } else if (initialState == "player") {
-                ContentTransform(
-                    targetContentEnter = EnterTransition.None,
-                    // Starts at full speed so a released swipe carries on instead of pausing first.
-                initialContentExit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
-                    targetContentZIndex = -1f,
-                )
-            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
-        }, label = "app-destination") { currentDestination ->
-            if (currentDestination == "player") {
+        val showPlayer = destination == "player"
+        playerVisibleState.targetState = showPlayer
+        val baseDestination = if (settings || (showPlayer && playerFromSettings)) "settings" else "catalog"
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier.fillMaxSize()
+                    .then(if (showPlayer) Modifier.clearAndSetSemantics {} else Modifier)
+                    .drawWithContent {
+                        if (!showPlayer || playerDismissY.floatValue > 0.5f) drawContent()
+                    },
+            ) {
+                AnimatedContent(baseDestination, transitionSpec = {
+                    if (targetState == "settings" || initialState == "settings") {
+                        (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+                    } else fadeIn(tween(140)) togetherWith fadeOut(tween(120))
+                }, label = "app-destination") { currentDestination ->
+                    BaseDestination(currentDestination)
+                }
+            }
+            AnimatedVisibility(
+                visibleState = playerVisibleState,
+                modifier = Modifier.fillMaxSize(),
+                enter = fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 },
+                exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
+                label = "player-overlay",
+            ) {
                 Box(Modifier.fillMaxSize()) {
                     // The offset outlives the dismiss so the exit slide continues from the finger.
                     DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
-                    // Composed ahead of the gesture so the first frame of a pull has nothing to build.
-                    if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
-                        this@AnimatedContent.transition.targetState == EnterExitState.Visible) {
-                        Box(
-                            Modifier.fillMaxSize()
-                                .clearAndSetSemantics {}
-                                .drawWithContent {
-                                    if (playerDismissY.floatValue > 0.5f) drawContent()
-                                }
-                        ) {
-                            BaseDestination(if (playerFromSettings) "settings" else "catalog")
-                        }
-                    }
                     PlayerScreen(vm, state, wide, landscape, landscapeWindow, rail, lyrics, queue, rotation,
                         dragOffset = playerDismissY,
                         onUpdateDrag = ::updatePlayerDrag,
@@ -778,10 +805,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                         onAlbum = { state.current?.let(::openTrackAlbum) },
                         onArtist = ::openTrackArtist,
-                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true },
+                        onOpenShow = ::openPlayingShowFromPlayer)
                 }
-            } else {
-                BaseDestination(currentDestination)
             }
         }
         if (floatingQueue && queue) {
@@ -1288,7 +1314,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, landscapeWindow: Boolean, tabletWindow: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
     dragOffset: State<Float>, onUpdateDrag: (Float, Boolean) -> Unit,
     onBack: () -> Unit, onDismiss: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
-    onAdd: () -> Unit, onSleep: () -> Unit) {
+    onAdd: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {}) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val sleepActive = sleep.deadline != null || sleep.entryId != null
@@ -1304,7 +1330,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     if (track.isPodcast) {
         Box(playerModifier) {
             PodcastPlayerScreen(vm, state, landscape || wide, !queue,
-                onBack, onDismiss, onUpdateDrag, onQueue, onSleep)
+                onBack, onDismiss, onUpdateDrag, onQueue, onSleep, onOpenShow)
         }
         return
     }

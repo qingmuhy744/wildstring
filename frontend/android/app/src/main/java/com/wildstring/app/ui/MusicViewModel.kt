@@ -100,6 +100,8 @@ class MusicViewModel @Inject constructor(
     private val favoriteJobs = mutableSetOf<String>()
     private val playlistJobs = mutableSetOf<String>()
     private val optimisticFavorites = mutableMapOf<String, Boolean>()
+    val pendingPodcastFavorites = MutableStateFlow<Set<String>>(emptySet())
+    val podcastFavoriteOverrides = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     private var queueSnapshot: List<QueueRow> = emptyList()
     private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
@@ -178,7 +180,7 @@ class MusicViewModel @Inject constructor(
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
-            authGeneration++; optimisticFavorites.clear()
+            authGeneration++; optimisticFavorites.clear(); pendingPodcastFavorites.value = emptySet(); podcastFavoriteOverrides.value = emptyMap()
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: AppLanguage.string(R.string.vm_login_expired)
             invalidationMessage = null
@@ -270,7 +272,7 @@ class MusicViewModel @Inject constructor(
         supersededInvalidationSelection = repository.session.requestState()?.selection.orEmpty()
         val generation = ++authGeneration
         invalidationMessage = null
-        loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear()
+        loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear(); pendingPodcastFavorites.value = emptySet(); podcastFavoriteOverrides.value = emptyMap()
         loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear()
         repository.client.dispatcher.cancelAll(); repository.downloads.pauseAll(); sleep.cancel()
         controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
@@ -534,20 +536,49 @@ class MusicViewModel @Inject constructor(
     fun clearPodcastQueueNotice() = podcastQueues.clearNotice()
 
     fun togglePodcastEpisodeFavorite(episodeId: String, loved: Boolean) = viewModelScope.launch {
+        val profile = repository.session.cacheScope()
+        val key = "$profile:podcast:$episodeId"
+        if (!favoriteJobs.add(key)) return@launch
+        val generation = authGeneration
+        val previousIds = repository.podcastFavoriteIds.value
+        val previousOverride = podcastFavoriteOverrides.value
+        podcastFavoriteOverrides.value = previousOverride + (episodeId to loved)
+        pendingPodcastFavorites.value = pendingPodcastFavorites.value + episodeId
+        if (loved) repository.podcastFavoriteIds.value = previousIds + episodeId
+        else repository.podcastFavoriteIds.value = previousIds - episodeId
+        rememberPodcastEpisodeFavorite(episodeId, loved)
         try {
             repository.favoritePodcastEpisode(episodeId, loved)
-            val episode = repository.cachedPodcastEpisode(episodeId)
-            val podcastId = episode?.podcastId
-            if (podcastId != null) {
-                val detail = repository.cachedPodcastDetail(podcastId)
-                if (detail != null) {
-                    podcastBrowser.remember(detail.copy(episodes = detail.episodes.map {
-                        if (it.id == episodeId) it.copy(loved = loved, favorite = loved) else it
-                    }))
-                }
-            }
+            if (generation != authGeneration || profile != repository.session.cacheScope()) return@launch
+            rememberPodcastEpisodeFavorite(episodeId, loved)
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { notify(friendlyError(e)) }
+        catch (e: Exception) {
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                repository.podcastFavoriteIds.value = previousIds
+                podcastFavoriteOverrides.value = previousOverride + (episodeId to !loved)
+                rememberPodcastEpisodeFavorite(episodeId, !loved)
+                notify(AppLanguage.string(R.string.vm_favorite_not_saved, friendlyError(e)))
+            }
+        } finally {
+            favoriteJobs.remove(key)
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                pendingPodcastFavorites.value = pendingPodcastFavorites.value - episodeId
+                podcastFavoriteOverrides.value = podcastFavoriteOverrides.value - episodeId
+            }
+        }
+    }
+
+    private suspend fun rememberPodcastEpisodeFavorite(episodeId: String, loved: Boolean) {
+        val episode = repository.cachedPodcastEpisode(episodeId)
+        val podcastId = episode?.podcastId
+        if (podcastId != null) {
+            val detail = repository.cachedPodcastDetail(podcastId)
+            if (detail != null) {
+                podcastBrowser.remember(detail.copy(episodes = detail.episodes.map {
+                    if (it.id == episodeId) it.copy(loved = loved, favorite = loved) else it
+                }))
+            }
+        }
     }
 
     fun markPodcastEpisodeCompleted(episodeId: String, completed: Boolean, durationSeconds: Int = 0) = viewModelScope.launch {

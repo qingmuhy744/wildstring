@@ -363,6 +363,7 @@
     <string name="artist_count">%1$d 位艺人</string>
     <string name="album_count">%1$d 张专辑</string>
     <string name="open_artist_named">查看艺人 · %1$s</string>
+    <string name="open_show_named">打开节目 %1$s</string>
     <string name="track_count">%1$d 首</string>
     <string name="play_count_value">%1$d 次</string>
     <string name="minutes_value">%1$d 分钟</string>
@@ -1557,6 +1558,7 @@
     <string name="pod_exp_followed">已关注</string>
     <string name="pod_exp_following">正在关注…</string>
     <string name="pod_exp_hot_ranking">Apple Podcasts 区域热门榜 · %1$s</string>
+    <string name="pod_exp_hot_ranking_plain">Apple Podcasts 区域热门榜</string>
     <string name="pod_exp_latest_episodes">最新单集</string>
     <string name="pod_exp_no_results">暂无节目，试试其他区域或关键词。</string>
     <string name="pod_exp_open_show">打开节目</string>
@@ -1677,7 +1679,8 @@
     <string name="pod_scr_no_followed_shows_yet">还没有关注的节目</string>
     <string name="pod_scr_no_show_intro">暂无节目介绍</string>
     <string name="pod_scr_pending_empty_prompt">待播列表为空 · 点击设置新集规则</string>
-    <string name="pod_scr_pending_summary">共 %1$d 集待播 · 点击查看</string>
+    <string name="pod_scr_pending_summary">共 %1$d 集待播</string>
+    <string name="pod_scr_open_queue">打开待播列表</string>
     <string name="pod_scr_play">播放</string>
     <string name="pod_scr_play_btn">▶ 播放</string>
     <string name="pod_scr_play_episode_btn">播放单集</string>
