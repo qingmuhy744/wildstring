@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  adjacentPodcastEpisode,
   previewPodcastTracks,
   readPodcastPreference,
   resolvePodcastPreference,
@@ -7,6 +8,7 @@ import {
   syncPodcastPreferenceCache,
 } from '../src/podcast-continuation';
 import { podcastEpisodeToTrack } from '../src/podcast-track';
+import { placeQueuedEpisode, type RemoteQueueItem } from '../src/podcast-remote';
 import type { PodcastDetail } from '../src/podcasts';
 
 const detail = {
@@ -84,6 +86,26 @@ test('被排除的预览不再出现，已听完可以重新纳入', () => {
   expect(
     ids(previewPodcastTracks(track(5), detail, { order: 'asc', skipCompleted: false }, new Set())),
   ).toEqual(['podcast_ep_6', 'podcast_ep_7', 'podcast_ep_8']);
+});
+
+test('节目线向前跳过已听完，向后回到列表里的上一集', () => {
+  const preference = { order: 'desc' as const, skipCompleted: true, autoContinue: true };
+  expect(adjacentPodcastEpisode(track(8).id, detail, preference, new Set(), 1)?.id).toBe(
+    'podcast_ep_6',
+  );
+  expect(adjacentPodcastEpisode(track(8).id, detail, preference, new Set(), -1)).toBeNull();
+  expect(adjacentPodcastEpisode(track(6).id, detail, preference, new Set(), -1)?.id).toBe(
+    'podcast_ep_7',
+  );
+  expect(
+    adjacentPodcastEpisode(
+      track(6).id,
+      detail,
+      { ...preference, autoContinue: false },
+      new Set(),
+      1,
+    ),
+  ).toBeNull();
 });
 
 test('当前单集不在这个节目里时不猜测下一集', () => {
@@ -179,4 +201,21 @@ test('节目设置优先于账号默认值，离线缓存按账号隔离', () =>
       });
     }
   }
+});
+
+test('加入待播不挪动已在列表中的单集，下一集播放只改位置', () => {
+  const queue: RemoteQueueItem[] = [
+    { episode_id: 'now', origin: 'manual', added_at: 't1' },
+    { episode_id: 'later', origin: 'rule', added_at: 't2' },
+  ];
+  expect(placeQueuedEpisode(queue, 'later', false, 'now')).toBe(queue);
+  expect(placeQueuedEpisode(queue, 'now', true, 'now')).toBe(queue);
+  expect(placeQueuedEpisode(queue, 'fresh', false, 'fresh').map((item) => item.episode_id)).toEqual(
+    ['now', 'later', 'fresh'],
+  );
+  const inserted = placeQueuedEpisode(queue, 'later', true, undefined);
+  expect(inserted.map((item) => item.episode_id)).toEqual(['later', 'now']);
+  expect(inserted[0].origin).toBe('manual');
+  expect(inserted[0].added_at).toBe('t2');
+  expect(inserted[1].origin).toBe('manual');
 });

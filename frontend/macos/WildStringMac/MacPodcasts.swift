@@ -23,7 +23,7 @@ struct MacPodcastsView: View {
     @State private var exploring = false
     @State private var episodeFilter = "all"
     @State private var newestFirst = true
-    @State private var showingInbox = false
+    @State private var showingQueue = false
 
     var body: some View {
         GeometryReader { geo in
@@ -63,8 +63,8 @@ struct MacPodcastsView: View {
             await loadShows()
             await playback.podcastCloud?.refreshPreferences()
         }
-        .task(id: showingInbox) {
-            if showingInbox { await playback.podcastCloud?.refreshInbox() }
+        .task(id: showingQueue) {
+            if showingQueue { await playback.podcastCloud?.refreshQueue() }
         }
         .sheet(isPresented: $exploring) {
             MacPodcastExplore(client: client) { id in
@@ -148,14 +148,14 @@ struct MacPodcastsView: View {
             .padding(.bottom, 8)
             let pendingCount = cloud?.unifiedPendingEpisodes.count ?? 0
             Button {
-                showingInbox = true
+                showingQueue = true
                 choosingShow = false
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet")
-                        .foregroundStyle(showingInbox ? MacTheme.accentDeep : MacTheme.muted)
+                        .foregroundStyle(showingQueue ? MacTheme.accentDeep : MacTheme.muted)
                     Text(L10n("macPodcasts.upNext"))
-                        .font(.system(size: 13, weight: showingInbox ? .semibold : .medium))
+                        .font(.system(size: 13, weight: showingQueue ? .semibold : .medium))
                         .foregroundStyle(MacTheme.ink)
                     Spacer(minLength: 0)
                     if pendingCount > 0 {
@@ -168,7 +168,7 @@ struct MacPodcastsView: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(showingInbox ? MacTheme.accent.opacity(0.14) : Color.clear)
+                        .fill(showingQueue ? MacTheme.accent.opacity(0.14) : Color.clear)
                 )
             }
             .buttonStyle(.plain)
@@ -198,7 +198,7 @@ struct MacPodcastsView: View {
                                 show: show,
                                 selected: selectedShowID == show.id
                             ) {
-                                showingInbox = false
+                                showingQueue = false
                                 choosingShow = false
                                 Task { await open(show.id) }
                             }
@@ -214,9 +214,9 @@ struct MacPodcastsView: View {
 
     @ViewBuilder
     private var detailPane: some View {
-        if showingInbox {
+        if showingQueue {
             MacPodcastUnifiedQueue(client: client, playback: playback, shows: shows.filter { $0.followed }) {
-                showingInbox = false
+                showingQueue = false
             }
         } else if loadingDetail {
             ProgressView(L10n("macPodcasts.openingShow"))
@@ -301,15 +301,15 @@ struct MacPodcastsView: View {
                                                 choose(episode, in: detail.episodes)
                                             }
                                         },
-                                        next: { enqueue(episode, in: detail.podcast, next: true) },
-                                        append: { enqueue(episode, in: detail.podcast, next: false) },
+                                        next: { enqueue(episode, next: true) },
+                                        append: { enqueue(episode, next: false) },
                                         save: {},
                                         toggleQueue: {
                                             if let c = cloud {
                                                 if c.isQueued(episodeID: episode.id) {
                                                     c.removeEpisode(episode.id)
                                                 } else {
-                                                    enqueue(episode, in: detail.podcast, next: false)
+                                                    enqueue(episode, next: false)
                                                 }
                                             }
                                         },
@@ -602,7 +602,7 @@ struct MacPodcastsView: View {
         guard episodes.contains(where: { $0.id == episode.id }) else { return }
         let show = detail?.podcast
         let artist = (show?.author.isEmpty == false) ? (show?.author ?? L10n("macPodcasts.defaultArtist")) : L10n("macPodcasts.defaultArtist")
-        // 只把用户点的这一集插到云端待播队首，不把整份节目灌进去。
+        // 从节目里点播，按这一档的顺序续播，不改云端待播。
         applyContinuation(episodes, show: show)
         let item = PlaybackService.Item(
             trackID: "podcast_ep_\(episode.id)",
@@ -639,41 +639,22 @@ struct MacPodcastsView: View {
         )
     }
 
-    private func enqueue(_ episode: PodcastEpisode, in show: PodcastSummary, next: Bool) {
+    private func enqueue(_ episode: PodcastEpisode, next: Bool) {
         let current = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
-        if let cloud = playback.podcastCloud {
-            cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
-            detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
-            return
-        }
-        let item = PlaybackService.Item(
-            trackID: "podcast_ep_\(episode.id)", title: episode.title,
-            artist: show.author.isEmpty ? show.title : show.author, album: show.title,
-            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1")
-        if playback.enqueue(items: [item], next: next) {
-            detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
-        } else {
-            detailMessage = playback.errorMessage
-        }
-    }
-
-    private func saveForLater(_ episode: PodcastEpisode) async {
+        if next, current == episode.id { return }
         guard let cloud = playback.podcastCloud else {
-            detailMessage = L10n("macPodcasts.cannotAddToInbox")
+            detailMessage = L10n("macPodcasts.cannotLoadQueue")
             return
         }
-        if let error = await cloud.addToInbox(episodeID: episode.id) {
-            detailMessage = error
-        } else {
-            detailMessage = L10n("macPodcasts.addedToInbox")
-        }
+        cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
+        detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
     }
 
     private func playPendingQueue() {
         guard let first = cloud?.unifiedPendingEpisodes.first else { return }
         Task {
             if let item = await cloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item)
+                playback.playPodcastEpisode(item, line: .queue)
             }
         }
     }
@@ -1200,6 +1181,12 @@ private struct MacPodcastUnifiedQueue: View {
     private func pendingEpisodesSection(_ cloud: PodcastCloudQueue) -> some View {
         let items = cloud.unifiedPendingEpisodes
         return VStack(alignment: .leading, spacing: 14) {
+            if let notice = cloud.queueFullNotice {
+                Text(notice)
+                    .font(MacTheme.caption)
+                    .foregroundStyle(MacTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if cloud.loading && items.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -1229,7 +1216,7 @@ private struct MacPodcastUnifiedQueue: View {
                             .buttonStyle(.plain)
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(item.episode?.title ?? cloud.title(for: item.episodeId))
+                                Text(cloud.title(for: item.episodeId))
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(MacTheme.ink)
                                     .lineLimit(2)
@@ -1305,7 +1292,7 @@ private struct MacPodcastUnifiedQueue: View {
     private func play(_ episodeID: String, cloud: PodcastCloudQueue) {
         Task {
             if let item = await cloud.playbackItem(for: episodeID) {
-                playback.playPodcastEpisode(item)
+                playback.playPodcastEpisode(item, line: .queue)
             }
         }
     }

@@ -2953,7 +2953,7 @@
   "podcastInbox": {
     "actionIgnore": "关闭（仅关注）",
     "actionQueueLast": "自动加到队尾",
-    "actionQueueNext": "自动插到下一集",
+    "actionQueueNext": "自动加到最前",
     "autoQueueSectionAria": "新集自动加入待播",
     "autoQueueSectionTitle": "新集自动加入待播",
     "browseShows": "浏览节目",
@@ -2970,6 +2970,7 @@
     "playAll": "▶ 播放全部",
     "playEpisodeFailed": "暂时无法播放该单集。请重试。",
     "playQueueFailed": "暂时无法开始播放待播列表。请重试。",
+    "queueFull": "待播列表已满，这次的新集没有自动加入。删掉一些后再刷新节目。",
     "readDeliveryFailed": "暂时无法读取新集自动待播。",
     "readInboxFailed": "暂时无法读取待播列表。请重试。",
     "readingDelivery": "正在读取新集自动待播",

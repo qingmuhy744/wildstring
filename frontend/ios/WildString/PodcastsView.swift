@@ -124,7 +124,7 @@ struct PodcastsView: View {
         guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
         Task {
             if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item)
+                playback.playPodcastEpisode(item, line: .queue)
             }
         }
     }
@@ -325,7 +325,7 @@ private struct PodcastDetailView: View {
     private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double) {
         guard episodes.contains(where: { $0.id == episode.id }) else { return }
         Haptics.tap()
-        // 只把用户点的这一集插到云端待播队首，不把整份节目灌进去。
+        // 从节目里点播，按这一档的顺序续播，不改云端待播。
         applyContinuation(episodes, show: detail?.podcast)
         playback.playPodcastEpisode(episode.playbackItem, position: position)
     }
@@ -355,6 +355,7 @@ private struct PodcastDetailView: View {
             return
         }
         let current = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
+        if next, current == episode.id { return }
         cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
         notice = next ? L10n("podcasts.enqueuedNext") : L10n("podcasts.enqueued")
     }
@@ -400,7 +401,7 @@ private struct PodcastDetailView: View {
         guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
         Task {
             if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item)
+                playback.playPodcastEpisode(item, line: .queue)
             }
         }
     }
@@ -428,24 +429,31 @@ private struct PodcastCloudStatusIOS: View {
     let cloud: PodcastCloudQueue
 
     var body: some View {
-        if cloud.conflict != nil {
+        if cloud.conflict != nil || cloud.syncError != nil || cloud.queueFullNotice != nil {
             VStack(alignment: .leading, spacing: 8) {
-                Text(PodcastCloudQueue.conflictMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 12) {
-                    Button(L10n("podcasts.useServerQueue")) { cloud.adoptServerQueue() }
-                    Button(L10n("podcasts.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                if cloud.conflict != nil {
+                    Text(PodcastCloudQueue.conflictMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(L10n("podcasts.useServerQueue")) { cloud.adoptServerQueue() }
+                        Button(L10n("podcasts.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                        Button(L10n("podcasts.keepLocalQueue")) { cloud.keepLocalWithoutOverwrite() }
+                    }
+                } else if let syncError = cloud.syncError {
+                    Text(syncError)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L10n("podcasts.retry")) { Task { await cloud.retrySync() } }
                 }
-            }
-        } else if let syncError = cloud.syncError {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(syncError)
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button(L10n("podcasts.retry")) { Task { await cloud.retrySync() } }
+                if let notice = cloud.queueFullNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -517,7 +525,7 @@ private struct PodcastUnifiedQueueView: View {
         let cloud = playback.podcastCloud
         List {
             if let cloud {
-                if cloud.conflict != nil {
+                if cloud.conflict != nil || cloud.syncError != nil || cloud.queueFullNotice != nil {
                     Section {
                         PodcastCloudStatusIOS(cloud: cloud)
                     }
@@ -572,14 +580,9 @@ private struct PodcastUnifiedQueueView: View {
                                         play(item.episodeId, cloud: cloud)
                                     } label: {
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.episode?.title ?? cloud.title(for: item.episodeId))
+                                            Text(cloud.title(for: item.episodeId))
                                                 .lineLimit(2)
                                                 .foregroundStyle(Color.primary)
-                                            if item.source == .inbox {
-                                                Text(L10n("podcasts.listenLater"))
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                            }
                                         }
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     }
@@ -638,7 +641,6 @@ private struct PodcastUnifiedQueueView: View {
         }
         .navigationTitle(L10n("podcasts.pendingQueue"))
         .task {
-            await playback.podcastCloud?.refreshInbox()
             await playback.podcastCloud?.refreshQueue()
             await playback.podcastCloud?.refreshPreferences()
             loadingShows = true
@@ -654,7 +656,7 @@ private struct PodcastUnifiedQueueView: View {
     private func play(_ episodeID: String, cloud: PodcastCloudQueue) {
         Task {
             if let item = await cloud.playbackItem(for: episodeID) {
-                playback.playPodcastEpisode(item)
+                playback.playPodcastEpisode(item, line: .queue)
             }
         }
     }

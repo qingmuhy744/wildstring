@@ -13,21 +13,23 @@ class PodcastQueueTest {
     private fun detail(vararg episodes: PodcastEpisode) =
         PodcastDetail(PodcastSummary(id = "show", title = "Show", feedUrl = "https://example.test/feed.xml"), episodes.toList())
 
-    @Test fun onDemandInsertsAtHeadAndPreservesEveryManualEntry() {
-        val queue = listOf("manual-a", "manual-b", "manual-c")
-        val result = podcastQueueOnDemand(queue, "on-demand")
-        assertEquals(4, result.size)                  // queue length grows by one
-        assertEquals("on-demand", result.first())     // inserted at the queue head
-        assertEquals(queue, result.drop(1))           // manual entries not cleared, order kept
-        assertTrue(result.containsAll(queue))
+    @Test fun playNextSkipsTheLoadedEpisodeAndOtherwiseInsertsAtTheFront() {
+        val items = listOf(PodcastQueueItem("now", "manual"), PodcastQueueItem("later", "rule"))
+        val skipped = podcastQueueEnqueue(items, "now", next = true, afterEpisodeId = "now", currentEpisodeId = "now")
+        assertEquals(0, skipped.added)
+        assertEquals(listOf("now", "later"), skipped.items.map { it.episodeId })
+        val front = podcastQueueEnqueue(items, "fresh", next = true, afterEpisodeId = "elsewhere", currentEpisodeId = "elsewhere")
+        assertEquals(listOf("fresh", "now", "later"), front.items.map { it.episodeId })
+        assertEquals("manual", front.items.first().origin)
     }
 
-    @Test fun onDemandAlreadyQueuedEpisodeMovesToHeadWithoutStacking() {
-        val queue = listOf("first", "on-demand", "last")
-        val result = podcastQueueOnDemand(queue, "on-demand")
-        assertEquals(3, result.size)
-        assertEquals("on-demand", result.first())
-        assertEquals(listOf("first", "last"), result.drop(1))
+    @Test fun appendPutsTheCurrentEpisodeAtTheTail() {
+        val items = listOf(PodcastQueueItem("now", "manual"), PodcastQueueItem("later", "rule"))
+        val appended = podcastQueueEnqueue(items, "fresh", next = false, currentEpisodeId = "fresh")
+        assertEquals(listOf("now", "later", "fresh"), appended.items.map { it.episodeId })
+        val again = podcastQueueEnqueue(appended.items, "now", next = false, currentEpisodeId = "now")
+        assertEquals(0, again.added)
+        assertEquals(listOf("now", "later", "fresh"), again.items.map { it.episodeId })
     }
 
     @Test fun autoContinueWritesNoQueueEntry() {
@@ -150,7 +152,7 @@ class PodcastQueueTest {
 
     @Test fun updatingOneShowKeepsTheOthersAndDefaultAutoContinue() {
         val current = PodcastQueuePreferences(
-            defaultAction = "inbox",
+            defaultAction = "queue_last",
             autoLimit = 3,
             autoContinue = false,
             shows = mapOf(
@@ -163,21 +165,21 @@ class PodcastQueueTest {
         assertEquals("queue_next", next.shows.orEmpty().getValue("b").action)
         assertEquals(4, next.shows.orEmpty().getValue("b").autoLimit)
         assertFalse(next.autoContinue)
-        assertEquals("inbox", next.defaultAction)
+        assertEquals("queue_last", next.defaultAction)
     }
 
     @Test fun defaultAutoContinueFollowsMatchingShowsOnly() {
         val current = PodcastQueuePreferences(
             autoContinue = true,
             shows = mapOf(
-                "follow" to PodcastShowQueuePreference(autoContinue = true, action = "inbox"),
+                "follow" to PodcastShowQueuePreference(autoContinue = true, action = "queue_last"),
                 "override" to PodcastShowQueuePreference(autoContinue = false, action = "ignore"),
             ),
         )
         val next = podcastPreferencesUpdatingAutoContinue(current, false)
         assertFalse(next.autoContinue)
         assertFalse(next.shows.orEmpty().getValue("follow").autoContinue)
-        assertEquals("inbox", next.shows.orEmpty().getValue("follow").action)
+        assertEquals("queue_last", next.shows.orEmpty().getValue("follow").action)
         assertFalse(next.shows.orEmpty().getValue("override").autoContinue)
         assertEquals("ignore", next.shows.orEmpty().getValue("override").action)
     }
@@ -207,9 +209,40 @@ class PodcastQueueTest {
         assertFalse(podcastContinuePreferenceFor(null, "show", cached.copy(autoContinue = false)).autoContinue)
     }
 
-    @Test fun movingToTheQueueDropsTheInboxCopy() {
-        val inbox = listOf(PodcastInboxItem("ep", "show", "manual"), PodcastInboxItem("other", "show", "rule"))
-        assertEquals(listOf("other"), podcastInboxWithout(inbox, "ep").map { it.episodeId })
+    @Test fun showLineupStaysOnTheShowAndManualNextWorksWhenAutoContinueIsOff() {
+        val e1 = episode("1")
+        val e2 = episode("2")
+        val e3 = episode("3", completed = true)
+        val e4 = episode("4")
+        val show = detail(e1, e2, e3, e4)
+        val off = PodcastContinuePreference(autoContinue = false)
+        assertEquals(listOf("1", "2"), podcastShowLineup(e2, show, off).map { it.id })
+        assertEquals("4", podcastManualNeighbor(e2, show, off, offset = 1)?.id)
+        assertEquals("1", podcastManualNeighbor(e2, show, off, offset = -1)?.id)
+        assertNull(podcastManualNeighbor(e2, show, PodcastContinuePreference(order = PodcastContinueOrder.OFF), 1))
+        assertEquals(listOf("1", "2", "4"), podcastShowLineup(e2, show).map { it.id })
+    }
+
+    @Test fun uploadNormalizesInboxAndBlankActions() {
+        val uploaded = PodcastQueuePreferences(
+            defaultAction = "inbox",
+            autoLimit = 200,
+            shows = mapOf(
+                "blank" to PodcastShowQueuePreference(action = ""),
+                "next" to PodcastShowQueuePreference(action = "queue_next"),
+            ),
+        ).forUpload()
+        assertEquals("queue_last", uploaded.defaultAction)
+        assertEquals(100, uploaded.autoLimit)
+        assertEquals("queue_last", uploaded.shows.orEmpty().getValue("blank").action)
+        assertEquals("queue_next", uploaded.shows.orEmpty().getValue("next").action)
+    }
+
+    @Test fun nullAddedAtFromGsonBecomesEmpty() {
+        val json = """{"version":2,"items":[{"episode_id":"ep","origin":"rule","added_at":null},{"episode_id":"blank","origin":"manual","added_at":"  "}]}"""
+        val snapshot = networkGson().fromJson(json, PodcastQueueSnapshot::class.java).normalized()
+        assertEquals(listOf("", ""), snapshot.items.map { it.addedAt })
+        assertEquals(listOf("rule", "manual"), snapshot.items.map { it.origin })
     }
 
     @Test fun syncFailureKeepsTheRequiredSentenceAndARetry() {

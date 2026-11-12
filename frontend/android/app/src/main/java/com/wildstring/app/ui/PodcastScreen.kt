@@ -11,14 +11,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -119,7 +113,7 @@ fun PodcastChannelPage(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var canAddPodcast by remember(owner) { mutableStateOf(false) }
     val canEditPublisher = state.account?.profile in listOf("owner", "librarian", "editor")
-    val pendingCount = cloud.queue.size + cloud.inbox.size
+    val pendingCount = cloud.queue.size
     val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
     LaunchedEffect(owner, browser.listLoading) {
         try {
@@ -213,14 +207,11 @@ fun PodcastChannelPage(
                                         onQueueEpisode = { ep, next ->
                                             vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                                         },
-                                        onRemoveQueuedEpisode = { epId ->
-                                            vm.removePodcastQueueEpisode(epId)
-                                            vm.removePodcastInboxEpisode(epId)
-                                        },
+                                        onRemoveQueuedEpisode = vm::removePodcastQueueEpisode,
                                         totalPendingCount = pendingCount,
                                         onPlayPendingQueue = { vm.playPodcastPendingQueue() },
                                         onOpenQueueSheet = { showQueueSheet = true },
-                                        isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } || cloud.inbox.any { it.episodeId == epId } },
+                                        isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } },
                                         isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
                                         isEpisodeFavorite = { epId -> epId in favoriteIds },
                                         onToggleFavorite = { episodeId, loved ->
@@ -326,25 +317,14 @@ fun PodcastChannelPage(
                 vm = vm,
                 cloud = cloud,
                 followedShows = podcasts.filter { it.followed },
+                playingEpisodeId = state.current?.podcastEpisodeId,
+                playing = state.playing,
+                buffering = state.buffering,
                 onDismiss = { showQueueSheet = false },
-                onPlayEpisode = { episodeId ->
-                    scope.launch {
-                        try {
-                            val episode = vm.repository.podcastEpisode(episodeId)
-                            val detail = vm.repository.podcastDetail(episode.podcastId)
-                            vm.playPodcastEpisode(episode, detail.podcast)
-                            showQueueSheet = false
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { statusMessage = friendlyError(e) }
-                    }
-                },
                 onPlayAll = {
                     vm.playPodcastPendingQueue()
                     showQueueSheet = false
                 },
-                onRemoveQueued = vm::removePodcastQueueEpisode,
-                onRemoveInbox = vm::removePodcastInboxEpisode,
-                onReorder = vm::reorderPodcastPending,
                 onUpdateShowDelivery = { podcastId, action -> vm.updatePodcastShowPreference(podcastId, action, 3) },
                 onBrowse = { showQueueSheet = false; exploring = true },
                 onRetry = vm::retryPodcastQueueSync,
@@ -376,6 +356,7 @@ private fun PodcastUnifiedQueueBanner(
     onRetry: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        if (cloud.queueFull) PodcastQueueFullNote()
         cloud.syncError?.let { message ->
             PodcastStatusCard(message, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
         }
@@ -458,19 +439,16 @@ private fun PodcastUnifiedQueueSheet(
     vm: MusicViewModel,
     cloud: PodcastCloudState,
     followedShows: List<PodcastSummary>,
+    playingEpisodeId: String?,
+    playing: Boolean,
+    buffering: Boolean,
     onDismiss: () -> Unit,
-    onPlayEpisode: (String) -> Unit,
     onPlayAll: () -> Unit,
-    onRemoveQueued: (String) -> Unit,
-    onRemoveInbox: (String) -> Unit,
-    onReorder: (List<PodcastQueueRow>) -> Unit,
     onUpdateShowDelivery: (String, String) -> Unit,
     onBrowse: () -> Unit,
     onRetry: () -> Unit,
 ) {
-    val combinedPendingRows = remember(cloud.queueRows, cloud.inboxRows) {
-        mergePendingRows(cloud.queueRows, cloud.inboxRows)
-    }
+    val pendingRows = cloud.queueRows
     var sheetTab by rememberSaveable { mutableStateOf("episodes") }
     val sortedShows = remember(followedShows, cloud.preferences) {
         followedShows.sortedBy { show ->
@@ -481,19 +459,6 @@ private fun PodcastUnifiedQueueSheet(
                 else -> 2
             }
         }
-    }
-
-    val listState = rememberLazyListState()
-    var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-
-    fun dropAt(index: Int, offset: Float): Int {
-        val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return index
-        val center = item.offset + item.size / 2f + offset
-        return listState.layoutInfo.visibleItemsInfo
-            .filter { it.index in combinedPendingRows.indices }
-            .minByOrNull { kotlin.math.abs((it.offset + it.size / 2f) - center) }
-            ?.index ?: index
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -523,7 +488,7 @@ private fun PodcastUnifiedQueueSheet(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
-                    if (sheetTab == "episodes" && combinedPendingRows.isNotEmpty()) {
+                    if (sheetTab == "episodes" && pendingRows.isNotEmpty()) {
                         FilledTonalButton(
                             onClick = onPlayAll,
                             shape = RoundedCornerShape(10.dp),
@@ -536,7 +501,7 @@ private fun PodcastUnifiedQueueSheet(
                 }
 
                 val tabs = listOf(
-                    Triple("episodes", "${stringResource(R.string.podcast_pending_episodes_title)} (${combinedPendingRows.size})", "podcast-queue-tab-episodes"),
+                    Triple("episodes", "${stringResource(R.string.podcast_pending_episodes_title)} (${pendingRows.size})", "podcast-queue-tab-episodes"),
                     Triple("rules", "${stringResource(R.string.podcast_rules_tab)} (${followedShows.size})", "podcast-queue-tab-rules"),
                 )
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -555,130 +520,52 @@ private fun PodcastUnifiedQueueSheet(
                     PodcastStatusCard(it, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
                 }
 
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (sheetTab == "episodes") {
-                        if (combinedPendingRows.isEmpty()) {
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.fillMaxWidth()
+                if (cloud.queueFull) PodcastQueueFullNote()
+                if (sheetTab == "episodes") {
+                    PodcastQueueRows(
+                        rows = pendingRows,
+                        currentEpisodeId = playingEpisodeId,
+                        playing = playing,
+                        buffering = buffering,
+                        onPlay = { row ->
+                            vm.playPodcastPendingQueue(row.episodeId)
+                            onDismiss()
+                        },
+                        onRemove = { vm.removePodcastQueueEpisode(it.episodeId) },
+                        onRestore = vm::restorePodcastQueueRow,
+                        onReorder = vm::reorderPodcastPending,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        empty = {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Column(
-                                        modifier = Modifier.padding(20.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.podcast_unified_queue_empty),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            TextButton(onClick = onBrowse) {
-                                                Text(stringResource(R.string.podcast_browse_shows))
-                                            }
-                                            if (followedShows.isNotEmpty()) {
-                                                TextButton(onClick = { sheetTab = "rules" }) {
-                                                    Text(stringResource(R.string.pod_scr_configure_rules))
-                                                }
-                                            }
+                                    Text(
+                                        text = stringResource(R.string.podcast_unified_queue_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = onBrowse) { Text(stringResource(R.string.podcast_browse_shows)) }
+                                        if (followedShows.isNotEmpty()) {
+                                            TextButton(onClick = { sheetTab = "rules" }) { Text(stringResource(R.string.pod_scr_configure_rules)) }
                                         }
                                     }
                                 }
                             }
-                        } else {
-                            itemsIndexed(combinedPendingRows, key = { _, entry -> entry.first.episodeId }) { index, entry ->
-                                val (row, isQueue) = entry
-                                val dragging = draggingIndex == index
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .zIndex(if (dragging) 1f else 0f)
-                                        .graphicsLayer { translationY = if (dragging) dragOffset else 0f }
-                                        .pointerInput(combinedPendingRows) {
-                                            detectDragGesturesAfterLongPress(
-                                                onDragStart = { draggingIndex = index; dragOffset = 0f },
-                                                onDrag = { change, amount -> change.consume(); dragOffset += amount.y },
-                                                onDragEnd = {
-                                                    val from = draggingIndex
-                                                    val target = if (from == null) index else dropAt(from, dragOffset)
-                                                    if (from != null && target != from) {
-                                                        val next = combinedPendingRows.toMutableList()
-                                                        val moved = next.removeAt(from)
-                                                        next.add(target, moved)
-                                                        onReorder(next.map { it.first })
-                                                    }
-                                                    draggingIndex = null
-                                                    dragOffset = 0f
-                                                },
-                                                onDragCancel = { draggingIndex = null; dragOffset = 0f },
-                                            )
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DragHandle,
-                                            contentDescription = stringResource(R.string.podcast_pending_drag_handle),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                text = row.title.ifBlank { stringResource(R.string.pod_scr_episode_fallback) },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            if (row.showTitle.isNotBlank()) {
-                                                Text(
-                                                    text = row.showTitle,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        }
-                                        Spacer(Modifier.width(8.dp))
-                                        FilledTonalButton(
-                                            onClick = { onPlayEpisode(row.episodeId) },
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Text(stringResource(R.string.pod_scr_play), fontSize = 12.sp, maxLines = 1, softWrap = false)
-                                        }
-                                        Spacer(Modifier.width(6.dp))
-                                        IconButton(
-                                            onClick = {
-                                                if (isQueue) onRemoveQueued(row.episodeId) else onRemoveInbox(row.episodeId)
-                                            },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = stringResource(R.string.pod_scr_remove_action),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
+                        },
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         if (sortedShows.isEmpty()) {
                             item {
                                 Surface(

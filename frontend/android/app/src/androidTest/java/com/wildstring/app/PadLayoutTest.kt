@@ -143,7 +143,7 @@ class PadLayoutTest {
                         }
                         path.endsWith("/catalog-settings") -> json("""{"can_add":false,"version":1}""")
                         path.endsWith("/podcasts/queue/preferences") -> json("""{"version":1,"global":{"action":"off","limit":0},"shows":{}}""")
-                        path.endsWith("/podcasts/queue") || path.endsWith("/podcasts/inbox") -> json("""{"version":1,"items":[]}""")
+                        path.endsWith("/podcasts/queue") -> json("""{"version":1,"items":[]}""")
                         path.endsWith("/favorites/ids") -> json("""{"ids":[]}""")
                         path == "/api/v1/agent/conversations" -> page(conversation, 1)
                         path == "/api/v1/agent/conversations/history-one" -> json(conversation)

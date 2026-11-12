@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.podcast_access import admit, require_programme
-from wildstring.podcast_queue import ensure_baseline
+from wildstring.podcast_queue import apply_serial_default, ensure_baseline
 
 
 class FollowUpdate(BaseModel):
@@ -36,6 +36,7 @@ def follow(database, user_id, podcast_id, followed, *, admitted=False):
                 (user_id, podcast_id),
             )
             ensure_baseline(db, user_id, podcast_id)
+            apply_serial_default(db, user_id, podcast_id)
         else:
             db.execute(
                 "DELETE FROM podcast_follows WHERE user_id=? AND podcast_id=?",

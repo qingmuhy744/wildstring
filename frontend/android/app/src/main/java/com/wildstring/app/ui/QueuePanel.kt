@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.wildstring.app.ui
 
 import com.wildstring.app.R
@@ -21,8 +23,15 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +78,11 @@ internal fun QueuePanel(
     val feedback = LocalTactileFeedback.current
     QueueList(state.queue, state.entryId, modifier,
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
-        onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
+        onRemove = {},
+        onSwipeRemove = { row ->
+            val removed = vm.removeQueueEntry(row.entryId) ?: return@QueueList null
+            ({ vm.restoreQueueEntry(removed.first, removed.second) })
+        },
         onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering,
         onClear = if (showClear && state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
         headerModifier = headerModifier,
@@ -86,27 +99,130 @@ internal fun PodcastQueuePanel(
 ) {
     val cloud by vm.podcastCloud.collectAsState()
     val feedback = LocalTactileFeedback.current
-    val autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue
-    val list = rememberLazyListState()
-    val drag = remember(list) { QueueDragState(list) { row: PodcastQueueRow -> row.episodeId } }
-    val handles = remember { mutableMapOf<String, Rect>() }
-    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val currentRows by rememberUpdatedState(cloud.queueRows)
-    val rows = drag.order ?: cloud.queueRows
-    val density = LocalDensity.current
-    val elevation = with(density) { 6.dp.toPx() }
-    val edge = with(density) { 64.dp.toPx() }
-    val speed = with(density) { 900.dp.toPx() }
-    // A refresh that reorders behind the finger cancels the gesture rather than applying a stale index.
-    val ids = remember(cloud.queueRows) { cloud.queueRows.map { it.episodeId } }
-    LaunchedEffect(ids) { if (drag.entryId != null && drag.originalIds != ids) drag.cancel() }
-    DisposableEffect(Unit) { onDispose { drag.cancel() } }
-
     LaunchedEffect(Unit) {
         vm.refreshPodcastCloud()
         vm.refreshPodcastAutoPreview()
     }
-    // Dragging near an edge keeps scrolling, so long queues can move a row past the viewport.
+    Column(modifier.fillMaxWidth().testTag("podcast-player-queue")) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).then(headerModifier),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.q_panel_queue_title, cloud.queueRows.size),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (onClose != null) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.q_panel_close))
+                }
+            }
+        }
+        if (cloud.queueFull) PodcastQueueFullNote(Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        PodcastQueueRows(
+            rows = cloud.queueRows,
+            currentEpisodeId = state.current?.podcastEpisodeId,
+            playing = state.playing,
+            buffering = state.buffering,
+            onPlay = { vm.playPodcastPendingQueue(it.episodeId) },
+            onRemove = { vm.removePodcastQueueEpisode(it.episodeId) },
+            onRestore = vm::restorePodcastQueueRow,
+            onReorder = vm::reorderPodcastPending,
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            empty = {
+                Text(
+                    text = stringResource(R.string.podcast_player_queue_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            },
+            footer = {
+                if (cloud.autoPreview.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.q_panel_auto_continue),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                    )
+                    cloud.autoPreview.forEach { item ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (item.showTitle.isNotBlank()) Text(item.showTitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                FilledTonalButton(
+                                    onClick = { feedback(TactileKind.Tap); vm.addPodcastEpisodeToQueue(item.episode, item.summary, next = false) },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp),
+                                ) { Text(stringResource(R.string.q_panel_add_to_queue), style = MaterialTheme.typography.labelSmall) }
+                            }
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.q_panel_not_written_to_queue),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                    )
+                }
+            },
+        )
+    }
+}
+
+@Composable
+internal fun PodcastQueueRows(
+    rows: List<PodcastQueueRow>,
+    currentEpisodeId: String?,
+    playing: Boolean,
+    buffering: Boolean,
+    onPlay: (PodcastQueueRow) -> Unit,
+    onRemove: (PodcastQueueRow) -> Unit,
+    onRestore: (PodcastQueueRow, Int) -> Unit,
+    onReorder: (List<PodcastQueueRow>) -> Unit,
+    modifier: Modifier = Modifier,
+    empty: @Composable () -> Unit = {},
+    footer: @Composable () -> Unit = {},
+) {
+    val feedback = LocalTactileFeedback.current
+    val list = rememberLazyListState()
+    val drag = remember(list) { QueueDragState(list) { row: PodcastQueueRow -> row.episodeId } }
+    val handles = remember { mutableMapOf<String, Rect>() }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val currentRows by rememberUpdatedState(rows)
+    val reorder by rememberUpdatedState(onReorder)
+    val ordered = drag.order ?: rows
+    val density = LocalDensity.current
+    val elevation = with(density) { 6.dp.toPx() }
+    val edge = with(density) { 64.dp.toPx() }
+    val speed = with(density) { 900.dp.toPx() }
+    val ids = remember(rows) { rows.map { it.episodeId } }
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    val removedLabel = stringResource(R.string.queue_removed)
+    val undoLabel = stringResource(R.string.queue_undo)
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val restoreNow = rememberUpdatedState(onRestore)
+    val removeNow = rememberUpdatedState(onRemove)
+    fun offerUndo(row: PodcastQueueRow, index: Int) {
+        scope.launch {
+            val result = snackbar.showSnackbar(removedLabel, undoLabel, duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) restoreNow.value(row, index)
+        }
+    }
+    LaunchedEffect(ids) { if (drag.entryId != null && drag.originalIds != ids) drag.cancel() }
+    DisposableEffect(Unit) { onDispose { drag.cancel() } }
     LaunchedEffect(drag.entryId) {
         if (drag.entryId == null) return@LaunchedEffect
         var previous = System.nanoTime()
@@ -125,34 +241,9 @@ internal fun PodcastQueuePanel(
             if (direction != 0f) { list.scrollBy(direction * speed * elapsed); drag.reorder() }
         }
     }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("podcast-player-queue")
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .then(headerModifier),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.q_panel_queue_title, cloud.queueRows.size),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            if (onClose != null) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.q_panel_close))
-                }
-            }
-        }
-
+    Box(modifier) {
         LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+            modifier = Modifier.fillMaxSize()
                 .onGloballyPositioned { coordinates = it }
                 .pointerInput(drag) {
                     awaitEachGesture {
@@ -176,9 +267,9 @@ internal fun PodcastQueuePanel(
                         try {
                             dropped = verticalDrag(change.id) { event -> drag.move(event.position.y); event.consume() }
                         } finally {
-                            if (dropped && drag.originalIds == startIds) drag.order?.let { ordered ->
-                                if (ordered.map { it.episodeId } != startIds) {
-                                    vm.reorderPodcastPending(ordered)
+                            if (dropped && drag.originalIds == startIds) drag.order?.let { orderedRows ->
+                                if (orderedRows.map { it.episodeId } != startIds) {
+                                    reorder(orderedRows)
                                     feedback(TactileKind.DragEnd)
                                 }
                             }
@@ -191,141 +282,67 @@ internal fun PodcastQueuePanel(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (cloud.queueRows.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(if (autoContinue) R.string.podcast_queue_empty_on else R.string.podcast_queue_empty_off),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                }
-            } else {
-                itemsIndexed(rows, key = { _, row -> row.episodeId }) { index, row ->
-                    val active = drag.entryId == row.episodeId
-                    DisposableEffect(row.episodeId) { onDispose { handles.remove(row.episodeId) } }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (active) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth().animateItem().zIndex(if (active) 1f else 0f).graphicsLayer {
+            if (rows.isEmpty()) item { empty() }
+            itemsIndexed(ordered, key = { _, row -> row.episodeId }) { index, row ->
+                val active = drag.entryId == row.episodeId
+                val current = row.episodeId == currentEpisodeId
+                val canSwipe = !current && !active
+                DisposableEffect(row.episodeId) { onDispose { handles.remove(row.episodeId) } }
+                val canSwipeNow by rememberUpdatedState(canSwipe)
+                val rowNow by rememberUpdatedState(row)
+                val indexNow by rememberUpdatedState(index)
+                val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
+                    if (value != SwipeToDismissBoxValue.EndToStart || !canSwipeNow) false
+                    else {
+                        removeNow.value(rowNow)
+                        offerUndo(rowNow, indexNow)
+                        true
+                    }
+                })
+                SwipeToDismissBox(
+                    state = dismissState,
+                    modifier = Modifier.animateItem(placementSpec = if (active) null else androidx.compose.animation.core.spring())
+                        .fillMaxWidth().zIndex(if (active) 1f else 0f)
+                        .graphicsLayer {
                             translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.episodeId }?.offset ?: 0) else 0f
                             shadowElevation = if (active) elevation else 0f
+                        },
+                    enableDismissFromStartToEnd = false,
+                    enableDismissFromEndToStart = canSwipe,
+                    gesturesEnabled = canSwipe,
+                    backgroundContent = {
+                        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                            Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // The handle stays visible so the list reads as reorderable without a gesture.
-                            val dragLabel = stringResource(R.string.queue_drag_named, row.title)
-                            Box(Modifier.size(48.dp).testTag("podcast-queue-handle-${row.episodeId}")
-                                .onGloballyPositioned { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.episodeId] = it.localBoundingBoxOf(handle, clipBounds = false) } }
-                                .semantics { contentDescription = dragLabel },
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
-                            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                                Text(
-                                    text = row.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (row.showTitle.isNotBlank()) {
-                                    Text(
-                                        text = row.showTitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(
-                                onClick = {
-                                    feedback(TactileKind.Tap)
-                                    vm.removePodcastQueueEpisode(row.episodeId)
-                                },
-                                enabled = drag.entryId == null,
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = stringResource(R.string.q_panel_remove_from_queue),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (cloud.autoPreview.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.q_panel_auto_continue),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                    )
-                }
-                items(cloud.autoPreview, key = { "preview-${it.episodeId}" }) { item ->
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (item.showTitle.isNotBlank()) {
-                                    Text(
-                                        text = item.showTitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.outline,
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            FilledTonalButton(
-                                onClick = {
-                                    feedback(TactileKind.Tap)
-                                    vm.addPodcastEpisodeToQueue(item.episode, item.summary, next = false)
-                                },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(32.dp),
-                            ) {
-                                Text(stringResource(R.string.q_panel_add_to_queue), style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-                item {
-                    Text(
-                        text = stringResource(R.string.q_panel_not_written_to_queue),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                    },
+                ) {
+                    QueueChromeRow(
+                        index = index,
+                        title = row.title,
+                        subtitle = row.showTitle,
+                        current = current,
+                        highlighted = active,
+                        playing = playing,
+                        buffering = buffering,
+                        playEnabled = drag.entryId == null,
+                        onPlay = { onPlay(row) },
+                        rowTag = "podcast-queue-row-${row.episodeId}",
+                        handleTag = "podcast-queue-handle-${row.episodeId}",
+                        onHandlePositioned = { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.episodeId] = it.localBoundingBoxOf(handle, clipBounds = false) } },
+                        dragLabel = resources.getString(R.string.queue_drag_named, row.title),
+                        positionLabel = resources.getString(R.string.queue_position, index + 1, rows.size),
+                        onMoveUp = if (index > 0) ({ feedback(TactileKind.Tap); reorder(ordered.toMutableList().apply { add(index - 1, removeAt(index)) }) }) else null,
+                        onMoveDown = if (index < ordered.lastIndex) ({ feedback(TactileKind.Tap); reorder(ordered.toMutableList().apply { add(index + 1, removeAt(index)) }) }) else null,
+                        onRemove = if (!current) ({ removeNow.value(row); offerUndo(row, index) }) else null,
+                        showRemoveButton = false,
+                        onRemoveButton = {},
+                        titleMaxLines = 2,
                     )
                 }
             }
+            item { footer() }
         }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(8.dp))
     }
 }
 
@@ -334,7 +351,9 @@ internal fun PodcastQueuePanel(
 internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
-    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = stringResource(R.string.queue_title_count, rows.size),
+    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true,
+    onSwipeRemove: ((QueueRow) -> (() -> Unit)?)? = null,
+    title: String = stringResource(R.string.queue_title_count, rows.size),
     playing: Boolean = false, buffering: Boolean = false, onClear: (() -> Unit)? = null,
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
@@ -353,6 +372,16 @@ internal fun QueueList(
     val edge = with(density) { 64.dp.toPx() }
     val speed = with(density) { 900.dp.toPx() }
     val elevation = with(density) { 6.dp.toPx() }
+    val snackbar = remember { SnackbarHostState() }
+    val removedLabel = stringResource(R.string.queue_removed)
+    val undoLabel = stringResource(R.string.queue_undo)
+    val swipeRemove by rememberUpdatedState(onSwipeRemove)
+    fun offerUndo(restore: () -> Unit) {
+        scope.launch {
+            val result = snackbar.showSnackbar(removedLabel, undoLabel, duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) restore()
+        }
+    }
 
     LaunchedEffect(Unit) {
         val currentIdx = rows.indexOfFirst { it.entryId == currentEntry }
@@ -386,7 +415,8 @@ internal fun QueueList(
             if (direction != 0f) { list.scrollBy(direction * speed * elapsed); drag.reorder() }
         }
     }
-    Column(modifier) {
+    Box(modifier) {
+    Column(Modifier.fillMaxSize()) {
         Row(headerModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
@@ -447,45 +477,151 @@ internal fun QueueList(
         ) {
             itemsIndexed(drag.order ?: rows, key = { _, row -> row.entryId }) { index, row ->
                 val active = drag.entryId == row.entryId
+                val current = row.entryId == currentEntry
+                val canSwipe = onSwipeRemove != null && allowRemove && !current && !active
                 DisposableEffect(row.entryId) { onDispose { handles.remove(row.entryId) } }
-                Row(
-                    Modifier.animateItem(placementSpec = if (active) null else androidx.compose.animation.core.spring())
-                        .fillMaxWidth().heightIn(min = 64.dp).zIndex(if (active) 1f else 0f)
-                        .graphicsLayer {
-                            translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.entryId }?.offset ?: 0) else 0f
-                            shadowElevation = if (active) elevation else 0f
-                            shape = RoundedCornerShape(12.dp)
-                        }
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (active) MaterialTheme.colorScheme.surfaceContainerHigh else if (row.entryId == currentEntry) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .semantics { selected = row.entryId == currentEntry }
-                        .testTag("queue-row-${row.entryId}"),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.padding(start = 12.dp).width(28.dp), contentAlignment = Alignment.Center) {
-                        if (row.entryId == currentEntry) PlaybackIndicator(playing, buffering)
-                        else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                val rowModifier = Modifier.animateItem(placementSpec = if (active) null else androidx.compose.animation.core.spring())
+                    .fillMaxWidth().zIndex(if (active) 1f else 0f)
+                    .graphicsLayer {
+                        translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.entryId }?.offset ?: 0) else 0f
+                        shadowElevation = if (active) elevation else 0f
                     }
-                    Column(Modifier.weight(1f).clickable(enabled = drag.entryId == null, interactionSource = remember { MutableInteractionSource() }, indication = null) { onPlay(row) }.padding(vertical = 12.dp, horizontal = 8.dp)) {
-                        Text(row.title, color = if (row.entryId == currentEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(row.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Box(Modifier.size(48.dp).testTag("queue-handle-${row.entryId}")
-                        .onGloballyPositioned { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.entryId] = it.localBoundingBoxOf(handle, clipBounds = false) } }
-                        .semantics {
-                            contentDescription = resources.getString(R.string.queue_drag_named, row.title)
-                            stateDescription = resources.getString(R.string.queue_position, index + 1, rows.size)
-                            customActions = buildList {
-                                if (index > 0) add(CustomAccessibilityAction(resources.getString(R.string.queue_move_up)) { haptic(TactileKind.Tap); move(row.entryId, index - 1); true })
-                                if (index < rows.lastIndex) add(CustomAccessibilityAction(resources.getString(R.string.queue_move_down)) { haptic(TactileKind.Tap); move(row.entryId, index + 1); true })
+                val body = @Composable {
+                    QueueChromeRow(
+                        index = index,
+                        title = row.title,
+                        subtitle = row.artist,
+                        current = current,
+                        highlighted = active,
+                        playing = playing,
+                        buffering = buffering,
+                        playEnabled = drag.entryId == null,
+                        onPlay = { onPlay(row) },
+                        rowTag = "queue-row-${row.entryId}",
+                        handleTag = "queue-handle-${row.entryId}",
+                        onHandlePositioned = { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.entryId] = it.localBoundingBoxOf(handle, clipBounds = false) } },
+                        dragLabel = resources.getString(R.string.queue_drag_named, row.title),
+                        positionLabel = resources.getString(R.string.queue_position, index + 1, rows.size),
+                        onMoveUp = if (index > 0) ({ haptic(TactileKind.Tap); move(row.entryId, index - 1) }) else null,
+                        onMoveDown = if (index < rows.lastIndex) ({ haptic(TactileKind.Tap); move(row.entryId, index + 1) }) else null,
+                        onRemove = if (allowRemove && !current) ({
+                            haptic(TactileKind.Tap)
+                            val restore = swipeRemove?.invoke(row)
+                            if (swipeRemove != null) {
+                                if (restore != null) offerUndo(restore)
+                            } else onRemove(row)
+                        }) else null,
+                        showRemoveButton = allowRemove && onSwipeRemove == null,
+                        onRemoveButton = { onRemove(row) },
+                    )
+                }
+                if (onSwipeRemove != null && allowRemove) {
+                    val canSwipeNow by rememberUpdatedState(canSwipe)
+                    val rowNow by rememberUpdatedState(row)
+                    val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
+                        if (value != SwipeToDismissBoxValue.EndToStart || !canSwipeNow) false
+                        else swipeRemove?.invoke(rowNow)?.also(::offerUndo) != null
+                    })
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        modifier = rowModifier,
+                        enableDismissFromStartToEnd = false,
+                        enableDismissFromEndToStart = canSwipe,
+                        gesturesEnabled = canSwipe,
+                        backgroundContent = {
+                            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                                Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        }, contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (allowRemove) IconButton({ onRemove(row) }, enabled = drag.entryId == null) { Icon(Icons.Default.Close, stringResource(R.string.remove_named, row.title)) }
+                        },
+                    ) { body() }
+                } else {
+                    Box(rowModifier) { body() }
                 }
             }
         }
+    }
+    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(8.dp))
+    }
+}
+
+@Composable
+private fun QueueChromeRow(
+    index: Int,
+    title: String,
+    subtitle: String,
+    current: Boolean,
+    highlighted: Boolean,
+    playing: Boolean,
+    buffering: Boolean,
+    playEnabled: Boolean,
+    onPlay: () -> Unit,
+    rowTag: String,
+    handleTag: String,
+    onHandlePositioned: (LayoutCoordinates) -> Unit,
+    dragLabel: String,
+    positionLabel: String,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
+    onRemove: (() -> Unit)?,
+    showRemoveButton: Boolean,
+    onRemoveButton: () -> Unit,
+    titleMaxLines: Int = 1,
+) {
+    val moveUpLabel = stringResource(R.string.queue_move_up)
+    val moveDownLabel = stringResource(R.string.queue_move_down)
+    val removeLabel = stringResource(R.string.queue_remove)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                when {
+                    highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    current -> MaterialTheme.colorScheme.primary.copy(alpha = .08f)
+                    else -> androidx.compose.ui.graphics.Color.Transparent
+                },
+            )
+            .semantics { selected = current }
+            .testTag(rowTag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.padding(start = 12.dp).width(28.dp), contentAlignment = Alignment.Center) {
+            if (current) PlaybackIndicator(playing, buffering)
+            else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        }
+        Column(Modifier.weight(1f).clickable(enabled = playEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onPlay).padding(vertical = 12.dp, horizontal = 8.dp)) {
+            Text(title, color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Box(Modifier.size(48.dp).testTag(handleTag)
+            .onGloballyPositioned(onHandlePositioned)
+            .semantics {
+                contentDescription = dragLabel
+                stateDescription = positionLabel
+                customActions = buildList {
+                    if (onMoveUp != null) add(CustomAccessibilityAction(moveUpLabel) { onMoveUp(); true })
+                    if (onMoveDown != null) add(CustomAccessibilityAction(moveDownLabel) { onMoveDown(); true })
+                    if (onRemove != null) add(CustomAccessibilityAction(removeLabel) { onRemove(); true })
+                }
+            }, contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (showRemoveButton) IconButton(onRemoveButton, enabled = playEnabled) { Icon(Icons.Default.Close, stringResource(R.string.remove_named, title)) }
+    }
+}
+
+@Composable
+internal fun PodcastQueueFullNote(modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth().testTag("podcast-queue-full"),
+    ) {
+        Text(
+            stringResource(R.string.podcast_queue_full),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

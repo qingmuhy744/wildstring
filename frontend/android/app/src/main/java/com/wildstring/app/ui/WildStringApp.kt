@@ -518,8 +518,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             onDismissRequest = {},
             title = { Text(stringResource(R.string.podcast_queue_conflict_title)) },
             text = { Text(stringResource(R.string.podcast_queue_conflict_body)) },
-            confirmButton = { TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.USE_SERVER) }) { Text(stringResource(R.string.podcast_queue_use_server)) } },
-            dismissButton = { TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.OVERWRITE) }) { Text(stringResource(R.string.podcast_queue_overwrite)) } },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.USE_SERVER) }) { Text(stringResource(R.string.podcast_queue_use_server)) }
+                    TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.OVERWRITE) }) { Text(stringResource(R.string.podcast_queue_overwrite)) }
+                    TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.KEEP_LOCAL) }) { Text(stringResource(R.string.podcast_queue_keep_local)) }
+                }
+            },
         )
     val savedPages = rememberSaveableStateHolder()
     val pullRefresh = rememberPullToRefreshState()
@@ -574,7 +579,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val landscape = landscapeWindow && !wide
         val rail = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val compact = safeHeight < 600.dp
-        val floatingQueue = expanded && state.current?.isPodcast == false && wide && !compact
+        val floatingQueue = expanded && state.current != null && wide && !compact
         var wasWide by rememberSaveable { mutableStateOf(wide) }
         var wasLandscapeWindow by rememberSaveable { mutableStateOf(landscapeWindow) }
         var previousStyle by rememberSaveable { mutableStateOf(preferences.playbackStyle) }

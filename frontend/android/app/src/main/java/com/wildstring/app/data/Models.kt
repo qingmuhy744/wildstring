@@ -356,6 +356,8 @@ data class PodcastQueueSnapshot(
     @SerializedName("device_id") val deviceId: String = "",
     val items: List<PodcastQueueItem> = emptyList(),
     @SerializedName("updated_at") val updatedAt: String? = null,
+    /** `queue_full` when a new-episode batch was not added because the queue is at the cap. */
+    val notice: String? = null,
 )
 
 data class PodcastQueueWriteItem(
@@ -392,25 +394,8 @@ fun PodcastQueueUpdate.writeBody(includeAddedAt: Boolean = true): com.google.gso
         )
     }
 
-data class PodcastInboxItem(
-    @SerializedName("episode_id") val episodeId: String = "",
-    @SerializedName("podcast_id") val podcastId: String = "",
-    val source: String = "manual",
-    @SerializedName("added_at") val addedAt: String = "",
-)
-
-data class PodcastInboxSnapshot(
-    val version: Int = 0,
-    val items: List<PodcastInboxItem> = emptyList(),
-)
-
-data class PodcastInboxWriteResult(
-    @SerializedName("episode_id") val episodeId: String = "",
-    val saved: Boolean = false,
-)
-
 data class PodcastShowQueuePreference(
-    val action: String = "inbox",
+    val action: String = "queue_last",
     @SerializedName("auto_limit") val autoLimit: Int = 3,
     val order: String = "follow",
     @SerializedName("skip_completed") val skipCompleted: Boolean = true,
@@ -419,7 +404,7 @@ data class PodcastShowQueuePreference(
 
 /** Account default (`auto_continue`) plus per-show overrides. Read before every write. */
 data class PodcastQueuePreferences(
-    @SerializedName("default_action") val defaultAction: String = "inbox",
+    @SerializedName("default_action") val defaultAction: String = "queue_last",
     @SerializedName("auto_limit") val autoLimit: Int = 3,
     @SerializedName("auto_continue") val autoContinue: Boolean = true,
     val shows: Map<String, PodcastShowQueuePreference>? = emptyMap(),

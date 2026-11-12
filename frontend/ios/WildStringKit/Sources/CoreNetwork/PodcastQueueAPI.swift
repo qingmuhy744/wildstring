@@ -60,17 +60,21 @@ public struct PodcastQueueState: Decodable, Equatable, Sendable {
     public var deviceId: String
     public var items: [PodcastQueueItem]
     public var updatedAt: String?
+    /// Server hint. `queue_full` means an automatic batch was not added. A user PUT sends `""`.
+    public var notice: String
 
     public init(
         version: Int,
         deviceId: String = "",
         items: [PodcastQueueItem],
-        updatedAt: String? = nil
+        updatedAt: String? = nil,
+        notice: String = ""
     ) {
         self.version = version
         self.deviceId = deviceId
         self.items = items
         self.updatedAt = updatedAt
+        self.notice = notice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -78,6 +82,7 @@ public struct PodcastQueueState: Decodable, Equatable, Sendable {
         case deviceId = "device_id"
         case items
         case updatedAt = "updated_at"
+        case notice
     }
 
     public init(from decoder: Decoder) throws {
@@ -86,6 +91,7 @@ public struct PodcastQueueState: Decodable, Equatable, Sendable {
         deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId) ?? ""
         items = try container.decodeIfPresent([PodcastQueueItem].self, forKey: .items) ?? []
         updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        notice = try container.decodeIfPresent(String.self, forKey: .notice) ?? ""
     }
 }
 
@@ -131,38 +137,6 @@ public struct PodcastQueueConflict: Error, Equatable, Sendable {
     }
 }
 
-public struct PodcastInboxItem: Codable, Equatable, Sendable, Identifiable {
-    public var episodeId: String
-    public var podcastId: String
-    public var source: String
-    public var addedAt: String
-    public var id: String { episodeId }
-
-    public init(episodeId: String, podcastId: String, source: String, addedAt: String) {
-        self.episodeId = episodeId
-        self.podcastId = podcastId
-        self.source = source
-        self.addedAt = addedAt
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case episodeId = "episode_id"
-        case podcastId = "podcast_id"
-        case source
-        case addedAt = "added_at"
-    }
-}
-
-public struct PodcastInbox: Decodable, Equatable, Sendable {
-    public var version: Int
-    public var items: [PodcastInboxItem]
-
-    public init(version: Int, items: [PodcastInboxItem]) {
-        self.version = version
-        self.items = items
-    }
-}
-
 public func normalizeDeliveryAction(_ action: String?) -> String {
     guard let action = action, !action.isEmpty else { return "queue_last" }
     switch action {
@@ -202,7 +176,7 @@ public struct PodcastShowPreference: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(action, forKey: .action)
+        try container.encode(normalizeDeliveryAction(action), forKey: .action)
         try container.encode(autoLimit, forKey: .autoLimit)
         try container.encode(order, forKey: .order)
         try container.encode(skipCompleted, forKey: .skipCompleted)
@@ -255,7 +229,7 @@ public struct PodcastQueuePreferences: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(defaultAction, forKey: .defaultAction)
+        try container.encode(normalizeDeliveryAction(defaultAction), forKey: .defaultAction)
         try container.encode(autoLimit, forKey: .autoLimit)
         try container.encode(autoContinue, forKey: .autoContinue)
         try container.encode(shows, forKey: .shows)
@@ -282,22 +256,19 @@ public struct PodcastQueuePreferences: Codable, Equatable, Sendable {
 public enum PodcastQueueMerge {
     public static let limit = 5000
 
-    /// On-demand play: the chosen episode becomes the head, origin `manual`. Every other entry stays.
-    public static func playing(_ episodeID: String, queue: [PodcastQueueItem]) -> [PodcastQueueItem] {
-        let rest = queue.filter { $0.episodeId != episodeID }
-        return [PodcastQueueItem(episodeId: episodeID, origin: "manual")] + rest
-    }
-
-    /// `next` inserts after the current episode (or at the head). Otherwise append.
-    /// An existing copy is not stacked. A new entry is `manual` and nothing else is added.
+    /// `next` inserts after the current episode when that episode is in the queue,
+    /// otherwise at the front. The episode already playing is left where it is.
+    /// Append of an episode already in the queue changes nothing. A new entry is `manual`.
     public static func enqueue(
         _ episodeID: String,
         queue: [PodcastQueueItem],
         next: Bool,
         after currentID: String?
     ) -> [PodcastQueueItem] {
+        if next, let currentID, episodeID == currentID { return queue }
         let exists = queue.contains { $0.episodeId == episodeID }
         if !exists, queue.count >= limit { return queue }
+        if !next, exists { return queue }
         if next {
             var rest = queue.filter { $0.episodeId != episodeID }
             let entry = PodcastQueueItem(episodeId: episodeID, origin: "manual")
@@ -307,12 +278,6 @@ public enum PodcastQueueMerge {
                 rest.insert(entry, at: 0)
             }
             return rest
-        }
-        if exists {
-            return queue.map { item in
-                guard item.episodeId == episodeID, item.origin != "manual" else { return item }
-                return PodcastQueueItem(episodeId: item.episodeId, origin: "manual")
-            }
         }
         return queue + [PodcastQueueItem(episodeId: episodeID, origin: "manual")]
     }
@@ -350,23 +315,6 @@ public enum PodcastQueueMerge {
 }
 
 extension WildstringClient {
-    public func podcastInbox() async throws -> PodcastInbox {
-        let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/inbox"))
-        return try JSONDecoder().decode(PodcastInbox.self, from: data)
-    }
-
-    public func addPodcastInboxItem(episodeID: String) async throws {
-        _ = try await perform(
-            Request(method: "PUT", path: "api/v1/podcasts/inbox/items/\(Self.queuePath(episodeID))")
-        )
-    }
-
-    public func removePodcastInboxItem(episodeID: String) async throws {
-        _ = try await perform(
-            Request(method: "DELETE", path: "api/v1/podcasts/inbox/items/\(Self.queuePath(episodeID))")
-        )
-    }
-
     public func podcastQueue() async throws -> PodcastQueueState {
         let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/queue"))
         return try JSONDecoder().decode(PodcastQueueState.self, from: data)

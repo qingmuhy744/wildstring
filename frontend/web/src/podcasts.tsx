@@ -182,6 +182,7 @@ interface PodcastsProps {
   onPlayTrack: (track: Track) => void;
   onQueueTrack: (track: Track, next: boolean) => void;
   onPlayQueue?: () => void;
+  onPlayQueuedEpisode?: (episodeId: string) => void;
   onRemoveQueuedEpisode?: (episodeId: string) => void;
 }
 
@@ -216,6 +217,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   onPlayTrack,
   onQueueTrack,
   onPlayQueue,
+  onPlayQueuedEpisode,
   onRemoveQueuedEpisode,
 }) => {
   const queuedSet = useMemo(() => new Set(queuedEpisodeIds), [queuedEpisodeIds]);
@@ -2090,6 +2092,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           onQueueTrack={onQueueTrack}
           onPlayTrack={onPlayTrack}
           onPlayQueue={onPlayQueue}
+          onPlayQueuedEpisode={onPlayQueuedEpisode}
           onRemoveQueuedEpisode={onRemoveQueuedEpisode}
         />
       )}

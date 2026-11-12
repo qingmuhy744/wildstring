@@ -1301,6 +1301,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 onPlayQueue={() => {
                   void player.playPodcastQueue();
                 }}
+                onPlayQueuedEpisode={(episodeId) => {
+                  void player.playPodcastQueue(episodeId);
+                }}
                 onRemoveQueuedEpisode={(id) => {
                   player.removePodcastQueueEpisode(id);
                 }}
