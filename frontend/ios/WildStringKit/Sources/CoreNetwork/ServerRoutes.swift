@@ -214,4 +214,24 @@ public final class ServerRoutes {
             if failures >= 2 { await choose(profile.routes.filter { $0.address != profile.activeAddress }) }
         }
     }
+
+    /// Stateless health check for a single route. Never mutates the profile, message or busy state.
+    public enum RouteProbe: Equatable, Sendable {
+        case ok(Int)
+        case sessionExpired
+        case unreachable
+    }
+
+    public func test(route: ServerRoute) async -> RouteProbe {
+        guard let address = try? ServerAddress(input: route.address, allowsInsecureHTTP: route.allowHTTP) else { return .unreachable }
+        let started = Date()
+        do {
+            let status = try await makeClient(address).authStatus(timeout: 5)
+            return status.authenticated ? .ok(Int(Date().timeIntervalSince(started) * 1000)) : .sessionExpired
+        } catch let error as APIError {
+            return error.statusCode < 500 && error.code != "https_required" ? .sessionExpired : .unreachable
+        } catch {
+            return .unreachable
+        }
+    }
 }
