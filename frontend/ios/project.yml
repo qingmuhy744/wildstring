@@ -9,8 +9,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.8.12"
-    CURRENT_PROJECT_VERSION: "47"
+    MARKETING_VERSION: "0.8.13"
+    CURRENT_PROJECT_VERSION: "48"
     SWIFT_EMIT_LOC_STRINGS: "NO"
 targets:
   WildString:
