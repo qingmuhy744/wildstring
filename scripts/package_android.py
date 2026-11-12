@@ -46,10 +46,21 @@ def main() -> None:
     destination.mkdir(parents=True, exist_ok=True)
     apk = destination / f"wildstring-{version}-{variant}.apk"
     shutil.copyfile(source, apk)
-    with apk.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    (destination / "SHA256SUMS").write_text(f"{digest}  {apk.name}\n")
-    print(f"Packaged {apk.relative_to(root)} ({apk.stat().st_size} bytes)")
+    packaged = [apk]
+    if variant == "release":
+        mapping_source = root / "frontend/android/app/build/outputs/mapping/release/mapping.txt"
+        if not mapping_source.is_file() or mapping_source.stat().st_size == 0:
+            raise ValueError("R8 mapping.txt missing; release builds must keep it for crash retrace")
+        mapping = destination / f"wildstring-{version}-mapping.txt"
+        shutil.copyfile(mapping_source, mapping)
+        packaged.append(mapping)
+    checksums = []
+    for path in packaged:
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        checksums.append(f"{digest}  {path.name}\n")
+        print(f"Packaged {path.relative_to(root)} ({path.stat().st_size} bytes)")
+    (destination / "SHA256SUMS").write_text("".join(checksums))
 
 
 if __name__ == "__main__":

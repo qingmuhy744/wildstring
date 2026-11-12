@@ -70,10 +70,11 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 发布产物：
 
 - `wildstring-X.Y.Z-release.apk`：固定签名、R8 优化、无内置测试曲库的 Android 安装包。
+- `wildstring-X.Y.Z-mapping.txt`：对应正式包的 R8 混淆映射，用于还原崩溃堆栈。
 - `wildstring-web-vX.Y.Z.zip`：Web 静态文件、LICENSE 与使用说明；运行时需要后端。
 - `WildString-macOS.dmg`：原生 Mac 客户端，最低 macOS 14；是否经过 Developer ID 签名与公证取决于 Apple secrets 配置，发布说明须明确实际状态。
 - 数据源插件 ZIP：按各插件独立版本打包。
-- `SHA256SUMS`：APK、Web ZIP、插件 ZIP、Mac DMG 与公开签名指纹文件的 SHA-256。
+- `SHA256SUMS`：APK、R8 mapping、Web ZIP、插件 ZIP、Mac DMG 与公开签名指纹文件的 SHA-256。
 - `android-signing-certificate.sha256`：Android 发布签名的公开证书指纹。
 - `ghcr.io/qingmuhy744/wildstring:vX.Y.Z`：同时包含后端、Web 与 FFmpeg 的双架构镜像；同时发布版本标签和提交标签。正式版更新 `latest`，预发布不更新。
 
