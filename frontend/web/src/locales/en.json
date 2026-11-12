@@ -2953,7 +2953,7 @@
   "podcastInbox": {
     "actionIgnore": "Disabled (follow only)",
     "actionQueueLast": "Auto-add to bottom of queue",
-    "actionQueueNext": "Auto-play next",
+    "actionQueueNext": "Auto-add to the front",
     "autoQueueSectionAria": "Auto-queue new episodes",
     "autoQueueSectionTitle": "Auto-Queue New Episodes",
     "browseShows": "Browse shows",
@@ -2970,6 +2970,7 @@
     "playAll": "▶ Play All",
     "playEpisodeFailed": "Unable to play this episode right now. Please try again.",
     "playQueueFailed": "Unable to start playing the queue right now. Please try again.",
+    "queueFull": "The queue is full, so these new episodes were not added. Remove some, then refresh the show.",
     "readDeliveryFailed": "Unable to read auto-queue settings for new episodes.",
     "readInboxFailed": "Unable to read queue right now. Please try again.",
     "readingDelivery": "Reading auto-queue settings for new episodes",

@@ -19,7 +19,7 @@ extension PodcastShowPreference {
     }
 }
 
-/// Cloud 稍后听 / 待播 queue for one signed-in account.
+/// Cloud 待播 queue for one signed-in account.
 /// A 409 keeps the local items and exposes `conflict` for the user to resolve.
 @MainActor
 @Observable
@@ -30,37 +30,30 @@ public final class PodcastCloudQueue {
     public private(set) var loading = false
     public private(set) var syncError: String?
     public private(set) var conflict: PodcastQueueConflict?
-    public private(set) var inbox = PodcastInbox(version: 0, items: [])
-    public private(set) var inboxEpisodes: [String: PodcastEpisode] = [:]
-    public private(set) var inboxLoading = false
-    public private(set) var inboxError: String?
     public private(set) var preferences: PodcastQueuePreferences?
     public private(set) var preferenceError: String?
     public var notice: String?
+    /// Calm copy when the server refused an automatic batch because the queue is full.
+    public private(set) var queueFullNotice: String?
+    /// This device keeps its queue and does not upload it until the user picks server or overwrite.
+    private var holdingLocal = false
+    private var unavailableEpisodeIDs: Set<String> = []
 
     public struct UnifiedPendingEpisode: Identifiable, Equatable, Sendable {
-        public enum Source: String, Sendable {
-            case queue
-            case inbox
-        }
-
         public var id: String { episodeId }
         public let episodeId: String
         public let origin: String
-        public let source: Source
         public let episode: PodcastEpisode?
         public let addedAt: String
 
         public init(
             episodeId: String,
             origin: String,
-            source: Source,
             episode: PodcastEpisode?,
             addedAt: String = ""
         ) {
             self.episodeId = episodeId
             self.origin = origin
-            self.source = source
             self.episode = episode
             self.addedAt = addedAt
         }
@@ -117,7 +110,15 @@ public final class PodcastCloudQueue {
     }
 
     public func title(for episodeID: String) -> String {
-        episodes[episodeID]?.title ?? inboxEpisodes[episodeID]?.title ?? KitL10n("kit.podcast.loadingEpisode")
+        if let title = episodes[episodeID]?.title.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty
+        {
+            return title
+        }
+        if unavailableEpisodeIDs.contains(episodeID) || episodes[episodeID] != nil {
+            return KitL10n("kit.podcast.unavailableEpisode")
+        }
+        return KitL10n("kit.podcast.loadingEpisode")
     }
 
     public func upcoming(after episodeID: String?) -> [PodcastQueueItem] {
@@ -132,7 +133,7 @@ public final class PodcastCloudQueue {
         if !podcastID.isEmpty, let show = source?.shows[podcastID] { return show }
         let accountAutoContinue = source?.autoContinue ?? true
         return PodcastShowPreference(
-            action: source?.defaultAction ?? "inbox",
+            action: source?.defaultAction ?? "queue_last",
             autoLimit: source?.autoLimit ?? 3,
             order: accountAutoContinue ? "follow" : "off",
             skipCompleted: true,
@@ -152,19 +153,6 @@ public final class PodcastCloudQueue {
         }
     }
 
-    public func refreshInbox() async {
-        inboxLoading = inbox.items.isEmpty
-        defer { inboxLoading = false }
-        do {
-            let loaded = try await client.podcastInbox()
-            inbox = loaded
-            inboxError = nil
-            await resolveInbox()
-        } catch {
-            inboxError = KitL10n("kit.podcast.inboxReadFailed", Self.explain(error))
-        }
-    }
-
     public func refreshPreferences() async {
         do {
             let loaded = try await client.podcastQueuePreferences()
@@ -178,17 +166,11 @@ public final class PodcastCloudQueue {
         }
     }
 
-    public func noteUserPlay(episodeID: String) {
-        perform {
-            await self.edit { items in
-                items = PodcastQueueMerge.playing(episodeID, queue: items)
-            }
-        }
-    }
-
     public func enqueueEpisode(_ episodeID: String, next: Bool, currentEpisodeID: String?) {
         perform {
-            if !self.hasLoaded, !self.pendingWrite, self.conflict == nil {
+            // Play-next never restarts or moves the episode that is already current.
+            if next, let currentEpisodeID, currentEpisodeID == episodeID { return }
+            if !self.hasLoaded, !self.pendingWrite, self.conflict == nil, !self.holdingLocal {
                 await self.loadQueue()
             }
             let exists = self.items.contains { $0.episodeId == episodeID }
@@ -196,11 +178,13 @@ public final class PodcastCloudQueue {
                 self.syncError = KitL10n("kit.podcast.queueFull", PodcastQueueMerge.limit)
                 return
             }
+            let before = self.items
             await self.edit { items in
                 items = PodcastQueueMerge.enqueue(
                     episodeID, queue: items, next: next, after: currentEpisodeID
                 )
             }
+            guard self.items != before else { return }
             self.notice = next ? KitL10n("kit.podcast.enqueuedNext") : KitL10n("kit.podcast.enqueued")
         }
     }
@@ -210,9 +194,6 @@ public final class PodcastCloudQueue {
             await self.edit { items in
                 items = PodcastQueueMerge.removing(episodeID, queue: items)
             }
-            if self.inbox.items.contains(where: { $0.episodeId == episodeID }) {
-                await self.removeFromInbox(episodeID: episodeID)
-            }
             self.notice = KitL10n("kit.podcast.removedFromQueue")
         }
     }
@@ -221,45 +202,23 @@ public final class PodcastCloudQueue {
         items.contains { $0.episodeId == episodeID }
     }
 
+    /// Pending rows in queue order. Inbox is not merged in.
     public var unifiedPendingEpisodes: [UnifiedPendingEpisode] {
-        var queuePart: [UnifiedPendingEpisode] = []
-        var inboxPart: [UnifiedPendingEpisode] = []
+        var rows: [UnifiedPendingEpisode] = []
         var seen = Set<String>()
         for item in items {
             if seen.insert(item.episodeId).inserted {
-                queuePart.append(
+                rows.append(
                     UnifiedPendingEpisode(
                         episodeId: item.episodeId,
                         origin: item.origin,
-                        source: .queue,
                         episode: episodes[item.episodeId],
                         addedAt: item.addedAt
                     )
                 )
             }
         }
-        for item in inbox.items {
-            if seen.insert(item.episodeId).inserted {
-                inboxPart.append(
-                    UnifiedPendingEpisode(
-                        episodeId: item.episodeId,
-                        origin: "manual",
-                        source: .inbox,
-                        episode: inboxEpisodes[item.episodeId] ?? episodes[item.episodeId],
-                        addedAt: item.addedAt
-                    )
-                )
-            }
-        }
-        // Explicit queue items keep their exact playback/manual order; unqueued inbox items follow by ascending join time.
-        let sortedInbox = inboxPart.enumerated()
-            .sorted { lhs, rhs in
-                lhs.element.addedAt == rhs.element.addedAt
-                    ? lhs.offset < rhs.offset
-                    : lhs.element.addedAt < rhs.element.addedAt
-            }
-            .map(\.element)
-        return queuePart + sortedInbox
+        return rows
     }
 
     public func moveItems(from offsets: IndexSet, to destination: Int) {
@@ -270,22 +229,48 @@ public final class PodcastCloudQueue {
         }
     }
 
-    /// Removes the finished episode and returns the next queued item, if any.
+    /// Removes the finished episode and returns the item that was immediately after it.
+    /// An episode that was not in the queue is left untouched and yields nil.
     /// Auto-continue is not inserted here.
     public func episodeFinished(_ episodeID: String) async -> PodcastQueueItem? {
         await withCheckedContinuation { continuation in
             perform {
+                if !self.hasLoaded, !self.pendingWrite, self.conflict == nil, !self.holdingLocal {
+                    await self.loadQueue()
+                }
+                let snapshot = self.items
+                let index = snapshot.firstIndex(where: { $0.episodeId == episodeID })
+                let following: PodcastQueueItem? = {
+                    guard let index, index + 1 < snapshot.count else { return nil }
+                    return snapshot[index + 1]
+                }()
                 await self.edit { items in
                     items = PodcastQueueMerge.finished(episodeID, queue: items)
                 }
-                continuation.resume(returning: self.items.first { $0.episodeId != episodeID })
+                continuation.resume(returning: index == nil ? nil : following)
+            }
+        }
+    }
+
+    /// The queue item immediately before `episodeID`, if the episode is in the queue and is not first.
+    public func episodeBefore(_ episodeID: String) async -> PodcastQueueItem? {
+        await withCheckedContinuation { continuation in
+            perform {
+                if !self.hasLoaded, !self.pendingWrite, self.conflict == nil, !self.holdingLocal {
+                    await self.loadQueue()
+                }
+                guard let index = self.items.firstIndex(where: { $0.episodeId == episodeID }), index > 0 else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: self.items[index - 1])
             }
         }
     }
 
     public func playbackItem(for episodeID: String) async -> PlaybackService.Item? {
         let episode: PodcastEpisode
-        if let cached = episodes[episodeID] ?? inboxEpisodes[episodeID] {
+        if let cached = episodes[episodeID] {
             episode = cached
         } else {
             do {
@@ -311,29 +296,6 @@ public final class PodcastCloudQueue {
         )
     }
 
-    public func addToInbox(episodeID: String) async -> String? {
-        do {
-            try await client.addPodcastInboxItem(episodeID: episodeID)
-            inboxError = nil
-            await refreshInbox()
-            return nil
-        } catch {
-            let message = KitL10n("kit.podcast.inboxAddFailed", Self.explain(error))
-            inboxError = message
-            return message
-        }
-    }
-
-    public func removeFromInbox(episodeID: String) async {
-        do {
-            try await client.removePodcastInboxItem(episodeID: episodeID)
-            inbox.items.removeAll { $0.episodeId == episodeID }
-            inboxError = nil
-        } catch {
-            inboxError = KitL10n("kit.podcast.inboxRemoveFailed", Self.explain(error))
-        }
-    }
-
     public func updateShow(
         podcastID: String,
         action: String,
@@ -351,7 +313,7 @@ public final class PodcastCloudQueue {
                         autoLimit: prefs.autoLimit,
                         autoContinue: prefs.autoContinue
                     )
-                    show.action = action
+                    show.action = normalizeDeliveryAction(action)
                     show.autoLimit = min(100, max(0, autoLimit))
                     show.order = order
                     show.autoContinue = order != "off"
@@ -393,7 +355,7 @@ public final class PodcastCloudQueue {
     }
 
     public func podcastID(forEpisodeID episodeID: String) async throws -> String {
-        if let cached = episodes[episodeID] ?? inboxEpisodes[episodeID] {
+        if let cached = episodes[episodeID] {
             return cached.podcastId
         }
         let loaded = try await client.podcastEpisode(id: episodeID)
@@ -452,12 +414,14 @@ public final class PodcastCloudQueue {
     public func adoptServerQueue() {
         perform {
             guard let conflict = self.conflict else { return }
+            self.holdingLocal = false
             self.version = conflict.current.version
             self.items = conflict.current.items
             self.conflict = nil
             self.pendingWrite = false
             self.hasLoaded = true
             self.syncError = nil
+            self.queueFullNotice = Self.batchNotice(conflict.current.notice)
             await self.resolveMissing()
         }
     }
@@ -465,6 +429,7 @@ public final class PodcastCloudQueue {
     public func overwriteWithLocal() {
         perform {
             guard let conflict = self.conflict else { return }
+            self.holdingLocal = false
             self.version = conflict.current.version
             self.conflict = nil
             self.syncError = nil
@@ -473,23 +438,27 @@ public final class PodcastCloudQueue {
         }
     }
 
-    /// Rewrites the whole pending list in the given order; all entries become manual and inbox rows drain into the queue.
+    /// Dismisses the conflict and keeps this device's queue without uploading it.
+    public func keepLocalWithoutOverwrite() {
+        perform {
+            guard self.conflict != nil else { return }
+            self.holdingLocal = true
+            self.conflict = nil
+            self.pendingWrite = false
+            self.syncError = nil
+            self.hasLoaded = true
+        }
+    }
+
+    /// Rewrites the pending list in the given order. Every moved row becomes manual.
     public func reorderPending(_ orderedIDs: [String]) {
         perform {
             let queued = Dictionary(uniqueKeysWithValues: self.items.map { ($0.episodeId, $0) })
-            let pool = Dictionary(uniqueKeysWithValues: self.inbox.items.map { ($0.episodeId, $0) })
             let rebuilt: [PodcastQueueItem] = orderedIDs.compactMap { id in
-                if let item = queued[id] {
-                    return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: item.addedAt)
-                }
-                if let entry = pool[id] {
-                    return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: entry.addedAt)
-                }
-                return nil
+                guard let item = queued[id] else { return nil }
+                return PodcastQueueItem(episodeId: id, origin: "manual", addedAt: item.addedAt)
             }
             guard rebuilt.count == orderedIDs.count, rebuilt != self.items else { return }
-            let promoted = Set(orderedIDs)
-            self.inbox.items.removeAll { promoted.contains($0.episodeId) }
             await self.edit { items in
                 items = rebuilt
             }
@@ -508,13 +477,18 @@ public final class PodcastCloudQueue {
     }
 
     private func edit(_ change: (inout [PodcastQueueItem]) -> Void) async {
-        if !hasLoaded, !pendingWrite, conflict == nil {
+        if !hasLoaded, !pendingWrite, conflict == nil, !holdingLocal {
             await loadQueue()
         }
         var updated = items
         change(&updated)
         guard updated != items else { return }
         items = updated
+        if holdingLocal {
+            pendingWrite = false
+            await resolveMissing()
+            return
+        }
         pendingWrite = true
         if conflict != nil {
             syncError = Self.conflictMessage
@@ -529,9 +503,10 @@ public final class PodcastCloudQueue {
         defer { loading = false }
         do {
             let state = try await client.podcastQueue()
-            if !pendingWrite, conflict == nil {
+            if !pendingWrite, conflict == nil, !holdingLocal {
                 version = state.version
                 items = state.items
+                queueFullNotice = Self.batchNotice(state.notice)
             }
             hasLoaded = true
             if conflict == nil, !pendingWrite { syncError = nil }
@@ -542,7 +517,7 @@ public final class PodcastCloudQueue {
     }
 
     private func flushOnce() async {
-        guard pendingWrite, conflict == nil else { return }
+        guard pendingWrite, conflict == nil, !holdingLocal else { return }
         let snapshot = items
         do {
             let saved = try await client.replacePodcastQueue(
@@ -552,17 +527,23 @@ public final class PodcastCloudQueue {
             if items == snapshot {
                 items = saved.items
                 pendingWrite = false
+                queueFullNotice = Self.batchNotice(saved.notice)
             }
             conflict = nil
             syncError = nil
             hasLoaded = true
         } catch let error as PodcastQueueConflict {
             conflict = error
+            holdingLocal = false
             hasLoaded = true
             syncError = Self.conflictMessage
         } catch {
             syncError = KitL10n("kit.podcast.syncFailed", Self.explain(error))
         }
+    }
+
+    private static func batchNotice(_ notice: String) -> String? {
+        notice == "queue_full" ? KitL10n("kit.podcast.queueBatchFull") : nil
     }
 
     private func resolveMissing() async {
@@ -572,21 +553,16 @@ public final class PodcastCloudQueue {
         for id in missing {
             if let episode = try? await client.podcastEpisode(id: id) {
                 copy[id] = episode
+                if !episode.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    unavailableEpisodeIDs.remove(id)
+                } else {
+                    unavailableEpisodeIDs.insert(id)
+                }
+            } else {
+                unavailableEpisodeIDs.insert(id)
             }
         }
         episodes = copy
-    }
-
-    private func resolveInbox() async {
-        let missing = inbox.items.map(\.episodeId).filter { inboxEpisodes[$0] == nil }
-        guard !missing.isEmpty else { return }
-        var copy = inboxEpisodes
-        for id in missing {
-            if let episode = try? await client.podcastEpisode(id: id) {
-                copy[id] = episode
-            }
-        }
-        inboxEpisodes = copy
     }
 
     private func perform(_ work: @escaping @MainActor () async -> Void) {

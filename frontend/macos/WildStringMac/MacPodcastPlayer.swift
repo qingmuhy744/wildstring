@@ -240,7 +240,7 @@ struct MacPodcastPlayer: View {
             return
         }
         actionError = nil
-        playback.playPodcastEpisode(item)
+        playback.playPodcastEpisode(item, line: .queue)
     }
 
     private var articlePane: some View {
@@ -323,24 +323,31 @@ struct PodcastCloudStatus: View {
     let cloud: PodcastCloudQueue
 
     var body: some View {
-        if cloud.conflict != nil {
+        if cloud.conflict != nil || cloud.syncError != nil || cloud.queueFullNotice != nil {
             VStack(alignment: .leading, spacing: 8) {
-                Text(PodcastCloudQueue.conflictMessage)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Button(L10n("macPodcastPlayer.adoptServerQueue")) { cloud.adoptServerQueue() }
-                    Button(L10n("macPodcastPlayer.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                if cloud.conflict != nil {
+                    Text(PodcastCloudQueue.conflictMessage)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(L10n("macPodcastPlayer.adoptServerQueue")) { cloud.adoptServerQueue() }
+                        Button(L10n("macPodcastPlayer.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                        Button(L10n("macPodcastPlayer.keepLocalQueue")) { cloud.keepLocalWithoutOverwrite() }
+                    }
+                } else if let syncError = cloud.syncError {
+                    Text(syncError)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L10n("macPodcastPlayer.retry")) { Task { await cloud.retrySync() } }
                 }
-            }
-        } else if let syncError = cloud.syncError {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(syncError)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button(L10n("macPodcastPlayer.retry")) { Task { await cloud.retrySync() } }
+                if let notice = cloud.queueFullNotice {
+                    Text(notice)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

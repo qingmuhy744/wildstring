@@ -4778,6 +4778,23 @@
         }
       }
     },
+    "kit.podcast.queueBatchFull": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The queue is full, so this batch was not added. Remove some episodes, then refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待播列表已满，这次的新集没有加入。移除一些单集后再刷新。"
+          }
+        }
+      }
+    },
     "kit.podcast.queueFull": {
       "extractionState": "manual",
       "localizations": {
@@ -4825,6 +4842,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "暂时无法同步，本机播放不受影响。%@ 可以重试。"
+          }
+        }
+      }
+    },
+    "kit.podcast.unavailableEpisode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This episode is unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这一集暂时不可用"
           }
         }
       }
@@ -15148,6 +15182,23 @@
         }
       }
     },
+    "macPodcastPlayer.keepLocalQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this device only, don’t overwrite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅保留本机、暂不覆盖"
+          }
+        }
+      }
+    },
     "macPodcastPlayer.overwriteWithLocal": {
       "extractionState": "manual",
       "localizations": {
@@ -16327,13 +16378,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Play Next"
+            "value": "Auto-add to the front"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自动插到下一集"
+            "value": "自动加到最前"
           }
         }
       }
@@ -23909,13 +23960,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Play after current"
+            "value": "Auto-add to the front"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "插到当前之后"
+            "value": "自动加到最前"
           }
         }
       }
@@ -24583,6 +24634,23 @@
         }
       }
     },
+    "podcasts.keepLocalQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this device only, don’t overwrite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅保留本机、暂不覆盖"
+          }
+        }
+      }
+    },
     "podcasts.overwriteWithLocal": {
       "extractionState": "manual",
       "localizations": {
@@ -25106,6 +25174,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在收听"
+          }
+        }
+      }
+    },
+    "queueView.keepLocalQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this device only, don’t overwrite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅保留本机、暂不覆盖"
           }
         }
       }

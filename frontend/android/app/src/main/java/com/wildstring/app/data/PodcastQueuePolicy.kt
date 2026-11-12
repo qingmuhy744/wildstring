@@ -4,10 +4,10 @@ import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 
 /**
- * Pure podcast queue and auto-continue policy for contracts/podcast-queue.md.
+ * Pure podcast queue placement and show continuation.
  * Cloud reads and writes live in Repository; these functions never touch the network.
- * §2.3 auto-continue writes no queue entry; §2.5 on-demand playback keeps existing
- * entries and their origin; §5 a non-empty queue wins over auto-continue.
+ * Show playback does not rewrite the queue. Auto-continue stays on the show and is never uploaded.
+ * Play-next inserts after the loaded episode when that episode is queued, otherwise at the front.
  */
 
 /** Shown when a queue write fails. Playback on this device still starts. */
@@ -66,26 +66,17 @@ fun nextEpisode(
 }
 
 /**
- * Contract §2.5: an on-demand episode is inserted at the queue head and every existing
- * (manually queued) entry is preserved. An episode already in the queue moves to the head
- * instead of being stacked twice. Media ids model the local Media3 playlist.
- */
-fun podcastQueueOnDemand(queue: List<String>, episode: String): List<String> =
-    listOf(episode) + queue.filter { it != episode }
-
-/**
- * Contract §2.3 / §5: auto-continue writes no queue entry. Played items leave the queue
- * and only the derived current episode remains — never `queue + episode`.
+ * Auto-continue writes no queue entry. The derived episode is local playback only.
  */
 fun podcastQueueAutoContinue(episode: String): List<String> = listOf(episode)
 
-/** Contract §5: what the player should do when a podcast episode reaches its end. */
+/** What show continuation should do after the current episode when the queue context is not advancing. */
 enum class PodcastEndAction { ADVANCE_QUEUE, CONTINUE, STOP }
 data class PodcastEndPlan(val action: PodcastEndAction, val episode: PodcastEpisode? = null)
 
 /**
- * Contract §5: a non-empty manual queue always wins. Auto-continue takes over only when
- * the queue is empty (here: no queued item after the current one).
+ * Show continuation. [hasQueuedNext] is only for a queue-context playlist that still has a successor.
+ * Show playback passes false so a non-empty queue cannot take over the show.
  */
 fun podcastEndPlan(
     hasQueuedNext: Boolean,
@@ -124,13 +115,21 @@ fun podcastQueuePlace(items: List<PodcastQueueItem>, episodeId: String, index: I
     return PodcastQueuePlacement(rest.toMutableList().apply { add(at, entry) }, added = if (existing == null) 1 else 0, atLimit = false)
 }
 
-/** Append, or insert after the playing episode when [next] is set. Already-queued tail adds are a no-op. */
+/**
+ * Append, or insert for play-next. Already-queued tail adds are a no-op.
+ * Play-next of the episode loaded in the player (paused counts) does nothing.
+ * Play-next inserts after that episode when it is queued, otherwise at the front.
+ */
 fun podcastQueueEnqueue(
     items: List<PodcastQueueItem>,
     episodeId: String,
     next: Boolean,
     afterEpisodeId: String? = null,
+    currentEpisodeId: String? = null,
 ): PodcastQueuePlacement {
+    if (next && !currentEpisodeId.isNullOrBlank() && episodeId == currentEpisodeId) {
+        return PodcastQueuePlacement(items, added = 0, atLimit = false)
+    }
     if (!next && items.any { it.episodeId == episodeId }) return PodcastQueuePlacement(items, added = 0, atLimit = false)
     val rest = items.filter { it.episodeId != episodeId }
     val after = afterEpisodeId?.let { id -> rest.indexOfFirst { it.episodeId == id } } ?: -1
@@ -142,14 +141,62 @@ fun podcastQueueEnqueue(
     return podcastQueuePlace(items, episodeId, index)
 }
 
+/** Show order around [current]. Forward episodes are included only while auto-continue is on. */
+fun podcastShowLineup(
+    current: PodcastEpisode,
+    detail: PodcastDetail,
+    preference: PodcastContinuePreference = PodcastContinuePreference(),
+    progress: Map<String, EpisodeProgress> = emptyMap(),
+): List<PodcastEpisode> {
+    if (detail.podcast.id != current.podcastId) return listOf(current)
+    val ordered = orderedShowEpisodes(detail, preference.order) ?: return listOf(current)
+    val index = ordered.indexOfFirst { it.id == current.id }
+    if (index < 0) return listOf(current)
+    val after = if (!preference.autoContinue) emptyList() else ordered.drop(index + 1).filter { episode ->
+        !preference.skipCompleted || !episode.isCompleted(progress)
+    }
+    return ordered.take(index) + listOf(current) + after
+}
+
+/** Manual previous/next inside one show. Off disables both directions. Forward skips completed episodes. */
+fun podcastManualNeighbor(
+    current: PodcastEpisode,
+    detail: PodcastDetail,
+    preference: PodcastContinuePreference = PodcastContinuePreference(),
+    offset: Int,
+    progress: Map<String, EpisodeProgress> = emptyMap(),
+): PodcastEpisode? {
+    if (offset == 0 || detail.podcast.id != current.podcastId) return null
+    val ordered = orderedShowEpisodes(detail, preference.order) ?: return null
+    val index = ordered.indexOfFirst { it.id == current.id }
+    if (index < 0) return null
+    if (offset < 0) return ordered.getOrNull(index - 1)
+    return ordered.drop(index + 1).firstOrNull { episode ->
+        !preference.skipCompleted || !episode.isCompleted(progress)
+    }
+}
+
+private fun orderedShowEpisodes(detail: PodcastDetail, order: PodcastContinueOrder): List<PodcastEpisode>? {
+    if (order == PodcastContinueOrder.OFF) return null
+    val episodes = detail.episodes.filter { it.podcastId == detail.podcast.id }
+    return when (order) {
+        PodcastContinueOrder.FOLLOW -> episodes
+        PodcastContinueOrder.OLDEST_FIRST -> episodes.sortedBy { podcastPublishedMillis(it.pubDate) }
+        PodcastContinueOrder.NEWEST_FIRST -> episodes.sortedByDescending { podcastPublishedMillis(it.pubDate) }
+        PodcastContinueOrder.OFF -> null
+    }
+}
+
 fun podcastQueueRemoveEpisode(items: List<PodcastQueueItem>, episodeId: String): List<PodcastQueueItem> =
     items.filter { it.episodeId != episodeId }
 
-fun podcastInboxWithout(items: List<PodcastInboxItem>, episodeId: String): List<PodcastInboxItem> =
-    items.filter { it.episodeId != episodeId }
-
 fun podcastQueueNormalize(items: List<PodcastQueueItem>): List<PodcastQueueItem> =
-    items.map { item -> item.copy(origin = if (item.origin == "rule") "rule" else "manual") }
+    items.map { item ->
+        item.copy(
+            origin = if (item.origin == "rule") "rule" else "manual",
+            addedAt = if (item.addedAt.isNullOrBlank()) "" else item.addedAt,
+        )
+    }
 
 enum class PodcastQueueConflictChoice { KEEP_LOCAL, USE_SERVER, OVERWRITE }
 
@@ -252,7 +299,7 @@ class PodcastQueueConflictException(val current: PodcastQueueSnapshot) : java.io
 fun PodcastQueueSnapshot.normalized(): PodcastQueueSnapshot = copy(items = podcastQueueNormalize(items))
 
 fun PodcastQueuePreferences.forUpload(): PodcastQueuePreferences = copy(
-    defaultAction = defaultAction.ifBlank { "inbox" },
+    defaultAction = normalizeDeliveryAction(defaultAction),
     autoLimit = autoLimit.coerceIn(0, 100),
-    shows = shows.orEmpty(),
+    shows = shows.orEmpty().mapValues { (_, show) -> show.copy(action = normalizeDeliveryAction(show.action)) },
 )

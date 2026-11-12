@@ -25,7 +25,7 @@ async function resetPodcastQueue(page: Page) {
       shows: {
         ...prefs.shows,
         'radio-test': {
-          action: prefs.shows?.['radio-test']?.action ?? prefs.default_action ?? 'inbox',
+          action: prefs.shows?.['radio-test']?.action ?? prefs.default_action ?? 'queue_last',
           auto_limit: prefs.shows?.['radio-test']?.auto_limit ?? prefs.auto_limit ?? 3,
           order: 'follow',
           skip_completed: true,
@@ -92,12 +92,8 @@ async function openRadio(page: Page) {
   await page.reload();
   await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
-  const queued = page.waitForResponse(
-    (response) =>
-      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
-  );
   await page.locator('.episode-play-btn').first().click();
-  expect((await queued).ok()).toBeTruthy();
+  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-6/stream');
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.locator('.programme-track')).toHaveCount(3);
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();
@@ -305,20 +301,30 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
   await row(3)
     .getByRole('button', { name: /更多操作/ })
     .click();
+  const appended = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
   await menu.getByRole('menuitem', { name: '加入待播', exact: true }).click();
+  expect((await appended).ok()).toBeTruthy();
+  const queued = await (await page.request.get('/api/v1/podcasts/queue')).json();
+  expect(queued.items.map((item: { episode_id: string }) => item.episode_id)).toEqual([
+    'radio-2',
+    'radio-3',
+  ]);
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(page.locator('.programme-track').first()).toContainText('第 2 集');
-  await expect(page.locator('.programme-track').nth(1)).toContainText('第 3 集');
-  await expect(page.locator('.programme-track').first()).toContainText('手动添加');
-  await expect(page.locator('.programme-track')).toHaveCount(5);
-  await page.locator('.programme-track').last().scrollIntoViewIfNeeded();
-  await expect(page.locator('.programme-track').last()).toBeInViewport();
+  await expect(page.locator('.programme-track').first()).toContainText('第 5 集');
   await page.getByRole('button', { name: '收起全屏播放' }).click();
   await row(1)
     .getByRole('button', { name: /更多操作/ })
     .click();
   await menu.getByRole('menuitem', { name: '播放单集', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-1/stream');
+  const afterPlay = await (await page.request.get('/api/v1/podcasts/queue')).json();
+  expect(afterPlay.items.map((item: { episode_id: string }) => item.episode_id)).toEqual([
+    'radio-2',
+    'radio-3',
+  ]);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
 });
 
@@ -705,22 +711,27 @@ test('跳转边界、按钮中心对齐和报纸自适应宽度', async ({ page 
   }
 });
 
-test('自然播完标记完成并自动接续，手动添加优先且半途单集继续播放', async ({ page }) => {
+test('自然播完顺着当前节目接续，加入待播只写入列表', async ({ page }) => {
   await openRadio(page);
   await page.getByRole('button', { name: '收起全屏播放' }).click();
   await page.locator('.episode-title-button').filter({ hasText: '第 3 集' }).click();
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
   await page.getByRole('button', { name: '加入待播', exact: true }).click();
+  expect((await saved).ok()).toBeTruthy();
+  const queued = await (await page.request.get('/api/v1/podcasts/queue')).json();
+  expect(queued.items.map((item: { episode_id: string }) => item.episode_id)).toEqual(['radio-3']);
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(page.locator('.programme-track').first()).toContainText('第 3 集');
-  await expect(page.locator('.programme-track').first()).toContainText('手动添加');
+  await expect(page.locator('.programme-track').first()).toContainText('第 5 集');
   const duration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
     .fill((duration - 0.2).toFixed(1));
   await page.getByRole('button', { name: '收音机播放' }).click();
-  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-3/stream');
-  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(2);
+  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-5/stream');
   await page.getByRole('button', { name: '收音机暂停' }).click();
   await expect
     .poll(async () => {
@@ -729,6 +740,10 @@ test('自然播完标记完成并自动接续，手动添加优先且半途单�
         .completed;
     })
     .toBe(true);
+  const stillQueued = await (await page.request.get('/api/v1/podcasts/queue')).json();
+  expect(stillQueued.items.map((item: { episode_id: string }) => item.episode_id)).toEqual([
+    'radio-3',
+  ]);
 });
 
 test('账号级自动续播关闭且无单节目覆盖时生效，保存节目设置保留全局关闭', async ({ page }) => {
@@ -737,7 +752,7 @@ test('账号级自动续播关闭且无单节目覆盖时生效，保存节目�
   const disabled = await page.request.put('/api/v1/podcasts/queue/preferences', {
     headers: { 'X-Wildstring-Client': 'android' },
     data: {
-      default_action: 'inbox',
+      default_action: 'queue_last',
       auto_limit: 3,
       auto_continue: false,
       shows: {},
@@ -777,7 +792,7 @@ test('账号级自动续播关闭且无单节目覆盖时生效，保存节目�
   });
 });
 
-test('音乐单曲循环不接管播客结束，跨节目队列播完后按新节目偏好自动接续', async ({ page }) => {
+test('音乐单曲循环不接管播客结束，节目线不改走待播列表', async ({ page }) => {
   await openRadio(page);
 
   const secondDetail = {
@@ -861,19 +876,19 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        default_action: 'inbox',
+        default_action: 'queue_last',
         auto_limit: 3,
         auto_continue: true,
         shows: {
           'radio-test': {
-            action: 'inbox',
+            action: 'queue_last',
             auto_limit: 3,
             order: 'follow',
             skip_completed: true,
             auto_continue: true,
           },
           'radio-second': {
-            action: 'inbox',
+            action: 'queue_last',
             auto_limit: 3,
             order: 'asc',
             skip_completed: true,
@@ -903,35 +918,35 @@ test('音乐单曲循环不接管播客结束，跨节目队列播完后按新�
   await page.locator('.episode-play-btn').first().click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();
-  await expect(page.locator('.programme-track').first()).toContainText('夜间第 1 集');
+  await expect(page.locator('.programme-track').first()).toContainText('第 5 集');
 
-  // 1. Finishing radio-6 (Show A) must NOT repeat radio-6 despite music repeat_one; it advances to queued radio-1 (Show B).
+  // Finishing radio-6 stays on 午后广播. Music repeat-one does not replay it, and the other show in the queue is not next.
   const firstDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
     .fill((firstDuration - 0.2).toFixed(1));
   await page.getByRole('button', { name: '收音机播放' }).click();
-  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-1/stream');
-  await expect(page.locator('.programme-track').first()).toContainText('夜间第 2 集');
+  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-5/stream');
   await page.getByRole('button', { name: '收音机暂停' }).click();
+  expect(remoteQueueState.items.map((item) => item.episode_id)).toEqual(['radio-1']);
 
-  // 2. Now on Show B (radio-1) with explicit queue empty after radio-1 finishes: must auto-continue to radio-2 per Show B's 'asc' preference.
+  await page.getByRole('button', { name: '收起全屏播放' }).click();
+  await page.getByRole('button', { name: '▶ 播放待播 (1)', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-1/stream');
   const secondDuration = await audioDuration(page);
   await page
     .getByRole('slider', { name: '播放进度', exact: true })
     .last()
     .fill((secondDuration - 0.2).toFixed(1));
-  await page.getByRole('button', { name: '收音机播放' }).click();
-  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-2/stream');
-  await page.getByRole('button', { name: '收音机暂停' }).click();
-  expect(remoteQueueState.items).toEqual([]);
+  await expect.poll(() => remoteQueueState.items).toEqual([]);
+  expect((await audio(page)).source).not.toContain('/episodes/radio-2/stream');
 });
 
 test('单集行快捷待播切换、统一待播列表一键播放及底栏队列续播预览', async ({ page }, info) => {
   await login(page);
   await podcastCatalog(page);
-  // Clear remote queue and add radio-4 to inbox for testing unified pending list
+  // Clear the remote queue. Episode 4 is added from the row later, in list order.
   const headers = { 'X-Wildstring-Client': 'web' };
   const currentQueue = await (await page.request.get('/api/v1/podcasts/queue')).json();
   const clearResp = await page.request.put('/api/v1/podcasts/queue', {
@@ -939,10 +954,6 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
     data: { version: currentQueue.version, device_id: 'test-reset', items: [] },
   });
   expect(clearResp.ok()).toBeTruthy();
-  const inboxResp = await page.request.put('/api/v1/podcasts/inbox/items/radio-4', {
-    headers,
-  });
-  expect(inboxResp.ok()).toBeTruthy();
 
   await page.reload();
   await podcastCatalog(page);
@@ -953,7 +964,7 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   const row = (number: number) =>
     page.locator('.podcast-episode-row').filter({ hasText: `第 ${number} 集` });
 
-  // 1. Quick inline "+ 待播" on episode rows (also adopts onto idle player so Play is enabled)
+  // 1. Quick inline "+ 待播" edits the list and does not load a current episode.
   await row(6).getByRole('button', { name: '+ 待播', exact: true }).click();
   await expect(row(6).getByRole('button', { name: '✓ 已待播', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -961,7 +972,7 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   );
   await expect(
     page.locator('.player').getByRole('button', { name: '播放', exact: true }),
-  ).toBeEnabled();
+  ).toBeDisabled();
   await row(5).getByRole('button', { name: '+ 待播', exact: true }).click();
   await expect(row(5).getByRole('button', { name: '✓ 已待播', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -983,8 +994,10 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   await row(5).getByRole('button', { name: '✓ 已待播', exact: true }).click();
   await expect(row(5).getByRole('button', { name: '+ 待播', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '▶ 播放待播 (1)', exact: true })).toBeVisible();
+  await row(4).getByRole('button', { name: '+ 待播', exact: true }).click();
+  await expect(page.getByRole('button', { name: '▶ 播放待播 (2)', exact: true })).toBeVisible();
 
-  // 3. Open unified "待播列表" dialog: shows unified "待播单集" (queue + inbox) & "新集自动加入待播"
+  // 3. The pending dialog is the queue order, including a manually reordered row.
   await page.getByRole('button', { name: '待播列表', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '待播列表' });
   const pendingRegion = dialog.getByRole('region', { name: '待播单集' });
@@ -1005,7 +1018,6 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
     '第 4 集：给午后的一封声音来信',
     '第 6 集：给午后的一封声音来信',
   ]);
-  await expect(page.locator('.player strong')).toHaveText('第 4 集：给午后的一封声音来信');
   await dialog.getByRole('button', { name: '关闭', exact: true }).click();
   await expect(dialog).toBeHidden();
   await page.getByRole('button', { name: '待播列表', exact: true }).click();
@@ -1023,7 +1035,6 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
     '第 6 集：给午后的一封声音来信',
     '第 4 集：给午后的一封声音来信',
   ]);
-  await expect(page.locator('.player strong')).toHaveText('第 6 集：给午后的一封声音来信');
 
   await dialog.getByRole('tab', { name: /新集自动加入待播/ }).click();
   const deliveryRegion = dialog.getByRole('region', { name: '新集自动加入待播' });

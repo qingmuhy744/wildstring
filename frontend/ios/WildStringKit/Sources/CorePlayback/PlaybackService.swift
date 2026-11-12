@@ -26,6 +26,12 @@ public struct PlaybackSnapshot: Equatable, Sendable {
     }
 }
 
+/// Which list the current podcast follows. Show playback never rewrites the cloud queue.
+public enum PodcastPlaybackLine: Sendable {
+    case show
+    case queue
+}
+
 /// Owns the single AVPlayer for the app, plus the queue, restore points and
 /// system playback controls (lock screen, headphones).
 @MainActor
@@ -166,6 +172,8 @@ public final class PlaybackService {
     }
     /// Client-side podcast auto-continuation state (never synced, never queued).
     public var podcastAutoContinueEnabled = true
+    /// Queue line steps inside the cloud queue. Show line uses the show rule and does not fall into the queue.
+    public private(set) var podcastLine: PodcastPlaybackLine = .show
     @ObservationIgnored private var podcastContinuationShowID: String?
     @ObservationIgnored private var podcastEpisodes: [PodcastContinuation.Episode] = []
     @ObservationIgnored private var podcastPreference = PodcastContinuation.Preference()
@@ -248,7 +256,7 @@ public final class PlaybackService {
 
     public func play(items: [Item], startingAt index: Int, position: Double = 0) {
         guard items.indices.contains(index) else { return }
-        invalidatePodcastAdvance()
+        let turn = invalidatePodcastAdvance()
         podcastOverrideItem = nil
         if let reason = items[index].unavailableReason {
             errorMessage = KitL10n("kit.playback.trackUnavailableRetry", items[index].title, reason)
@@ -257,6 +265,10 @@ public final class PlaybackService {
         let playable = items.filter { $0.unavailableReason == nil }
         let selectedIndex = items.prefix(index).filter { $0.unavailableReason == nil }.count
         queue.set(items: playable, startingAt: selectedIndex)
+        if let episodeID = Self.podcastEpisodeID(queue.current?.trackID ?? "") {
+            podcastLine = .show
+            preparePodcastContinuation(forEpisodeID: episodeID, turn: turn)
+        }
         startCurrent(autoplay: true, startAt: max(0, position))
         persistQueueAndProgress()
     }
@@ -276,14 +288,19 @@ public final class PlaybackService {
         podcastAutoContinueEnabled = preference.autoContinue
     }
 
-    /// Plays one explicitly chosen episode. With a cloud queue attached, only
-    /// that episode is inserted at the head of the cloud queue (origin manual);
-    /// the rest of the show is not added. Music already in the local queue stays.
-    public func playPodcastEpisode(_ item: Item, position: Double? = nil) {
-        startPodcastEpisode(item, position: position ?? item.resumePositionSeconds, recordInCloudQueue: true)
+    /// Plays one explicitly chosen episode without rewriting the cloud queue.
+    /// `.show` follows that show. `.queue` continues from that row in the pending list.
+    /// Music already in the local queue stays behind the episode.
+    public func playPodcastEpisode(
+        _ item: Item,
+        position: Double? = nil,
+        line: PodcastPlaybackLine = .show
+    ) {
+        podcastLine = line
+        startPodcastEpisode(item, position: position ?? item.resumePositionSeconds)
     }
 
-    private func startPodcastEpisode(_ item: Item, position: Double, recordInCloudQueue: Bool) {
+    private func startPodcastEpisode(_ item: Item, position: Double, autoplay: Bool = true) {
         let turn = invalidatePodcastAdvance()
         guard item.unavailableReason == nil else {
             errorMessage = KitL10n("kit.playback.itemUnavailable", item.title)
@@ -300,11 +317,8 @@ public final class PlaybackService {
             rest = queue.items.filter { $0.id != item.id }
         }
         queue.set(items: [item] + rest, startingAt: 0)
-        startCurrent(autoplay: true, startAt: max(0, position))
+        startCurrent(autoplay: autoplay, startAt: max(0, position))
         persistQueueAndProgress()
-        if recordInCloudQueue, let episodeID = Self.podcastEpisodeID(item.trackID) {
-            podcastCloud?.noteUserPlay(episodeID: episodeID)
-        }
     }
 
     private func preparePodcastContinuation(forEpisodeID episodeID: String, turn: Int) {
@@ -313,7 +327,7 @@ public final class PlaybackService {
             return
         }
         podcastEpisodes = []
-        podcastContinuationShowID = (podcastCloud?.episodes[episodeID] ?? podcastCloud?.inboxEpisodes[episodeID])?.podcastId
+        podcastContinuationShowID = podcastCloud?.episodes[episodeID]?.podcastId
         syncContinuationPreferenceFromCloud()
         guard let cloud = podcastCloud else { return }
         podcastContinuationTask?.cancel()
@@ -344,9 +358,11 @@ public final class PlaybackService {
         )
     }
 
-    /// Manual 上一集 / 下一集 in podcast mode. Derives the adjacent episode
-    /// from the pure rule without adding it to the queue.
+    /// Manual 上一集 / 下一集 in podcast mode. With a cloud queue, the step follows
+    /// the current line and does not write auto-continue rows. Without one, the
+    /// adjacent show episode stays a local override.
     public func skipPodcastEpisode(_ direction: PodcastContinuation.Skip) {
+        if beginContextStep(direction) { return }
         invalidatePodcastAdvance()
         guard let currentID = currentItem?.trackID, currentID.hasPrefix("podcast_ep_"),
               let next = podcastAdjacentItem(
@@ -448,11 +464,13 @@ public final class PlaybackService {
     }
 
     public func next() {
+        if beginContextStep(.next) { return }
         if podcastOverrideItem != nil { skipPodcastEpisode(.next); return }
         move(by: 1)
     }
 
     public func previous() {
+        if beginContextStep(.previous) { return }
         if podcastOverrideItem != nil { skipPodcastEpisode(.previous); return }
         move(by: -1)
     }
@@ -461,18 +479,39 @@ public final class PlaybackService {
 
     @discardableResult
     public func enqueue(items: [Item], next: Bool = false) -> Bool {
-        let items = items.filter { $0.unavailableReason == nil }
-        guard !items.isEmpty else {
+        let playable = items.filter { $0.unavailableReason == nil }
+        guard !playable.isEmpty else {
             errorMessage = KitL10n("kit.playback.noPlayableTracks")
             return false
         }
-        guard queue.count + items.count <= 5000 else {
+        let podcasts = playable.filter { Self.podcastEpisodeID($0.trackID) != nil }
+        let music = playable.filter { Self.podcastEpisodeID($0.trackID) == nil }
+        if !podcasts.isEmpty {
+            // Podcast add / play-next only edits the cloud queue. An empty music
+            // queue must not start playback as a side effect.
+            let currentID = Self.podcastEpisodeID(currentItem?.trackID ?? "")
+            if let cloud = podcastCloud {
+                for item in podcasts {
+                    guard let episodeID = Self.podcastEpisodeID(item.trackID) else { continue }
+                    cloud.enqueueEpisode(episodeID, next: next, currentEpisodeID: currentID)
+                }
+            } else {
+                guard queue.count + podcasts.count <= 5000 else {
+                    errorMessage = KitL10n("kit.playback.queueLimit")
+                    return false
+                }
+                queue.enqueue(podcasts, next: next)
+                persistQueueAndProgress()
+            }
+            if music.isEmpty { return true }
+        }
+        guard queue.count + music.count <= 5000 else {
             errorMessage = KitL10n("kit.playback.queueLimit")
             return false
         }
         let wasEmpty = queue.count == 0
         podcastOverrideItem = nil
-        queue.enqueue(items, next: next)
+        queue.enqueue(music, next: next)
         persistQueueAndProgress()
         if wasEmpty { startCurrent(autoplay: true, startAt: 0) }
         return true
@@ -1158,61 +1197,145 @@ public final class PlaybackService {
         return queue.current
     }
 
+    /// Starts a cloud-backed previous/next. Returns false when this player should use the local queue.
+    @discardableResult
+    private func beginContextStep(_ direction: PodcastContinuation.Skip) -> Bool {
+        guard podcastCloud != nil, let episodeID = Self.podcastEpisodeID(currentItem?.trackID ?? "") else {
+            return false
+        }
+        let turn = invalidatePodcastAdvance()
+        let cloud = podcastCloud
+        podcastAdvanceTask = Task { @MainActor in
+            await self.performContextStep(
+                episodeID: episodeID,
+                direction: direction,
+                turn: turn,
+                cloud: cloud,
+                automatic: false
+            )
+        }
+        return true
+    }
+
     private func advanceCloudPodcast(
         episodeID: String,
         endedTrackID: String,
         turn: Int,
         cloud: PodcastCloudQueue?
     ) async {
-        let next = await cloud?.episodeFinished(episodeID)
-        guard turn == podcastTurn else { return }
-        if let next {
-            guard let item = await cloud?.playbackItem(for: next.episodeId) else {
+        _ = endedTrackID
+        await performContextStep(
+            episodeID: episodeID,
+            direction: .next,
+            turn: turn,
+            cloud: cloud,
+            automatic: true
+        )
+    }
+
+    /// Queue line stays inside the queue. Show line uses the continuation rule and stops when the show ends.
+    private func performContextStep(
+        episodeID: String,
+        direction: PodcastContinuation.Skip,
+        turn: Int,
+        cloud: PodcastCloudQueue?,
+        automatic: Bool
+    ) async {
+        guard let cloud else { return }
+        if podcastLine == .queue {
+            await stepQueue(episodeID: episodeID, direction: direction, turn: turn, cloud: cloud, automatic: automatic)
+            return
+        }
+        await stepShow(episodeID: episodeID, direction: direction, turn: turn, cloud: cloud, automatic: automatic)
+    }
+
+    private func stepQueue(
+        episodeID: String,
+        direction: PodcastContinuation.Skip,
+        turn: Int,
+        cloud: PodcastCloudQueue,
+        automatic: Bool
+    ) async {
+        if direction == .previous {
+            guard let previous = await cloud.episodeBefore(episodeID) else { return }
+            guard let item = await cloud.playbackItem(for: previous.episodeId) else {
                 guard turn == podcastTurn else { return }
                 errorMessage = KitL10n("kit.playback.nextEpisodeUnavailable")
-                stopAtEndOfPodcast()
                 return
             }
             guard turn == podcastTurn else { return }
-            startPodcastEpisode(item, position: 0, recordInCloudQueue: false)
+            startPodcastEpisode(item, position: 0, autoplay: intendedPlaying)
             return
         }
-        if let cloud {
-            let knownShowID = podcastContinuationShowID
-                ?? (cloud.episodes[episodeID] ?? cloud.inboxEpisodes[episodeID])?.podcastId
-                ?? ""
-            if cloud.hasResolvedPreferences {
-                let resolved = cloud.showPreference(knownShowID).continuation
-                podcastPreference = resolved
-                podcastAutoContinueEnabled = resolved.autoContinue
-            }
-            let anyShowEnablesAutoContinue = cloud.preferences?.shows.values.contains(where: \.autoContinue) == true
-            let shouldSyncEpisodes = !podcastEpisodes.contains(where: { $0.id == episodeID })
-                && (!cloud.hasResolvedPreferences
-                    || podcastAutoContinueEnabled
-                    || (knownShowID.isEmpty && anyShowEnablesAutoContinue))
-            if shouldSyncEpisodes {
-                do {
-                    try await syncPodcastContinuation(forEpisodeID: episodeID, cloud: cloud, turn: turn)
-                } catch {
-                    guard turn == podcastTurn else { return }
+        let following = await cloud.episodeFinished(episodeID)
+        guard turn == podcastTurn else { return }
+        guard let following else {
+            if automatic { stopAtEndOfPodcast() }
+            return
+        }
+        guard let item = await cloud.playbackItem(for: following.episodeId) else {
+            guard turn == podcastTurn else { return }
+            errorMessage = KitL10n("kit.playback.nextEpisodeUnavailable")
+            if automatic { stopAtEndOfPodcast() }
+            return
+        }
+        guard turn == podcastTurn else { return }
+        startPodcastEpisode(item, position: 0, autoplay: automatic || intendedPlaying)
+    }
+
+    private func stepShow(
+        episodeID: String,
+        direction: PodcastContinuation.Skip,
+        turn: Int,
+        cloud: PodcastCloudQueue,
+        automatic: Bool
+    ) async {
+        if automatic, direction == .next {
+            _ = await cloud.episodeFinished(episodeID)
+            guard turn == podcastTurn else { return }
+        }
+        let knownShowID = podcastContinuationShowID ?? cloud.episodes[episodeID]?.podcastId ?? ""
+        if cloud.hasResolvedPreferences {
+            let resolved = cloud.showPreference(knownShowID).continuation
+            podcastPreference = resolved
+            podcastAutoContinueEnabled = resolved.autoContinue
+        }
+        let missing = !podcastEpisodes.contains(where: { $0.id == episodeID })
+        let anyShowEnablesAutoContinue = cloud.preferences?.shows.values.contains(where: \.autoContinue) == true
+        let shouldSync = missing && (
+            !automatic
+                || !cloud.hasResolvedPreferences
+                || podcastAutoContinueEnabled
+                || (knownShowID.isEmpty && anyShowEnablesAutoContinue)
+        )
+        if shouldSync {
+            do {
+                try await syncPodcastContinuation(forEpisodeID: episodeID, cloud: cloud, turn: turn)
+            } catch {
+                guard turn == podcastTurn else { return }
+                if automatic {
                     errorMessage = KitL10n("kit.playback.episodesReadFailed")
                     stopAtEndOfPodcast()
-                    return
                 }
+                return
             }
         }
         guard turn == podcastTurn else { return }
-        if let auto = podcastAdjacentItem(
-            currentID: endedTrackID, direction: .next, requireAutoContinue: true
-        ) {
-            guard turn == podcastTurn else { return }
-            podcastOverrideItem = auto
-            startCurrent(autoplay: true, startAt: 0)
+        let trackID = "podcast_ep_\(episodeID)"
+        guard let adjacent = podcastAdjacentItem(
+            currentID: trackID,
+            direction: direction,
+            requireAutoContinue: automatic
+        ) else {
+            if automatic { stopAtEndOfPodcast() }
             return
         }
-        guard turn == podcastTurn else { return }
-        stopAtEndOfPodcast()
+        if !automatic, direction == .next {
+            _ = await cloud.episodeFinished(episodeID)
+            guard turn == podcastTurn else { return }
+        }
+        podcastOverrideItem = adjacent
+        startCurrent(autoplay: automatic || intendedPlaying, startAt: 0)
     }
 
     func waitForPodcastTasks() async {

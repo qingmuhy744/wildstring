@@ -97,25 +97,32 @@ struct QueueView: View {
 
     private func podcastQueueList(cloud: PodcastCloudQueue) -> some View {
         List {
-            if cloud.conflict != nil {
+            if cloud.conflict != nil || cloud.syncError != nil || cloud.queueFullNotice != nil {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(PodcastCloudQueue.conflictMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                        HStack(spacing: 12) {
-                            Button(L10n("queueView.adoptServerQueue")) { cloud.adoptServerQueue() }
-                            Button(L10n("queueView.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                        if cloud.conflict != nil {
+                            Text(PodcastCloudQueue.conflictMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Button(L10n("queueView.adoptServerQueue")) { cloud.adoptServerQueue() }
+                                Button(L10n("queueView.overwriteWithLocal")) { cloud.overwriteWithLocal() }
+                                Button(L10n("queueView.keepLocalQueue")) { cloud.keepLocalWithoutOverwrite() }
+                            }
+                        } else if let syncError = cloud.syncError {
+                            Text(syncError)
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(L10n("queueView.retry")) { Task { await cloud.retrySync() } }
                         }
-                    }
-                }
-            } else if let syncError = cloud.syncError {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(syncError)
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                        Button(L10n("queueView.retry")) { Task { await cloud.retrySync() } }
+                        if let notice = cloud.queueFullNotice {
+                            Text(notice)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
@@ -199,6 +206,6 @@ struct QueueView: View {
             return
         }
         actionError = nil
-        playback.playPodcastEpisode(item)
+        playback.playPodcastEpisode(item, line: .queue)
     }
 }

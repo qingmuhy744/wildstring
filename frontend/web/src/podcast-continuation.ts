@@ -158,6 +158,40 @@ export function nextPodcastPreview(
     }));
 }
 
+/** One step along the show order. Forward skips completed episodes; back steps to the previous episode. */
+export function adjacentPodcastEpisode(
+  currentTrackId: string | null | undefined,
+  detail: PodcastDetail | null | undefined,
+  preference: PodcastPreference,
+  dismissed: ReadonlySet<string>,
+  step: 1 | -1,
+  options?: { listOrder?: 'asc' | 'desc' },
+): Track | null {
+  if (step > 0) {
+    return nextPodcastPreview(currentTrackId, detail, preference, dismissed, options)[0] ?? null;
+  }
+  if (!currentTrackId || !detail || !podcastAutoContinues(preference)) return null;
+  const direction = preference.order === 'follow' ? options?.listOrder || 'desc' : preference.order;
+  if (direction === 'off') return null;
+  const episodes = [...detail.episodes].sort((a, b) => {
+    const aDate = Date.parse(a.pub_date),
+      bDate = Date.parse(b.pub_date);
+    const dates = Number.isFinite(aDate) && Number.isFinite(bDate) ? aDate - bDate : 0;
+    const order =
+      dates || (a.episode_number ?? 0) - (b.episode_number ?? 0) || a.id.localeCompare(b.id);
+    return direction === 'asc' ? order : -order;
+  });
+  const at = episodes.findIndex((episode) => `podcast_ep_${episode.id}` === currentTrackId);
+  if (at <= 0) return null;
+  const episode = episodes[at - 1];
+  if (!episode || dismissed.has(episode.id) || dismissed.has(`podcast_ep_${episode.id}`))
+    return null;
+  return {
+    ...podcastEpisodeToTrack(episode, detail.podcast),
+    podcast_queue_origin: 'auto' as const,
+  };
+}
+
 /** Same preview, addressed by the current track instead of its id. */
 export function previewPodcastTracks(
   current: Track | undefined,

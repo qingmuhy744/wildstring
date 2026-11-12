@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Latest release [v0.8.12](docs/releases/v0.8.12.md)** · Android gets podcast audio and artwork through your WildString server; episodes already downloaded to the device still play offline, and artwork for shows not yet added is cached and served by the server. Tablet Discover and podcast exploration layouts are refined, artists and albums open from wide song rows, and tablet settings navigation is fixed. This release also ships the planned 0.8.11 changes: adaptive Android phone and tablet layouts, queue drag-and-drop across clients, and a single Web metadata task queue. Legacy instance-wide AI settings are removed; recreate your model connection in assistant settings after upgrading.
+- **Latest release [v0.8.13](docs/releases/v0.8.13.md)** · **Incompatible with 0.8.12 and older clients**: the server no longer provides `/podcasts/inbox`, so the server and all four clients must be upgraded together. Each account now has one ordered podcast queue; listen-later rows move onto the tail on upgrade, new episodes default to the end, and the hidden per-show cap of 3 is gone. Play from a show follows that show; play from the queue follows the list. Android also refines podcast player transitions, queue sheet insets, and folds the new-episode rule into the Followed menu.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 

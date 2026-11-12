@@ -194,13 +194,11 @@ def test_tier1_queue_delivery_action_queue_last(e2e_context):
     items2 = queue_resp2.json()["items"]
     assert [item["episode_id"] for item in items2] == ["ep-qlast-1", "ep-qlast-2"]
 
-    # Inbox remains empty
-    inbox_resp = client.get("/api/v1/podcasts/inbox", headers=HEADERS)
-    assert inbox_resp.json()["items"] == []
+    assert queue_resp2.json()["notice"] == ""
 
 
 def test_tier1_queue_delivery_action_queue_next(e2e_context):
-    """Verify 'queue_next' inserts new episodes immediately after current (at index 1)."""
+    """Verify 'queue_next' places the newest episode at the front of the queue."""
     client = e2e_context["owner"]
     e2e_context["follow_show"](client)
 
@@ -225,32 +223,30 @@ def test_tier1_queue_delivery_action_queue_next(e2e_context):
     # Set delivery preference to queue_next
     e2e_context["set_preference"](client, "queue_next")
 
-    # Deliver ep-qnext-1 -> should be inserted at index 1
     e2e_context["add_episode"]("ep-qnext-1")
     e2e_context["deliver"](["ep-qnext-1"])
 
     queue_resp = client.get("/api/v1/podcasts/queue", headers=HEADERS).json()
     assert [item["episode_id"] for item in queue_resp["items"]] == [
-        "ep-qexist-1",
         "ep-qnext-1",
+        "ep-qexist-1",
         "ep-qexist-2",
     ]
 
-    # Deliver ep-qnext-2 -> should also insert at index 1 (pushing previous next to index 2)
     e2e_context["add_episode"]("ep-qnext-2")
     e2e_context["deliver"](["ep-qnext-2"])
 
     queue_resp2 = client.get("/api/v1/podcasts/queue", headers=HEADERS).json()
     assert [item["episode_id"] for item in queue_resp2["items"]] == [
-        "ep-qexist-1",
         "ep-qnext-2",
         "ep-qnext-1",
+        "ep-qexist-1",
         "ep-qexist-2",
     ]
 
 
 def test_tier1_queue_delivery_action_ignore(e2e_context):
-    """Verify 'ignore' skips delivering new episodes to both queue and inbox."""
+    """Verify 'ignore' leaves the queue unchanged."""
     client = e2e_context["owner"]
     e2e_context["follow_show"](client)
     e2e_context["set_preference"](client, "ignore")
@@ -259,7 +255,6 @@ def test_tier1_queue_delivery_action_ignore(e2e_context):
     assert e2e_context["deliver"](["ep-ignore-1"]) == 0
 
     assert client.get("/api/v1/podcasts/queue", headers=HEADERS).json()["items"] == []
-    assert client.get("/api/v1/podcasts/inbox", headers=HEADERS).json()["items"] == []
 
     # Episode is still accessible in podcast details
     show_detail = client.get(f"/api/v1/podcasts/{SHOW_ID}", headers=HEADERS).json()
@@ -267,18 +262,19 @@ def test_tier1_queue_delivery_action_ignore(e2e_context):
     assert "ep-ignore-1" in ep_ids
 
 
-def test_tier1_queue_delivery_legacy_inbox_normalization(e2e_context):
-    """Verify legacy 'inbox' action works and preferences accept normalized actions."""
+def test_tier1_queue_delivery_rejects_legacy_inbox_action(e2e_context):
     client = e2e_context["owner"]
     e2e_context["follow_show"](client)
-    e2e_context["set_preference"](client, "inbox")
-
-    e2e_context["add_episode"]("ep-inbox-deliv")
-    assert e2e_context["deliver"](["ep-inbox-deliv"]) == 1
-
-    inbox_items = client.get("/api/v1/podcasts/inbox", headers=HEADERS).json()["items"]
-    assert [item["episode_id"] for item in inbox_items] == ["ep-inbox-deliv"]
-    assert client.get("/api/v1/podcasts/queue", headers=HEADERS).json()["items"] == []
+    response = client.put(
+        "/api/v1/podcasts/queue/preferences",
+        headers=HEADERS,
+        json={
+            "default_action": "inbox",
+            "auto_limit": 3,
+            "shows": {},
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_tier1_episode_completion_progress_toggle(e2e_context):

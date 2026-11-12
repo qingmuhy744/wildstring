@@ -4,7 +4,7 @@ import type { PodcastPreference } from './podcast-continuation';
 import { podcastEpisodeToTrack } from './podcast-track';
 
 export type QueueOrigin = 'manual' | 'rule';
-export type NewEpisodeAction = 'inbox' | 'queue_last' | 'queue_next' | 'ignore';
+export type NewEpisodeAction = 'queue_last' | 'queue_next' | 'ignore';
 
 export interface RemoteQueueItem {
   episode_id: string;
@@ -17,13 +17,8 @@ export interface RemoteQueue {
   device_id: string;
   items: RemoteQueueItem[];
   updated_at: string | null;
-}
-
-export interface InboxItem {
-  episode_id: string;
-  podcast_id: string;
-  source: string;
-  added_at: string;
+  /** `queue_full` when an automatic batch was refused because the queue is at the cap. */
+  notice?: string;
 }
 
 export interface ShowQueuePreference {
@@ -42,6 +37,37 @@ export interface QueuePreferences {
 }
 
 const deviceKey = 'wildstring:device-id';
+
+/** Stored `inbox` from older servers is the tail of the queue. */
+export function normalizeDeliveryAction(action: string | undefined): NewEpisodeAction {
+  if (action === 'queue_next' || action === 'ignore' || action === 'queue_last') return action;
+  return 'queue_last';
+}
+
+/**
+ * Append, or insert for play-next. An episode already in the queue stays put on append.
+ * Play-next of the loaded episode does nothing. Otherwise play-next inserts after that
+ * episode when it is queued, or at the front. A newly placed row is manual.
+ * Returns the same array when nothing changes.
+ */
+export function placeQueuedEpisode(
+  items: RemoteQueueItem[],
+  episodeId: string,
+  next: boolean,
+  currentEpisodeId?: string | null,
+): RemoteQueueItem[] {
+  if (!episodeId || (next && currentEpisodeId && episodeId === currentEpisodeId)) return items;
+  const existing = items.find((item) => item.episode_id === episodeId);
+  if (!next && existing) return items;
+  const rest = items.filter((item) => item.episode_id !== episodeId);
+  const entry: RemoteQueueItem = existing
+    ? { ...existing, origin: 'manual' }
+    : { episode_id: episodeId, origin: 'manual' };
+  if (!next) return [...rest, entry];
+  const at = currentEpisodeId ? rest.findIndex((item) => item.episode_id === currentEpisodeId) : -1;
+  const index = at >= 0 ? at + 1 : 0;
+  return [...rest.slice(0, index), entry, ...rest.slice(index)];
+}
 
 export function podcastDeviceId() {
   try {
@@ -86,18 +112,6 @@ export async function putPodcastQueue(version: number, items: RemoteQueueItem[])
   }
 }
 
-export function getInbox() {
-  return api<{ version: number; items: InboxItem[] }>('/podcasts/inbox');
-}
-
-export function addInbox(episodeId: string) {
-  return api(`/podcasts/inbox/items/${encodeURIComponent(episodeId)}`, { method: 'PUT' });
-}
-
-export function removeInbox(episodeId: string) {
-  return api(`/podcasts/inbox/items/${encodeURIComponent(episodeId)}`, { method: 'DELETE' });
-}
-
 export interface EpisodeFavoriteResponse {
   episode_id: string;
   favorite: boolean;
@@ -111,8 +125,15 @@ export function favoritePodcastEpisode(id: string, loved: boolean) {
   });
 }
 
-export function getQueuePreferences() {
-  return api<QueuePreferences>('/podcasts/queue/preferences');
+export async function getQueuePreferences() {
+  const body = await api<QueuePreferences>('/podcasts/queue/preferences');
+  const shows = Object.fromEntries(
+    Object.entries(body.shows || {}).map(([id, pref]) => [
+      id,
+      { ...pref, action: normalizeDeliveryAction(pref.action) },
+    ]),
+  );
+  return { ...body, default_action: normalizeDeliveryAction(body.default_action), shows };
 }
 
 export function putQueuePreferences(body: QueuePreferences) {

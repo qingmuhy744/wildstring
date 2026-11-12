@@ -318,18 +318,6 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         if (settings.userId != session.account?.id) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         return api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy), RequestOwner(owner)).also { requireProfile(owner) }
     }
-    suspend fun podcastInbox(): PodcastInboxSnapshot {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().podcastInbox(RequestOwner(owner)).also { requireProfile(owner) }
-    }
-    suspend fun addPodcastInbox(episodeId: String): PodcastInboxWriteResult {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().addPodcastInboxItem(episodeId, com.google.gson.JsonObject(), RequestOwner(owner)).also { requireProfile(owner) }
-    }
-    suspend fun removePodcastInbox(episodeId: String): PodcastInboxWriteResult {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().removePodcastInboxItem(episodeId, RequestOwner(owner)).also { requireProfile(owner) }
-    }
     suspend fun podcastQueue(): PodcastQueueSnapshot {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastQueue(RequestOwner(owner)).normalized().also { requireProfile(owner) }
