@@ -50,7 +50,9 @@ def main() -> None:
     if variant == "release":
         mapping_source = root / "frontend/android/app/build/outputs/mapping/release/mapping.txt"
         if not mapping_source.is_file() or mapping_source.stat().st_size == 0:
-            raise ValueError("R8 mapping.txt missing; release builds must keep it for crash retrace")
+            raise ValueError(
+                "R8 mapping.txt missing; release builds must keep it for crash retrace"
+            )
         mapping = destination / f"wildstring-{version}-mapping.txt"
         shutil.copyfile(mapping_source, mapping)
         packaged.append(mapping)
