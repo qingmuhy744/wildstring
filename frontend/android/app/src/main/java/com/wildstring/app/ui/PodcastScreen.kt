@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -535,6 +536,7 @@ private fun PodcastUnifiedQueueSheet(
                         onRestore = vm::restorePodcastQueueRow,
                         onReorder = vm::reorderPodcastPending,
                         modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalContentPadding = 0.dp,
                         empty = {
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -702,39 +704,62 @@ private fun PodcastStatusCard(message: String, onAction: () -> Unit, action: Str
     }
 }
 
+/** Follow state plus everything that only matters once a show is followed: new-episode rule, auto download, unfollow. */
 @Composable
-private fun PodcastShowPreferenceSection(
+internal fun PodcastFollowedMenu(
     preference: PodcastShowQueuePreference?,
     loading: Boolean,
     error: String?,
     onChange: (String, Int) -> Unit,
     onRetry: () -> Unit,
+    onAutoDownload: () -> Unit,
+    onUnfollow: () -> Unit,
+    modifier: Modifier = Modifier,
+    fillWidth: Boolean = false,
 ) {
-    val current = preference ?: PodcastShowQueuePreference()
-    val normalizedAction = normalizeDeliveryAction(current.action)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("podcast-new-episode"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.podcast_new_episode_action), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        when {
-            loading -> Box(Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh))
-            error != null && preference == null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
-            else -> {
-                if (error != null) PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
-                val options = listOf(
-                    "queue_last" to R.string.podcast_action_queue_last_short,
-                    "queue_next" to R.string.podcast_action_queue_next_short,
-                    "ignore" to R.string.podcast_action_ignore_short,
-                )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    options.forEachIndexed { index, (action, label) ->
-                        SegmentedButton(
-                            selected = normalizedAction == action,
-                            onClick = { onChange(action, current.autoLimit) },
-                            shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                            label = { Text(stringResource(label), maxLines = 1, softWrap = false) },
-                        )
-                    }
+    var open by remember { mutableStateOf(false) }
+    val action = preference?.let { normalizeDeliveryAction(it.action) }
+    fun label(value: String) = when (value) {
+        "queue_next" -> R.string.podcast_action_queue_next_short
+        "ignore" -> R.string.podcast_action_ignore_short
+        else -> R.string.podcast_action_queue_last_short
+    }
+    Box(modifier) {
+        OutlinedButton(
+            onClick = { open = true },
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
+            modifier = Modifier.height(40.dp).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
+        ) {
+            // The current rule rides on the button; "仅关注" is the quiet default and adds nothing.
+            Text(
+                stringResource(R.string.pod_exp_followed) + if (action != null && action != "ignore") " · " + stringResource(label(action)) else "",
+                fontSize = 13.sp, maxLines = 1, softWrap = false,
+            )
+            Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(open, { open = false }, Modifier.testTag("podcast-follow-options")) {
+            Text(
+                stringResource(R.string.podcast_new_episode_summary),
+                Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                error != null -> DropdownMenuItem(text = { Text(stringResource(R.string.podcast_sync_retry)) }, onClick = { onRetry() })
+                loading || preference == null -> Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
+                else -> listOf("queue_last", "queue_next", "ignore").forEach { value ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(label(value))) },
+                        trailingIcon = { if (action == value) Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) },
+                        onClick = { open = false; if (action != value) onChange(value, preference.autoLimit) },
+                        modifier = Modifier.testTag("podcast-follow-option-$value"),
+                    )
                 }
             }
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_auto_download)) }, onClick = { open = false; onAutoDownload() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = { open = false; onUnfollow() })
         }
     }
 }
@@ -1193,49 +1218,44 @@ private fun PodcastDetailView(
 
                         Spacer(Modifier.height(14.dp))
 
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // One action row: the primary play action, the queue, and follow state with its secondary rules in a menu.
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (totalPendingCount > 0) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilledTonalButton(
-                                        onClick = onPlayPendingQueue,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
-                                    OutlinedButton(
-                                        onClick = onOpenQueueSheet,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
-                                }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilledTonalButton(
-                                    onClick = onFollow,
+                                Button(
+                                    onClick = onPlayPendingQueue,
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
                                     modifier = Modifier.weight(1f).height(40.dp),
                                 ) {
-                                    Text(if (podcast.followed) stringResource(R.string.pod_scr_unfollow_show) else stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
-                                if (podcast.followed) {
-                                    OutlinedButton(
-                                        onClick = onAutoDownload,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Text(stringResource(R.string.pod_scr_auto_download), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
+                                OutlinedButton(
+                                    onClick = onOpenQueueSheet,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(40.dp),
+                                ) {
+                                    Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
                             }
+                            if (!podcast.followed) {
+                                FilledTonalButton(
+                                    onClick = onFollow,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = (if (totalPendingCount > 0) Modifier else Modifier.weight(1f)).height(40.dp),
+                                ) {
+                                    Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                }
+                            } else PodcastFollowedMenu(
+                                preference = showPreference, loading = preferenceLoading, error = preferenceError,
+                                onChange = onShowPreference, onRetry = onRetryPreference,
+                                onAutoDownload = onAutoDownload, onUnfollow = onFollow,
+                                modifier = if (totalPendingCount > 0) Modifier else Modifier.weight(1f),
+                                fillWidth = totalPendingCount <= 0,
+                            )
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -1258,13 +1278,6 @@ private fun PodcastDetailView(
                             )
                         }
                     }
-                    PodcastShowPreferenceSection(
-                        preference = showPreference,
-                        loading = preferenceLoading,
-                        error = preferenceError,
-                        onChange = onShowPreference,
-                        onRetry = onRetryPreference,
-                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1279,8 +1292,7 @@ private fun PodcastDetailView(
                     if (episodeScope == "saved") Text(stringResource(R.string.pod_scr_saved_hint),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier

@@ -1,17 +1,19 @@
 package com.wildstring.app
 
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
 import com.wildstring.app.ui.QueueList
 import com.wildstring.app.ui.QueueRow
+import com.wildstring.app.ui.PodcastQueueRow
+import com.wildstring.app.ui.PodcastQueueRows
 import com.wildstring.app.ui.TactileKind
 import org.junit.Assert.*
 import org.junit.Rule
@@ -90,5 +92,58 @@ class QueueReorderTest {
         compose.runOnIdle { rows.value = rows.value.dropLast(1) }
         queue.performTouchInput { up() }
         compose.runOnIdle { assertEquals("A changed queue must reject a stale drop", 1, moves.size) }
+    }
+
+    @Test fun podcastQueueCardsAlignWithDialogContent() {
+        val initialRows = listOf(
+            PodcastQueueRow("episode-1", "show", "单集一", "测试节目"),
+            PodcastQueueRow("episode-2", "show", "单集二", "测试节目"),
+        )
+        val rows = mutableStateOf(initialRows)
+        val reordered = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                androidx.compose.foundation.layout.Column(Modifier.width(360.dp).padding(16.dp)) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().height(48.dp).testTag("queue-dialog-tabs"))
+                    PodcastQueueRows(
+                        rows = rows.value,
+                        currentEpisodeId = null,
+                        playing = false,
+                        buffering = false,
+                        onPlay = {},
+                        onRemove = {},
+                        onRestore = { _, _ -> },
+                        onReorder = { ordered ->
+                            reordered += ordered.map { it.episodeId }
+                            rows.value = ordered
+                        },
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
+                        horizontalContentPadding = 0.dp,
+                    )
+                }
+            }
+        }
+
+        val tabs = compose.onNodeWithTag("queue-dialog-tabs").fetchSemanticsNode().boundsInRoot
+        val firstRow = compose.onNodeWithTag("podcast-queue-row-episode-1").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            assertEquals(tabs.left, firstRow.left, 0.5f)
+            assertEquals(tabs.right, firstRow.right, 0.5f)
+        }
+
+        val list = compose.onNodeWithTag("podcast-queue-list")
+        val listBounds = list.fetchSemanticsNode().boundsInRoot
+        val start = compose.onNodeWithTag("podcast-queue-handle-episode-1").fetchSemanticsNode().boundsInRoot.center - listBounds.topLeft
+        val end = compose.onNodeWithTag("podcast-queue-handle-episode-2").fetchSemanticsNode().boundsInRoot.center - listBounds.topLeft
+        list.performTouchInput {
+            down(start)
+            moveTo(start + Offset(0f, 24f), delayMillis = 100)
+            moveTo(end, delayMillis = 200)
+            up()
+        }
+        compose.runOnIdle {
+            assertEquals(listOf("episode-2", "episode-1"), rows.value.map { it.episodeId })
+            assertEquals(listOf("episode-2", "episode-1"), reordered)
+        }
     }
 }

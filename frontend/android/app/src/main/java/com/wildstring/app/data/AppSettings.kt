@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(
-    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
+    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val interfaceAnimations: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
     val playbackStyle: String = "vinyl", val songListSize: SongListSize = SongListSize.MEDIUM,
     val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
     val orientation: String = "auto")
@@ -25,7 +25,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         if (prefs.contains("red_cloth")) prefs.edit().remove("red_cloth").apply()
         if (devicePrefs.contains("red_icon")) devicePrefs.edit().remove("red_icon").apply()
         return Preferences(
-        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
+        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getBoolean("interface_animations", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
         prefs.getString("playback_style", "vinyl").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "vinyl",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
@@ -132,6 +132,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
             .apply()
     }
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
+    fun interfaceAnimations(enabled: Boolean) { prefs.edit().putBoolean("interface_animations", enabled).apply(); mutable.value = mutable.value.copy(interfaceAnimations = enabled) }
     fun limits(metadata: Int, artwork: Int, audio: Int) {
         require(metadata in CacheLimits.metadataMb && artwork in CacheLimits.artworkMb && audio in CacheLimits.audioMb)
         prefs.edit().putInt("metadata_mb", metadata).putInt("artwork_mb", artwork).putInt("audio_mb", audio).apply()

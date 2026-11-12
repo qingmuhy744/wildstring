@@ -71,9 +71,10 @@ internal fun QueuePanel(
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
     showClear: Boolean = true,
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     if (state.current?.isPodcast == true) {
-        PodcastQueuePanel(vm, state, modifier, headerModifier, onClose)
+        PodcastQueuePanel(vm, state, modifier, headerModifier, onClose, bottomInset)
         return
     }
     val feedback = LocalTactileFeedback.current
@@ -87,6 +88,7 @@ internal fun QueuePanel(
         onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering,
         onClear = if (showClear && state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
         headerModifier = headerModifier,
+        bottomInset = bottomInset,
         onClose = onClose)
 }
 
@@ -97,6 +99,7 @@ internal fun PodcastQueuePanel(
     modifier: Modifier = Modifier,
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val cloud by vm.podcastCloud.collectAsState()
     val feedback = LocalTactileFeedback.current
@@ -132,6 +135,7 @@ internal fun PodcastQueuePanel(
             onRestore = vm::restorePodcastQueueRow,
             onReorder = vm::reorderPodcastPending,
             modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            bottomInset = bottomInset,
             empty = {
                 Text(
                     text = stringResource(R.string.podcast_player_queue_empty),
@@ -193,6 +197,8 @@ internal fun PodcastQueueRows(
     onRestore: (PodcastQueueRow, Int) -> Unit,
     onReorder: (List<PodcastQueueRow>) -> Unit,
     modifier: Modifier = Modifier,
+    horizontalContentPadding: androidx.compose.ui.unit.Dp = 16.dp,
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
     empty: @Composable () -> Unit = {},
     footer: @Composable () -> Unit = {},
 ) {
@@ -246,6 +252,7 @@ internal fun PodcastQueueRows(
         LazyColumn(
             modifier = Modifier.fillMaxSize()
                 .onGloballyPositioned { coordinates = it }
+                .testTag("podcast-queue-list")
                 .pointerInput(drag) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -280,7 +287,7 @@ internal fun PodcastQueueRows(
                 },
             state = list,
             userScrollEnabled = drag.entryId == null,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            contentPadding = PaddingValues(start = horizontalContentPadding, end = horizontalContentPadding, top = 4.dp, bottom = 4.dp + bottomInset),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (rows.isEmpty()) item { empty() }
@@ -307,6 +314,8 @@ internal fun PodcastQueueRows(
                         .graphicsLayer {
                             translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.episodeId }?.offset ?: 0) else 0f
                             shadowElevation = if (active) elevation else 0f
+                            shape = RoundedCornerShape(12.dp)
+                            clip = false
                         },
                     enableDismissFromStartToEnd = false,
                     enableDismissFromEndToStart = canSwipe,
@@ -358,6 +367,7 @@ internal fun QueueList(
     playing: Boolean = false, buffering: Boolean = false, onClear: (() -> Unit)? = null,
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val resources = androidx.compose.ui.platform.LocalResources.current
     val list = rememberLazyListState()
@@ -475,6 +485,9 @@ internal fun QueueList(
                     }
                 },
             state = list, userScrollEnabled = drag.entryId == null,
+            // Inset cards with a gap, like the podcast queue, so the list ends as a soft block above the gesture bar.
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp + bottomInset),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(drag.order ?: rows, key = { _, row -> row.entryId }) { index, row ->
                 val active = drag.entryId == row.entryId
@@ -486,6 +499,8 @@ internal fun QueueList(
                     .graphicsLayer {
                         translationY = if (active) drag.top - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.entryId }?.offset ?: 0) else 0f
                         shadowElevation = if (active) elevation else 0f
+                        shape = RoundedCornerShape(12.dp)
+                        clip = false
                     }
                 val body = @Composable {
                     QueueChromeRow(
