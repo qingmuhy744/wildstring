@@ -73,13 +73,17 @@ struct MacAssistantView: View {
     }
 
     @ToolbarContentBuilder private var conversationActions: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
+        QuietToolbarItem {
             MacToolbarIconButton(systemImage: "clock.arrow.circlepath", help: L10n("macAssistant.history")) { showHistory.toggle() }
                 .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
+        }
+        QuietToolbarItem {
             MacToolbarIconButton(systemImage: "square.and.pencil", help: L10n("macAssistant.newConversation"), isDisabled: model.busy) {
                 model.newConversation()
                 inputFocused = true
             }
+        }
+        QuietToolbarItem {
             MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macAssistant.refresh"), isDisabled: model.isLoading || model.isSending) { Task { await model.refresh() } }
         }
     }

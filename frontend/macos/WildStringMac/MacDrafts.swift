@@ -56,7 +56,9 @@ struct MacDraftsView: View {
         }
         .navigationTitle(L10n("macDrafts.title"))
         .toolbar {
-            MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macDrafts.refresh"), isDisabled: loading) { Task { await load() } }
+            QuietToolbarItem {
+                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macDrafts.refresh"), isDisabled: loading) { Task { await load() } }
+            }
         }
         .task(id: filter) { await load() }
         .sheet(

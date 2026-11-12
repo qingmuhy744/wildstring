@@ -48,8 +48,10 @@ struct MacPodcastsView: View {
         }
         .navigationTitle(L10n("macPodcasts.title"))
         .toolbar {
-            ToolbarItemGroup {
+            QuietToolbarItem {
                 MacToolbarTextButton(title: L10n("macPodcasts.explore"), systemImage: "safari") { exploring = true }
+            }
+            QuietToolbarItem {
                 MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macPodcasts.refreshShows"), isDisabled: loadingShows) { Task { await loadShows() } }
             }
         }

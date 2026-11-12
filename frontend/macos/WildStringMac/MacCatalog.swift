@@ -679,6 +679,17 @@ struct MacArtistsView: View {
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]
   }
+  private var roleLabel: String {
+    switch role {
+    case "artist": return L10n("macCatalog.roleArtist")
+    case "": return L10n("macCatalog.roleAll")
+    case "vocalist": return L10n("macCatalog.roleVocalist")
+    case "lyricist": return L10n("macCatalog.roleLyricist")
+    case "composer": return L10n("macCatalog.roleComposer")
+    case "arranger": return L10n("macCatalog.roleArranger")
+    default: return L10n("macCatalog.roleAlbumArtist")
+    }
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -711,16 +722,36 @@ struct MacArtistsView: View {
     }
     .navigationTitle(L10n("macCatalog.artists"))
     .toolbar {
-      Picker(L10n("macCatalog.rolePicker"), selection: $role) {
-        Text(L10n("macCatalog.roleArtist")).tag("artist")
-        Text(L10n("macCatalog.roleAlbumArtist")).tag("album_artist")
-        Text(L10n("macCatalog.roleAll")).tag("")
-        Divider()
-        Text(L10n("macCatalog.roleVocalist")).tag("vocalist")
-        Text(L10n("macCatalog.roleLyricist")).tag("lyricist")
-        Text(L10n("macCatalog.roleComposer")).tag("composer")
-        Text(L10n("macCatalog.roleArranger")).tag("arranger")
-      }.pickerStyle(.menu).help(L10n("macCatalog.roleFilterHelp"))
+      QuietToolbarItem {
+        Menu {
+          Picker(L10n("macCatalog.rolePicker"), selection: $role) {
+          Text(L10n("macCatalog.roleArtist")).tag("artist")
+          Text(L10n("macCatalog.roleAlbumArtist")).tag("album_artist")
+          Text(L10n("macCatalog.roleAll")).tag("")
+          Divider()
+          Text(L10n("macCatalog.roleVocalist")).tag("vocalist")
+          Text(L10n("macCatalog.roleLyricist")).tag("lyricist")
+          Text(L10n("macCatalog.roleComposer")).tag("composer")
+          Text(L10n("macCatalog.roleArranger")).tag("arranger")
+        }
+        .pickerStyle(.inline)
+        .labelsHidden()
+      } label: {
+        HStack(spacing: 5) {
+          Text(roleLabel)
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.ink)
+          Image(systemName: "chevron.down")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(MacTheme.muted)
+        }
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help(L10n("macCatalog.roleFilterHelp"))
+      .accessibilityLabel(L10n("macCatalog.roleFilterHelp"))
+      }
     }
     .navigationDestination(for: Artist.self) { artist in
       MacArtistDetail(
@@ -886,7 +917,9 @@ struct MacPlaylistsView: View {
     }
     .navigationTitle(L10n("macCatalog.playlists"))
     .toolbar {
-      MacToolbarTextButton(title: L10n("macCatalog.newPlaylist"), systemImage: "plus", accent: true) { creating = true }
+      QuietToolbarItem {
+        MacToolbarTextButton(title: L10n("macCatalog.newPlaylist"), systemImage: "plus", accent: true) { creating = true }
+      }
     }
     .navigationDestination(for: Playlist.self) { playlist in
       MacPlaylistDetail(
@@ -1101,7 +1134,9 @@ struct MacFavoritesView: View {
     }
     .navigationTitle(L10n("macCatalog.favoritesTitle"))
     .toolbar {
-      MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .task { await load() }
   }
@@ -1150,7 +1185,9 @@ struct MacListeningView: View {
     )
     .navigationTitle(L10n("macCatalog.listeningHistoryTitle"))
     .toolbar {
-      MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .task { await load() }
   }

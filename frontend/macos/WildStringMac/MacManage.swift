@@ -50,7 +50,9 @@ struct MacManageView: View {
         }
         .navigationTitle(L10n("macManage.navTitle"))
         .toolbar {
-            MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macManage.refreshRecords"), isDisabled: loading) { Task { await load() } }
+            QuietToolbarItem {
+                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macManage.refreshRecords"), isDisabled: loading) { Task { await load() } }
+            }
         }
         .task { await load() }
     }

@@ -236,6 +236,25 @@ struct MacToolbarTextButton: View {
     }
 }
 
+/// Toolbar item without the macOS 26+ shared glass background.
+/// On older systems it is a plain trailing ToolbarItem.
+struct QuietToolbarItem<Content: View>: ToolbarContent {
+    var content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .automatic) { content }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .automatic) { content }
+        }
+    }
+}
+
 enum MacErrorText {
     static func message(for error: Error) -> String {
         if let network = error as? URLError {

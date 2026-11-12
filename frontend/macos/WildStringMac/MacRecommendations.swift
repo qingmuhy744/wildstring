@@ -189,8 +189,12 @@ struct MacDiscoverView: View {
     .background(MacTheme.canvas)
     .navigationTitle(L10n("macRec.dailyRecommendations"))
     .toolbar {
-      MacToolbarTextButton(title: refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew"), accent: true, isDisabled: refreshing || section != "daily") { Task { await refresh() } }
-      MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macRec.refresh"), isDisabled: loading) { Task { await load() } }
+      QuietToolbarItem {
+        MacToolbarTextButton(title: refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew"), accent: true, isDisabled: refreshing || section != "daily") { Task { await refresh() } }
+      }
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macRec.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .sheet(isPresented: $saving) {
       MacAddToPlaylistSheet(client: client, tracks: tracks) { message = $0 }
