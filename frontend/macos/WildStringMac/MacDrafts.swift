@@ -160,6 +160,7 @@ struct MacDraftPreview: View {
                         Task { await save(draft) }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(MacTheme.accentDeep)
                     .disabled(loading || busy || errorMessage != nil)
                 } else if draft?.isApplied == true {
                     Label(draft?.kind == "playlist" ? L10n("macDrafts.playlistSaved") : L10n("macDrafts.statusApplied"), systemImage: "checkmark.circle.fill")

@@ -391,6 +391,7 @@ struct MacSettingsView: View {
                             session.updater.openDownload(for: release)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
 
                         Button(L10n("macLibrary.viewReleaseNotes")) {
                             session.updater.openReleasePage(for: release)

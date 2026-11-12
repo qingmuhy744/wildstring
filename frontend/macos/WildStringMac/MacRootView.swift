@@ -300,6 +300,7 @@ private struct MacLoginView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .tint(MacTheme.accentDeep)
                 .disabled(session.isBusy || serverText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty)
             }
             .controlSize(.large)
@@ -420,6 +421,7 @@ private struct MacShellView: View {
                     Button(L10n("macRoot.handoffDismiss")) { session.sync?.dismiss() }
                     Button(L10n("macRoot.handoffResume")) { Task { await session.sync?.accept() } }
                         .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
                 }
                 .padding(10)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

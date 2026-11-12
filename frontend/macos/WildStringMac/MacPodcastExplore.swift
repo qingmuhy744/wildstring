@@ -79,6 +79,7 @@ struct MacPodcastExplore: View {
                                 }
                                 Button(adding ? L10n("macPodcastExplore.following") : preview.followed ? L10n("macPodcastExplore.openShow") : L10n("macPodcastExplore.followShow")) { Task { await follow(selected, preview: preview) } }
                                     .buttonStyle(.borderedProminent)
+                                    .tint(MacTheme.accentDeep)
                                     .disabled(adding || (!canAdd && preview.catalogPodcastID == nil))
                                 if !canAdd && preview.catalogPodcastID == nil { Text(L10n("macPodcastExplore.addDisabledByAdmin")).font(.caption).foregroundStyle(MacTheme.muted) }
                             }

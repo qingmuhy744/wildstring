@@ -206,6 +206,7 @@ struct MacMetadataSheet: View {
                 Button(L10n("macManage.cancel"), role: .cancel) { dismiss() }
                 Button(saving ? L10n("macManage.saving") : L10n("macManage.save")) { Task { await save() } }
                     .buttonStyle(.borderedProminent)
+                    .tint(MacTheme.accentDeep)
                     .disabled(!ready || saving || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

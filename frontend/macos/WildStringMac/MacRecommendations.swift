@@ -378,7 +378,7 @@ struct MacAddToPlaylistSheet: View {
         Spacer()
         Button(L10n("macRec.cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
         Button(busy ? L10n("macRec.adding") : L10n("macRec.confirmAdd")) { Task { await save() } }
-          .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .buttonStyle(.borderedProminent).tint(MacTheme.accentDeep).keyboardShortcut(.defaultAction)
           .disabled(
             tracks.isEmpty || busy || loading
               || (target == "new" && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
