@@ -5,6 +5,7 @@ import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import com.wildstring.app.playback.GainAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.pow
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -32,5 +33,15 @@ class GainAudioProcessorTest {
         processor.queueInput(input)
         val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(0.5f, output.float, 0.00001f); assertEquals(-1f, output.float, 0f); assertEquals(0f, output.float, 0f)
+    }
+    @Test fun livePodcastBoostAndResetReachTheNextBufferWithoutReconfiguring() {
+        val processor = GainAudioProcessor()
+        processor.configure(AudioFormat(48000, 1, C.ENCODING_PCM_16BIT)); processor.flush()
+        for ((db, expected) in listOf(0 to 4000, 6 to 7981, 12 to 15924, 0 to 4000)) {
+            processor.factor = 10.0.pow(db / 20.0).toFloat()
+            val input = ByteBuffer.allocateDirect(2).order(ByteOrder.LITTLE_ENDIAN).putShort(4000)
+            input.flip(); processor.queueInput(input)
+            assertEquals(expected.toShort(), processor.output.order(ByteOrder.LITTLE_ENDIAN).short)
+        }
     }
 }

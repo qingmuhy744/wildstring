@@ -2133,4 +2133,7 @@
     <string name="player_landscape_prompt">The phone is lying sideways. Switch to landscape player?</string>
     <string name="player_landscape_prompt_action">Switch</string>
     <string name="podcast_select_show">Select a show</string>
+    <string name="podcast_gain_title">Show volume boost</string>
+    <string name="podcast_gain_local">Saved on this device for all episodes of this show.</string>
+    <string name="podcast_gain_distortion">If the sound distorts, lower the boost.</string>
 </resources>

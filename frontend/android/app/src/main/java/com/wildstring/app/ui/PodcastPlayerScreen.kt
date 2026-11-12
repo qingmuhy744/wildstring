@@ -40,9 +40,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.R
 import com.wildstring.app.data.PodcastEpisode
+import kotlin.math.roundToInt
 import com.wildstring.app.data.friendlyError
 import kotlinx.coroutines.CancellationException
 
@@ -446,6 +449,60 @@ private fun PodcastPlayerControls(
     val dpSpec = tween<Dp>(ms, easing = FastOutSlowInEasing)
     val sizeSpec = tween<IntSize>(ms, easing = FastOutSlowInEasing)
     var moreMenu by remember { mutableStateOf(false) }
+    val podcastId = state.current?.podcast?.podcastId
+    var gainDialog by remember(podcastId, state.serverSelection) { mutableStateOf(false) }
+    val gainRevision by vm.settings.gainRevision.collectAsStateWithLifecycle()
+    val gainDb = remember(podcastId, gainRevision) { podcastId?.let(vm.settings::podcastGainDb) ?: 0 }
+    val gainText = if (gainDb == 0) "0 dB" else "+$gainDb dB"
+    val moreButton: @Composable () -> Unit = {
+        Box {
+            IconButton(tactile { moreMenu = true }, Modifier.testTag("podcast-controls-more")) {
+                Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
+            }
+            DropdownMenu(moreMenu, { moreMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.podcast_gain_title)) },
+                    trailingIcon = { Text(gainText, fontFamily = FontFamily.Monospace) },
+                    enabled = podcastId != null,
+                    onClick = tactile { moreMenu = false; gainDialog = true },
+                )
+                if (compact) {
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text(stringResource(R.string.podcast_previous_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(-1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.podcast_next_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pod_player_queue_label)) }, onClick = tactile { moreMenu = false; onQueue() })
+                    listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
+                        DropdownMenuItem(
+                            text = { Text("${rate}×", color = if (rate == speed) MaterialTheme.colorScheme.primary else Color.Unspecified) },
+                            onClick = tactile { vm.controller?.setPlaybackSpeed(rate); speed = rate; moreMenu = false },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    if (gainDialog && podcastId != null) AlertDialog(
+        onDismissRequest = { gainDialog = false },
+        title = { Text(stringResource(R.string.podcast_gain_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(state.current.album.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.podcast_gain_local), style = MaterialTheme.typography.bodySmall)
+                Text(gainText, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
+                val gainLabel = stringResource(R.string.podcast_gain_title)
+                Slider(
+                    value = gainDb.toFloat(),
+                    onValueChange = { vm.settings.podcastGainDb(podcastId, it.roundToInt()) },
+                    valueRange = 0f..12f,
+                    steps = 11,
+                    modifier = Modifier.testTag("podcast-gain-slider").semantics { contentDescription = gainLabel; stateDescription = gainText },
+                )
+                Text(stringResource(R.string.podcast_gain_distortion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(tactile { gainDialog = false }) { Text(stringResource(R.string.done)) } },
+        dismissButton = { TextButton(tactile { vm.settings.podcastGainDb(podcastId, 0) }, enabled = gainDb != 0) { Text(stringResource(R.string.gain_panel_reset)) } },
+    )
     val sideIcon by animateDpAsState(if (compact) 24.dp else 28.dp, dpSpec, label = "podcast-side-icon")
     val skipIcon by animateDpAsState(if (compact) 26.dp else 28.dp, dpSpec, label = "podcast-skip-icon")
     val playButton by animateDpAsState(if (compact) 48.dp else 64.dp, dpSpec, label = "podcast-play-size")
@@ -548,6 +605,7 @@ private fun PodcastPlayerControls(
                             )
                         }
                     }
+                    moreButton()
                 } }
                 Text(
                     formatPodcastTime(duration),
@@ -603,24 +661,8 @@ private fun PodcastPlayerControls(
                         Icon(Icons.Default.SkipNext, stringResource(R.string.podcast_next_episode), Modifier.size(sideIcon))
                     }
                 }
-                // Compact reading bar keeps only the essentials; everything else lives here.
                 AnimatedVisibility(compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
-                    Box {
-                        IconButton(tactile { moreMenu = true }, Modifier.testTag("podcast-controls-more")) {
-                            Icon(Icons.Default.MoreVert, stringResource(R.string.more_options), Modifier.size(sideIcon))
-                        }
-                        DropdownMenu(moreMenu, { moreMenu = false }) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.podcast_previous_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(-1) })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.podcast_next_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(1) })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.pod_player_queue_label)) }, onClick = tactile { moreMenu = false; onQueue() })
-                            listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
-                                DropdownMenuItem(
-                                    text = { Text("${rate}×", color = if (rate == speed) MaterialTheme.colorScheme.primary else Color.Unspecified) },
-                                    onClick = tactile { vm.controller?.setPlaybackSpeed(rate); speed = rate; moreMenu = false },
-                                )
-                            }
-                        }
-                    }
+                    moreButton()
                 }
             }
             state.playbackError?.let { message ->

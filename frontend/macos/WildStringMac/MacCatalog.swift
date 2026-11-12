@@ -143,7 +143,7 @@ struct MacPlayableTracks: View {
           }
           .font(MacTheme.micro)
           .foregroundStyle(MacTheme.faint)
-          .padding(.horizontal, 18)
+          .padding(.horizontal, 30)
           .padding(.vertical, 10)
           .overlay(alignment: .bottom) {
             Rectangle().fill(MacTheme.border).frame(height: 1)
@@ -369,20 +369,23 @@ struct MacPlayableTracks: View {
       .accessibilityLabel(L10n("macCatalog.moreActionsForTrack", track.title))
       .help(L10n("macCatalog.moreActionsForTrack", track.title))
     }
-    .padding(.vertical, 10)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
     .background(
-      current
-        ? MacTheme.accent.opacity(0.10)
-        : (isHovered ? MacTheme.panel.opacity(0.55) : Color.clear)
+      current ? MacTheme.accentSoft : (isHovered ? MacTheme.hover : MacTheme.panel),
+      in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
     )
-    .overlay(alignment: .bottom) {
-      Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
+    .overlay {
+      RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
+        .strokeBorder(current ? MacTheme.accent.opacity(0.45) : MacTheme.border, lineWidth: 1)
     }
+    .padding(.vertical, 3)
     .overlay(alignment: .leading) {
       if current {
         Capsule()
           .fill(MacTheme.accent)
           .frame(width: 3)
+          .padding(.horizontal, 3)
           .padding(.vertical, 12)
       }
     }
@@ -507,33 +510,42 @@ struct MacAlbumsView: View {
   @State private var total = 0
   @State private var message: String?
   @State private var loading = true
+  @FocusState private var searchFocused: Bool
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]
   }
 
   var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 22) {
-        ForEach(albums) { album in
-          MacCatalogCard(
-            client: client,
-            value: album,
-            title: album.title,
-            subtitle: album.artists.joined(separator: " / "),
-            cover: album.coverTrackId
-          )
-        }
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        MacSearchField(placeholder: L10n("macCatalog.searchAlbums"), text: $query, focused: $searchFocused)
+        Spacer(minLength: 0)
       }
-      .padding(24)
+      .padding(.horizontal, 24)
+      .padding(.top, 12)
+      .padding(.bottom, 6)
+      ScrollView {
+        LazyVGrid(columns: columns, spacing: 22) {
+          ForEach(albums) { album in
+            MacCatalogCard(
+              client: client,
+              value: album,
+              title: album.title,
+              subtitle: album.artists.joined(separator: " / "),
+              cover: album.coverTrackId
+            )
+          }
+        }
+        .padding(24)
+      }
       if albums.count < total {
-        Button(L10n("macCatalog.remainingAlbums", total - albums.count)) { Task { await load(reset: false) } }
-          .buttonStyle(.bordered)
-          .padding(.bottom, 24)
+        MacLoadMoreBar(text: L10n("macCatalog.remainingAlbums", total - albums.count)) {
+          Task { await load(reset: false) }
+        }
       }
     }
     .navigationTitle(L10n("macCatalog.albums"))
-    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchAlbums")))
     .navigationDestination(for: Album.self) { album in
       MacAlbumDetail(
         client: client,
@@ -661,54 +673,104 @@ struct MacArtistsView: View {
   @State private var total = 0
   @State private var message: String?
   @State private var loading = true
+  @FocusState private var searchFocused: Bool
     @AppStorage("macArtistRole") private var role = "album_artist"
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]
   }
+  private var roleLabel: String {
+    switch role {
+    case "artist": return L10n("macCatalog.roleArtist")
+    case "": return L10n("macCatalog.roleAll")
+    case "vocalist": return L10n("macCatalog.roleVocalist")
+    case "lyricist": return L10n("macCatalog.roleLyricist")
+    case "composer": return L10n("macCatalog.roleComposer")
+    case "arranger": return L10n("macCatalog.roleArranger")
+    default: return L10n("macCatalog.roleAlbumArtist")
+    }
+  }
 
   var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 22) {
-        ForEach(artists) { artist in
-          MacCatalogCard(
-            client: client,
-            value: artist,
-            title: artist.name,
-            subtitle: L10n("macCatalog.artistSubtitle", artist.albumCount, artist.trackCount),
-            cover: artist.coverTrackId
-          )
-        }
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        MacSearchField(placeholder: L10n("macCatalog.searchArtists"), text: $query, focused: $searchFocused)
+        Spacer(minLength: 0)
       }
-      .padding(24)
+      .padding(.horizontal, 24)
+      .padding(.top, 12)
+      .padding(.bottom, 6)
+      ScrollView {
+        LazyVGrid(columns: columns, spacing: 22) {
+          ForEach(artists) { artist in
+            MacCatalogCard(
+              client: client,
+              value: artist,
+              title: artist.name,
+              subtitle: L10n("macCatalog.artistSubtitle", artist.albumCount, artist.trackCount),
+              cover: artist.coverTrackId
+            )
+          }
+        }
+        .padding(24)
+      }
       if artists.count < total {
-        Button(L10n("macCatalog.remainingArtists", total - artists.count)) { Task { await load(reset: false) } }
-          .buttonStyle(.bordered)
-          .padding(.bottom, 24)
+        MacLoadMoreBar(text: L10n("macCatalog.remainingArtists", total - artists.count)) {
+          Task { await load(reset: false) }
+        }
       }
     }
     .navigationTitle(L10n("macCatalog.artists"))
     .toolbar {
-      Picker(L10n("macCatalog.rolePicker"), selection: $role) {
-        Text(L10n("macCatalog.roleArtist")).tag("artist")
-        Text(L10n("macCatalog.roleAlbumArtist")).tag("album_artist")
-        Text(L10n("macCatalog.roleAll")).tag("")
-        Divider()
-        Text(L10n("macCatalog.roleVocalist")).tag("vocalist")
-        Text(L10n("macCatalog.roleLyricist")).tag("lyricist")
-        Text(L10n("macCatalog.roleComposer")).tag("composer")
-        Text(L10n("macCatalog.roleArranger")).tag("arranger")
-      }.pickerStyle(.menu).help(L10n("macCatalog.roleFilterHelp"))
+      QuietToolbarItem {
+        Menu {
+          Picker(L10n("macCatalog.rolePicker"), selection: $role) {
+          Text(L10n("macCatalog.roleArtist")).tag("artist")
+          Text(L10n("macCatalog.roleAlbumArtist")).tag("album_artist")
+          Text(L10n("macCatalog.roleAll")).tag("")
+          Divider()
+          Text(L10n("macCatalog.roleVocalist")).tag("vocalist")
+          Text(L10n("macCatalog.roleLyricist")).tag("lyricist")
+          Text(L10n("macCatalog.roleComposer")).tag("composer")
+          Text(L10n("macCatalog.roleArranger")).tag("arranger")
+        }
+        .pickerStyle(.inline)
+        .labelsHidden()
+      } label: {
+        HStack(spacing: 5) {
+          Text(roleLabel)
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.ink)
+          Image(systemName: "chevron.down")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(MacTheme.muted)
+        }
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help(L10n("macCatalog.roleFilterHelp"))
+      .accessibilityLabel(L10n("macCatalog.roleFilterHelp"))
+      }
     }
-    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchArtists")))
     .navigationDestination(for: Artist.self) { artist in
-      MacArtistDetail(
-        client: client,
-        playback: playback,
-        favorites: favorites,
-        artist: artist,
-        canManage: canManage
-      )
+      if role == "album_artist" {
+        MacArtistAlbumsDetail(
+          client: client,
+          playback: playback,
+          favorites: favorites,
+          artist: artist,
+          canManage: canManage
+        )
+      } else {
+        MacArtistDetail(
+          client: client,
+          playback: playback,
+          favorites: favorites,
+          artist: artist,
+          canManage: canManage
+        )
+      }
     }
     .overlay {
       if artists.isEmpty {
@@ -818,6 +880,90 @@ private struct MacArtistDetail: View {
   }
 }
 
+
+private struct MacArtistAlbumsDetail: View {
+  let client: WildstringClient
+  let playback: PlaybackService
+  var favorites: MacFavorites?
+  let artist: Artist
+  var canManage = false
+  @Environment(\.dismiss) private var dismiss
+
+  @State private var albums: [Album] = []
+  @State private var message: String?
+  @State private var loading = true
+
+  private var columns: [GridItem] {
+    [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ScrollView {
+        LazyVGrid(columns: columns, spacing: 22) {
+          ForEach(albums) { album in
+            MacCatalogCard(
+              client: client,
+              value: album,
+              title: album.title,
+              subtitle: album.artists.joined(separator: " / "),
+              cover: album.coverTrackId
+            )
+          }
+        }
+        .padding(24)
+      }
+    }
+    .navigationTitle(artist.name)
+    .navigationBarBackButtonHidden(true)
+    .toolbar {
+      ToolbarItem(placement: .navigation) {
+        Button {
+          dismiss()
+        } label: {
+          Image(systemName: "chevron.backward")
+        }
+        .help(L10n("macCatalog.back"))
+        .keyboardShortcut("[", modifiers: .command)
+      }
+    }
+    .navigationDestination(for: Album.self) { album in
+      MacAlbumDetail(
+        client: client,
+        playback: playback,
+        favorites: favorites,
+        album: album,
+        canManage: canManage
+      )
+    }
+    .overlay {
+      if albums.isEmpty {
+        if loading {
+          ProgressView()
+        } else if let message {
+          ContentUnavailableView(L10n("macCatalog.cannotLoadAlbums"), systemImage: "square.stack", description: Text(message))
+        } else {
+          ContentUnavailableView(L10n("macCatalog.artistAlbumsEmpty"), systemImage: "square.stack")
+        }
+      }
+    }
+    .task { await load() }
+  }
+
+  private func load() async {
+    loading = albums.isEmpty
+    do {
+      albums = try await MacPages.collect { offset in
+        try await client.artistAlbums(artistId: artist.id, limit: 100, offset: offset)
+      }
+      message = nil
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
+    loading = false
+  }
+}
+
 struct MacPlaylistsView: View {
   let client: WildstringClient
   let playback: PlaybackService
@@ -827,7 +973,6 @@ struct MacPlaylistsView: View {
   @State private var playlists: [Playlist] = []
   @State private var message: String?
   @State private var failure: String?
-  @State private var newName = ""
   @State private var creating = false
   @State private var renaming: Playlist?
   @State private var renameText = ""
@@ -865,7 +1010,9 @@ struct MacPlaylistsView: View {
     }
     .navigationTitle(L10n("macCatalog.playlists"))
     .toolbar {
-      Button(L10n("macCatalog.newPlaylist")) { creating = true }
+      QuietToolbarItem {
+        MacToolbarTextButton(title: L10n("macCatalog.newPlaylist"), systemImage: "plus", accent: true) { creating = true }
+      }
     }
     .navigationDestination(for: Playlist.self) { playlist in
       MacPlaylistDetail(
@@ -888,10 +1035,8 @@ struct MacPlaylistsView: View {
         }
       }
     }
-    .alert(L10n("macCatalog.newPlaylist"), isPresented: $creating) {
-      TextField(L10n("macCatalog.playlistNamePlaceholder"), text: $newName)
-      Button(L10n("macCatalog.create")) { Task { await create() } }
-      Button(L10n("macCatalog.cancel"), role: .cancel) { newName = "" }
+    .sheet(isPresented: $creating) {
+      MacPlaylistCreationSheet(client: client, onSaved: { await load() })
     }
     .alert(
       L10n("macCatalog.renamePlaylist"),
@@ -929,18 +1074,6 @@ struct MacPlaylistsView: View {
     loading = false
   }
 
-  private func create() async {
-    let name = newName.trimmingCharacters(in: .whitespaces)
-    newName = ""
-    guard !name.isEmpty else { return }
-    do {
-      _ = try await client.createPlaylist(name: name)
-      await load()
-    } catch {
-      failure = MacErrorText.message(for: error)
-    }
-  }
-
   private func rename() async {
     guard let playlist = renaming else { return }
     renaming = nil
@@ -963,6 +1096,300 @@ struct MacPlaylistsView: View {
       await load()
     } catch {
       failure = MacErrorText.message(for: error)
+    }
+  }
+}
+
+
+private struct MacPlaylistCreationSheet: View {
+  let client: WildstringClient
+  let onSaved: () async -> Void
+  @Environment(\.dismiss) private var dismiss
+
+  @State private var name = ""
+  @State private var kind = "manual"
+  @State private var match = "all"
+  @State private var rows: [Row] = [Row()]
+  @State private var sort = "title"
+  @State private var order = "asc"
+  @State private var limit = 200
+  @State private var creating = false
+  @State private var error: String?
+
+  private struct Row: Identifiable {
+    let id = UUID()
+    var field = "artist"
+    var oper = "contains"
+    var value = ""
+    var end = ""
+  }
+
+  private enum FieldType { case text, number, boolean, date }
+
+  private static let fieldMeta: [(id: String, labelKey: String, type: FieldType)] = [
+    ("title", "macCatalog.smartFieldTitle", .text),
+    ("artist", "macCatalog.smartFieldArtist", .text),
+    ("albumartist", "macCatalog.smartFieldAlbumArtist", .text),
+    ("album", "macCatalog.smartFieldAlbum", .text),
+    ("filetype", "macCatalog.smartFieldFormat", .text),
+    ("duration", "macCatalog.smartFieldDuration", .number),
+    ("loved", "macCatalog.smartFieldLoved", .boolean),
+    ("playCount", "macCatalog.smartFieldPlayCount", .number),
+    ("listened", "macCatalog.smartFieldListened", .number),
+    ("lastPlayed", "macCatalog.smartFieldLastPlayed", .date),
+    ("dateAdded", "macCatalog.smartFieldDateAdded", .date),
+    ("dateLoved", "macCatalog.smartFieldDateLoved", .date),
+  ]
+
+  private static let sortMeta: [(id: String, labelKey: String)] = [
+    ("title", "macCatalog.smartFieldTitle"),
+    ("artist", "macCatalog.smartFieldArtist"),
+    ("album", "macCatalog.smartFieldAlbum"),
+    ("duration", "macCatalog.smartFieldDuration"),
+    ("playCount", "macCatalog.smartFieldPlayCount"),
+    ("listened", "macCatalog.smartFieldListened"),
+    ("lastPlayed", "macCatalog.smartFieldLastPlayed"),
+    ("dateAdded", "macCatalog.smartFieldDateAdded"),
+    ("dateLoved", "macCatalog.smartFieldDateLoved"),
+  ]
+
+  private static func fieldType(of field: String) -> FieldType {
+    fieldMeta.first { $0.id == field }?.type ?? .text
+  }
+
+  private static func operators(for field: String) -> [String] {
+    switch fieldType(of: field) {
+    case .boolean: return ["is"]
+    case .number: return ["gt", "lt", "is", "inTheRange"]
+    case .date: return ["inTheLast", "notInTheLast"]
+    case .text: return ["contains", "is", "isNot", "notContains", "startsWith", "endsWith"]
+    }
+  }
+
+  private static func operatorLabel(_ op: String) -> String {
+    switch op {
+    case "is": return L10n("macCatalog.smartOpIs")
+    case "isNot": return L10n("macCatalog.smartOpIsNot")
+    case "contains": return L10n("macCatalog.smartOpContains")
+    case "notContains": return L10n("macCatalog.smartOpNotContains")
+    case "startsWith": return L10n("macCatalog.smartOpStartsWith")
+    case "endsWith": return L10n("macCatalog.smartOpEndsWith")
+    case "gt": return L10n("macCatalog.smartOpGt")
+    case "lt": return L10n("macCatalog.smartOpLt")
+    case "inTheRange": return L10n("macCatalog.smartOpInTheRange")
+    case "inTheLast": return L10n("macCatalog.smartOpInTheLast")
+    case "notInTheLast": return L10n("macCatalog.smartOpNotInTheLast")
+    default: return op
+    }
+  }
+
+  private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+  private func ruleIsValid(_ row: Row) -> Bool {
+    switch Self.fieldType(of: row.field) {
+    case .boolean:
+      return row.value == "true" || row.value == "false"
+    case .number:
+      guard let low = Double(row.value) else { return false }
+      if row.oper == "inTheRange" {
+        guard let high = Double(row.end) else { return false }
+        return low <= high
+      }
+      return true
+    case .date:
+      guard let days = Int(row.value) else { return false }
+      return days >= 1 && days <= 36500
+    case .text:
+      return !row.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+  }
+
+  private var canCreate: Bool {
+    guard !trimmedName.isEmpty else { return false }
+    guard kind == "smart" else { return true }
+    return !rows.isEmpty && rows.allSatisfy(ruleIsValid)
+  }
+
+  private func makeDefinition() -> SmartDefinition {
+    let rules = rows.map { row -> SmartRule in
+      let value: SmartValue
+      switch Self.fieldType(of: row.field) {
+      case .boolean:
+        value = .bool(row.value == "true")
+      case .number, .date:
+        if row.oper == "inTheRange" {
+          value = .numbers([Double(row.value) ?? 0, Double(row.end) ?? 0])
+        } else {
+          value = .number(Double(row.value) ?? 0)
+        }
+      case .text:
+        value = .string(row.value)
+      }
+      return SmartRule(operator: row.oper, field: row.field, value: value)
+    }
+    return SmartDefinition(match: match, rules: rules, sort: sort, order: order, limit: limit)
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Text(L10n("macCatalog.newPlaylist"))
+        .font(.title2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding([.horizontal, .top], 20)
+        .padding(.bottom, 4)
+      Form {
+        Section {
+          TextField(L10n("macCatalog.playlistNamePlaceholder"), text: $name)
+            .textFieldStyle(.roundedBorder)
+        }
+        Section {
+          Picker(L10n("macCatalog.smartKindLabel"), selection: $kind) {
+            Text(L10n("macCatalog.playlistKindManual")).tag("manual")
+            Text(L10n("macCatalog.playlistKindSmart")).tag("smart")
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+        }
+        if kind == "smart" {
+          Section {
+            Picker(L10n("macCatalog.smartMatchLabel"), selection: $match) {
+              Text(L10n("macCatalog.smartMatchAll")).tag("all")
+              Text(L10n("macCatalog.smartMatchAny")).tag("any")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            ForEach($rows) { $row in
+              ruleRow($row)
+            }
+            Button {
+              withAnimation(.easeInOut(duration: 0.18)) { rows.append(Row()) }
+            } label: {
+              Label(L10n("macCatalog.smartAddRule"), systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+          } header: {
+            Text(L10n("macCatalog.smartRulesLegend"))
+          } footer: {
+            Text(L10n("macCatalog.smartHint"))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Section {
+            Picker(L10n("macCatalog.smartSortLabel"), selection: $sort) {
+              ForEach(Self.sortMeta, id: \.id) { meta in
+                Text(L10n(meta.labelKey)).tag(meta.id)
+              }
+            }
+            Picker(L10n("macCatalog.smartOrderLabel"), selection: $order) {
+              Text(L10n("macCatalog.smartOrderAsc")).tag("asc")
+              Text(L10n("macCatalog.smartOrderDesc")).tag("desc")
+            }
+            .pickerStyle(.segmented)
+            Stepper(value: $limit, in: 1 ... 5000, step: 50) {
+              Text(L10n("macCatalog.smartLimit", limit))
+            }
+          } header: {
+            Text(L10n("macCatalog.smartSortSection"))
+          }
+        }
+      }
+      .formStyle(.grouped)
+      Divider()
+      HStack {
+        if let error {
+          Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
+        }
+        Spacer(minLength: 8)
+        Button(L10n("macCatalog.cancel")) { dismiss() }
+          .buttonStyle(.bordered)
+        Button(L10n("macCatalog.create")) { save() }
+          .buttonStyle(.borderedProminent)
+          .tint(MacTheme.accentDeep)
+          .disabled(!canCreate || creating)
+      }
+      .padding([.horizontal, .bottom], 16)
+      .padding(.top, 8)
+    }
+    .frame(width: 620)
+    .frame(minHeight: 420, maxHeight: 680)
+  }
+
+  private func save() {
+    creating = true
+    error = nil
+    Task {
+      do {
+        let definition = kind == "smart" ? makeDefinition() : nil
+        _ = try await client.createPlaylist(name: trimmedName, kind: kind, definition: definition)
+        await onSaved()
+        dismiss()
+      } catch {
+        self.error = MacErrorText.message(for: error)
+        creating = false
+      }
+    }
+  }
+
+  @ViewBuilder private func ruleRow(_ row: Binding<Row>) -> some View {
+    HStack(spacing: 8) {
+      Picker("", selection: Binding(get: { row.wrappedValue.field }, set: { newValue in
+        row.wrappedValue.field = newValue
+        let allowed = Self.operators(for: newValue)
+        if !allowed.contains(row.wrappedValue.oper) { row.wrappedValue.oper = allowed[0] }
+        if Self.fieldType(of: newValue) == .boolean { row.wrappedValue.value = "true" }
+      })) {
+        ForEach(Self.fieldMeta, id: \.id) { meta in
+          Text(L10n(meta.labelKey)).tag(meta.id)
+        }
+      }
+      .labelsHidden()
+      .frame(width: 140)
+      Picker("", selection: row.oper) {
+        ForEach(Self.operators(for: row.wrappedValue.field), id: \.self) { op in
+          Text(Self.operatorLabel(op)).tag(op)
+        }
+      }
+      .labelsHidden()
+      .frame(width: 122)
+      valueControl(row)
+      Button {
+        rows.removeAll { $0.id == row.wrappedValue.id }
+      } label: {
+        Image(systemName: "minus.circle.fill")
+          .font(.system(size: 16))
+          .foregroundStyle(rows.count > 1 ? MacTheme.muted : MacTheme.border)
+      }
+      .buttonStyle(.plain)
+      .disabled(rows.count <= 1)
+      .help(L10n("macCatalog.delete"))
+      .accessibilityLabel(L10n("macCatalog.delete"))
+    }
+  }
+
+  @ViewBuilder private func valueControl(_ row: Binding<Row>) -> some View {
+    switch Self.fieldType(of: row.wrappedValue.field) {
+    case .boolean:
+      Picker("", selection: row.value) {
+        Text(L10n("macCatalog.smartBoolTrue")).tag("true")
+        Text(L10n("macCatalog.smartBoolFalse")).tag("false")
+      }
+      .labelsHidden()
+      .frame(width: 110)
+    case .number, .date:
+      TextField(Self.fieldType(of: row.wrappedValue.field) == .date
+        ? L10n("macCatalog.smartDaysPlaceholder")
+        : L10n("macCatalog.smartValuePlaceholder"), text: row.value)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 78)
+      if row.wrappedValue.oper == "inTheRange" {
+        Text("–").foregroundStyle(.secondary)
+        TextField(L10n("macCatalog.smartValuePlaceholder"), text: row.end)
+          .textFieldStyle(.roundedBorder)
+          .frame(width: 78)
+      }
+    case .text:
+      TextField(L10n("macCatalog.smartValuePlaceholder"), text: row.value)
+        .textFieldStyle(.roundedBorder)
     }
   }
 }
@@ -1080,8 +1507,9 @@ struct MacFavoritesView: View {
     }
     .navigationTitle(L10n("macCatalog.favoritesTitle"))
     .toolbar {
-      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
-        .disabled(loading)
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .task { await load() }
   }
@@ -1130,8 +1558,9 @@ struct MacListeningView: View {
     )
     .navigationTitle(L10n("macCatalog.listeningHistoryTitle"))
     .toolbar {
-      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
-        .disabled(loading)
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macCatalog.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .task { await load() }
   }
@@ -1179,12 +1608,9 @@ struct MacNotificationsView: View {
             .font(MacTheme.caption)
             .foregroundStyle(MacTheme.muted)
             Spacer()
-            Button(L10n("macCatalog.markAllNotificationsRead")) {
+            MacToolbarTextButton(title: L10n("macCatalog.markAllNotificationsRead"), isDisabled: page.unreadCount == 0) {
               Task { await markAll(page.highWatermark) }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(page.unreadCount == 0)
           }
           .padding(.horizontal, 24)
           .padding(.top, 20)

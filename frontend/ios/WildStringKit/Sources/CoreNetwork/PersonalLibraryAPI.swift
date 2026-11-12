@@ -105,16 +105,21 @@ extension WildstringClient {
         return try JSONDecoder().decode(Page<Track>.self, from: data)
     }
 
-    public func createPlaylist(name: String) async throws -> Playlist {
+    public func createPlaylist(
+        name: String,
+        kind: String = "manual",
+        definition: SmartDefinition? = nil
+    ) async throws -> Playlist {
         struct Body: Encodable {
             let name: String
             let kind: String
+            let definition: SmartDefinition?
         }
         let data = try await perform(
             Request(
                 method: "POST",
                 path: "api/v1/playlists",
-                body: try JSONEncoder().encode(Body(name: name, kind: "manual")),
+                body: try JSONEncoder().encode(Body(name: name, kind: kind, definition: definition)),
                 contentType: "application/json"
             )
         )

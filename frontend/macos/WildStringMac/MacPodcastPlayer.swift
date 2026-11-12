@@ -14,7 +14,6 @@ struct MacPodcastPlayer: View {
     @State private var error: String?
     @State private var showQueue = false
     @State private var actionError: String?
-    @Environment(\.colorScheme) private var colorScheme
 
     private var cloud: PodcastCloudQueue? { playback.podcastCloud }
 
@@ -43,16 +42,14 @@ struct MacPodcastPlayer: View {
                 HStack {
                     Button { session.showFullscreen = false } label: {
                         Image(systemName: "chevron.down").frame(width: 32, height: 32)
-                            .background(.primary.opacity(0.06), in: Circle())
+                            .background(MacTheme.hover, in: Circle())
                     }.buttonStyle(.plain).help(L10n("macPodcastPlayer.backToPodcastsHelp")).accessibilityLabel(L10n("macPodcastPlayer.dismissPlayer"))
                     Spacer()
                     Label(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : playback.isPlaying ? L10n("macPodcastPlayer.listening") : L10n("macPodcastPlayer.paused"),
                         systemImage: "antenna.radiowaves.left.and.right")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(MacTheme.muted)
                     Spacer()
-                    Button { showQueue.toggle() } label: {
-                        Label(showQueue ? L10n("macPodcastPlayer.showNotes") : L10n("macPodcastPlayer.playQueue"), systemImage: showQueue ? "doc.text" : "list.number")
-                    }.buttonStyle(.bordered)
+                    MacToolbarTextButton(title: showQueue ? L10n("macPodcastPlayer.showNotes") : L10n("macPodcastPlayer.playQueue"), systemImage: showQueue ? "doc.text" : "list.number", accent: true) { showQueue.toggle() }
                 }
                 HStack(alignment: .top, spacing: 36) {
                     ScrollView {
@@ -66,15 +63,14 @@ struct MacPodcastPlayer: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(colorScheme == .dark ? 0.45 : 0.85),
-                        in: RoundedRectangle(cornerRadius: 20))
+                    .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: MacTheme.panelRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: MacTheme.panelRadius, style: .continuous).strokeBorder(MacTheme.border, lineWidth: 1))
                 }
                 .frame(maxWidth: 1160, maxHeight: .infinity)
             }
             .padding(28)
             .frame(width: geo.size.width, height: geo.size.height)
-            .background(colorScheme == .dark ? Color(red: 0.095, green: 0.10, blue: 0.10) :
-                Color(red: 0.96, green: 0.95, blue: 0.93))
+            .background(MacTheme.canvas)
         }
         .tint(MacTheme.accentDeep)
         .onExitCommand { session.showFullscreen = false }
@@ -90,7 +86,7 @@ struct MacPodcastPlayer: View {
                     Text(show?.title ?? playback.currentItem?.album ?? L10n("macPodcastPlayer.defaultPodcastTitle"))
                         .font(.headline).fixedSize(horizontal: false, vertical: true)
                     Text(show?.author ?? playback.currentItem?.artist ?? "")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(MacTheme.muted)
                 }
             }
             Text(playback.currentItem?.title ?? L10n("macPodcastPlayer.selectAnEpisode"))
@@ -98,7 +94,7 @@ struct MacPodcastPlayer: View {
                 .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             if let episode {
                 Text("\(macPodcastDate(episode.pubDate)) · \(macPodcastClock(episode.durationSeconds))")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(MacTheme.muted)
             }
             VStack(spacing: 7) {
                 PlaybackSlider(playback: playback)
@@ -106,7 +102,7 @@ struct MacPodcastPlayer: View {
                     Text(macPlaybackClock(playback.currentTime))
                     Spacer()
                     Text(playback.duration > 0 ? L10n("macPodcastPlayer.remainingTime", macPlaybackClock(max(0, playback.duration - playback.currentTime))) : L10n("macPodcastPlayer.durationLoading"))
-                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }.font(.caption.monospacedDigit()).foregroundStyle(MacTheme.muted)
             }
             HStack(spacing: 14) {
                 MacPlaybackRateMenu(playback: playback)
@@ -119,7 +115,7 @@ struct MacPodcastPlayer: View {
                 }.help(L10n("macPodcastPlayer.skipBackward15")).accessibilityLabel(L10n("macPodcastPlayer.skipBackward15"))
                 Button { playback.togglePlayPause() } label: {
                     Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2).foregroundStyle(.white).frame(width: 54, height: 54)
+                        .font(.title2).foregroundStyle(MacTheme.onAccent).frame(width: 54, height: 54)
                         .background(MacTheme.accentDeep, in: Circle())
                 }.help(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
                     .accessibilityLabel(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
@@ -133,50 +129,68 @@ struct MacPodcastPlayer: View {
             }.buttonStyle(.plain)
             MacSleepMenu(playback: playback, podcast: true)
             if let message = actionError ?? playback.errorMessage {
-                Text(message).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                Text(message).font(.caption).foregroundStyle(MacTheme.danger).fixedSize(horizontal: false, vertical: true)
             }
             Divider()
             if let cloud {
                 PodcastCloudStatus(cloud: cloud)
             }
             HStack {
-                Text(L10n("macPodcastPlayer.upNextHeading")).font(.headline)
+                Text(L10n("macPodcastPlayer.upNextHeading")).font(MacTheme.section(13))
                 Spacer()
                 Text(L10n("macPodcastPlayer.episodeCount", queuedUpcoming.count))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(MacTheme.mono(11)).foregroundStyle(MacTheme.faint)
             }
-            if cloud?.loading == true, queuedUpcoming.isEmpty, cloud?.items.isEmpty != false {
+            if let cloud, cloud.loading, cloud.items.isEmpty, queuedUpcoming.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(L10n("macPodcastPlayer.syncingQueue")).font(.callout).foregroundStyle(.secondary)
+                    Text(L10n("macPodcastPlayer.syncingQueue")).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
             } else if queuedUpcoming.isEmpty {
                 Text(playback.podcastAutoContinueEnabled ? L10n("macPodcastPlayer.autoContinueOn") : L10n("macPodcastPlayer.autoContinueOff"))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Button(L10n("macPodcastPlayer.viewAndEditQueue")) { showQueue = true }.buttonStyle(.plain)
-                    .font(.caption).foregroundStyle(MacTheme.accentDeep)
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(queuedUpcoming) { item in
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(queuedUpcoming.prefix(3).enumerated()), id: \.element.id) { position, item in
                         Button { Task { await playQueued(item.episodeId) } } label: {
-                            HStack(alignment: .top, spacing: 9) {
-                                Image(systemName: "play.circle").foregroundStyle(MacTheme.accentDeep)
+                            HStack(spacing: 8) {
+                                Text(String(format: "%02d", position + 1))
+                                    .font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint)
+                                    .frame(width: 18, alignment: .leading)
                                 Text(cloud?.title(for: item.episodeId) ?? item.episodeId)
-                                    .font(.callout).lineLimit(3).multilineTextAlignment(.leading)
+                                    .font(MacTheme.caption).foregroundStyle(MacTheme.ink)
+                                    .lineLimit(1)
                                 Spacer(minLength: 0)
                             }
-                        }.buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 2)
+                        }
+                        .buttonStyle(.plain)
+                        .help(cloud?.title(for: item.episodeId) ?? item.episodeId)
                     }
                 }
+                Button { showQueue = true } label: {
+                    HStack(spacing: 6) {
+                        Text(L10n("macPodcastPlayer.viewAndEditQueue"))
+                            .font(MacTheme.caption).foregroundStyle(MacTheme.accentDeep)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(MacTheme.faint)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             if !autoPreview.isEmpty {
-                Text(L10n("macPodcastPlayer.autoContinueSection")).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                Text(L10n("macPodcastPlayer.wontWriteToQueue")).font(.caption2).foregroundStyle(.tertiary)
+                Text(L10n("macPodcastPlayer.autoContinueSection")).font(MacTheme.micro).foregroundStyle(MacTheme.muted)
+                Text(L10n("macPodcastPlayer.wontWriteToQueue")).font(MacTheme.micro).foregroundStyle(MacTheme.faint)
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(autoPreview) { item in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(item.title).font(.callout).foregroundStyle(.secondary)
+                            Text(item.title).font(.callout).foregroundStyle(MacTheme.muted)
                                 .lineLimit(2).multilineTextAlignment(.leading)
                             Spacer(minLength: 8)
                             Button(L10n("macPodcastPlayer.addToQueue")) {
@@ -194,44 +208,135 @@ struct MacPodcastPlayer: View {
     }
 
     private var queuePane: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L10n("macPodcastPlayer.queueTitle")).font(.headline)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(L10n("macPodcastPlayer.queueTitle")).font(MacTheme.section(15))
+                if let count = cloud?.items.count, count > 0 {
+                    Text(L10n("macPodcastPlayer.episodeCount", count))
+                        .font(MacTheme.mono(11)).foregroundStyle(MacTheme.faint)
+                }
+                Spacer(minLength: 8)
+                if let cloud, !cloud.items.isEmpty {
+                    Button { Task { await playFirstQueued() } } label: {
+                        Label(L10n("macPodcastPlayer.playAll"), systemImage: "play.fill")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.accentDeep)
+                    }
+                    .buttonStyle(.plain)
+                    .help(L10n("macPodcastPlayer.playAll"))
+                }
+            }
             if let cloud {
                 PodcastCloudStatus(cloud: cloud)
+                    .padding(.top, 4)
                 if cloud.loading, cloud.items.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text(L10n("macPodcastPlayer.syncingQueue")).font(.callout).foregroundStyle(.secondary)
-                    }
+                    queueSkeleton
                 } else if cloud.items.isEmpty {
-                    Text(playback.podcastAutoContinueEnabled ? L10n("macPodcastPlayer.autoContinueOn") : L10n("macPodcastPlayer.autoContinueOff"))
-                        .font(.callout).foregroundStyle(.secondary)
+                    ContentUnavailableView(L10n("macQueue.emptyTitle"),
+                        systemImage: "text.line.first.and.arrowtriangle.forward",
+                        description: Text(L10n("macQueue.emptyDescPodcasts")))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    if cloud.items.count > 1 {
+                        Text(L10n("macQueue.dragToReorder"))
+                            .font(MacTheme.micro).foregroundStyle(MacTheme.faint)
+                            .padding(.top, 8)
+                    }
+                    // No native List selection: its square grey highlight ignores the row's rounded shape.
                     List {
-                        ForEach(cloud.items) { item in
-                            HStack(spacing: 8) {
-                                Text(cloud.title(for: item.episodeId))
-                                    .lineLimit(2)
-                                Spacer(minLength: 8)
-                                if item.episodeId == currentEpisodeID {
-                                    Text(L10n("macPodcastPlayer.listeningBadge")).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
+                        ForEach(Array(cloud.items.enumerated()), id: \.element.id) { position, item in
+                            queueRow(item, position: position, cloud: cloud)
+                                .id(item.id)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                         }
                         .onMove { cloud.moveItems(from: $0, to: $1) }
                     }
-                    .frame(minHeight: 180)
-                }
-            }
-            if !autoPreview.isEmpty {
-                Text(L10n("macPodcastPlayer.autoContinueSection")).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                ForEach(autoPreview) { item in
-                    Text(item.title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .padding(.top, 4)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(24)
+        .padding(20)
+    }
+
+    private func queueRow(_ item: PodcastQueueItem, position: Int, cloud: PodcastCloudQueue) -> some View {
+        let isCurrent = item.episodeId == currentEpisodeID
+        let episode = cloud.episodes[item.episodeId]
+        let title = cloud.title(for: item.episodeId)
+        return HStack(spacing: 10) {
+            Text(String(format: "%02d", position + 1))
+                .font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint)
+                .frame(width: 20, alignment: .leading)
+            MacPodcastArtwork(url: episode?.podcastId == show?.id ? show?.coverURL : nil, side: 38)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? MacTheme.accentDeep : MacTheme.ink)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if let episode {
+                    Text("\(macPodcastDate(episode.pubDate)) · \(macPodcastClock(episode.durationSeconds))")
+                        .font(MacTheme.mono(9))
+                        .foregroundStyle(MacTheme.faint)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if isCurrent {
+                Text(L10n("macPodcastPlayer.listeningBadge"))
+                    .font(MacTheme.micro).foregroundStyle(MacTheme.accentDeep)
+            }
+            Menu {
+                Button(L10n("macQueue.playNow")) { Task { await playQueued(item.episodeId) } }
+                Button(L10n("macQueue.removeFromQueue"), role: .destructive) { cloud.removeEpisode(item.episodeId) }
+                    .disabled(isCurrent)
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 22, height: 26)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel(L10n("macQueue.trackActions", title))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(isCurrent ? MacTheme.accentSoft : Color.clear,
+            in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { Task { await playQueued(item.episodeId) } }
+        .contextMenu {
+            Button(L10n("macQueue.playNow")) { Task { await playQueued(item.episodeId) } }
+            Button(L10n("macQueue.removeFromQueue"), role: .destructive) { cloud.removeEpisode(item.episodeId) }
+                .disabled(isCurrent)
+        }
+        .help(title)
+    }
+
+    private var queueSkeleton: some View {
+        VStack(spacing: 10) {
+            ForEach(0..<3, id: \.self) { _ in
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 3).fill(MacTheme.sidebar).frame(width: 20, height: 10)
+                    RoundedRectangle(cornerRadius: 8).fill(MacTheme.sidebar).frame(width: 38, height: 38)
+                    VStack(alignment: .leading, spacing: 5) {
+                        RoundedRectangle(cornerRadius: 3).fill(MacTheme.sidebar).frame(height: 10).frame(maxWidth: .infinity, alignment: .leading)
+                        RoundedRectangle(cornerRadius: 3).fill(MacTheme.sidebar).frame(width: 132, height: 8)
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+        }
+        .padding(.top, 14)
+        .accessibilityHidden(true)
+    }
+
+    private func playFirstQueued() async {
+        guard let cloud else { return }
+        let next = cloud.upcoming(after: currentEpisodeID).first ?? cloud.items.first
+        guard let episodeId = next?.episodeId else { return }
+        await playQueued(episodeId)
     }
 
     private func playQueued(_ episodeID: String) async {
@@ -266,10 +371,10 @@ struct MacPodcastPlayer: View {
                 } else if loading {
                     ProgressView(L10n("macPodcastPlayer.loadingEpisodeContent"))
                 } else if error == nil {
-                    Text(L10n("macPodcastPlayer.noArticleContent")).foregroundStyle(.secondary)
+                    Text(L10n("macPodcastPlayer.noArticleContent")).foregroundStyle(MacTheme.muted)
                 }
                 if let error {
-                    Text(error).font(.callout).foregroundStyle(.secondary)
+                    Text(error).font(.callout).foregroundStyle(MacTheme.muted)
                     Button(L10n("macPodcastPlayer.reload")) { Task { await load() } }
                 }
             }.frame(maxWidth: 720, alignment: .leading).padding(32)
@@ -328,7 +433,7 @@ struct PodcastCloudStatus: View {
                 if cloud.conflict != nil {
                     Text(PodcastCloudQueue.conflictMessage)
                         .font(.callout)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(MacTheme.warning)
                         .fixedSize(horizontal: false, vertical: true)
                     VStack(alignment: .leading, spacing: 8) {
                         Button(L10n("macPodcastPlayer.adoptServerQueue")) { cloud.adoptServerQueue() }
@@ -338,14 +443,14 @@ struct PodcastCloudStatus: View {
                 } else if let syncError = cloud.syncError {
                     Text(syncError)
                         .font(.callout)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(MacTheme.warning)
                         .fixedSize(horizontal: false, vertical: true)
                     Button(L10n("macPodcastPlayer.retry")) { Task { await cloud.retrySync() } }
                 }
                 if let notice = cloud.queueFullNotice {
                     Text(notice)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MacTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

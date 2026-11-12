@@ -11,6 +11,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.wildstring.app.data.*
+import com.wildstring.app.playback.mediaItem
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.InetAddress
@@ -56,6 +57,20 @@ internal class PodcastRoutingFixture : AutoCloseable {
 }
 
 class PodcastStreamTest {
+    @Test fun restoredPodcastTrackRetainsShowIdentityForLocalGain() = PodcastRoutingFixture().use { fixture ->
+        val episode = PodcastEpisode("second", "show", "guid-2", "Second episode", audioUrl = "https://example.invalid/audio.mp3")
+        val show = PodcastSummary("show", "Synthetic show", feedUrl = "https://example.invalid/feed")
+        val track = episode.toTrack(show)
+        kotlinx.coroutines.runBlocking {
+            fixture.repository.rememberPodcastEpisode(episode, show)
+            val restored = checkNotNull(fixture.repository.cachedTrack(track.id))
+            val item = restored.mediaItem(fixture.repository)
+            assertEquals("show", item.mediaMetadata.extras?.getString("podcast_id"))
+            assertEquals(track.id, item.mediaMetadata.extras?.getString("track_id"))
+            assertEquals(fixture.session.cacheScope(), item.mediaMetadata.extras?.getString("profile"))
+        }
+    }
+
     @Test fun playbackUsesAuthenticatedServerAndPreservesRange() = PodcastRoutingFixture().use { fixture ->
         val payload = ByteArray(256) { it.toByte() }
         fixture.server.dispatcher = object : Dispatcher() {

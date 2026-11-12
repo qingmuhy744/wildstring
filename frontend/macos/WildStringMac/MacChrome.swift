@@ -76,6 +76,9 @@ enum MacTheme {
     static let olive = adaptive(light: 0x57492F, dark: 0xB4C09E)
     static let oliveSoft = adaptive(light: 0xE4E7DB, dark: 0x2E2924)
     static let success = adaptive(light: 0x496332, dark: 0xB2C69A)
+    static let warning = adaptive(light: 0x80591E, dark: 0xE5BD7C)
+    static let danger = adaptive(light: 0xA64027, dark: 0xF2A392)
+    static let hover = adaptive(light: 0xE4E7DB, dark: 0x34302A)
     static let onAccent = adaptive(light: 0xFFFAF3, dark: 0x211B17)
 
     static let cardRadius: CGFloat = 14
@@ -122,6 +125,133 @@ extension View {
         fill: Color = MacTheme.panel
     ) -> some View {
         modifier(MacPanelModifier(padding: padding, radius: radius, fill: fill))
+    }
+}
+
+/// House search input: same recipe as the search page field — raised fill, 10px radius,
+/// accent hairline on focus. Keeps library-style filters consistent instead of each
+/// toolbar inventing its own bubble.
+struct MacSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    var maxWidth: CGFloat = 420
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(focused.wrappedValue ? MacTheme.accentDeep : MacTheme.muted)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(MacTheme.ink)
+                .focused(focused)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    focused.wrappedValue = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(MacTheme.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n("macSearch.clearSearch"))
+                .help(L10n("macSearch.clearSearch"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .frame(maxWidth: maxWidth)
+        .background(MacTheme.raised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(focused.wrappedValue ? MacTheme.accent : MacTheme.border, lineWidth: 1))
+    }
+}
+
+/// Full-width load-more footer for long lists: panel surface with a top hairline,
+/// accent text button. Replaces floating bordered pills over scrolled content.
+struct MacLoadMoreBar: View {
+    let text: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(MacTheme.caption)
+                .foregroundStyle(MacTheme.accentDeep)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(MacTheme.panel)
+        .overlay(alignment: .top) { Rectangle().fill(MacTheme.border).frame(height: 1) }
+        .accessibilityLabel(text)
+    }
+}
+
+/// Quiet toolbar icon button: plain 14pt glyph, no glass bubble.
+/// Disabled state fades to faint instead of showing a system glass grey.
+struct MacToolbarIconButton: View {
+    let systemImage: String
+    let help: String
+    var isDisabled: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isDisabled ? MacTheme.faint : MacTheme.muted)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// Quiet toolbar text action: caption-weight label with optional leading icon, no fill.
+/// accent picks accentDeep for the one primary action of the page.
+struct MacToolbarTextButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var accent: Bool = false
+    var isDisabled: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage).font(.system(size: 12, weight: .semibold))
+                }
+                Text(title).font(MacTheme.caption)
+            }
+            .foregroundStyle(isDisabled ? MacTheme.faint : (accent ? MacTheme.accentDeep : MacTheme.ink))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .accessibilityLabel(title)
+    }
+}
+
+/// Toolbar item without the macOS 26+ shared glass background.
+/// On older systems it is a plain trailing ToolbarItem.
+struct QuietToolbarItem<Content: View>: ToolbarContent {
+    var content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .automatic) { content }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .automatic) { content }
+        }
     }
 }
 

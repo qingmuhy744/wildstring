@@ -240,6 +240,7 @@ struct MacFullscreenPlayer: View {
             // Fixed arm frame so the rotation anchor (top) sits exactly on the pivot disc.
             .frame(width: side * 0.056, height: side * 0.46, alignment: .top)
             .rotationEffect(.degrees(engaged ? 12 : -10), anchor: .top)
+            .animation(reduceMotion ? nil : .spring(response: 0.82, dampingFraction: 0.94), value: engaged)
             .position(x: pivotX, y: pivotY + side * 0.23)
             Circle()
                 .fill(RadialGradient(colors: [Color(red: 0.659, green: 0.624, blue: 0.573),

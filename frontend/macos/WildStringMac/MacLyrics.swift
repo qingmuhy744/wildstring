@@ -252,6 +252,7 @@ struct MacLyricScroll: View {
                             if let current { reveal(current, proxy: proxy, animated: true) }
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
                         .controlSize(.small)
                         .padding(.bottom, 12)
                     }
