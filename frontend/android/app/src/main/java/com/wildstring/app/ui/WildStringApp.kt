@@ -734,42 +734,47 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
             }
         }
-        // Move each page between its destination and the player backdrop without recreating
-        // its saveable registry before the outgoing instance has saved its state.
+        // Catalog and settings stay in one composition slot. Through 0.8.13 they were
+        // moved with movableContentOf into the player backdrop and back again on
+        // swipe-dismiss, in the same frame as the player's exit animation. That move
+        // races Compose 1.12 lazy item reuse / pausable prefetch and crashes with
+        // "onReuse is only expected on attached node". The player is now an overlay;
+        // a downward swipe only translates and then removes it. movableContentOf is
+        // still used for the settings <-> catalog transition, where the saveable
+        // registry must not be recreated mid-flight.
         val settingsContent = remember { movableContentOf { baseDestinationContent("settings") } }
         val catalogContent = remember { movableContentOf { baseDestinationContent("catalog") } }
         @Composable fun BaseDestination(target: String) {
             if (target == "settings") settingsContent() else catalogContent()
         }
-        AnimatedContent(destination, transitionSpec = {
-            if (targetState == "settings" || initialState == "settings") {
-                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
-            } else if (initialState == "player") {
-                ContentTransform(
-                    targetContentEnter = EnterTransition.None,
-                    // Starts at full speed so a released swipe carries on instead of pausing first.
-                initialContentExit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
-                    targetContentZIndex = -1f,
-                )
-            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
-        }, label = "app-destination") { currentDestination ->
-            if (currentDestination == "player") {
+        val showPlayer = destination == "player"
+        val baseDestination = if (settings || (showPlayer && playerFromSettings)) "settings" else "catalog"
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier.fillMaxSize()
+                    .then(if (showPlayer) Modifier.clearAndSetSemantics {} else Modifier)
+                    .drawWithContent {
+                        if (!showPlayer || playerDismissY.floatValue > 0.5f) drawContent()
+                    },
+            ) {
+                AnimatedContent(baseDestination, transitionSpec = {
+                    if (targetState == "settings" || initialState == "settings") {
+                        (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+                    } else fadeIn(tween(140)) togetherWith fadeOut(tween(120))
+                }, label = "app-destination") { currentDestination ->
+                    BaseDestination(currentDestination)
+                }
+            }
+            AnimatedVisibility(
+                visible = showPlayer,
+                modifier = Modifier.fillMaxSize(),
+                enter = fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 },
+                exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
+                label = "player-overlay",
+            ) {
                 Box(Modifier.fillMaxSize()) {
                     // The offset outlives the dismiss so the exit slide continues from the finger.
                     DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
-                    // Composed ahead of the gesture so the first frame of a pull has nothing to build.
-                    if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
-                        this@AnimatedContent.transition.targetState == EnterExitState.Visible) {
-                        Box(
-                            Modifier.fillMaxSize()
-                                .clearAndSetSemantics {}
-                                .drawWithContent {
-                                    if (playerDismissY.floatValue > 0.5f) drawContent()
-                                }
-                        ) {
-                            BaseDestination(if (playerFromSettings) "settings" else "catalog")
-                        }
-                    }
                     PlayerScreen(vm, state, wide, landscape, landscapeWindow, rail, lyrics, queue, rotation,
                         dragOffset = playerDismissY,
                         onUpdateDrag = ::updatePlayerDrag,
@@ -780,8 +785,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onArtist = ::openTrackArtist,
                         onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
                 }
-            } else {
-                BaseDestination(currentDestination)
             }
         }
         if (floatingQueue && queue) {
