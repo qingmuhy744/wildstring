@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -529,7 +530,12 @@ internal fun QueueList(
                         enableDismissFromEndToStart = canSwipe,
                         gesturesEnabled = canSwipe,
                         backgroundContent = {
-                            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                            Box(
+                                Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
                                 Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         },
@@ -570,16 +576,19 @@ private fun QueueChromeRow(
     val moveUpLabel = stringResource(R.string.queue_move_up)
     val moveDownLabel = stringResource(R.string.queue_move_down)
     val removeLabel = stringResource(R.string.queue_remove)
+    // The swipe layer always draws 「移除」. A transparent or 8% tint lets that word show at rest
+    // and sit under the drag handle, including on the playing row. The sheet behind a song queue
+    // is surfaceContainerLow and the podcast dialog is surface, so the card uses the next step up.
+    val card = MaterialTheme.colorScheme.surfaceContainer
+    val rowFill = when {
+        highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
+        current -> MaterialTheme.colorScheme.primary.copy(alpha = .08f).compositeOver(card)
+        else -> card
+    }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(
-                when {
-                    highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
-                    current -> MaterialTheme.colorScheme.primary.copy(alpha = .08f)
-                    else -> androidx.compose.ui.graphics.Color.Transparent
-                },
-            )
+            .background(rowFill)
             .semantics { selected = current }
             .testTag(rowTag),
         verticalAlignment = Alignment.CenterVertically,
