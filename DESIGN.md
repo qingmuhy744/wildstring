@@ -204,7 +204,7 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 - **Right Detail Header**:
   - `92×92` show artwork (`12px` radius), `24px` title, author, and positive availability copy: `共 100 集 · ` + coral `还有 99 集可听`.
   - Header action buttons:
-    - Unified `待播列表` button opening the unified pending queue sheet/dialog (merging queued and inbox items into a single list with `▶ 播放全部` and item-level play/remove controls, alongside 3-option `新集自动待播` selector (`关闭（仅关注）`, `自动加到队尾`, `自动插到下一集`); redundant auto-limit spinbox/stepper is omitted from primary UI).
+    - Unified `待播列表` button opening the pending queue sheet/dialog (the ordered queue only, with `▶ 播放全部` and item-level play/remove controls, alongside 3-option `新集自动待播` selector (`关闭（仅关注）`, `自动加到队尾`, `自动加到最前`); redundant auto-limit spinbox/stepper is omitted from primary UI).
     - Quick play action: `▶ 播放待播 (N)` rendered whenever queued episodes exist (`queuedSet.size > 0`), starting playback of queued episodes in sequence.
   - Primary coral pill button (`▶ 继续收听` or `▶ 播放最新一集`) paired with a circular `32×32` `⋯` button housing `分享节目` and destructive `取消订阅`.
   - Collapsible 2-line show description with `展开简介` link.
