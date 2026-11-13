@@ -90,24 +90,104 @@ class QueueReorderTest {
                 )
             }
         }
-        val row = compose.onNodeWithTag("queue-row-entry-1")
-        val bounds = row.fetchSemanticsNode().boundsInRoot
-        val center = bounds.center - bounds.topLeft
-        row.performTouchInput {
-            down(center)
-            moveTo(Offset(-bounds.width * .9f, center.y), delayMillis = 400)
+        val queue = compose.onNodeWithTag("playback-queue")
+        val viewport = queue.fetchSemanticsNode().boundsInRoot
+        val bounds = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
+        val start = bounds.center - viewport.topLeft
+        queue.performTouchInput {
+            down(start)
+            moveTo(Offset(start.x - bounds.width * 1.1f, start.y), delayMillis = 400)
         }
         compose.runOnIdle { assertTrue("Holding a swipe must not remove the row", removed.isEmpty()) }
-        row.performTouchInput { up() }
-        compose.waitUntil(5_000) { removed.size == 1 }
-        compose.onNodeWithText(uiString(R.string.queue_undo), substring = false).performClick()
-        compose.waitUntil(5_000) { rows.value.map { it.entryId } == listOf("entry-0", "entry-1", "entry-2") }
-        compose.runOnIdle {
-            val restored = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
-            val neighbor = compose.onNodeWithTag("queue-row-entry-2").fetchSemanticsNode().boundsInRoot
-            assertEquals("Undo must reset the dismissed offset", neighbor.left, restored.left, 1f)
+        queue.performTouchInput { moveTo(start, delayMillis = 400); up() }
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue("Returning before release must not remove the row", removed.isEmpty()) }
+        queue.performTouchInput {
+            down(start)
+            moveTo(Offset(start.x - bounds.width * 1.1f, start.y), delayMillis = 400)
         }
+        compose.runOnIdle { assertTrue("Holding a swipe must not remove the row", removed.isEmpty()) }
+        queue.performTouchInput { up() }
+        compose.waitUntil(5_000) { compose.runOnIdle { removed.size == 1 } }
+        compose.onNodeWithText(uiString(R.string.queue_undo), substring = false).performClick()
+        compose.waitUntil(5_000) { compose.runOnIdle { rows.value.map { it.entryId } == listOf("entry-0", "entry-1", "entry-2") } }
+        val restored = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
+        val neighbor = compose.onNodeWithTag("queue-row-entry-2").fetchSemanticsNode().boundsInRoot
+        assertEquals("Undo must reset the dismissed offset", neighbor.left, restored.left, 1f)
     }
+    @Test fun undoBeforeQueueUpdateResetsSwipeAndAllowsAnotherRemoval() {
+        var removals = 0
+        var undos = 0
+        compose.setContent {
+            MaterialTheme {
+                QueueList(
+                    initial.take(3), "entry-0", Modifier.width(360.dp).height(360.dp),
+                    onPlay = {}, onRemove = {}, onHaptic = {}, onMove = { _, _ -> },
+                    // Model a MediaController timeline update that has not reached the UI yet.
+                    onSwipeRemove = { removals++; { undos++ } },
+                )
+            }
+        }
+        val queue = compose.onNodeWithTag("playback-queue")
+        fun holdAtRemovalEdge(expectedRemovals: Int) {
+            val viewport = queue.fetchSemanticsNode().boundsInRoot
+            val row = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
+            val start = row.center - viewport.topLeft
+            queue.performTouchInput {
+                down(start)
+                moveTo(Offset(start.x - row.width * 1.1f, start.y), delayMillis = 400)
+            }
+            compose.runOnIdle { assertEquals("Holding the swipe must not remove a row", expectedRemovals, removals) }
+        }
+        holdAtRemovalEdge(0)
+        queue.performTouchInput { up() }
+        compose.waitUntil(5_000) { compose.runOnIdle { removals == 1 } }
+        compose.onNodeWithText(uiString(R.string.queue_undo), substring = false).performClick()
+        compose.waitUntil(5_000) { compose.runOnIdle { undos == 1 } }
+        val restored = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
+        val neighbor = compose.onNodeWithTag("queue-row-entry-2").fetchSemanticsNode().boundsInRoot
+        assertEquals("Undo must clear the swipe offset even before the queue refreshes", neighbor.left, restored.left, 1f)
+        compose.runOnIdle { assertEquals("Undo must not dismiss the restored row again", 1, removals) }
+        holdAtRemovalEdge(1)
+        queue.performTouchInput { up() }
+        compose.waitUntil(5_000) { compose.runOnIdle { removals == 2 } }
+    }
+
+    @Test fun podcastUndoBeforeQueueUpdateResetsSwipe() {
+        val episodes = listOf(
+            PodcastQueueRow("episode-1", "show", "单集一", "测试节目"),
+            PodcastQueueRow("episode-2", "show", "单集二", "测试节目"),
+        )
+        var removals = 0
+        var undos = 0
+        compose.setContent {
+            MaterialTheme {
+                PodcastQueueRows(
+                    rows = episodes, currentEpisodeId = "episode-1", playing = false, buffering = false,
+                    onPlay = {}, onRemove = { removals++ }, onRestore = { _, _ -> undos++ }, onReorder = {},
+                    modifier = Modifier.width(360.dp).height(260.dp),
+                )
+            }
+        }
+        val queue = compose.onNodeWithTag("podcast-queue-list")
+        val viewport = queue.fetchSemanticsNode().boundsInRoot
+        val row = compose.onNodeWithTag("podcast-queue-row-episode-2").fetchSemanticsNode().boundsInRoot
+        val start = row.center - viewport.topLeft
+        queue.performTouchInput {
+            down(start)
+            moveTo(Offset(start.x - row.width * 1.1f, start.y), delayMillis = 400)
+        }
+        compose.runOnIdle { assertEquals("Holding a podcast swipe must not remove a row", 0, removals) }
+        queue.performTouchInput { up() }
+        compose.waitUntil(5_000) { compose.runOnIdle { removals == 1 } }
+        compose.onNodeWithText(uiString(R.string.queue_undo), substring = false).performClick()
+        compose.waitUntil(5_000) { compose.runOnIdle { undos == 1 } }
+        val restored = compose.onNodeWithTag("podcast-queue-row-episode-2").fetchSemanticsNode().boundsInRoot
+        val neighbor = compose.onNodeWithTag("podcast-queue-row-episode-1").fetchSemanticsNode().boundsInRoot
+        assertEquals("Podcast undo must clear the swipe offset", neighbor.left, restored.left, 1f)
+        compose.runOnIdle { assertEquals("Podcast undo must not dismiss the row again", 1, removals) }
+    }
+
     @Test fun edgeScrollReachesOffscreenRowsAndExternalChangeCancelsDrop() {
         show()
         val queue = compose.onNodeWithTag("playback-queue")
