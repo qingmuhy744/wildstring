@@ -10,7 +10,7 @@
 - Android「服务器线路」对话框新增逐条线路的「测试」按钮（与 macOS 0.8.14 一致），内联显示「已连接 · N ms / 可达 · 会话已过期需要重新登录 / 无法连接」，不改动当前选线与保存状态。
 - Android 发现页「每日推荐」快捷入口去除特权 accent 样式，恢复与其余两个入口一致的中性呈现，并在文本旁新增「AI 整理」sage 徽章（与 macOS 一致）。
 - Android 设计合规批量修正：调色板恢复 §3 令牌映射（surface 角色、error/danger 角色、success/warning），「播放中」标记行改用 row-active 颜色，accent 小字改用 accent-text；服务器线路/音剧详情页 CTA 层级重构（继续收听/播放最新一集 coral 主按钮 + 紧凑次要操作行），电台 episode 行落地三态（播放中/进行中/已听完），列表加载态改为布局匹配骨架屏；触控目标收敛到 ≥48dp，时间/计数统一等宽数字（tnum），字重上限 600。
-- Android 音乐播放队列删除手势改为松手后才提交：拖到删除区但继续按住不会提前移除；撤销时按原索引恢复，避免歌曲暂时落到列表最左侧。
+- Android 音乐和播客播放队列删除手势改为松手后才提交：拖到删除区但继续按住不会提前移除；撤销恢复原位置并清除滑动偏移，即使队列更新尚未显示也不会留在左侧。
 - 正式版 Release 可选自动更新个人 Homebrew Tap 的 `Casks/wildstring.rb`；需配置 `HOMEBREW_TAP_TOKEN`。
 - 各端版本统一为 0.8.16；Android versionCode 为 52，iOS／Mac 构建号为 51。详见 [0.8.16 发布说明](docs/releases/v0.8.16.md)。
 

@@ -303,7 +303,7 @@ internal fun PodcastQueueRows(
                 val canSwipeNow by rememberUpdatedState(canSwipe)
                 val rowNow by rememberUpdatedState(row)
                 val indexNow by rememberUpdatedState(index)
-                val dismissState = rememberSwipeToDismissBoxState()
+                val dismissState = key(dismissalEpochs[row.episodeId]) { rememberSwipeToDismissBoxState() }
                 val dismissAction = rememberUpdatedState<(SwipeToDismissBoxValue) -> Unit>(
                     newValue = { value ->
                         if (value == SwipeToDismissBoxValue.EndToStart) {
@@ -315,7 +315,6 @@ internal fun PodcastQueueRows(
                     },
                 )
                 val onDismiss = remember { { value: SwipeToDismissBoxValue -> dismissAction.value(value) } }
-                key(row.episodeId, dismissalEpochs[row.episodeId] ?: 0) {
                 SwipeToDismissBox(
                     state = dismissState,
                     modifier = Modifier.animateItem(placementSpec = if (active) null else androidx.compose.animation.core.spring())
@@ -358,7 +357,6 @@ internal fun PodcastQueueRows(
                         onRemoveButton = {},
                         titleMaxLines = 2,
                     )
-                }
                 }
             }
             item { footer() }
@@ -549,7 +547,7 @@ internal fun QueueList(
                 if (onSwipeRemove != null && allowRemove) {
                     val canSwipeNow by rememberUpdatedState(canSwipe)
                     val rowNow by rememberUpdatedState(row)
-                    val dismissState = rememberSwipeToDismissBoxState()
+                    val dismissState = key(dismissalEpochs[row.entryId]) { rememberSwipeToDismissBoxState() }
                     val dismissAction = rememberUpdatedState<(SwipeToDismissBoxValue) -> Unit>(
                         newValue = { value ->
                             if (value == SwipeToDismissBoxValue.EndToStart) {
@@ -562,26 +560,24 @@ internal fun QueueList(
                         },
                     )
                     val onDismiss = remember { { value: SwipeToDismissBoxValue -> dismissAction.value(value) } }
-                    key(row.entryId, dismissalEpochs[row.entryId] ?: 0) {
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            modifier = rowModifier,
-                            enableDismissFromStartToEnd = false,
-                            enableDismissFromEndToStart = canSwipe,
-                            gesturesEnabled = canSwipe,
-                            onDismiss = onDismiss,
-                            backgroundContent = {
-                                Box(
-                                    Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                        .padding(horizontal = 20.dp),
-                                    contentAlignment = Alignment.CenterEnd,
-                                ) {
-                                    Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            },
-                        ) { body() }
-                    }
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        modifier = rowModifier,
+                        enableDismissFromStartToEnd = false,
+                        enableDismissFromEndToStart = canSwipe,
+                        gesturesEnabled = canSwipe,
+                        onDismiss = onDismiss,
+                        backgroundContent = {
+                            Box(
+                                Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
+                    ) { body() }
                 } else {
                     Box(rowModifier) { body() }
                 }
