@@ -12,6 +12,7 @@ struct PodcastQueueTests {
         let conflict = try #require(PodcastQueueConflict.decode(from: data))
         #expect(conflict.current.version == 4)
         #expect(conflict.current.deviceId == "")
+        #expect(conflict.current.notice == "")
         #expect(conflict.current.items == [PodcastQueueItem(episodeId: "e1", origin: "rule")])
         let other = Data(#"{"detail":"episode_unavailable"}"#.utf8)
         #expect(PodcastQueueConflict.decode(from: other) == nil)
@@ -24,7 +25,19 @@ struct PodcastQueueTests {
         )
         #expect(queue.version == 2)
         #expect(queue.deviceId == "")
+        #expect(queue.notice == "")
         #expect(queue.items[0].origin == "manual")
+
+        let full = try JSONDecoder().decode(
+            PodcastQueueState.self,
+            from: Data(#"{"version":3,"items":[],"notice":"queue_full"}"#.utf8)
+        )
+        #expect(full.notice == "queue_full")
+        let cleared = try JSONDecoder().decode(
+            PodcastQueueState.self,
+            from: Data(#"{"version":3,"items":[],"notice":""}"#.utf8)
+        )
+        #expect(cleared.notice == "")
 
         let prefs = try JSONDecoder().decode(
             PodcastQueuePreferences.self,
@@ -58,18 +71,29 @@ struct PodcastQueueTests {
         #expect(json["version"] as? Int == 2)
     }
 
-    @Test func playingInsertsOnlyTheChosenEpisode() {
+    @Test func playNextSkipsTheCurrentEpisodeAndOtherwiseInserts() {
         let queue = [
-            PodcastQueueItem(episodeId: "b", origin: "rule"),
-            PodcastQueueItem(episodeId: "c", origin: "manual"),
+            PodcastQueueItem(episodeId: "now", origin: "manual"),
+            PodcastQueueItem(episodeId: "later", origin: "rule"),
         ]
-        let next = PodcastQueueMerge.playing("a", queue: queue)
-        #expect(next.map(\.episodeId) == ["a", "b", "c"])
-        #expect(next.map(\.origin) == ["manual", "rule", "manual"])
-        let again = PodcastQueueMerge.playing("c", queue: next)
-        #expect(again.map(\.episodeId) == ["c", "a", "b"])
-        #expect(again[0].origin == "manual")
-        #expect(!again.contains { $0.episodeId == "show-rest" })
+        let skipped = PodcastQueueMerge.enqueue("now", queue: queue, next: true, after: "now")
+        #expect(skipped == queue)
+
+        let afterCurrent = PodcastQueueMerge.enqueue("extra", queue: queue, next: true, after: "now")
+        #expect(afterCurrent.map(\.episodeId) == ["now", "extra", "later"])
+        #expect(afterCurrent[1].origin == "manual")
+        #expect(afterCurrent[2].origin == "rule")
+
+        let missingCurrent = PodcastQueueMerge.enqueue("extra", queue: queue, next: true, after: "elsewhere")
+        #expect(missingCurrent.map(\.episodeId) == ["extra", "now", "later"])
+        let emptyPlayer = PodcastQueueMerge.enqueue("extra", queue: queue, next: true, after: nil)
+        #expect(emptyPlayer.map(\.episodeId) == ["extra", "now", "later"])
+
+        let appended = PodcastQueueMerge.enqueue("playing", queue: queue, next: false, after: "playing")
+        #expect(appended.map(\.episodeId) == ["now", "later", "playing"])
+        let already = PodcastQueueMerge.enqueue("later", queue: queue, next: false, after: nil)
+        #expect(already.map(\.episodeId) == ["now", "later"])
+        #expect(already[1].origin == "rule")
     }
 
     @Test func finishedEpisodeLeavesAndAutoContinueIsNotInserted() {

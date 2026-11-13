@@ -783,15 +783,6 @@
   line-height: 1.75;
   margin: 8px 0 0;
 }
-.legacy-ai-compatibility {
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-.legacy-ai-compatibility summary {
-  cursor: pointer;
-  color: var(--muted);
-}
 @media (max-width: 600px) {
   .model-connection-label {
     gap: 4px 12px;

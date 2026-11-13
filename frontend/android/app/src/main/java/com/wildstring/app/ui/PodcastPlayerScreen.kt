@@ -1,6 +1,17 @@
 package com.wildstring.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,19 +40,24 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.R
 import com.wildstring.app.data.PodcastEpisode
+import kotlin.math.roundToInt
 import com.wildstring.app.data.friendlyError
 import kotlinx.coroutines.CancellationException
 
@@ -49,9 +65,11 @@ import kotlinx.coroutines.CancellationException
 internal fun PodcastPlayerScreen(
     vm: MusicViewModel, state: MusicState, wide: Boolean, dragEnabled: Boolean,
     onBack: () -> Unit, onDismiss: () -> Unit, onDragOffset: (Float, Boolean) -> Unit,
-    onQueue: () -> Unit, onSleep: () -> Unit,
+    onQueue: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {},
 ) {
     val track = state.current ?: return
+    val preferences by vm.settings.state.collectAsStateWithLifecycle()
+    val motionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     var article by rememberSaveable(track.id) { mutableStateOf(false) }
     var preview by rememberSaveable(track.id) { mutableStateOf(false) }
@@ -82,7 +100,7 @@ internal fun PodcastPlayerScreen(
             Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .padding(horizontal = if (wide) 24.dp else if (article) 12.dp else 20.dp),
+                .padding(horizontal = if (wide) 24.dp else 20.dp),
         ) {
             Row(
                 Modifier
@@ -96,7 +114,7 @@ internal fun PodcastPlayerScreen(
                     Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
                 }
                 val aiComingSoon = stringResource(R.string.pod_player_ai_notes_coming_soon)
-                Surface(
+                if (wide) Spacer(Modifier.weight(1f)) else Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
                 ) {
@@ -126,6 +144,20 @@ internal fun PodcastPlayerScreen(
                         )
                     }
                 }
+                val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
+                val pendingFavorites by vm.pendingPodcastFavorites.collectAsStateWithLifecycle()
+                val favoriteOverrides by vm.podcastFavoriteOverrides.collectAsStateWithLifecycle()
+                val episodeId = track.podcastEpisodeId
+                val loved = episodeId != null && (
+                    favoriteOverrides[episodeId] ?: (episodeId in favoriteIds || episode?.isFavorite == true)
+                )
+                if (episodeId != null) {
+                    FavoriteControl(
+                        loved = loved,
+                        pending = episodeId in pendingFavorites,
+                        click = tactile { vm.togglePodcastEpisodeFavorite(episodeId, !loved) },
+                    )
+                }
                 IconButton(tactile(onSleep)) {
                     Icon(
                         Icons.Default.Bedtime,
@@ -134,56 +166,64 @@ internal fun PodcastPlayerScreen(
                     )
                 }
             }
-            val content: @Composable (Modifier) -> Unit = { modifier ->
-                if (article) Surface(
-                    modifier,
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
-                ) {
-                    Column(
+            val articlePane: @Composable () -> Unit = {
+Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Surface(
                         Modifier
-                            .fillMaxSize()
-                            .verticalScroll(articleScroll, overscrollEffect = null)
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
-                            .testTag("podcast-article"),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                            .fillMaxHeight()
+                            .then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth() else Modifier.fillMaxWidth())
+                            .testTag("podcast-article-surface"),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
                     ) {
-                        Text(
-                            track.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Column(
+                            Modifier
+                                .fillMaxSize()
+                                .verticalScroll(articleScroll, overscrollEffect = null)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                                .testTag("podcast-article"),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Text(
-                                (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                track.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
                             )
-                            episode?.pubDate?.takeIf { it.isNotBlank() }?.let { pub ->
-                                Text(
-                                    pub.take(16),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                PodcastShowName(
+                                    name = (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
+                                    onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    tag = "podcast-player-article-show",
                                 )
+                                episode?.pubDate?.takeIf { it.isNotBlank() }?.let { pub ->
+                                    Text(
+                                        pub.take(16),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            val description = episode?.description.orEmpty()
+                            if (description.isNotBlank()) PodcastArticleText(description, Modifier.fillMaxWidth(), duration) { vm.seek(it) }
+                            else if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stringResource(R.string.pod_player_loading_article)) }
+                            else if (error == null) Text(stringResource(R.string.pod_player_no_article), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            error?.let { message ->
+                                Text(if (episode != null) stringResource(R.string.pod_player_saved_article) else message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton({ reload++ }) { Text(stringResource(R.string.pod_player_reload)) }
                             }
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                        val description = episode?.description.orEmpty()
-                        if (description.isNotBlank()) PodcastArticleText(description, Modifier.fillMaxWidth(), duration) { vm.seek(it) }
-                        else if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stringResource(R.string.pod_player_loading_article)) }
-                        else if (error == null) Text(stringResource(R.string.pod_player_no_article), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        error?.let { message ->
-                            Text(if (episode != null) stringResource(R.string.pod_player_saved_article) else message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton({ reload++ }) { Text(stringResource(R.string.pod_player_reload)) }
-                        }
                     }
-                } else BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+                }
+            }
+            val coverPane: @Composable () -> Unit = {
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     val coverSize = minOf(maxWidth, maxHeight * .64f, 400.dp)
                     Column(
                         Modifier
@@ -217,20 +257,59 @@ internal fun PodcastPlayerScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(
-                                listOfNotNull(
-                                    track.album?.takeIf { it.isNotBlank() },
-                                    track.artist.takeIf { it.isNotBlank() && it != track.album },
-                                ).joinToString(" · ").ifBlank { track.artist },
-                                Modifier.fillMaxWidth(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            val showName = track.album?.takeIf { it.isNotBlank() }
+                            val authorName = track.artist.takeIf { it.isNotBlank() && it != track.album }
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                if (showName != null) {
+                                    PodcastShowName(
+                                        name = showName,
+                                        onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        tag = "podcast-player-show",
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                }
+                                if (showName != null && authorName != null) {
+                                    Text(" · ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (authorName != null) {
+                                    Text(
+                                        authorName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                } else if (showName == null) {
+                                    Text(
+                                        track.artist,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+            }
+            val content: @Composable (Modifier) -> Unit = { modifier ->
+                val ms = if (motionAllowed) 240 else 0
+                AnimatedContent(
+                    targetState = article,
+                    modifier = modifier,
+                    transitionSpec = {
+                        // Same duration and curve as the control bar so both areas settle together.
+                        val curve = FastOutSlowInEasing
+                        if (targetState) (fadeIn(tween(ms, ms / 4, curve)) togetherWith fadeOut(tween(ms * 2 / 3, easing = curve)))
+                        else (fadeIn(tween(ms, ms / 4, curve)) + scaleIn(tween(ms, ms / 4, curve), initialScale = .96f)) togetherWith
+                            (fadeOut(tween(ms * 2 / 3, easing = curve)) + scaleOut(tween(ms, easing = curve), targetScale = .98f))
+                    },
+                    label = "podcast-view-mode",
+                ) { showArticle -> if (showArticle) articlePane() else coverPane() }
             }
             val tabSwipeModifier = Modifier.podcastTabSwipe(
                 enabled = !wide,
@@ -241,24 +320,57 @@ internal fun PodcastPlayerScreen(
             if (wide) Row(
                 Modifier.weight(1f).fillMaxWidth().padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                content(Modifier.weight(1.5f).fillMaxHeight())
-                PodcastPlayerControls(vm, state, duration, onQueue, compact = false, Modifier.weight(1f).then(swipeModifier))
+                // Wide screens never trade reading space for control size: cover + full controls beside the article.
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) { coverPane() }
+                    PodcastPlayerControls(
+                        vm, state, duration, onQueue, compact = false, motionAllowed = motionAllowed,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).then(swipeModifier),
+                    )
+                }
+                Box(Modifier.weight(1.25f).fillMaxHeight()) { articlePane() }
             } else {
                 content(Modifier.weight(1f).fillMaxWidth().then(tabSwipeModifier))
                 PodcastPlayerControls(
-                    vm,
-                    state,
-                    duration,
-                    onQueue,
-                    compact = article,
-                    Modifier.fillMaxWidth().padding(top = if (article) 4.dp else 8.dp, bottom = 6.dp).then(swipeModifier),
+                    vm, state, duration, onQueue, compact = article, motionAllowed = motionAllowed,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).then(swipeModifier),
                 )
             }
         }
     }
     if (preview) ArtworkPreview(vm, track) { preview = false }
+}
+
+
+@Composable
+private fun PodcastShowName(
+    name: String,
+    onOpen: (() -> Unit)?,
+    color: androidx.compose.ui.graphics.Color,
+    style: androidx.compose.ui.text.TextStyle,
+    tag: String,
+    modifier: Modifier = Modifier,
+) {
+    val label = stringResource(R.string.open_show_named, name)
+    val open = onOpen
+    Text(
+        name,
+        style = style,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .then(
+                if (open != null && name.isNotBlank()) Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable(role = Role.Button, onClickLabel = label, onClick = open)
+                    .padding(vertical = 2.dp)
+                else Modifier
+            )
+            .testTag(tag)
+            .semantics { if (open != null && name.isNotBlank()) contentDescription = label },
+    )
 }
 
 /**
@@ -393,6 +505,7 @@ private fun PodcastPlayerControls(
     duration: Long,
     onQueue: () -> Unit,
     compact: Boolean,
+    motionAllowed: Boolean,
     modifier: Modifier,
 ) {
     val position by vm.position.collectAsStateWithLifecycle()
@@ -400,176 +513,246 @@ private fun PodcastPlayerControls(
     var scrub by remember { mutableStateOf<Float?>(null) }
     var speedMenu by remember { mutableStateOf(false) }
     var speed by remember(vm.controller) { mutableFloatStateOf(vm.controller?.playbackParameters?.speed ?: 1f) }
-    Column(modifier) {
-        Slider(
-            value = scrub ?: position.coerceAtMost(duration).toFloat(),
-            onValueChange = { scrub = it },
-            onValueChangeFinished = {
-                scrub?.let {
-                    feedback(TactileKind.Tap)
-                    vm.seek(it.toLong())
+    val ms = if (motionAllowed) 240 else 0
+    val fade = tween<Float>(ms, easing = FastOutSlowInEasing)
+    val dpSpec = tween<Dp>(ms, easing = FastOutSlowInEasing)
+    val sizeSpec = tween<IntSize>(ms, easing = FastOutSlowInEasing)
+    var moreMenu by remember { mutableStateOf(false) }
+    val podcastId = state.current?.podcast?.podcastId
+    var gainDialog by remember(podcastId, state.serverSelection) { mutableStateOf(false) }
+    val gainRevision by vm.settings.gainRevision.collectAsStateWithLifecycle()
+    val gainDb = remember(podcastId, gainRevision) { podcastId?.let(vm.settings::podcastGainDb) ?: 0 }
+    val gainText = if (gainDb == 0) "0 dB" else "+$gainDb dB"
+    val moreButton: @Composable () -> Unit = {
+        Box {
+            IconButton(tactile { moreMenu = true }, Modifier.testTag("podcast-controls-more")) {
+                Icon(Icons.Default.MoreVert, stringResource(R.string.more_options))
+            }
+            DropdownMenu(moreMenu, { moreMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.podcast_gain_title)) },
+                    trailingIcon = { Text(gainText, fontFamily = FontFamily.Monospace) },
+                    enabled = podcastId != null,
+                    onClick = tactile { moreMenu = false; gainDialog = true },
+                )
+                if (compact) {
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text(stringResource(R.string.podcast_previous_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(-1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.podcast_next_episode)) }, onClick = tactile { moreMenu = false; vm.skipPodcastEpisode(1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pod_player_queue_label)) }, onClick = tactile { moreMenu = false; onQueue() })
+                    listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
+                        DropdownMenuItem(
+                            text = { Text("${rate}×", color = if (rate == speed) MaterialTheme.colorScheme.primary else Color.Unspecified) },
+                            onClick = tactile { vm.controller?.setPlaybackSpeed(rate); speed = rate; moreMenu = false },
+                        )
+                    }
                 }
-                scrub = null
-            },
-            valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
-            enabled = duration > 0,
-            colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-                activeTickColor = Color.Transparent,
-                inactiveTickColor = Color.Transparent,
-            ),
-        )
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                formatPodcastTime(scrub?.toLong() ?: position),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+            }
+        }
+    }
+    if (gainDialog && podcastId != null) AlertDialog(
+        onDismissRequest = { gainDialog = false },
+        title = { Text(stringResource(R.string.podcast_gain_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(state.current.album.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.podcast_gain_local), style = MaterialTheme.typography.bodySmall)
+                Text(gainText, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
+                val gainLabel = stringResource(R.string.podcast_gain_title)
+                Slider(
+                    value = gainDb.toFloat(),
+                    onValueChange = { vm.settings.podcastGainDb(podcastId, it.roundToInt()) },
+                    valueRange = 0f..12f,
+                    steps = 11,
+                    modifier = Modifier.testTag("podcast-gain-slider").semantics { contentDescription = gainLabel; stateDescription = gainText },
+                )
+                Text(stringResource(R.string.podcast_gain_distortion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(tactile { gainDialog = false }) { Text(stringResource(R.string.done)) } },
+        dismissButton = { TextButton(tactile { vm.settings.podcastGainDb(podcastId, 0) }, enabled = gainDb != 0) { Text(stringResource(R.string.gain_panel_reset)) } },
+    )
+    val sideIcon by animateDpAsState(if (compact) 24.dp else 28.dp, dpSpec, label = "podcast-side-icon")
+    val skipIcon by animateDpAsState(if (compact) 26.dp else 28.dp, dpSpec, label = "podcast-skip-icon")
+    val playButton by animateDpAsState(if (compact) 48.dp else 64.dp, dpSpec, label = "podcast-play-size")
+    val playIcon by animateDpAsState(if (compact) 26.dp else 34.dp, dpSpec, label = "podcast-play-icon")
+    val rowGap by animateDpAsState(if (compact) 0.dp else 8.dp, dpSpec, label = "podcast-row-gap")
+    run {
+        Column(modifier.fillMaxWidth().testTag(if (compact) "podcast-controls-compact" else "podcast-controls-full")) {
+            Slider(
+                value = scrub ?: position.coerceAtMost(duration).toFloat(),
+                onValueChange = { scrub = it },
+                onValueChangeFinished = {
+                    scrub?.let {
+                        feedback(TactileKind.Tap)
+                        vm.seek(it.toLong())
+                    }
+                    scrub = null
+                },
+                valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
+                enabled = duration > 0,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent,
+                ),
             )
             Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box {
+                Text(
+                    formatPodcastTime(scrub?.toLong() ?: position),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                )
+                AnimatedVisibility(
+                    !compact,
+                    enter = fadeIn(fade) + expandHorizontally(sizeSpec),
+                    exit = fadeOut(fade) + shrinkHorizontally(sizeSpec),
+                ) { Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(onClick = tactile { speedMenu = true }),
+                        ) {
+                            Text(
+                                text = "${speed}×",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            )
+                        }
+                        DropdownMenu(speedMenu, { speedMenu = false }) {
+                            listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
+                                DropdownMenuItem(
+                                    text = { Text("${rate}×") },
+                                    onClick = tactile {
+                                        vm.controller?.setPlaybackSpeed(rate)
+                                        speed = rate
+                                        speedMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(onClick = tactile { speedMenu = true }),
+                            .clickable(onClick = tactile(onQueue)),
                     ) {
-                        Text(
-                            text = "${speed}×",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        )
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.QueueMusic,
+                                contentDescription = stringResource(R.string.pod_player_queue_desc),
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = stringResource(R.string.pod_player_queue_label),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
                     }
-                    DropdownMenu(speedMenu, { speedMenu = false }) {
-                        listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
-                            DropdownMenuItem(
-                                text = { Text("${rate}×") },
-                                onClick = tactile {
-                                    vm.controller?.setPlaybackSpeed(rate)
-                                    speed = rate
-                                    speedMenu = false
-                                },
+                    moreButton()
+                } }
+                Text(
+                    formatPodcastTime(duration),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = rowGap),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AnimatedVisibility(!compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
+                    IconButton(tactile { vm.skipPodcastEpisode(-1) }) {
+                        Icon(Icons.Default.SkipPrevious, stringResource(R.string.podcast_previous_episode), Modifier.size(sideIcon))
+                    }
+                }
+                IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(skipIcon))
+                        Text("15", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
+                    }
+                }
+                FilledIconButton(
+                    onClick = tactile(vm::toggle),
+                    modifier = Modifier.size(playButton).testTag("podcast-play-pause"),
+                    shape = CircleShape,
+                ) {
+                    if (state.buffering) {
+                        CircularProgressIndicator(
+                            Modifier.size(playIcon * .8f),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Crossfade(state.playing, animationSpec = tween(if (motionAllowed) 130 else 0), label = "podcast-play-pause") { playing ->
+                            Icon(
+                                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (playing) stringResource(R.string.pod_player_pause) else stringResource(R.string.pod_player_play),
+                                Modifier.size(playIcon),
                             )
                         }
                     }
                 }
+                IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) {
+                    Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(skipIcon))
+                }
+                AnimatedVisibility(!compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
+                    IconButton(tactile { vm.skipPodcastEpisode(1) }) {
+                        Icon(Icons.Default.SkipNext, stringResource(R.string.podcast_next_episode), Modifier.size(sideIcon))
+                    }
+                }
+                AnimatedVisibility(compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
+                    moreButton()
+                }
+            }
+            state.playbackError?.let { message ->
                 Surface(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(onClick = tactile(onQueue)),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = stringResource(R.string.pod_player_queue_desc),
-                            modifier = Modifier.size(15.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                         Text(
-                            text = stringResource(R.string.pod_player_queue_label),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            message,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
-                    }
-                }
-            }
-            Text(
-                formatPodcastTime(duration),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-            )
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = if (compact) 4.dp else 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(tactile { vm.skipPodcastEpisode(-1) }) {
-                Icon(
-                    Icons.Default.SkipPrevious,
-                    stringResource(R.string.podcast_previous_episode),
-                    Modifier.size(if (compact) 24.dp else 28.dp),
-                )
-            }
-            IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(if (compact) 26.dp else 28.dp))
-                    Text("15", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
-                }
-            }
-            FilledIconButton(
-                onClick = tactile(vm::toggle),
-                modifier = Modifier.size(if (compact) 52.dp else 64.dp),
-                shape = CircleShape,
-            ) {
-                if (state.buffering) {
-                    CircularProgressIndicator(
-                        Modifier.size(if (compact) 24.dp else 28.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Crossfade(state.playing, animationSpec = tween(130), label = "podcast-play-pause") { playing ->
-                        Icon(
-                            if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (playing) stringResource(R.string.pod_player_pause) else stringResource(R.string.pod_player_play),
-                            Modifier.size(if (compact) 28.dp else 34.dp),
-                        )
-                    }
-                }
-            }
-            IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) {
-                Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(if (compact) 26.dp else 28.dp))
-            }
-            IconButton(tactile { vm.skipPodcastEpisode(1) }) {
-                Icon(
-                    Icons.Default.SkipNext,
-                    stringResource(R.string.podcast_next_episode),
-                    Modifier.size(if (compact) 24.dp else 28.dp),
-                )
-            }
-        }
-        state.playbackError?.let { message ->
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        message,
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                    TextButton(tactile(vm::toggle)) {
-                        Text(stringResource(R.string.pod_player_retry))
+                        TextButton(tactile(vm::toggle)) {
+                            Text(stringResource(R.string.pod_player_retry))
+                        }
                     }
                 }
             }

@@ -1,23 +1,3 @@
-.metadata-task-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 20px 0 8px;
-}
-.metadata-task-tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 42px;
-}
-.metadata-task-tabs button[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: var(--accent);
-}
-.metadata-task-tabs span {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.75;
-}
 .metadata-task-list .metadata-task-actions {
   flex-direction: row;
   flex-wrap: wrap;
@@ -31,12 +11,13 @@
 .metadata-task-copy small {
   font-size: 11px;
 }
-.metadata-task-guidance {
-  max-width: 72ch;
-  margin: 6px 0 0;
+/* The row states the reason in plain words; it is the only text that carries a warning tone. */
+.metadata-task-reason {
+  line-height: 1.5;
+  margin-top: 2px;
 }
-.metadata-task-list .metadata-task-warning {
-  color: var(--accent);
+.metadata-task-reason.muted {
+  color: var(--muted);
 }
 .metadata-task-empty {
   padding: 20px 0;
@@ -93,4 +74,39 @@
   gap: 8px;
   min-height: 40px;
   width: auto;
+}
+/* Secondary row actions fold behind one control so the review action reads as the next step. */
+.metadata-task-more {
+  position: relative;
+}
+.metadata-task-more > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+.metadata-task-more > summary::-webkit-details-marker {
+  display: none;
+}
+.metadata-task-more[open] > summary {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.metadata-task-more > button {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 140px;
+  justify-content: flex-start;
+  white-space: nowrap;
+  background: var(--panel, #fff);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 18%);
 }

@@ -56,11 +56,9 @@ struct MacDraftsView: View {
         }
         .navigationTitle(L10n("macDrafts.title"))
         .toolbar {
-            Button {
-                Task { await load() }
-            } label: {
-                Label(L10n("macDrafts.refresh"), systemImage: "arrow.clockwise")
-            }.disabled(loading)
+            QuietToolbarItem {
+                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macDrafts.refresh"), isDisabled: loading) { Task { await load() } }
+            }
         }
         .task(id: filter) { await load() }
         .sheet(
@@ -164,6 +162,7 @@ struct MacDraftPreview: View {
                         Task { await save(draft) }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(MacTheme.accentDeep)
                     .disabled(loading || busy || errorMessage != nil)
                 } else if draft?.isApplied == true {
                     Label(draft?.kind == "playlist" ? L10n("macDrafts.playlistSaved") : L10n("macDrafts.statusApplied"), systemImage: "checkmark.circle.fill")

@@ -190,7 +190,8 @@
 /* Grid & Cards */
 .podcasts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 240px));
+  /* Columns stretch with the surface, like the album grid; a fixed 240px cap left the trailing gap. */
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   gap: 1.5rem;
 }
 
@@ -4163,6 +4164,75 @@
 
 .podcast-inbox-item.compact {
   padding: 8px 12px;
+}
+
+.podcast-inbox-item.selected {
+  border-color: var(--podcast-accent, #c9875f);
+  background: var(--podcast-panel-hover, #34302a);
+}
+
+.podcast-inbox-select,
+.podcast-inbox-select-all input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--podcast-accent, #c9875f);
+  cursor: pointer;
+}
+
+.podcast-inbox-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.podcast-inbox-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--podcast-subtle, #a09aa0);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.podcast-inbox-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.podcast-inbox-bulk-count {
+  color: var(--podcast-subtle, #a09aa0);
+  font-size: 0.82rem;
+}
+
+.podcast-inbox-bulk-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--podcast-line, #3a352f);
+  border-radius: 6px;
+  background: var(--podcast-panel, #211e1b);
+  color: var(--podcast-ink, #e8e3d9);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.podcast-inbox-bulk-actions button:hover:not(:disabled) {
+  background: var(--podcast-panel-hover, #34302a);
+}
+
+.podcast-inbox-bulk-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.podcast-inbox-bulk-actions .podcast-inbox-bulk-clear {
+  border-color: transparent;
+  background: transparent;
+  color: var(--podcast-subtle, #a09aa0);
 }
 
 .podcast-inbox-item.compact .podcast-inbox-copy strong {

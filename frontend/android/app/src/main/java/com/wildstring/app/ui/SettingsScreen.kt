@@ -2,8 +2,10 @@
 package com.wildstring.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -51,11 +53,13 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     About(R.string.settings_group_about, R.string.settings_about_summary, Icons.Default.Info),
 }
 
-@Composable internal fun SettingsScreen(vm: MusicViewModel, bottomBar: @Composable () -> Unit = {}, back: () -> Unit) {
+@Composable internal fun SettingsScreen(vm: MusicViewModel, wide: Boolean = false, bottomBar: @Composable () -> Unit = {}, back: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val settingsOwner = vm.repository.session.cacheScope()
     var section by rememberSaveable(settingsOwner) { mutableStateOf<SettingsSection?>(null) }
+    val activeSection = section ?: if (wide) SettingsSection.Account else null
+    val sidebarScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     val pages = rememberSaveableStateHolder()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
@@ -73,11 +77,11 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     var podcastPlayback by remember(settingsOwner) { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
     var savingPodcastPlayback by remember(settingsOwner) { mutableStateOf(false) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
-    LaunchedEffect(section, preferences, clearing, feature, state.current?.id) {
-        if (section == SettingsSection.Storage) usage = vm.cacheUsage()
+    LaunchedEffect(activeSection, preferences, clearing, feature, state.current?.id) {
+        if (activeSection == SettingsSection.Storage) usage = vm.cacheUsage()
     }
-    LaunchedEffect(settingsOwner, section) {
-        if (section != SettingsSection.Podcast) return@LaunchedEffect
+    LaunchedEffect(settingsOwner, activeSection) {
+        if (activeSection != SettingsSection.Podcast) return@LaunchedEffect
         try {
             val loaded = vm.repository.podcastPlaybackSettings()
             if (settingsOwner == vm.repository.session.cacheScope()) podcastPlayback = loaded
@@ -86,11 +90,25 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     val resources = LocalResources.current
+    val sidebar: (@Composable () -> Unit)? = if (wide) {
+        {
+            SettingsSection.entries.forEach { item ->
+                NavigationDrawerItem(
+                    label = { Text(stringResource(item.title)) },
+                    selected = activeSection == item,
+                    onClick = { section = item; message = null },
+                    icon = { Icon(item.icon, null) },
+                    modifier = Modifier.fillMaxWidth().testTag("setting-category-${item.name.lowercase()}"),
+                )
+            }
+        }
+    } else null
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
-        pages.SaveableStateProvider("$settingsOwner:${section?.name ?: "home"}") {
-            SettingsPage(back = { if (section == null) back() else { section = null; message = null } }, bottomBar = bottomBar,
-                title = stringResource(section?.title ?: R.string.settings_title)) {
-            when (section) {
+        pages.SaveableStateProvider("$settingsOwner:${activeSection?.name ?: "home"}") {
+            SettingsPage(back = { if (wide || section == null) back() else { section = null; message = null } }, bottomBar = bottomBar,
+                sidebarScrollState = sidebarScroll, sidebar = sidebar,
+                title = stringResource(if (wide) R.string.settings_title else activeSection?.title ?: R.string.settings_title)) {
+            when (activeSection) {
                 null -> Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
                     Column {
                         SettingsSection.entries.forEach { item ->
@@ -240,6 +258,10 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                             styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
                         SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
                             listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
+                        ListItem(headlineContent = { Text(stringResource(R.string.settings_interface_animations)) }, supportingContent = { Text(stringResource(R.string.settings_interface_animations_hint)) },
+                            leadingContent = { Icon(Icons.Default.Animation, null) },
+                            trailingContent = { Switch(preferences.interfaceAnimations, null) },
+                            modifier = Modifier.testTag("interface-animations").toggleable(value = preferences.interfaceAnimations, role = Role.Switch, onValueChange = vm.settings::interfaceAnimations))
                         SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
                             listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
                             stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)

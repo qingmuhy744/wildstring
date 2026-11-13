@@ -32,6 +32,8 @@ struct ServerRoutesEditor: View {
     @State private var allowHTTP = false
     @State private var error: String?
     @State private var adding = false
+    @State private var probes: [String: ServerRoutes.RouteProbe] = [:]
+    @State private var testing: Set<String> = []
 
     var body: some View {
         Form {
@@ -50,6 +52,8 @@ struct ServerRoutesEditor: View {
                         index: index,
                         totalCount: routes.profile.routes.count,
                         isActive: route.address == routes.profile.activeAddress,
+                        probe: probes[route.address],
+                        isTesting: testing.contains(route.address),
                         onRename: { newName in routes.rename(route, name: newName) },
                         onMove: { distance in routes.move(route, by: distance) },
                         onReauth: {
@@ -64,6 +68,15 @@ struct ServerRoutesEditor: View {
                         },
                         onRemove: {
                             Task { await routes.remove(route) }
+                        },
+                        onTest: {
+                            let key = route.address
+                            testing.insert(key)
+                            Task {
+                                let result = await routes.test(route: route)
+                                testing.remove(key)
+                                probes[key] = result
+                            }
                         }
                     )
                 }
@@ -141,10 +154,13 @@ private struct ServerRouteRow: View {
     let index: Int
     let totalCount: Int
     let isActive: Bool
+    let probe: ServerRoutes.RouteProbe?
+    let isTesting: Bool
     let onRename: (String) -> Void
     let onMove: (Int) -> Void
     let onReauth: () -> Void
     let onRemove: () -> Void
+    let onTest: () -> Void
 
     @State private var isEditing = false
     @State private var draftName = ""
@@ -197,6 +213,11 @@ private struct ServerRouteRow: View {
                         .buttonStyle(.borderless)
                         .disabled(index == totalCount - 1)
                         .help(L10n("routes.moveDownHelp"))
+                    Button { onTest() } label: { Image(systemName: "stethoscope") }
+                        .buttonStyle(.borderless)
+                        .disabled(isTesting)
+                        .help(L10n("routes.testHelp"))
+                        .accessibilityLabel(L10n("routes.testHelp"))
                     Button(L10n("routes.reauth")) { onReauth() }
                         .buttonStyle(.borderless)
                     Button(role: .destructive) { onRemove() } label: { Image(systemName: "trash") }
@@ -205,10 +226,27 @@ private struct ServerRouteRow: View {
                         .help(L10n("routes.removeHelp"))
                 }
             }
-            Text(route.address)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            HStack(spacing: 10) {
+                Text(route.address)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if isTesting {
+                    Text(L10n("routes.testing")).font(.caption2).foregroundStyle(.secondary)
+                } else if let probe {
+                    switch probe {
+                    case .ok(let ms):
+                        Label(L10n("routes.testOk", ms), systemImage: "checkmark.circle.fill")
+                            .font(.caption2).foregroundStyle(.green)
+                    case .sessionExpired:
+                        Label(L10n("routes.testSessionExpired"), systemImage: "exclamationmark.circle.fill")
+                            .font(.caption2).foregroundStyle(.orange)
+                    case .unreachable:
+                        Label(L10n("routes.testFailed"), systemImage: "xmark.circle.fill")
+                            .font(.caption2).foregroundStyle(.red)
+                    }
+                }
+            }
         }
         .padding(.vertical, 2)
     }

@@ -5,7 +5,7 @@ BEGIN IMMEDIATE;
 ALTER TABLE recommendation_preferences ADD COLUMN connection_id TEXT NOT NULL DEFAULT 'local';
 ALTER TABLE recommendation_preferences ADD COLUMN sources TEXT NOT NULL DEFAULT '["personal","community","discovery","revisit"]';
 ALTER TABLE recommendation_preferences ADD COLUMN lastfm_tags TEXT NOT NULL DEFAULT '[]';
-UPDATE recommendation_preferences SET connection_id='legacy' WHERE use_ai=1;
+UPDATE recommendation_preferences SET connection_id='local', use_ai=0 WHERE use_ai=1;
 UPDATE recommendation_preferences SET sources='["personal","community","discovery","revisit","lastfm_similar"]' WHERE use_lastfm=1;
 ALTER TABLE recommendation_preferences ADD COLUMN external_enabled INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE recommendation_preferences ADD COLUMN external_refresh_days INTEGER NOT NULL DEFAULT 7;

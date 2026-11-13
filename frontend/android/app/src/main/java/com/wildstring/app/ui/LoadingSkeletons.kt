@@ -116,3 +116,35 @@ internal fun AgentSkeleton(modifier: Modifier = Modifier) {
         }
     }
 }
+
+@Composable
+internal fun PodcastExploreResultsSkeleton(modifier: Modifier = Modifier, count: Int = 8) {
+    Column(modifier.fillMaxWidth().testTag("podcast-explore-results-skeleton"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        repeat(count) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 68.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SkeletonBlock(Modifier.size(56.dp), RoundedCornerShape(10.dp))
+                Column(Modifier.weight(1f).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    SkeletonLine(widthFraction = .72f)
+                    SkeletonLine(widthFraction = .45f)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PodcastExplorePreviewSkeleton(modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().testTag("podcast-explore-preview-skeleton"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            SkeletonBlock(Modifier.size(92.dp), RoundedCornerShape(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SkeletonLine(widthFraction = .7f)
+                SkeletonLine(widthFraction = .42f)
+            }
+        }
+        SkeletonLine(widthFraction = .55f)
+        SkeletonLine(widthFraction = 1f)
+        SkeletonLine(widthFraction = .86f)
+        SkeletonLine(widthFraction = .64f)
+    }
+}

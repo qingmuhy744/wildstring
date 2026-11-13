@@ -8,8 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -44,7 +42,6 @@ import kotlin.math.roundToInt
     playlistActions: (Playlist) -> Unit = {},
     albumActions: (Album) -> Unit = {},
 ) {
-    val list = rememberLazyListState()
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val playlistFeedback = LocalTactileFeedback.current
@@ -56,13 +53,13 @@ import kotlin.math.roundToInt
     val albumGrid = state.kind == "albums"
     var jumpJob by remember { mutableStateOf<Job?>(null) }
     val firstPosition by remember(albumGrid) { derivedStateOf {
-        ((if (albumGrid) grid.firstVisibleItemIndex else list.firstVisibleItemIndex) - 1).coerceAtLeast(0)
+        (grid.firstVisibleItemIndex - 1).coerceAtLeast(0)
     } }
     val activeKey = groups.lastOrNull { it.count > 0 && it.offset != null && it.offset <= firstPosition }?.key
     // Page ownership lives in the ViewModel; changing visible positions never changes the route.
     LaunchedEffect(state.contentKey, albumGrid, state.total, state.loading, state.window.pages.keys, state.rangeErrors.keys) {
         snapshotFlow {
-            val visible = if (albumGrid) grid.layoutInfo.visibleItemsInfo.map { it.index } else list.layoutInfo.visibleItemsInfo.map { it.index }
+            val visible = grid.layoutInfo.visibleItemsInfo.map { it.index }
             visible.map { it - 1 }.filter { it in 0 until state.total }
         }.distinctUntilChanged().collect { visible ->
             if (visible.isNotEmpty()) {
@@ -73,61 +70,81 @@ import kotlin.math.roundToInt
             }
         }
     }
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
+        val trackColumns = pad && maxWidth >= 720.dp
+        val cardGrid = pad && state.kind in listOf("artists", "playlists")
         val gutter = if (indexed) 30.dp else 0.dp
-        if (albumGrid) LazyVerticalGrid(GridCells.Adaptive(140.dp), state = grid,
-            modifier = Modifier.fillMaxSize().padding(end = gutter).testTag("album-grid"),
-            horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-            item(key = "catalog-header", span = { GridItemSpan(maxLineSpan) }) { header() }
-            items(state.total, key = { "album-position-$it" }) { index ->
-                val album = state.window.albumAt(index)
-                if (album == null) CatalogPlaceholder(vm, state, index, grid = true)
-                else Column(Modifier.testTag("catalog-item-$index").combinedClickable(
-                    onClick = { vm.openAlbum(album) },
-                    hapticFeedbackEnabled = false,
-                    onLongClickLabel = stringResource(R.string.album_actions),
-                    onLongClick = { playlistFeedback(TactileKind.DragStart); albumActions(album) },
-                )) {
-                    Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
-                    Text(album.title, Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(album.artists.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // One grid and one absolute item index in every mode retain the viewport on resize.
+        LazyVerticalGrid(
+            columns = when { albumGrid -> GridCells.Adaptive(140.dp); cardGrid -> GridCells.Adaptive(260.dp); else -> GridCells.Fixed(1) },
+            state = grid,
+            modifier = Modifier.fillMaxSize().padding(end = gutter).testTag(if (albumGrid) "album-grid" else "catalog-list"),
+            horizontalArrangement = Arrangement.spacedBy(if (albumGrid || cardGrid) 16.dp else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(if (albumGrid) 16.dp else if (cardGrid) 8.dp else 0.dp),
+            contentPadding = if (albumGrid || cardGrid) PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp) else PaddingValues(bottom = 12.dp),
+        ) {
+            item(key = "catalog-header", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    header()
+                    if (trackColumns && !albumGrid && !cardGrid) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(Modifier.width(if (state.collection == "albums" || state.albumFilter != null) 30.dp else LocalSongListSize.current.coverDp.dp))
+                            Text(stringResource(R.string.sort_track_name), Modifier.weight(2.4f).padding(start = 14.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.artists), Modifier.weight(1.4f).padding(start = 24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.agent_ws_field_album), Modifier.weight(1.7f).padding(start = 24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.sort_duration), Modifier.width(52.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(48.dp))
+                        }
+                    }
                 }
             }
-        } else LazyColumn(state = list, modifier = Modifier.fillMaxSize().padding(end = gutter).testTag("catalog-list"),
-            contentPadding = PaddingValues(bottom = 12.dp)) {
-            item(key = "catalog-header") { header() }
             items(state.total, key = { "catalog-position-$it" }) { index ->
-                when (state.kind) {
-                    "artists" -> state.window.artistAt(index)?.let { artist ->
-                        ListItem(headlineContent = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text(stringResource(R.string.track_count, artist.trackCount)) },
-                            leadingContent = { Cover(vm, artist.coverTrackId, artist.name, Modifier.size(44.dp)) },
-                            modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openArtist(artist) })
-                    } ?: CatalogPlaceholder(vm, state, index)
-                    "playlists" -> state.window.playlistAt(index)?.let { cached ->
-                        val playlist = playlistsById[cached.id] ?: cached
-                        ListItem(headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text(stringResource(R.string.track_count, playlist.trackCount) + if (playlist.kind == "smart") stringResource(R.string.smart_playlist_suffix) else "") },
-                            leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(44.dp)) },
-                            modifier = Modifier.testTag("catalog-item-$index").combinedClickable(
-                                onClick = { vm.openPlaylist(playlist) },
-                                hapticFeedbackEnabled = false,
-                                onLongClickLabel = stringResource(R.string.playlist_actions),
-                                onLongClick = { playlistFeedback(TactileKind.DragStart); playlistActions(playlist) }))
-                    } ?: CatalogPlaceholder(vm, state, index)
-                    else -> state.window.trackAt(index)?.let { track ->
-                        val display = tracksById[track.id] ?: track
-                        Column {
-                            if (state.discs.size > 1 && state.sort in listOf("title", "track_number")) {
-                                state.discs.firstOrNull { it.offset == index }?.let { disc ->
-                                    DiscHeading(disc)
+                if (albumGrid) {
+                    val album = state.window.albumAt(index)
+                    if (album == null) CatalogPlaceholder(vm, state, index, grid = true)
+                    else Column(Modifier.testTag("catalog-item-$index").combinedClickable(
+                        onClick = { vm.openAlbum(album) },
+                        hapticFeedbackEnabled = false,
+                        onLongClickLabel = stringResource(R.string.album_actions),
+                        onLongClick = { playlistFeedback(TactileKind.DragStart); albumActions(album) },
+                    )) {
+                        Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
+                        Text(album.title, Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(album.artists.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                } else {
+                    when (state.kind) {
+                        "artists" -> state.window.artistAt(index)?.let { artist ->
+                            ListItem(headlineContent = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(stringResource(R.string.track_count, artist.trackCount)) },
+                                leadingContent = { Cover(vm, artist.coverTrackId, artist.name, Modifier.size(44.dp)) },
+                                modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openArtist(artist) })
+                        } ?: CatalogPlaceholder(vm, state, index)
+                        "playlists" -> state.window.playlistAt(index)?.let { cached ->
+                            val playlist = playlistsById[cached.id] ?: cached
+                            ListItem(headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(stringResource(R.string.track_count, playlist.trackCount) + if (playlist.kind == "smart") stringResource(R.string.smart_playlist_suffix) else "") },
+                                leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(44.dp)) },
+                                modifier = Modifier.testTag("catalog-item-$index").combinedClickable(
+                                    onClick = { vm.openPlaylist(playlist) },
+                                    hapticFeedbackEnabled = false,
+                                    onLongClickLabel = stringResource(R.string.playlist_actions),
+                                    onLongClick = { playlistFeedback(TactileKind.DragStart); playlistActions(playlist) }))
+                        } ?: CatalogPlaceholder(vm, state, index)
+                        else -> state.window.trackAt(index)?.let { track ->
+                            val display = tracksById[track.id] ?: track
+                            Column {
+                                if (state.discs.size > 1 && state.sort in listOf("title", "track_number")) {
+                                    state.discs.firstOrNull { it.offset == index }?.let { disc ->
+                                        DiscHeading(disc)
+                                    }
                                 }
+                                TrackRow(vm, display, state, index, { play(display) }, { actions(display) }, columns = trackColumns)
                             }
-                            TrackRow(vm, display, state, index, { play(display) }, { actions(display) })
-                        }
-                    } ?: CatalogPlaceholder(vm, state, index)
+                        } ?: CatalogPlaceholder(vm, state, index)
+                    }
                 }
             }
         }
@@ -135,7 +152,7 @@ import kotlin.math.roundToInt
             vm.ensureRange(offset, retry = true)
             jumpJob?.cancel()
             jumpJob = scope.launch {
-                if (albumGrid) grid.scrollToItem(offset + 1) else list.scrollToItem(offset + 1)
+                grid.scrollToItem(offset + 1)
             }
         }
         if (!state.loading && state.total == 0 && state.error == null) Text(

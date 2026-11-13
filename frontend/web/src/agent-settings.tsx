@@ -3,7 +3,6 @@ import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
-import { AISettings } from './ai-settings';
 import { useModelConnections } from './model-connection';
 import type { AgentConnection, AgentPage, ToolCredential } from './agent-api';
 import {
@@ -179,11 +178,7 @@ export function AgentConnections({ user }: { user: User }) {
                       : item.shared
                         ? t('agentSettings.scopeShared')
                         : t('agentSettings.scopeAdmin')}
-                    {item.id === 'legacy'
-                      ? t('agentSettings.legacyBadge')
-                      : item.read_only
-                        ? t('agentSettings.readOnlyBadge')
-                        : ''}
+                    {item.read_only ? t('agentSettings.readOnlyBadge') : ''}
                     <br />
                     {item.background_allowed
                       ? t('agentSettings.backgroundAllowed')
@@ -196,7 +191,6 @@ export function AgentConnections({ user }: { user: User }) {
                       ? t('agentSettings.myUsage', { count: item.my_usage.calls })
                       : ''}
                   </small>
-                  {item.id === 'legacy' && <small>{t('agentSettings.legacyDescription')}</small>}
                 </div>
                 <StateBadge state={item.enabled ? 'ready' : 'disabled'} />
                 <div className="workspace-actions">
@@ -457,13 +451,6 @@ export function AgentConnections({ user }: { user: User }) {
               </div>
             </div>
           </form>
-          {isOwner(user) && (
-            <details className="legacy-ai-compatibility">
-              <summary>{t('agentSettings.legacySummary')}</summary>
-              <p className="muted">{t('agentSettings.legacyNotice')}</p>
-              <AISettings />
-            </details>
-          )}
           {isOwner(user) && (
             <details>
               <summary>{t('agentSettings.policySummary')}</summary>

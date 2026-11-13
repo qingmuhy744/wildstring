@@ -1,11 +1,14 @@
-"""Personal podcast inbox, ordered play queue and per-show new-episode delivery.
+"""Ordered podcast queue and per-show new-episode delivery.
 
 See contracts/podcast-queue.md. This is an independent channel: the music
 playback snapshot (playback_states) and its track validation are untouched.
+``podcast_inbox_baseline`` only records which episodes already existed when a
+user followed a show. It is not a listen-later list.
 """
 
 import json
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,9 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring.podcast_access import require_programme
 
-ACTION_PATTERN = "^(inbox|queue_last|queue_next|ignore)$"
+ACTION_PATTERN = "^(queue_last|queue_next|ignore)$"
 ORDER_PATTERN = "^(follow|asc|desc|off)$"
 GLOBAL_SHOW = ""
+QUEUE_CAP = 5000
+NOTICE_FULL = "queue_full"
 
 
 def _now() -> str:
@@ -36,38 +41,100 @@ def _episode_podcast(connection, user_id: str, episode_id: str) -> str | None:
     return row["podcast_id"]
 
 
-def _add_inbox(connection, user_id, episode_id, podcast_id, source) -> None:
-    connection.execute(
-        """INSERT OR IGNORE INTO podcast_inbox
-           (user_id, episode_id, podcast_id, source, added_at) VALUES (?,?,?,?,?)""",
-        (user_id, episode_id, podcast_id, source, _now()),
-    )
+def _published_stamp(raw: str) -> float:
+    if not raw:
+        return 0.0
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        parsed = None
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.timestamp()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _ordered_episode_ids(connection, episode_ids: list[str], *, newest_first: bool) -> list[str]:
+    if not episode_ids:
+        return []
+    placeholders = ",".join("?" * len(episode_ids))
+    rows = {
+        row["id"]: row
+        for row in connection.execute(
+            f"SELECT id, pub_date, episode_number FROM podcast_episodes WHERE id IN ({placeholders})",  # nosec B608 -- placeholders only
+            tuple(episode_ids),
+        )
+    }
+    order = {episode_id: position for position, episode_id in enumerate(episode_ids)}
+
+    def key(episode_id: str) -> tuple[float, int, int]:
+        row = rows.get(episode_id)
+        number = 0
+        if row is not None and row["episode_number"] is not None:
+            number = int(row["episode_number"])
+        return (_published_stamp(row["pub_date"] if row else ""), number, order[episode_id])
+
+    ordered = sorted(episode_ids, key=key)
+    if newest_first:
+        ordered.reverse()
+    return ordered
 
 
 def _queue_rows(connection, user_id):
     row = connection.execute(
-        "SELECT items_json, version, device_id, updated_at FROM podcast_queue_state WHERE user_id=?",
+        """SELECT items_json, version, device_id, updated_at, notice
+           FROM podcast_queue_state WHERE user_id=?""",
         (user_id,),
     ).fetchone()
     if row is None:
-        return [], 0, "", None
+        return [], 0, "", None, ""
     try:
         items = json.loads(row["items_json"])
     except (TypeError, ValueError):
         items = []
-    return items, row["version"], row["device_id"], row["updated_at"]
+    if not isinstance(items, list):
+        items = []
+    return items, row["version"], row["device_id"], row["updated_at"], row["notice"] or ""
 
 
-def _save_queue(connection, user_id, items, device_id, version) -> None:
+def _save_queue(connection, user_id, items, device_id, version, notice="") -> None:
     connection.execute(
         """INSERT INTO podcast_queue_state
-           (user_id, items_json, version, device_id, updated_at) VALUES (?,?,?,?,?)
+           (user_id, items_json, version, device_id, updated_at, notice) VALUES (?,?,?,?,?,?)
            ON CONFLICT(user_id) DO UPDATE SET
              items_json=excluded.items_json,
              version=excluded.version,
              device_id=excluded.device_id,
-             updated_at=excluded.updated_at""",
-        (user_id, json.dumps(items, separators=(",", ":")), version, device_id, _now()),
+             updated_at=excluded.updated_at,
+             notice=excluded.notice""",
+        (user_id, json.dumps(items, separators=(",", ":")), version, device_id, _now(), notice),
+    )
+
+
+def _set_notice(connection, user_id, notice: str) -> None:
+    items, version, device_id, updated_at, current = _queue_rows(connection, user_id)
+    if current == notice and updated_at is not None:
+        return
+    connection.execute(
+        """INSERT INTO podcast_queue_state
+           (user_id, items_json, version, device_id, updated_at, notice)
+           VALUES (?,?,?,?,?,?)
+           ON CONFLICT(user_id) DO UPDATE SET notice=excluded.notice""",
+        (
+            user_id,
+            json.dumps(items, separators=(",", ":")),
+            version,
+            device_id,
+            updated_at or _now(),
+            notice,
+        ),
     )
 
 
@@ -85,7 +152,7 @@ def _prefs(connection, user_id, podcast_id):
         ).fetchone()
     if row is None:
         return {
-            "action": "inbox",
+            "action": "queue_last",
             "auto_limit": 3,
             "order": "follow",
             "skip_completed": True,
@@ -109,11 +176,32 @@ def ensure_baseline(connection, user_id, podcast_id) -> None:
     )
 
 
+def apply_serial_default(connection, user_id, podcast_id) -> None:
+    """Serial shows start closed and oldest-to-newest until the user chooses otherwise."""
+    row = connection.execute("SELECT show_type FROM podcasts WHERE id=?", (podcast_id,)).fetchone()
+    if row is None or row["show_type"] != "serial":
+        return
+    existing = connection.execute(
+        "SELECT 1 FROM podcast_queue_prefs WHERE user_id=? AND podcast_id=?",
+        (user_id, podcast_id),
+    ).fetchone()
+    if existing is not None:
+        return
+    connection.execute(
+        """INSERT INTO podcast_queue_prefs
+           (user_id, podcast_id, action, auto_limit, episode_order, skip_completed, auto_continue)
+           VALUES (?,?,?,?,?,?,?)""",
+        (user_id, podcast_id, "ignore", 3, "asc", 1, 1),
+    )
+
+
 def distribute_new_episodes(connection, podcast_id, episode_ids) -> int:
     """Deliver freshly inserted episodes to followers according to their show settings.
 
     Called inside the RSS refresh transaction. Episode identity, not publication
-    date, decides what counts as new; see the baseline rule in the contract.
+    date, decides what counts as new; publication date only orders one batch.
+    ``queue_next`` places the batch at the front of the queue, newest first.
+    ``queue_last`` appends it, oldest first. Neither call changes what is playing.
     """
     if not episode_ids:
         return 0
@@ -135,33 +223,22 @@ def distribute_new_episodes(connection, podcast_id, episode_ids) -> int:
         action = preference["action"]
         if action == "ignore":
             continue
-        if action == "inbox":
-            for episode_id in episode_ids:
-                _add_inbox(connection, user_id, episode_id, podcast_id, "rule")
-            delivered += 1
+        newest_first = action == "queue_next"
+        ordered = _ordered_episode_ids(connection, list(episode_ids), newest_first=newest_first)
+        items, version, device_id, _, _ = _queue_rows(connection, user_id)
+        present = {item.get("episode_id") for item in items if isinstance(item, dict)}
+        fresh = [episode_id for episode_id in ordered if episode_id not in present]
+        if not fresh:
             continue
-        items, version, device_id, _ = _queue_rows(connection, user_id)
-        for episode_id in episode_ids:
-            entry = {"episode_id": episode_id, "origin": "rule", "added_at": _now()}
-            if action == "queue_next":
-                items.insert(min(1, len(items)), entry)
-            else:
-                items.append(entry)
-        rule_positions = []
-        for index, item in enumerate(items):
-            if item.get("origin") != "rule":
-                continue
-            row = connection.execute(
-                "SELECT podcast_id FROM podcast_episodes WHERE id=?", (item["episode_id"],)
-            ).fetchone()
-            if row is not None and row["podcast_id"] == podcast_id:
-                rule_positions.append(index)
-        overflow = len(rule_positions) - max(0, preference["auto_limit"])
-        if overflow > 0:
-            for index in reversed(rule_positions[:overflow]):
-                moved = items.pop(index)
-                _add_inbox(connection, user_id, moved["episode_id"], podcast_id, "rule")
-        _save_queue(connection, user_id, items, device_id, version + 1)
+        if len(items) + len(fresh) > QUEUE_CAP:
+            _set_notice(connection, user_id, NOTICE_FULL)
+            continue
+        stamp = _now()
+        entries = [
+            {"episode_id": episode_id, "origin": "rule", "added_at": stamp} for episode_id in fresh
+        ]
+        items = entries + items if newest_first else items + entries
+        _save_queue(connection, user_id, items, device_id, version + 1, notice="")
         delivered += 1
     return delivered
 
@@ -188,7 +265,7 @@ class QueueUpdate(BaseModel):
 
 class ShowPreference(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: str = Field(default="inbox", pattern=ACTION_PATTERN)
+    action: str = Field(default="queue_last", pattern=ACTION_PATTERN)
     auto_limit: int = Field(default=3, ge=0, le=100)
     order: str = Field(default="follow", pattern=ORDER_PATTERN)
     skip_completed: bool = True
@@ -197,7 +274,7 @@ class ShowPreference(BaseModel):
 
 class PreferencesUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    default_action: str = Field(default="inbox", pattern=ACTION_PATTERN)
+    default_action: str = Field(default="queue_last", pattern=ACTION_PATTERN)
     auto_limit: int = Field(default=3, ge=0, le=100)
     # Account-wide playback default. Show rows may override auto_continue.
     auto_continue: bool = True
@@ -247,7 +324,7 @@ def _read_prefs(connection, user_id):
             "auto_continue": bool(row["auto_continue"]),
         }
     return {
-        "default_action": global_row["action"] if global_row else "inbox",
+        "default_action": global_row["action"] if global_row else "queue_last",
         "auto_limit": global_row["auto_limit"] if global_row else 3,
         "auto_continue": bool(global_row["auto_continue"]) if global_row else True,
         "shows": shows,
@@ -257,51 +334,23 @@ def _read_prefs(connection, user_id):
 def routes(router: APIRouter, auth: Any, database: Any) -> None:
     session = auth.require_session
 
-    @router.get("/inbox")
-    def get_inbox(user: Annotated[dict, Depends(session)]):
-        with database.connect() as connection:
-            rows = connection.execute(
-                """SELECT episode_id, podcast_id, source, added_at FROM podcast_inbox
-                   WHERE user_id=? ORDER BY added_at DESC""",
-                (user["id"],),
-            ).fetchall()
-            _, version, _, _ = _queue_rows(connection, user["id"])
-        return {"version": version, "items": [dict(row) for row in rows]}
-
-    @router.put("/inbox/items/{episode_id}", dependencies=[Depends(auth.require_client)])
-    def add_inbox_item(episode_id: str, user: Annotated[dict, Depends(session)]):
-        with database.connect(write=True) as connection:
-            podcast_id = _episode_podcast(connection, user["id"], episode_id)
-            if podcast_id is None:
-                raise HTTPException(422, "episode_unavailable")
-            _add_inbox(connection, user["id"], episode_id, podcast_id, "manual")
-        return {"episode_id": episode_id, "saved": True}
-
-    @router.delete("/inbox/items/{episode_id}", dependencies=[Depends(auth.require_client)])
-    def remove_inbox_item(episode_id: str, user: Annotated[dict, Depends(session)]):
-        with database.connect(write=True) as connection:
-            connection.execute(
-                "DELETE FROM podcast_inbox WHERE user_id=? AND episode_id=?",
-                (user["id"], episode_id),
-            )
-        return {"episode_id": episode_id, "saved": False}
-
     @router.get("/queue")
     def get_queue(user: Annotated[dict, Depends(session)]):
         with database.connect() as connection:
-            items, version, device_id, updated_at = _queue_rows(connection, user["id"])
+            items, version, device_id, updated_at, notice = _queue_rows(connection, user["id"])
         return {
             "version": version,
             "device_id": device_id,
             "items": items,
             "updated_at": updated_at,
+            "notice": notice,
         }
 
     @router.put("/queue", dependencies=[Depends(auth.require_client)])
     def put_queue(body: QueueUpdate, user: Annotated[dict, Depends(session)]):
         with database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            items, version, _, updated_at = _queue_rows(connection, user["id"])
+            items, version, _, updated_at, _ = _queue_rows(connection, user["id"])
             if body.version != version:
                 raise HTTPException(
                     409,
@@ -329,11 +378,7 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
                     }
                 )
             _save_queue(connection, user["id"], clean, body.device_id, version + 1)
-            connection.executemany(
-                "DELETE FROM podcast_inbox WHERE user_id=? AND episode_id=?",
-                [(user["id"], entry["episode_id"]) for entry in clean],
-            )
-        return {"version": version + 1, "items": clean}
+        return {"version": version + 1, "items": clean, "notice": ""}
 
     @router.get("/queue/preferences")
     def get_preferences(user: Annotated[dict, Depends(session)]):

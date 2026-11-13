@@ -131,7 +131,7 @@ test('资料编辑员只看到可执行的管理动作', async ({ page }, info) 
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
   await manageTab(page, '任务记录');
-  await expect(page.getByText('元数据候选中心', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('补全歌曲信息', { exact: true })).toHaveCount(0);
   await manageTab(page, '歌曲信息');
   await expect(page.getByRole('button', { name: '查询本页资料', exact: true })).toHaveCount(0);
   await expect(page.getByText('编辑信息', { exact: true }).first()).toBeVisible();

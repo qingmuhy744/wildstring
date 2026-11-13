@@ -67,10 +67,10 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
         }
     }
     fun factory(client: OkHttpClient): DataSource.Factory = DataSource.Factory {
+        val upstream = OkHttpDataSource.Factory(client)
         var profile: String? = null
         var storage: String? = null
         var key: String? = null
-        val upstream = OkHttpDataSource.Factory(client)
         val cached = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
             .setCacheKeyFactory { spec -> cacheKey(storage ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired)), spec.uri) }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)

@@ -50,9 +50,9 @@ struct MacManageView: View {
         }
         .navigationTitle(L10n("macManage.navTitle"))
         .toolbar {
-            Button { Task { await load() } } label: {
-                Label(L10n("macManage.refreshRecords"), systemImage: "arrow.clockwise")
-            }.disabled(loading)
+            QuietToolbarItem {
+                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macManage.refreshRecords"), isDisabled: loading) { Task { await load() } }
+            }
         }
         .task { await load() }
     }
@@ -208,6 +208,7 @@ struct MacMetadataSheet: View {
                 Button(L10n("macManage.cancel"), role: .cancel) { dismiss() }
                 Button(saving ? L10n("macManage.saving") : L10n("macManage.save")) { Task { await save() } }
                     .buttonStyle(.borderedProminent)
+                    .tint(MacTheme.accentDeep)
                     .disabled(!ready || saving || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

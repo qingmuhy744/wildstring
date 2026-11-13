@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { MetadataReviewDialog } from './metadata-review';
 import { Icon } from './icons';
-import { JobDiagnostics, jobStatus, type ProviderJob } from './provider-diagnostics';
+import { type ProviderJob, providerReason } from './provider-diagnostics';
 import { Pagination } from './track-list';
 import './metadata-tasks.css';
 
-type View = 'active' | 'pending' | 'attention' | 'history';
+/** The page is one queue: everything that still needs a decision, newest first. */
+type View = 'queue' | 'history';
 interface Task extends ProviderJob {
   track_id: string;
   title: string;
@@ -21,29 +22,31 @@ interface Task extends ProviderJob {
   acknowledged_at: number | null;
 }
 interface TaskPage {
-  view: View;
+  view: string;
   items: Task[];
   total: number;
   offset: number;
   limit: number;
-  counts: Record<View, number>;
+  counts: Record<string, number>;
   queued: number;
   running: number;
   snapshot_at: number;
   retention_days: number;
 }
-const viewKeys: Record<View, string> = {
-  active: 'metadataTasks.viewActive',
-  pending: 'metadataTasks.viewPending',
-  attention: 'metadataTasks.viewAttention',
-  history: 'metadataTasks.viewHistory',
-};
-const emptyKeys: Record<View, string> = {
-  active: 'metadataTasks.emptyActive',
-  pending: 'metadataTasks.emptyPending',
-  attention: 'metadataTasks.emptyAttention',
-  history: 'metadataTasks.emptyHistory',
-};
+
+/** Reasons arrive as codes; the row speaks the first one and keeps the rest in the details. */
+function reasonCodes(task: Task): string[] {
+  const codes: unknown[] = task.error ? [task.error] : [];
+  if (task.warnings) {
+    try {
+      const parsed = JSON.parse(task.warnings);
+      if (Array.isArray(parsed)) codes.push(...parsed);
+    } catch {
+      codes.push(undefined);
+    }
+  }
+  return [...new Set(codes.map((code) => providerReason(code)))];
+}
 
 export function MetadataJobs({
   onInspect,
@@ -55,7 +58,6 @@ export function MetadataJobs({
   const { t } = useTranslation();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewTrackId, setReviewTrackId] = useState<string>();
-  const [view, setView] = useState<View>('active');
   const [offset, setOffset] = useState(0);
   const [value, setValue] = useState<TaskPage | null>(null);
   const [error, setError] = useState('');
@@ -66,22 +68,21 @@ export function MetadataJobs({
   const [historyOffset, setHistoryOffset] = useState(0);
   const [history, setHistory] = useState<TaskPage | null>(null);
   const [historyError, setHistoryError] = useState('');
-  const initial = useRef(true),
-    request = useRef(false);
+  const request = useRef(false);
+
   useEffect(() => {
-    initial.current = true;
-    setView('active');
     setOffset(0);
     setHistory(null);
     setHistoryOffset(0);
   }, [batchId]);
+
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function load() {
       try {
         const result = await api<TaskPage>(
-          `/manage/providers/tasks?view=${view}&offset=${offset}${batchId ? `&batch_id=${encodeURIComponent(batchId)}` : ''}`,
+          `/manage/providers/tasks?view=queue&offset=${offset}${batchId ? `&batch_id=${encodeURIComponent(batchId)}` : ''}`,
           { signal: controller.signal },
         );
         if (controller.signal.aborted) return;
@@ -91,13 +92,6 @@ export function MetadataJobs({
         }
         setValue(result);
         setError('');
-        if (initial.current) {
-          initial.current = false;
-          if (!result.counts.active) {
-            if (result.counts.pending) setView('pending');
-            else if (result.counts.attention) setView('attention');
-          }
-        }
       } catch {
         if (!controller.signal.aborted) setError(t('metadataTasks.loadError'));
       }
@@ -108,15 +102,14 @@ export function MetadataJobs({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [view, offset, tick, batchId]);
+  }, [offset, tick, batchId]);
+
   useEffect(() => {
     if (!historyOpen) return;
     const controller = new AbortController();
     api<TaskPage>(
       `/manage/providers/tasks?view=history&offset=${historyOffset}${batchId ? `&batch_id=${encodeURIComponent(batchId)}` : ''}`,
-      {
-        signal: controller.signal,
-      },
+      { signal: controller.signal },
     )
       .then((result) => {
         if (controller.signal.aborted) return;
@@ -150,24 +143,49 @@ export function MetadataJobs({
       setBusy(false);
     }
   }
-  function review(task: Task) {
-    if (!value || (view !== 'pending' && view !== 'attention')) return;
-    const prompt =
-      view === 'pending'
-        ? t('metadataTasks.ignorePendingConfirm', { title: task.title })
-        : t('metadataTasks.ignoreAttentionConfirm', { title: task.title });
-    if (!confirm(prompt)) return;
+
+  /** Archives whatever is still pending for the track, so the row leaves the queue. */
+  function archive(task: Task) {
+    if (!value) return;
+    if (!confirm(t('metadataTasks.archiveConfirm', { title: task.title }))) return;
     void mutate(
       `/manage/providers/tasks/tracks/${encodeURIComponent(task.track_id)}/review`,
-      { view, through: value.snapshot_at, ...(batchId ? { batch_id: batchId } : {}) },
-      t('metadataTasks.processedArchived'),
+      { view: 'queue', through: value.snapshot_at, ...(batchId ? { batch_id: batchId } : {}) },
+      t('metadataTasks.archivedNotice'),
     );
   }
+
+  function openReview(task: Task) {
+    setReviewTrackId(task.track_id);
+    setReviewOpen(true);
+  }
+
+  /** One sentence that answers "what is wrong with this song", not a job status. */
+  function reason(task: Task): string {
+    if (task.suggestion_count > 0) {
+      return t('metadataTasks.reasonSuggestions', { count: task.suggestion_count });
+    }
+    const [first] = reasonCodes(task);
+    if (first) return t(first);
+    if (task.status === 'failed' || task.status === 'stale')
+      return t('metadataTasks.reasonNoResult');
+    return t('metadataTasks.reasonDone');
+  }
+
   function rows(page: TaskPage, current: View) {
-    return page.items.length ? (
+    if (!page.items.length) {
+      return (
+        <p className="metadata-task-empty">
+          {t(current === 'history' ? 'metadataTasks.emptyHistory' : 'metadataTasks.emptyQueue')}
+        </p>
+      );
+    }
+    return (
       <ul
         className="manage-track-list metadata-task-list"
-        aria-label={t('metadataTasks.taskListAria', { view: t(viewKeys[current]) })}
+        aria-label={t(
+          current === 'history' ? 'metadataTasks.historyListAria' : 'metadataTasks.queueListAria',
+        )}
       >
         {page.items.map((task) => (
           <li key={task.track_id}>
@@ -175,17 +193,11 @@ export function MetadataJobs({
               <strong>{task.title}</strong>
               <span
                 data-help={hints.taskHistory}
-                className={task.requires_attention ? 'metadata-task-warning' : ''}
+                className={
+                  current === 'queue' ? 'metadata-task-reason' : 'metadata-task-reason muted'
+                }
               >
-                {task.status === 'completed' && task.has_issue
-                  ? t('metadataTasks.partialCompleted')
-                  : current === 'history' && task.status === 'completed'
-                    ? t('metadataTasks.queryCompleted')
-                    : t(jobStatus[task.status] || 'providerDiagnostics.statusUnknown')}
-                {current === 'pending'
-                  ? t('metadataTasks.pendingSuggestions', { count: task.suggestion_count })
-                  : ''}
-                {task.has_issue && !task.requires_attention ? t('metadataTasks.issueResolved') : ''}
+                {current === 'history' ? reason(task) : reason(task)}
               </span>
               <small>
                 {new Date(task.created_at * 1000).toLocaleString()}
@@ -193,32 +205,25 @@ export function MetadataJobs({
                   ? t('metadataTasks.mergedQueries', { count: task.job_count })
                   : ''}
               </small>
-              <JobDiagnostics job={task} />
             </div>
             <div className="metadata-task-actions">
               <button
-                aria-label={t('metadataTasks.inspectTrackAria', {
-                  action:
-                    current === 'history'
-                      ? t('metadataTasks.actionView')
-                      : t('metadataTasks.actionReview'),
-                  title: task.title,
-                })}
-                onClick={() => {
-                  if (current === 'history') onInspect(task.track_id);
-                  else {
-                    setReviewTrackId(task.track_id);
-                    setReviewOpen(true);
-                  }
-                }}
+                className="primary"
+                aria-label={t(
+                  current === 'history'
+                    ? 'metadataTasks.inspectTrackAria'
+                    : 'metadataTasks.reviewTrackAria',
+                  { title: task.title },
+                )}
+                onClick={() =>
+                  current === 'history' ? onInspect(task.track_id) : openReview(task)
+                }
               >
                 {current === 'history'
                   ? t('metadataTasks.viewDetails')
-                  : task.requires_attention
-                    ? t('metadataTasks.viewOldResults')
-                    : t('metadataTasks.viewCandidates')}
+                  : t('metadataTasks.reviewAction')}
               </button>
-              {['pending', 'attention'].includes(current) && !!task.requires_attention && (
+              {current === 'queue' && !!task.requires_attention && (
                 <button
                   disabled={busy}
                   aria-label={t('metadataTasks.retryTrackAria', { title: task.title })}
@@ -234,21 +239,29 @@ export function MetadataJobs({
                   {t('metadataTasks.requery')}
                 </button>
               )}
-              {(current === 'pending' || current === 'attention') && (
-                <button disabled={busy} onClick={() => review(task)}>
-                  {current === 'pending'
-                    ? t('metadataTasks.ignoreSuggestions')
-                    : t('metadataTasks.ignoreIssue')}
-                </button>
+              {current === 'queue' && (
+                <details className="metadata-task-more">
+                  <summary
+                    aria-label={t('metadataTasks.moreActionsAria', { title: task.title })}
+                    role="button"
+                  >
+                    ⋯
+                  </summary>
+                  <button disabled={busy} onClick={() => archive(task)}>
+                    {t('metadataTasks.archiveTask')}
+                  </button>
+                </details>
               )}
             </div>
           </li>
         ))}
       </ul>
-    ) : (
-      <p className="metadata-task-empty">{t(emptyKeys[current])}</p>
     );
   }
+
+  const pendingCount = value ? (value.counts.pending ?? 0) + (value.counts.attention ?? 0) : 0;
+  const activeCount = value ? (value.counts.active ?? 0) : 0;
+
   return (
     <section className="management-card metadata-tasks" aria-label={t('metadataTasks.sectionAria')}>
       {reviewOpen && (
@@ -265,52 +278,26 @@ export function MetadataJobs({
       <div className="management-section-heading">
         <div>
           <h2>{t('metadataTasks.headingTitle')}</h2>
-          <button
-            onClick={() => {
-              setReviewTrackId(undefined);
-              setReviewOpen(true);
-            }}
-          >
-            {batchId
-              ? t('metadataTasks.reviewBatchCandidates')
-              : t('metadataTasks.reviewMetadataBatch')}
-          </button>
           <p className="muted" role="status">
             {value
-              ? t('metadataTasks.queueStatus', { queued: value.queued, running: value.running })
+              ? pendingCount
+                ? t('metadataTasks.queueSummary', { count: pendingCount })
+                : t('metadataTasks.queueClear')
               : t('metadataTasks.loadingTasks')}
+            {activeCount ? t('metadataTasks.activeSummary', { count: activeCount }) : ''}
           </p>
-          {view === 'attention' && !!value?.counts.attention && (
-            <p className="muted metadata-task-guidance" role="note">
-              {t('metadataTasks.attentionGuidance')}
-            </p>
+          {batchId && (
+            <button
+              onClick={() => {
+                setReviewTrackId(undefined);
+                setReviewOpen(true);
+              }}
+            >
+              {t('metadataTasks.reviewBatchCandidates')}
+            </button>
           )}
         </div>
         <div className="metadata-task-toolbar">
-          {view === 'attention' && !!value?.counts.attention ? (
-            <button
-              disabled={busy}
-              onClick={() => {
-                if (
-                  confirm(
-                    t('metadataTasks.ignoreAllAttentionConfirm', {
-                      count: value.counts.attention,
-                    }),
-                  )
-                ) {
-                  void mutate(
-                    '/manage/providers/tasks/attention/clear',
-                    { through: value.snapshot_at, batch_id: batchId },
-                    t('metadataTasks.ignoredAllAttentionNotice', {
-                      count: value.counts.attention,
-                    }),
-                  );
-                }
-              }}
-            >
-              {t('metadataTasks.ignoreAllAttention', { count: value.counts.attention })}
-            </button>
-          ) : null}
           {value?.queued ? (
             <button
               disabled={busy}
@@ -330,36 +317,38 @@ export function MetadataJobs({
             <Icon name="refresh" />
             {t('metadataTasks.refresh')}
           </button>
+          {pendingCount ? (
+            <details className="metadata-task-more">
+              <summary aria-label={t('metadataTasks.moreToolbarActionsAria')} role="button">
+                ⋯
+              </summary>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  if (confirm(t('metadataTasks.archiveAllConfirm', { count: pendingCount }))) {
+                    void mutate(
+                      '/manage/providers/tasks/attention/clear',
+                      { through: value?.snapshot_at, batch_id: batchId },
+                      t('metadataTasks.archivedAllNotice', { count: pendingCount }),
+                    );
+                  }
+                }}
+              >
+                {t('metadataTasks.archiveAll', { count: pendingCount })}
+              </button>
+            </details>
+          ) : null}
         </div>
       </div>
-      <nav
-        className="metadata-task-tabs"
-        aria-label={t('metadataTasks.tabsAria')}
-        data-help={hints.taskHistory}
-      >
-        {(['active', 'pending', 'attention'] as const).map((name) => (
-          <button
-            key={name}
-            aria-pressed={view === name}
-            onClick={() => {
-              setView(name);
-              setOffset(0);
-            }}
-          >
-            {t(viewKeys[name])}
-            <span>{value?.counts[name] ?? '—'}</span>
-          </button>
-        ))}
-      </nav>
       {error && (
         <p role="alert" className="error">
           {error}
         </p>
       )}
       {message && <p role="status">{message}</p>}
-      {value?.view === view ? (
+      {value ? (
         <>
-          {rows(value, view)}
+          {rows(value, 'queue')}
           {value.total > value.limit && (
             <Pagination page={value} onOffset={setOffset} unit={t('metadataTasks.unitTracks')} />
           )}
@@ -375,7 +364,7 @@ export function MetadataJobs({
         <summary>
           {t('metadataTasks.historySummary', {
             countSuffix: value
-              ? t('metadataTasks.historyCountSuffix', { count: value.counts.history })
+              ? t('metadataTasks.historyCountSuffix', { count: value.counts.history ?? 0 })
               : '',
           })}
         </summary>

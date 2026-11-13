@@ -300,6 +300,7 @@ private struct MacLoginView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .tint(MacTheme.accentDeep)
                 .disabled(session.isBusy || serverText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty)
             }
             .controlSize(.large)
@@ -332,6 +333,7 @@ private struct MacShellView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    @AppStorage("macAppearance") private var appearance = "system"
     @State private var libraries: [MusicLibrary] = []
     @State private var navigationPath = NavigationPath()
     @Environment(\.colorScheme) private var colorScheme
@@ -420,6 +422,7 @@ private struct MacShellView: View {
                     Button(L10n("macRoot.handoffDismiss")) { session.sync?.dismiss() }
                     Button(L10n("macRoot.handoffResume")) { Task { await session.sync?.accept() } }
                         .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
                 }
                 .padding(10)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -535,9 +538,9 @@ private struct MacShellView: View {
             }
             Rectangle().fill(sidebarBorder).frame(height: 1)
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(L10n("macRoot.workspaceSection")).font(MacTheme.micro).foregroundStyle(sidebarFaint)
-                    Spacer()
+                HStack(spacing: 4) {
+                    appearanceMenu
+                    Spacer(minLength: 0)
                     footerButton(.notifications)
                     footerButton(.settings)
                 }
@@ -632,6 +635,37 @@ private struct MacShellView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(sidebarAccentSoft.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .help("\(session.routes?.activeName ?? L10n("macRoot.defaultRoute")) · \(session.connection?.label ?? L10n("macRoot.connecting"))")
+    }
+
+    private var appearanceMenu: some View {
+        Menu {
+            Picker(L10n("macLibrary.appearanceMode"), selection: $appearance) {
+                Label(L10n("macLibrary.themeSystem"), systemImage: "circle.lefthalf.filled").tag("system")
+                Label(L10n("macLibrary.themeLight"), systemImage: "sun.max").tag("light")
+                Label(L10n("macLibrary.themeDark"), systemImage: "moon").tag("dark")
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: appearanceSymbol)
+                .font(.system(size: 14))
+                .foregroundStyle(sidebarMuted)
+                .frame(width: 28, height: 28)
+                .background(.clear, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .help(L10n("macLibrary.appearanceMode"))
+        .accessibilityLabel(L10n("macLibrary.appearanceMode"))
+    }
+
+    private var appearanceSymbol: String {
+        switch appearance {
+        case "light": return "sun.max"
+        case "dark": return "moon"
+        default: return "circle.lefthalf.filled"
+        }
     }
 
     private func footerButton(_ page: MacPage) -> some View {

@@ -17,6 +17,7 @@ struct MacPodcastExplore: View {
     @State private var error: String?
     @State private var previewError: String?
     @State private var retry = 0
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 16) {
@@ -32,17 +33,17 @@ struct MacPodcastExplore: View {
                     Text(L10n("macPodcastExplore.regionJapan")).tag("jp"); Text(L10n("macPodcastExplore.regionUnitedKingdom")).tag("gb")
                 }.frame(width: 185).disabled(!query.isEmpty)
             }
-            TextField(L10n("macPodcastExplore.searchPrompt"), text: $query).textFieldStyle(.roundedBorder)
+            MacSearchField(placeholder: L10n("macPodcastExplore.searchPrompt"), text: $query, focused: $searchFocused, maxWidth: .infinity)
             HStack {
                 Text(query.isEmpty ? L10n("macPodcastExplore.regionalTopCharts", page?.regions.joined(separator: ", ").uppercased() ?? "") : L10n("macPodcastExplore.catalogSearch"))
                 Spacer()
                 if loading { ProgressView().controlSize(.small) }
-            }.font(.caption).foregroundStyle(.secondary)
+            }.font(.caption).foregroundStyle(MacTheme.muted)
             if let error {
-                HStack { Text(error).foregroundStyle(.secondary); Button(L10n("macPodcastExplore.retry")) { retry += 1 } }
+                HStack { Text(error).foregroundStyle(MacTheme.muted); Button(L10n("macPodcastExplore.retry")) { retry += 1 } }
             }
             if let page, !page.failedRegions.isEmpty {
-                Text(L10n("macPodcastExplore.failedRegions", page.failedRegions.map(\.region).joined(separator: ", "))).font(.caption).foregroundStyle(.orange)
+                Text(L10n("macPodcastExplore.failedRegions", page.failedRegions.map(\.region).joined(separator: ", "))).font(.caption).foregroundStyle(MacTheme.warning)
             }
             HSplitView {
                 ScrollView {
@@ -53,15 +54,15 @@ struct MacPodcastExplore: View {
                                     MacPodcastArtwork(url: URL(string: result.artworkURL), side: 54)
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(result.title).font(.headline).lineLimit(2)
-                                        Text(result.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        Text(result.author).font(.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
                                         Text(result.followed ? L10n("macPodcastExplore.followed") : result.explicit ? L10n("macPodcastExplore.explicit") : result.genres.joined(separator: " · "))
-                                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                            .font(.caption2).foregroundStyle(MacTheme.muted).lineLimit(1)
                                     }.frame(maxWidth: .infinity, alignment: .leading)
                                 }.padding(10)
                                     .background(selected?.id == result.id ? MacTheme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain)
                         }
-                        if page?.results.isEmpty == true && !loading { Text(L10n("macPodcastExplore.noResults")).foregroundStyle(.secondary).padding() }
+                        if page?.results.isEmpty == true && !loading { Text(L10n("macPodcastExplore.noResults")).foregroundStyle(MacTheme.muted).padding() }
                     }
                 }.frame(minWidth: 280, idealWidth: 320)
                 ScrollView {
@@ -70,7 +71,7 @@ struct MacPodcastExplore: View {
                             Text(selected.title).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
                             if previewing { ProgressView(L10n("macPodcastExplore.previewing")) }
                             if let preview {
-                                Text(L10n("macPodcastExplore.previewEpisodes", preview.author, preview.episodeCount)).foregroundStyle(.secondary)
+                                Text(L10n("macPodcastExplore.previewEpisodes", preview.author, preview.episodeCount)).foregroundStyle(MacTheme.muted)
                                 Text(MacPodcastArticle.render(preview.description, duration: 0)).textSelection(.enabled)
                                 Text(L10n("macPodcastExplore.latestEpisodes")).font(.headline)
                                 ForEach(Array(preview.latestEpisodes.enumerated()), id: \.offset) { _, episode in
@@ -78,10 +79,11 @@ struct MacPodcastExplore: View {
                                 }
                                 Button(adding ? L10n("macPodcastExplore.following") : preview.followed ? L10n("macPodcastExplore.openShow") : L10n("macPodcastExplore.followShow")) { Task { await follow(selected, preview: preview) } }
                                     .buttonStyle(.borderedProminent)
+                                    .tint(MacTheme.accentDeep)
                                     .disabled(adding || (!canAdd && preview.catalogPodcastID == nil))
-                                if !canAdd && preview.catalogPodcastID == nil { Text(L10n("macPodcastExplore.addDisabledByAdmin")).font(.caption).foregroundStyle(.secondary) }
+                                if !canAdd && preview.catalogPodcastID == nil { Text(L10n("macPodcastExplore.addDisabledByAdmin")).font(.caption).foregroundStyle(MacTheme.muted) }
                             }
-                            if let previewError { Text(previewError).foregroundStyle(.orange) }
+                            if let previewError { Text(previewError).foregroundStyle(MacTheme.warning) }
                         } else {
                             ContentUnavailableView(L10n("macPodcastExplore.discoverPrompt"), systemImage: "antenna.radiowaves.left.and.right", description: Text(L10n("macPodcastExplore.discoverPromptDesc")))
                         }

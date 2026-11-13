@@ -31,7 +31,7 @@ internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
         // Keep the previous atmosphere until the next one is ready; resetting here fades the whole backdrop out and back on every track change.
         if (!track.mayHaveCover || profile == null) { value = null; return@produceState }
         try {
-            val result = vm.coverLoader(track.id).execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
+            val result = vm.imageLoader.execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
                 .memoryCacheKey("$profile:atmosphere:${vm.repository.cover(track.id)}").size(96).allowHardware(false).build())
             if (result is SuccessResult) value = withContext(Dispatchers.Default) {
                 val original = (result.drawable as? BitmapDrawable)?.bitmap ?: result.drawable.toBitmap(96, 96)

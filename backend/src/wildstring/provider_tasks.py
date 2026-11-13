@@ -7,8 +7,11 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-View = Literal["active", "pending", "attention", "history"]
+View = Literal["active", "pending", "attention", "history", "queue"]
 VIEWS = ("active", "pending", "attention", "history")
+# The queue view merges what needs a decision, so the page shows one list instead of asking
+# the reader to understand the bucket model.
+QUEUE_VIEWS = ("pending", "attention")
 RETENTION_DAYS = 30
 SCHEMA = """
 BEGIN IMMEDIATE;
@@ -51,7 +54,8 @@ WITH pending AS (
 
 class ReviewTasks(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    view: Literal["pending", "attention"]
+    # "queue" archives whatever is still awaiting a decision for the track.
+    view: Literal["pending", "attention", "queue"]
     through: float = Field(ge=0, allow_inf_nan=False)
     batch_id: str | None = Field(default=None, max_length=128)
 
@@ -67,7 +71,7 @@ class AttentionClear(BaseModel):
     batch_id: str | None = Field(default=None, max_length=128)
 
 
-def statement(tail, batch_id=None):
+def statement(tail, batch_id=None, merged=False):
     """Compose fixed internal SQL fragments; every request value remains bound."""
     selection = SELECTION
     if batch_id:
@@ -78,6 +82,9 @@ def statement(tail, batch_id=None):
             "WHERE pj.track_id=t.id AND prm.batch_id=?)",
             1,
         )
+    # The queue view merges both decision buckets; substitution keeps every tail a fixed literal.
+    if merged:
+        tail = tail.replace("bucket=?", "bucket IN ('pending','attention')")
     return "".join((selection, tail))
 
 
@@ -108,6 +115,18 @@ def task_page(repository, view: View, limit=20, offset=0, batch_id=None):
                 prefix,
             ).fetchall()
         )
+        # Pending and attention describe the same decision for the reader, so the queue counts
+        # tracks once even when a track has both kinds of job.
+        queue_total = connection.execute(
+            statement(
+                "SELECT count(DISTINCT track_id) FROM classified "
+                "WHERE bucket IN ('pending','attention')",
+                batch_id,
+            ),
+            prefix,
+        ).fetchone()[0]
+        merged = view == "queue"
+        row_params = (*prefix, limit, offset) if merged else (*prefix, view, limit, offset)
         rows = connection.execute(
             statement(
                 """, ranked AS (
@@ -117,23 +136,26 @@ def task_page(repository, view: View, limit=20, offset=0, batch_id=None):
                     sum(pending_count) OVER (PARTITION BY track_id) AS suggestion_count,
                     max(has_issue) OVER (PARTITION BY track_id) AS group_has_issue,
                     max(has_issue AND acknowledged_at IS NULL) OVER (PARTITION BY track_id) AS requires_attention
-                FROM classified WHERE bucket=? AND (bucket<>'history' OR hidden_at IS NULL)
-            ) SELECT * FROM ranked WHERE position=1 ORDER BY created_at DESC,id DESC
-            LIMIT ? OFFSET ?""",
+                FROM classified WHERE bucket=?"""
+                " AND (bucket<>'history' OR hidden_at IS NULL)"
+                " ) SELECT * FROM ranked WHERE position=1 ORDER BY created_at DESC,id DESC"
+                " LIMIT ? OFFSET ?",
                 batch_id,
+                merged,
             ),
-            (*prefix, view, limit, offset),
+            row_params,
         ).fetchall()
         items = []
         diagnostics = {}
         for row in connection.execute(
             statement(
-                "SELECT track_id,error,warnings FROM classified WHERE bucket=? "
-                "AND (bucket<>'history' OR hidden_at IS NULL) "
-                "AND track_id IN (SELECT value FROM json_each(?))",
+                "SELECT track_id,error,warnings FROM classified WHERE bucket=?"
+                " AND (bucket<>'history' OR hidden_at IS NULL)"
+                " AND track_id IN (SELECT value FROM json_each(?))",
                 batch_id,
+                merged,
             ),
-            (*prefix, view, json.dumps([row["track_id"] for row in rows])),
+            (*prefix, *(() if merged else (view,)), json.dumps([row["track_id"] for row in rows])),
         ):
             codes = diagnostics.setdefault(row["track_id"], [])
             codes.extend(json.loads(row["warnings"]))
@@ -148,7 +170,7 @@ def task_page(repository, view: View, limit=20, offset=0, batch_id=None):
             items.append(item)
     return {
         "items": items,
-        "total": counts[view],
+        "total": queue_total if merged else counts[view],
         "limit": limit,
         "offset": offset,
         "counts": counts,
@@ -163,26 +185,22 @@ def task_page(repository, view: View, limit=20, offset=0, batch_id=None):
 def review_tasks(repository, track_id, body: ReviewTasks):
     """Only review terminal results visible at the caller's snapshot, never new work."""
     clock = time.time()
+    merged = body.view == "queue"
+    job_params = (
+        (repository.library_id(), body.batch_id) if body.batch_id else (repository.library_id(),)
+    )
     with repository.database.connect(write=True) as connection:
         connection.execute("BEGIN IMMEDIATE")
         jobs = connection.execute(
             statement(
-                "SELECT id FROM classified WHERE track_id=? AND bucket=? AND updated_at<=?",
+                "SELECT id,bucket FROM classified WHERE track_id=? AND bucket=? AND updated_at<=?",
                 body.batch_id,
+                merged,
             ),
-            (
-                *(
-                    (repository.library_id(), body.batch_id)
-                    if body.batch_id
-                    else (repository.library_id(),)
-                ),
-                track_id,
-                body.view,
-                min(body.through, clock),
-            ),
+            (*job_params, track_id, *(() if merged else (body.view,)), min(body.through, clock)),
         ).fetchall()
         for job in jobs:
-            if body.view == "pending":
+            if job["bucket"] == "pending":
                 connection.execute(
                     "UPDATE metadata_suggestions SET status='ignored' "
                     "WHERE job_id=? AND status='pending'",

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(
-    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
+    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val interfaceAnimations: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
     val playbackStyle: String = "vinyl", val songListSize: SongListSize = SongListSize.MEDIUM,
     val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
     val orientation: String = "auto")
@@ -25,7 +25,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         if (prefs.contains("red_cloth")) prefs.edit().remove("red_cloth").apply()
         if (devicePrefs.contains("red_icon")) devicePrefs.edit().remove("red_icon").apply()
         return Preferences(
-        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
+        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getBoolean("interface_animations", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
         prefs.getString("playback_style", "vinyl").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "vinyl",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
@@ -55,6 +55,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         boundAccount = identity
         initializedBinding = true
         mutable.value = preferences()
+        gainChanged()
     }
 
     private fun copyPreference(edit: SharedPreferences.Editor, key: String, value: Any?) {
@@ -90,6 +91,15 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     }
     fun avatarChanged() { avatarMutable.value += 1 }
     fun gainChanged() { gainMutable.value += 1 }
+    /** Local to this device and the bound server/account, shared by all episodes of a show. */
+    fun podcastGainDb(podcastId: String): Int = prefs.getInt("podcast-gain:$podcastId", 0).coerceIn(0, 12)
+    fun podcastGainDb(podcastId: String, db: Int) {
+        require(podcastId.isNotBlank() && db in 0..12)
+        val edit = prefs.edit()
+        if (db == 0) edit.remove("podcast-gain:$podcastId") else edit.putInt("podcast-gain:$podcastId", db)
+        edit.apply()
+        gainChanged()
+    }
     fun lyricFollowSeconds(seconds: Int) {
         require(seconds in listOf(1, 2, 3, 5, 10))
         prefs.edit().putInt("lyric_follow_seconds", seconds).apply()
@@ -132,6 +142,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
             .apply()
     }
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
+    fun interfaceAnimations(enabled: Boolean) { prefs.edit().putBoolean("interface_animations", enabled).apply(); mutable.value = mutable.value.copy(interfaceAnimations = enabled) }
     fun limits(metadata: Int, artwork: Int, audio: Int) {
         require(metadata in CacheLimits.metadataMb && artwork in CacheLimits.artworkMb && audio in CacheLimits.audioMb)
         prefs.edit().putInt("metadata_mb", metadata).putInt("artwork_mb", artwork).putInt("audio_mb", audio).apply()

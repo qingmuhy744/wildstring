@@ -1523,6 +1523,8 @@ struct StubbedHTTPTests {
             }
             let client = try makeClient()
             var preferences = try await client.podcastQueuePreferences()
+            #expect(preferences.defaultAction == "queue_last")
+            #expect(preferences.shows["edit"]?.action == "queue_last")
             var show = preferences.shows["edit"] ?? PodcastShowPreference()
             show.action = "queue_last"
             show.autoLimit = 4

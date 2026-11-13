@@ -17,11 +17,18 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 class RecommendationExperienceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
-    private class Fixture(val canAddPodcasts: Boolean = true, val profile: String = "owner") : java.io.Closeable {
+    private class Fixture(val canAddPodcasts: Boolean = true, val profile: String = "owner", val directoryCount: Int = 1) : java.io.Closeable {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, String>>()
         val track = """{"id":"local-a","title":"真实本库歌曲","artists":["合成艺人"],"album":"合成专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
         // Written on the MockWebServer thread after the request is recorded; read by the test.
         @Volatile var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
+        private val directoryCover = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888).let { bitmap ->
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.drawColor(android.graphics.Color.rgb(143, 91, 57))
+            val paint = android.graphics.Paint().apply { color = android.graphics.Color.rgb(232, 209, 169) }
+            canvas.drawCircle(32f, 32f, 18f, paint)
+            java.io.ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it); bitmap.recycle() }.toByteArray()
+        }
         var wanted = false
         @Volatile var podcastAdded = false
         @Volatile var directoryThrottled = false
@@ -44,8 +51,14 @@ class RecommendationExperienceTest {
                     if (path.endsWith("/podcasts/catalog-settings")) return@synchronized json("""{"can_add":$canAddPodcasts,"allow_user_subscriptions":$canAddPodcasts,"version":1}""")
                     if (path.endsWith("/podcasts/discover") || path.endsWith("/podcasts/search")) {
                         if (directoryThrottled) return@synchronized json("""{"detail":{"code":"podcast_search_upstream_rate_limited","retry_after":60}}""").setResponseCode(429)
-                        return@synchronized json("""{"results":[{"itunes_id":"12345","title":"探索测试节目","author":"合成工作室","feed_url":"https://podcast.example/feed.xml","artwork_url":"","genres":["社会与文化"],"explicit":false,"catalog_podcast_id":null,"followed":false}],"regions":["${request.requestUrl!!.queryParameter("region") ?: "tw"}"],"explicit_hidden":0,"failed_regions":[]}""")
+                        val results = (0 until directoryCount).joinToString(",") { index ->
+                            val title = if (index == 0) "探索测试节目" else if (index % 2 == 0) "城市与声音：一段有很长标题的旅途 $index" else "The Long Weekend — conversations about music and everyday life $index"
+                            val feed = if (index == 0) "https://podcast.example/feed.xml" else "https://podcast.example/feed-$index.xml"
+                            """{"itunes_id":"${12345 + index}","title":"$title","author":"合成工作室 · Studio $index","feed_url":"$feed","artwork_url":"https://images.example.test/directory.png","artwork_key":${if (index % 4 == 3) "null" else "\"directory-fixture\""},"genres":["社会与文化"],"explicit":false,"catalog_podcast_id":null,"followed":${index % 4 == 2}}"""
+                        }
+                        return@synchronized json("""{"results":[$results],"regions":["${request.requestUrl!!.queryParameter("region") ?: "tw"}"],"explicit_hidden":0,"failed_regions":[]}""")
                     }
+                    if (path.endsWith("/podcasts/directory-cover/directory-fixture")) return@synchronized MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(directoryCover))
                     if (path.endsWith("/podcasts/preview")) return@synchronized json("""{"title":"探索测试节目","author":"合成工作室","description":"<p>公开节目简介</p>","episode_count":1,"latest_episodes":[{"title":"探索后的第一集","pub_date":"2026-11-01"}],"catalog_podcast_id":null,"followed":false}""")
                     if (path.endsWith("/podcasts/explore-show")) return@synchronized json("""{"podcast":$podcast,"episodes":[$episode]}""")
                     if (path.endsWith("/podcasts")) {
@@ -223,6 +236,90 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("assistant-paused-player").assertDoesNotExist()
                 assertEquals(entry, vm.state.value.entryId)
             } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun directoryCoverRendersOnPhoneAndTabletInBothThemes() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val accessibilityFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        fun shell(command: String) {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
+        }
+        shell("wm density 160")
+        shell("wm size 390x844")
+        try {
+            Fixture(directoryCount = 18).use { fixture -> val vm = connect(fixture)
+                try {
+                    compose.onNodeWithTag("nav-podcast").performClick()
+                    compose.onNodeWithTag("podcast-open-explore").performClick()
+                    compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("GET /api/v1/podcasts/directory-cover/") } }
+                    for ((width, height) in listOf(390 to 844, 1100 to 840, 840 to 1100)) {
+                        shell("wm size ${width}x$height")
+                        compose.waitUntil(30_000) { InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.screenWidthDp == width }
+                        for (theme in listOf("light", "dark")) {
+                            compose.runOnIdle { vm.settings.appearance(theme) }
+                            compose.onNodeWithTag("podcast-explore-12345").assertIsDisplayed()
+                            if (width >= 840) {
+                                // The first result is previewed automatically; selection never changes list geometry.
+                                compose.waitUntil(10_000) { compose.onAllNodesWithText("公开节目简介").fetchSemanticsNodes().isNotEmpty() }
+                                compose.onNodeWithTag("podcast-explore-results").assertIsDisplayed()
+                                compose.onNodeWithTag("podcast-explore-12345").assertIsSelected()
+                                val before = compose.onNodeWithTag("podcast-explore-results").fetchSemanticsNode().boundsInRoot
+                                val preview = compose.onNodeWithTag("podcast-explore-preview").fetchSemanticsNode().boundsInRoot
+                                assertTrue(preview.left > before.right)
+                                capture("podcast-directory-$width-$theme.png")
+                                compose.onNodeWithTag("podcast-explore-12346").performClick()
+                                compose.onNodeWithTag("podcast-explore-12346").assertIsSelected()
+                                assertEquals(before, compose.onNodeWithTag("podcast-explore-results").fetchSemanticsNode().boundsInRoot)
+                                compose.onNodeWithTag("podcast-explore-12345").performClick()
+                            } else {
+                                capture("podcast-directory-$width-$theme.png")
+                                compose.onNodeWithTag("podcast-explore-12345").performClick()
+                                compose.waitUntil(10_000) { compose.onAllNodesWithText("公开节目简介").fetchSemanticsNodes().isNotEmpty() }
+                                compose.onNodeWithTag("podcast-explore-results").assertDoesNotExist()
+                                capture("podcast-directory-preview-$width-$theme.png")
+                                compose.onNodeWithContentDescription(uiString(R.string.pod_exp_back_to_list)).performClick()
+                            }
+                        }
+                    }
+                    compose.onNodeWithTag("podcast-explore-search").performTextInput("声音")
+                    compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("GET /api/v1/podcasts/search?") } }
+                    compose.waitUntil(10_000) { compose.onAllNodesWithText("公开节目简介").fetchSemanticsNodes().isNotEmpty() }
+                    val previewRequests = fixture.requests.count { it.first.startsWith("POST /api/v1/podcasts/preview") }
+                    shell("wm size 700x1000")
+                    compose.waitUntil(30_000) { InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.screenWidthDp == 700 }
+                    compose.onNodeWithTag("podcast-explore-results").assertDoesNotExist()
+                    compose.onNodeWithTag("podcast-explore-search").assertTextContains("声音")
+                    compose.onNodeWithText("公开节目简介").assertIsDisplayed()
+                    compose.onNodeWithTag("podcast-explore-follow").assertIsDisplayed()
+                    compose.waitUntil(10_000) { automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }
+                    fun followAboveKeyboard(): Pair<android.graphics.Rect, androidx.compose.ui.geometry.Rect>? {
+                        val keyboard = automation.windows.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                            ?: return null
+                        val keyboardBounds = android.graphics.Rect().also(keyboard::getBoundsInScreen)
+                        val followBounds = compose.onNodeWithTag("podcast-explore-follow").fetchSemanticsNode().boundsInRoot
+                        return keyboardBounds to followBounds
+                    }
+                    compose.waitUntil(5_000) { followAboveKeyboard()?.let { it.second.bottom <= it.first.top } == true }
+                    val (keyboardBounds, followBounds) = checkNotNull(followAboveKeyboard())
+                    capture("podcast-directory-split-700-dark.png")
+                    assertTrue("Follow button $followBounds overlaps keyboard $keyboardBounds", followBounds.bottom <= keyboardBounds.top)
+                    shell("wm size 1100x840")
+                    compose.waitUntil(30_000) { InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.screenWidthDp == 1100 }
+                    compose.onNodeWithTag("podcast-explore-results").assertIsDisplayed()
+                    compose.onNodeWithTag("podcast-explore-12345").assertIsSelected()
+                    assertEquals(previewRequests, fixture.requests.count { it.first.startsWith("POST /api/v1/podcasts/preview") })
+                    assertFalse(fixture.podcastAdded)
+                    assertTrue(fixture.requests.none { it.first.contains("images.example.test") })
+                    compose.onNodeWithContentDescription(uiString(R.string.pod_exp_close_explore)).performClick()
+                    compose.onNodeWithTag("podcast-explore").assertDoesNotExist()
+                } finally { cleanup(vm) }
+            }
+        } finally {
+            shell("wm size reset")
+            shell("wm density reset")
+            automation.serviceInfo = automation.serviceInfo.apply { flags = accessibilityFlags }
         }
     }
 

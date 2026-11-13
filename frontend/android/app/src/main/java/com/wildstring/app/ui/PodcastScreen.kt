@@ -11,14 +11,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,11 +28,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.wildstring.app.AppLanguage
@@ -46,13 +40,15 @@ import com.wildstring.app.R
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.text.HtmlCompat
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.wildstring.app.data.PodcastDetail
 import com.wildstring.app.data.PodcastEpisode
 import com.wildstring.app.data.PodcastShowQueuePreference
@@ -121,7 +117,7 @@ fun PodcastChannelPage(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var canAddPodcast by remember(owner) { mutableStateOf(false) }
     val canEditPublisher = state.account?.profile in listOf("owner", "librarian", "editor")
-    val pendingCount = cloud.queue.size + cloud.inbox.size
+    val pendingCount = cloud.queue.size
     val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
     LaunchedEffect(owner, browser.listLoading) {
         try {
@@ -148,123 +144,142 @@ fun PodcastChannelPage(
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (selectedPodcast != null) {
-            pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
-                PodcastDetailView(
-                    podcast = selectedPodcast,
-                    detail = selectedDetail,
-                    positions = positions,
-                    loading = detailLoading,
-                    onBack = vm::back,
-                    onRefresh = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
-                    onPlayEpisode = { ep ->
-                        vm.playPodcastEpisode(ep, selectedPodcast)
-                    },
-                    onQueueEpisode = { ep, next ->
-                        vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
-                    },
-                    onRemoveQueuedEpisode = { epId ->
-                        vm.removePodcastQueueEpisode(epId)
-                        vm.removePodcastInboxEpisode(epId)
-                    },
-                    totalPendingCount = pendingCount,
-                    onPlayPendingQueue = { vm.playPodcastPendingQueue() },
-                    onOpenQueueSheet = { showQueueSheet = true },
-                    isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } || cloud.inbox.any { it.episodeId == epId } },
-                    isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
-                    isEpisodeFavorite = { epId -> epId in favoriteIds },
-                    onToggleFavorite = { episodeId, loved ->
-                        vm.togglePodcastEpisodeFavorite(episodeId, loved)
-                    },
-                    onToggleCompleted = { episodeId, completed ->
-                        vm.markPodcastEpisodeCompleted(episodeId, completed)
-                    },
-                    showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
-                    preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
-                    preferenceError = cloud.preferencesError,
-                    onShowPreference = { action, limit -> vm.updatePodcastShowPreference(selectedPodcast.id, action, limit) },
-                    onRetryPreference = vm::refreshPodcastQueuePreferences,
-                    onFollow = { vm.togglePodcastFollow(selectedPodcast) },
-                    onAutoDownload = { autoDownloadPodcast = selectedPodcast },
-                    onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
-                    onSaveEpisode = { episode -> scope.launch {
-                        try {
-                            val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
-                            if (owner != vm.repository.session.cacheScope()) return@launch
-                            val current = vm.podcastBrowser.state.value.details[episode.podcastId]
-                            current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
-                                if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
-                            })) }
-                            statusMessage = if (!result.saved) AppLanguage.string(R.string.pod_scr_unsaved_shared_retained) else if (result.reused) AppLanguage.string(R.string.pod_scr_saved_reused) else AppLanguage.string(R.string.pod_scr_saved_preparing)
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { statusMessage = friendlyError(e) }
-                    } },
-                    publisher = {
-                        PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
-                            onOpen = {
-                                publisherOriginPodcastId = selectedPodcast.id
-                                selectedPublisherId = it.id
-                                selectedPublisherName = it.name
-                                vm.back()
-                            },
-                            onSaved = { detail ->
-                                vm.podcastBrowser.remember(detail)
-                                statusMessage = AppLanguage.string(R.string.pod_scr_publisher_saved)
-                            })
-                    },
-                )
-            }
-        } else if (selectedPublisher != null) {
-            PodcastPublisherPage(
-                vm = vm,
-                publisher = selectedPublisher,
-                onBack = closePublisher,
-                onSelect = {
-                    if (it.id == publisherOriginPodcastId) {
-                        selectedPublisherId = null
-                        publisherOriginPodcastId = null
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+            Row(Modifier.fillMaxSize().testTag(if (split) "podcast-two-pane" else "podcast-single-pane")) {
+                if (split || (selectedPodcast == null && selectedPublisher == null)) {
+                    Box(if (split) Modifier.width(260.dp).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
+                        pageStates.SaveableStateProvider("list") {
+                            PodcastListView(
+                                vm = vm,
+                                podcasts = podcasts.filter { it.followed },
+                                selectedId = selectedId,
+                                canManage = false,
+                                canAdd = canAddPodcast,
+                                onFollow = vm::togglePodcastFollow,
+                                onAutoDownload = { autoDownloadPodcast = it },
+                                loading = loading,
+                                onSelect = { vm.openPodcast(it.id) },
+                                onAddClick = { exploring = true },
+                                onExplore = { exploring = true },
+                                onRefreshAll = {
+                                    vm.podcastBrowser.reloadList(synchronize = false)
+                                    vm.refreshPodcastCloud()
+                                },
+                                queueHeader = {
+                                    PodcastUnifiedQueueBanner(
+                                        cloud = cloud,
+                                        pendingCount = pendingCount,
+                                        onOpenQueue = { showQueueSheet = true },
+                                        onPlayAll = { vm.playPodcastPendingQueue() },
+                                        onRetry = vm::retryPodcastQueueSync,
+                                    )
+                                },
+                                onDelete = { p ->
+                                    scope.launch {
+                                        try {
+                                            vm.repository.deletePodcast(p.id)
+                                            if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
+                                            statusMessage = AppLanguage.string(R.string.pod_scr_deleted_show, p.title)
+                                        } catch (e: CancellationException) { throw e }
+                                        catch (e: Exception) {
+                                            statusMessage = AppLanguage.string(R.string.pod_scr_delete_failed, e.message.orEmpty())
+                                        }
+                                    }
+                                },
+                            )
+                        }
                     }
-                    vm.openPodcast(it.id)
-                },
-            )
-        } else {
-            pageStates.SaveableStateProvider("list") {
-                PodcastListView(
-                    podcasts = podcasts.filter { it.followed },
-                    canManage = false,
-                    canAdd = canAddPodcast,
-                    onFollow = vm::togglePodcastFollow,
-                    onAutoDownload = { autoDownloadPodcast = it },
-                    loading = loading,
-                    onSelect = { vm.openPodcast(it.id) },
-                    onAddClick = { exploring = true },
-                    onExplore = { exploring = true },
-                    onRefreshAll = {
-                        vm.podcastBrowser.reloadList(synchronize = false)
-                        vm.refreshPodcastCloud()
-                    },
-                    queueHeader = {
-                        PodcastUnifiedQueueBanner(
-                            cloud = cloud,
-                            pendingCount = pendingCount,
-                            onOpenQueue = { showQueueSheet = true },
-                            onPlayAll = { vm.playPodcastPendingQueue() },
-                            onRetry = vm::retryPodcastQueueSync,
-                        )
-                    },
-                    onDelete = { p ->
-                        scope.launch {
-                            try {
-                                vm.repository.deletePodcast(p.id)
-                                if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
-                                statusMessage = AppLanguage.string(R.string.pod_scr_deleted_show, p.title)
-                            } catch (e: CancellationException) { throw e }
-                            catch (e: Exception) {
-                                statusMessage = AppLanguage.string(R.string.pod_scr_delete_failed, e.message.orEmpty())
+                }
+                if (split) VerticalDivider()
+                if (split || selectedPodcast != null || selectedPublisher != null) {
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                        Box(Modifier.widthIn(max = 760.dp).fillMaxSize()) {
+                            if (selectedPodcast != null) {
+                                pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
+                                    PodcastDetailView(
+                                        vm = vm,
+                                        podcast = selectedPodcast,
+                                        detail = selectedDetail,
+                                        positions = positions,
+                                        loading = detailLoading,
+                                        onBack = vm::back,
+                                        onRefresh = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                                        onPlayEpisode = { ep ->
+                                            vm.playPodcastEpisode(ep, selectedPodcast)
+                                        },
+                                        onQueueEpisode = { ep, next ->
+                                            vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
+                                        },
+                                        onRemoveQueuedEpisode = vm::removePodcastQueueEpisode,
+                                        totalPendingCount = pendingCount,
+                                        onPlayPendingQueue = { vm.playPodcastPendingQueue() },
+                                        onOpenQueueSheet = { showQueueSheet = true },
+                                        isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } },
+                                        isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
+                                        isEpisodeFavorite = { epId -> epId in favoriteIds },
+                                        onToggleFavorite = { episodeId, loved ->
+                                            vm.togglePodcastEpisodeFavorite(episodeId, loved)
+                                        },
+                                        onToggleCompleted = { episodeId, completed ->
+                                            vm.markPodcastEpisodeCompleted(episodeId, completed)
+                                        },
+                                        showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
+                                        preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
+                                        preferenceError = cloud.preferencesError,
+                                        onShowPreference = { action, limit -> vm.updatePodcastShowPreference(selectedPodcast.id, action, limit) },
+                                        onRetryPreference = vm::refreshPodcastQueuePreferences,
+                                        onFollow = { vm.togglePodcastFollow(selectedPodcast) },
+                                        onAutoDownload = { autoDownloadPodcast = selectedPodcast },
+                                        onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                                        onSaveEpisode = { episode -> scope.launch {
+                                            try {
+                                                val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
+                                                if (owner != vm.repository.session.cacheScope()) return@launch
+                                                val current = vm.podcastBrowser.state.value.details[episode.podcastId]
+                                                current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
+                                                    if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
+                                                })) }
+                                                statusMessage = if (!result.saved) AppLanguage.string(R.string.pod_scr_unsaved_shared_retained) else if (result.reused) AppLanguage.string(R.string.pod_scr_saved_reused) else AppLanguage.string(R.string.pod_scr_saved_preparing)
+                                            } catch (e: CancellationException) { throw e }
+                                            catch (e: Exception) { statusMessage = friendlyError(e) }
+                                        } },
+                                        publisher = {
+                                            PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
+                                                onOpen = {
+                                                    publisherOriginPodcastId = selectedPodcast.id
+                                                    selectedPublisherId = it.id
+                                                    selectedPublisherName = it.name
+                                                    vm.back()
+                                                },
+                                                onSaved = { detail ->
+                                                    vm.podcastBrowser.remember(detail)
+                                                    statusMessage = AppLanguage.string(R.string.pod_scr_publisher_saved)
+                                                })
+                                        },
+                                    )
+                                }
+                            } else if (selectedPublisher != null) {
+                                PodcastPublisherPage(
+                                    vm = vm,
+                                    publisher = selectedPublisher,
+                                    onBack = closePublisher,
+                                    onSelect = {
+                                        if (it.id == publisherOriginPodcastId) {
+                                            selectedPublisherId = null
+                                            publisherOriginPodcastId = null
+                                        }
+                                        vm.openPodcast(it.id)
+                                    },
+                                )
+                            } else {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(stringResource(R.string.podcast_select_show), Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
-                    },
-                )
+                    }
+                }
             }
         }
 
@@ -303,27 +318,17 @@ fun PodcastChannelPage(
         }
         if (showQueueSheet) {
             PodcastUnifiedQueueSheet(
+                vm = vm,
                 cloud = cloud,
                 followedShows = podcasts.filter { it.followed },
+                playingEpisodeId = state.current?.podcastEpisodeId,
+                playing = state.playing,
+                buffering = state.buffering,
                 onDismiss = { showQueueSheet = false },
-                onPlayEpisode = { episodeId ->
-                    scope.launch {
-                        try {
-                            val episode = vm.repository.podcastEpisode(episodeId)
-                            val detail = vm.repository.podcastDetail(episode.podcastId)
-                            vm.playPodcastEpisode(episode, detail.podcast)
-                            showQueueSheet = false
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { statusMessage = friendlyError(e) }
-                    }
-                },
                 onPlayAll = {
                     vm.playPodcastPendingQueue()
                     showQueueSheet = false
                 },
-                onRemoveQueued = vm::removePodcastQueueEpisode,
-                onRemoveInbox = vm::removePodcastInboxEpisode,
-                onReorder = vm::reorderPodcastPending,
                 onUpdateShowDelivery = { podcastId, action -> vm.updatePodcastShowPreference(podcastId, action, 3) },
                 onBrowse = { showQueueSheet = false; exploring = true },
                 onRetry = vm::retryPodcastQueueSync,
@@ -355,6 +360,7 @@ private fun PodcastUnifiedQueueBanner(
     onRetry: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        if (cloud.queueFull) PodcastQueueFullNote()
         cloud.syncError?.let { message ->
             PodcastStatusCard(message, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
         }
@@ -364,7 +370,7 @@ private fun PodcastUnifiedQueueBanner(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .clickable(onClick = onOpenQueue)
+                .clickable(onClickLabel = stringResource(R.string.pod_scr_open_queue), onClick = onOpenQueue)
                 .testTag("podcast-queue-banner"),
         ) {
             Row(
@@ -406,6 +412,8 @@ private fun PodcastUnifiedQueueBanner(
                         if (pendingCount > 0) stringResource(R.string.pod_scr_pending_summary, pendingCount) else stringResource(R.string.pod_scr_pending_empty_prompt),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (pendingCount > 0) {
@@ -434,21 +442,19 @@ private fun PodcastUnifiedQueueBanner(
 
 @Composable
 private fun PodcastUnifiedQueueSheet(
+    vm: MusicViewModel,
     cloud: PodcastCloudState,
     followedShows: List<PodcastSummary>,
+    playingEpisodeId: String?,
+    playing: Boolean,
+    buffering: Boolean,
     onDismiss: () -> Unit,
-    onPlayEpisode: (String) -> Unit,
     onPlayAll: () -> Unit,
-    onRemoveQueued: (String) -> Unit,
-    onRemoveInbox: (String) -> Unit,
-    onReorder: (List<PodcastQueueRow>) -> Unit,
     onUpdateShowDelivery: (String, String) -> Unit,
     onBrowse: () -> Unit,
     onRetry: () -> Unit,
 ) {
-    val combinedPendingRows = remember(cloud.queueRows, cloud.inboxRows) {
-        mergePendingRows(cloud.queueRows, cloud.inboxRows)
-    }
+    val pendingRows = cloud.queueRows
     var sheetTab by rememberSaveable { mutableStateOf("episodes") }
     val sortedShows = remember(followedShows, cloud.preferences) {
         followedShows.sortedBy { show ->
@@ -459,19 +465,6 @@ private fun PodcastUnifiedQueueSheet(
                 else -> 2
             }
         }
-    }
-
-    val listState = rememberLazyListState()
-    var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-
-    fun dropAt(index: Int, offset: Float): Int {
-        val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return index
-        val center = item.offset + item.size / 2f + offset
-        return listState.layoutInfo.visibleItemsInfo
-            .filter { it.index in combinedPendingRows.indices }
-            .minByOrNull { kotlin.math.abs((it.offset + it.size / 2f) - center) }
-            ?.index ?: index
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -501,7 +494,7 @@ private fun PodcastUnifiedQueueSheet(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
-                    if (sheetTab == "episodes" && combinedPendingRows.isNotEmpty()) {
+                    if (sheetTab == "episodes" && pendingRows.isNotEmpty()) {
                         FilledTonalButton(
                             onClick = onPlayAll,
                             shape = RoundedCornerShape(10.dp),
@@ -514,7 +507,7 @@ private fun PodcastUnifiedQueueSheet(
                 }
 
                 val tabs = listOf(
-                    Triple("episodes", "${stringResource(R.string.podcast_pending_episodes_title)} (${combinedPendingRows.size})", "podcast-queue-tab-episodes"),
+                    Triple("episodes", "${stringResource(R.string.podcast_pending_episodes_title)} (${pendingRows.size})", "podcast-queue-tab-episodes"),
                     Triple("rules", "${stringResource(R.string.podcast_rules_tab)} (${followedShows.size})", "podcast-queue-tab-rules"),
                 )
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -533,130 +526,53 @@ private fun PodcastUnifiedQueueSheet(
                     PodcastStatusCard(it, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
                 }
 
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (sheetTab == "episodes") {
-                        if (combinedPendingRows.isEmpty()) {
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.fillMaxWidth()
+                if (cloud.queueFull) PodcastQueueFullNote()
+                if (sheetTab == "episodes") {
+                    PodcastQueueRows(
+                        rows = pendingRows,
+                        currentEpisodeId = playingEpisodeId,
+                        playing = playing,
+                        buffering = buffering,
+                        onPlay = { row ->
+                            vm.playPodcastPendingQueue(row.episodeId)
+                            onDismiss()
+                        },
+                        onRemove = { vm.removePodcastQueueEpisode(it.episodeId) },
+                        onRestore = vm::restorePodcastQueueRow,
+                        onReorder = vm::reorderPodcastPending,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalContentPadding = 0.dp,
+                        empty = {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Column(
-                                        modifier = Modifier.padding(20.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.podcast_unified_queue_empty),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            TextButton(onClick = onBrowse) {
-                                                Text(stringResource(R.string.podcast_browse_shows))
-                                            }
-                                            if (followedShows.isNotEmpty()) {
-                                                TextButton(onClick = { sheetTab = "rules" }) {
-                                                    Text(stringResource(R.string.pod_scr_configure_rules))
-                                                }
-                                            }
+                                    Text(
+                                        text = stringResource(R.string.podcast_unified_queue_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = onBrowse) { Text(stringResource(R.string.podcast_browse_shows)) }
+                                        if (followedShows.isNotEmpty()) {
+                                            TextButton(onClick = { sheetTab = "rules" }) { Text(stringResource(R.string.pod_scr_configure_rules)) }
                                         }
                                     }
                                 }
                             }
-                        } else {
-                            itemsIndexed(combinedPendingRows, key = { _, entry -> entry.first.episodeId }) { index, entry ->
-                                val (row, isQueue) = entry
-                                val dragging = draggingIndex == index
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .zIndex(if (dragging) 1f else 0f)
-                                        .graphicsLayer { translationY = if (dragging) dragOffset else 0f }
-                                        .pointerInput(combinedPendingRows) {
-                                            detectDragGesturesAfterLongPress(
-                                                onDragStart = { draggingIndex = index; dragOffset = 0f },
-                                                onDrag = { change, amount -> change.consume(); dragOffset += amount.y },
-                                                onDragEnd = {
-                                                    val from = draggingIndex
-                                                    val target = if (from == null) index else dropAt(from, dragOffset)
-                                                    if (from != null && target != from) {
-                                                        val next = combinedPendingRows.toMutableList()
-                                                        val moved = next.removeAt(from)
-                                                        next.add(target, moved)
-                                                        onReorder(next.map { it.first })
-                                                    }
-                                                    draggingIndex = null
-                                                    dragOffset = 0f
-                                                },
-                                                onDragCancel = { draggingIndex = null; dragOffset = 0f },
-                                            )
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DragHandle,
-                                            contentDescription = stringResource(R.string.podcast_pending_drag_handle),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                text = row.title.ifBlank { stringResource(R.string.pod_scr_episode_fallback) },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            if (row.showTitle.isNotBlank()) {
-                                                Text(
-                                                    text = row.showTitle,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        }
-                                        Spacer(Modifier.width(8.dp))
-                                        FilledTonalButton(
-                                            onClick = { onPlayEpisode(row.episodeId) },
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Text(stringResource(R.string.pod_scr_play), fontSize = 12.sp, maxLines = 1, softWrap = false)
-                                        }
-                                        Spacer(Modifier.width(6.dp))
-                                        IconButton(
-                                            onClick = {
-                                                if (isQueue) onRemoveQueued(row.episodeId) else onRemoveInbox(row.episodeId)
-                                            },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = stringResource(R.string.pod_scr_remove_action),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
+                        },
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         if (sortedShows.isEmpty()) {
                             item {
                                 Surface(
@@ -709,24 +625,7 @@ private fun PodcastUnifiedQueueSheet(
                                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            if (show.coverUrl.isNotBlank()) {
-                                                AsyncImage(
-                                                    model = ImageRequest.Builder(LocalContext.current)
-                                                        .data(show.coverUrl)
-                                                        .crossfade(true)
-                                                        .build(),
-                                                    contentDescription = show.title,
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                )
-                                            } else {
-                                                Icon(
-                                                    Icons.Default.Podcasts,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
+                                            PodcastArtworkImage(vm, show, Modifier.fillMaxSize())
                                         }
                                         Spacer(Modifier.width(12.dp))
                                         Column(Modifier.weight(1f)) {
@@ -810,39 +709,86 @@ private fun PodcastStatusCard(message: String, onAction: () -> Unit, action: Str
     }
 }
 
+
+/** Widest follow-button label in the current locale, including padding and the menu chevron. */
 @Composable
-private fun PodcastShowPreferenceSection(
+private fun podcastFollowButtonMinWidth(): androidx.compose.ui.unit.Dp {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val style = TextStyle(fontSize = 13.sp)
+    val followed = stringResource(R.string.pod_exp_followed)
+    val labels = listOf(
+        stringResource(R.string.pod_scr_follow_show),
+        followed,
+        followed + " · " + stringResource(R.string.podcast_action_queue_last_short),
+        followed + " · " + stringResource(R.string.podcast_action_queue_next_short),
+        followed + " · " + stringResource(R.string.podcast_action_ignore_short),
+    )
+    val textMax = labels.maxOf { label ->
+        with(density) {
+            measurer.measure(AnnotatedString(label), style = style, softWrap = false, maxLines = 1).size.width.toDp()
+        }
+    }
+    return textMax + 12.dp + 6.dp + 18.dp
+}
+
+/** Follow state plus everything that only matters once a show is followed: new-episode rule, auto download, unfollow. */
+@Composable
+internal fun PodcastFollowedMenu(
     preference: PodcastShowQueuePreference?,
     loading: Boolean,
     error: String?,
     onChange: (String, Int) -> Unit,
     onRetry: () -> Unit,
+    onAutoDownload: () -> Unit,
+    onUnfollow: () -> Unit,
+    modifier: Modifier = Modifier,
+    fillWidth: Boolean = false,
 ) {
-    val current = preference ?: PodcastShowQueuePreference()
-    val normalizedAction = normalizeDeliveryAction(current.action)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("podcast-new-episode"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.podcast_new_episode_action), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        when {
-            loading -> Box(Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh))
-            error != null && preference == null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
-            else -> {
-                if (error != null) PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
-                val options = listOf(
-                    "queue_last" to R.string.podcast_action_queue_last_short,
-                    "queue_next" to R.string.podcast_action_queue_next_short,
-                    "ignore" to R.string.podcast_action_ignore_short,
-                )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    options.forEachIndexed { index, (action, label) ->
-                        SegmentedButton(
-                            selected = normalizedAction == action,
-                            onClick = { onChange(action, current.autoLimit) },
-                            shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                            label = { Text(stringResource(label), maxLines = 1, softWrap = false) },
-                        )
-                    }
+    var open by remember { mutableStateOf(false) }
+    val action = preference?.let { normalizeDeliveryAction(it.action) }
+    fun label(value: String) = when (value) {
+        "queue_next" -> R.string.podcast_action_queue_next_short
+        "ignore" -> R.string.podcast_action_ignore_short
+        else -> R.string.podcast_action_queue_last_short
+    }
+    Box(modifier) {
+        OutlinedButton(
+            onClick = { open = true },
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
+            modifier = Modifier.height(40.dp).widthIn(min = podcastFollowButtonMinWidth()).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
+        ) {
+            // The current rule rides on the button; "仅关注" is the quiet default and adds nothing.
+            Text(
+                stringResource(R.string.pod_exp_followed) + if (action != null && action != "ignore") " · " + stringResource(label(action)) else "",
+                fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(open, { open = false }, Modifier.testTag("podcast-follow-options")) {
+            Text(
+                stringResource(R.string.podcast_new_episode_summary),
+                Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                error != null -> DropdownMenuItem(text = { Text(stringResource(R.string.podcast_sync_retry)) }, onClick = { onRetry() })
+                loading || preference == null -> Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
+                else -> listOf("queue_last", "queue_next", "ignore").forEach { value ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(label(value))) },
+                        trailingIcon = { if (action == value) Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) },
+                        onClick = { open = false; if (action != value) onChange(value, preference.autoLimit) },
+                        modifier = Modifier.testTag("podcast-follow-option-$value"),
+                    )
                 }
             }
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_auto_download)) }, onClick = { open = false; onAutoDownload() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = { open = false; onUnfollow() })
         }
     }
 }
@@ -869,6 +815,7 @@ private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: Stri
 
 @Composable
 private fun PodcastListView(
+    vm: MusicViewModel,
     podcasts: List<PodcastSummary>,
     canManage: Boolean,
     canAdd: Boolean,
@@ -881,6 +828,7 @@ private fun PodcastListView(
     onRefreshAll: () -> Unit,
     onDelete: (PodcastSummary) -> Unit,
     queueHeader: @Composable () -> Unit = {},
+    selectedId: String? = null,
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -908,57 +856,30 @@ private fun PodcastListView(
             }
         }
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", stringResource(R.string.pod_scr_refresh_subscriptions)) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val columns = if (maxWidth >= 720.dp) 2 else 1
-                val rows = remember(podcasts, columns) { podcasts.chunked(columns) }
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().testTag("podcast-list"),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item { queueHeader() }
-                    if (podcasts.isEmpty() && !loading) item {
-                        Box(Modifier.fillParentMaxSize()) {
-                            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
-                                TextButton(onExplore) { Text(if (canAdd) stringResource(R.string.pod_scr_explore_or_add) else stringResource(R.string.pod_scr_explore_trending)) }
-                            }
-                        }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().testTag("podcast-list"),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp, top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item { queueHeader() }
+                if (podcasts.isEmpty() && !loading) item {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
+                        TextButton(onExplore) { Text(if (canAdd) stringResource(R.string.pod_scr_explore_or_add) else stringResource(R.string.pod_scr_explore_trending)) }
                     }
-                    items(rows, key = { row -> row.first().id }) { row ->
-                        if (columns == 1) {
-                            val podcast = row.first()
-                            PodcastCardItem(
-                                podcast = podcast,
-                                onClick = { onSelect(podcast) },
-                                onDelete = { onDelete(podcast) },
-                                onFollow = { onFollow(podcast) },
-                                onAutoDownload = { onAutoDownload(podcast) },
-                                canManage = canManage,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                row.forEach { podcast ->
-                                    PodcastCardItem(
-                                        podcast = podcast,
-                                        onClick = { onSelect(podcast) },
-                                        onDelete = { onDelete(podcast) },
-                                        onFollow = { onFollow(podcast) },
-                                        onAutoDownload = { onAutoDownload(podcast) },
-                                        canManage = canManage,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                if (row.size < columns) {
-                                    Spacer(Modifier.weight((columns - row.size).toFloat()))
-                                }
-                            }
-                        }
-                    }
+                }
+                items(podcasts, key = { it.id }) { podcast ->
+                    PodcastCardItem(
+                        vm = vm,
+                        podcast = podcast,
+                        onClick = { onSelect(podcast) },
+                        onDelete = { onDelete(podcast) },
+                        onFollow = { onFollow(podcast) },
+                        onAutoDownload = { onAutoDownload(podcast) },
+                        canManage = canManage,
+                        selected = podcast.id == selectedId,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -967,6 +888,7 @@ private fun PodcastListView(
 
 @Composable
 private fun PodcastCardItem(
+    vm: MusicViewModel,
     podcast: PodcastSummary,
     onClick: () -> Unit,
     onDelete: () -> Unit,
@@ -974,14 +896,15 @@ private fun PodcastCardItem(
     onAutoDownload: () -> Unit,
     canManage: Boolean,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.clickable(onClick = onClick),
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.testTag("podcast-show-${podcast.id}").semantics { this.selected = selected }.clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -994,24 +917,7 @@ private fun PodcastCardItem(
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
-                if (podcast.coverUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(podcast.coverUrl)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = podcast.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Podcasts,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(30.dp),
-                    )
-                }
+                PodcastArtworkImage(vm, podcast, Modifier.fillMaxSize())
             }
 
             Spacer(Modifier.width(14.dp))
@@ -1187,6 +1093,7 @@ private fun EmptyPodcastState(
 
 @Composable
 private fun PodcastDetailView(
+    vm: MusicViewModel,
     podcast: PodcastSummary,
     detail: PodcastDetail?,
     positions: Map<String, EpisodeProgress>,
@@ -1283,24 +1190,7 @@ private fun PodcastDetailView(
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                if (podcast.coverUrl.isNotBlank()) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(podcast.coverUrl)
-                                            .crossfade(true)
-                                            .build(),
-                                        contentDescription = podcast.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.Podcasts,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(44.dp),
-                                    )
-                                }
+                                PodcastArtworkImage(vm, podcast, Modifier.fillMaxSize())
                             }
 
                             Spacer(Modifier.width(16.dp))
@@ -1357,49 +1247,44 @@ private fun PodcastDetailView(
 
                         Spacer(Modifier.height(14.dp))
 
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // One action row: the primary play action, the queue, and follow state with its secondary rules in a menu.
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (totalPendingCount > 0) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilledTonalButton(
-                                        onClick = onPlayPendingQueue,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
-                                    OutlinedButton(
-                                        onClick = onOpenQueueSheet,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
-                                }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilledTonalButton(
-                                    onClick = onFollow,
+                                Button(
+                                    onClick = onPlayPendingQueue,
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
                                     modifier = Modifier.weight(1f).height(40.dp),
                                 ) {
-                                    Text(if (podcast.followed) stringResource(R.string.pod_scr_unfollow_show) else stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
-                                if (podcast.followed) {
-                                    OutlinedButton(
-                                        onClick = onAutoDownload,
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp),
-                                        modifier = Modifier.weight(1f).height(40.dp),
-                                    ) {
-                                        Text(stringResource(R.string.pod_scr_auto_download), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                    }
+                                OutlinedButton(
+                                    onClick = onOpenQueueSheet,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(40.dp),
+                                ) {
+                                    Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
                             }
+                            if (!podcast.followed) {
+                                FilledTonalButton(
+                                    onClick = onFollow,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = (if (totalPendingCount > 0) Modifier else Modifier.weight(1f)).height(40.dp).widthIn(min = podcastFollowButtonMinWidth()),
+                                ) {
+                                    Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                }
+                            } else PodcastFollowedMenu(
+                                preference = showPreference, loading = preferenceLoading, error = preferenceError,
+                                onChange = onShowPreference, onRetry = onRetryPreference,
+                                onAutoDownload = onAutoDownload, onUnfollow = onFollow,
+                                modifier = if (totalPendingCount > 0) Modifier else Modifier.weight(1f),
+                                fillWidth = totalPendingCount <= 0,
+                            )
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -1422,13 +1307,6 @@ private fun PodcastDetailView(
                             )
                         }
                     }
-                    PodcastShowPreferenceSection(
-                        preference = showPreference,
-                        loading = preferenceLoading,
-                        error = preferenceError,
-                        onChange = onShowPreference,
-                        onRetry = onRetryPreference,
-                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1443,8 +1321,7 @@ private fun PodcastDetailView(
                     if (episodeScope == "saved") Text(stringResource(R.string.pod_scr_saved_hint),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier

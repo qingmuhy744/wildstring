@@ -1,9 +1,6 @@
 package com.wildstring.app.data
 
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.CookieJar
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -13,12 +10,6 @@ fun podcastEpisodeId(trackId: String?): String? =
 
 fun podcastArtworkUrl(value: String): String? = value.toHttpUrlOrNull()
     ?.takeIf { it.username.isEmpty() && it.password.isEmpty() }?.toString()
-
-/** Public RSS artwork must never use the authenticated server connection or its cookies. */
-fun podcastArtworkClient(): OkHttpClient = OkHttpClient.Builder()
-    .cookieJar(CookieJar.NO_COOKIES)
-    .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
-    .build()
 
 data class PodcastTimestamp(val start: Int, val end: Int, val positionMs: Long)
 

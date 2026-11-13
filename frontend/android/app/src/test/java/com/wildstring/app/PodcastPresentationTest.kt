@@ -2,9 +2,6 @@ package com.wildstring.app
 
 import com.google.gson.Gson
 import com.wildstring.app.data.*
-import okhttp3.Request
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -53,20 +50,7 @@ class PodcastPresentationTest {
         assertTrue(PlaybackRequest.isAac(PlaybackRequest.url("https://music.example.com/api/v1/tracks/music-1/stream", 192)))
     }
 
-    @Test fun publicArtworkNeverRetainsCookiesOrAddsServerCredentials() {
-        MockWebServer().use { origin -> MockWebServer().use { cdn ->
-            origin.start(); cdn.start()
-            origin.enqueue(MockResponse().setResponseCode(302).addHeader("Set-Cookie", "wildstring_session=private; Path=/").addHeader("Location", cdn.url("/cover.jpg")))
-            cdn.enqueue(MockResponse().setBody("image"))
-            val client = podcastArtworkClient()
-            client.newCall(Request.Builder().url(origin.url("/cover")).build()).execute().use { assertTrue(it.isSuccessful) }
-            listOf(origin.takeRequest(), cdn.takeRequest()).forEach { request ->
-                assertNull(request.getHeader("Cookie"))
-                assertNull(request.getHeader("Authorization"))
-                assertNull(request.getHeader("X-Wildstring-Client"))
-            }
-            assertTrue(client.cookieJar.loadForRequest(origin.url("/")).isEmpty())
-        } }
+    @Test fun invalidPodcastLinksAreRejected() {
         listOf("javascript:alert(1)", "file:///data/private", "https://user:password@example.com/image").forEach { assertNull(podcastArtworkUrl(it)) }
     }
 

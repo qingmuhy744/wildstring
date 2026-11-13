@@ -14,7 +14,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 
 ## 版本和签名
 
-显示名称「野弦 / WildString」，debug 显示「野弦 Dev」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.dev`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，0.8.0 为 36，0.8.1 为 37，0.8.2 为 38，0.8.3 为 39，0.8.4 为 40，0.8.5 为 41，0.8.6 为 42，0.8.7 为 43，0.8.8 为 44，0.8.9 为 45，0.8.10 为 46，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
+显示名称「野弦 / WildString」，debug 显示「野弦 Dev」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.dev`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，0.8.0 为 36，0.8.1 为 37，0.8.2 为 38，0.8.3 为 39，0.8.4 为 40，0.8.5 为 41，0.8.6 为 42，0.8.7 为 43，0.8.8 为 44，0.8.9 为 45，0.8.10 为 46，0.8.11 为 47，0.8.12 为 48，0.8.13 为 49，0.8.14 为 50，0.8.15 为 51，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
 同时更新 Python、Web、Android 版本及对应锁文件：
 
@@ -38,6 +38,11 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 | `v0.8.8` | `0.8.8` | `0.8.8` |
 | `v0.8.9` | `0.8.9` | `0.8.9` |
 | `v0.8.10` | `0.8.10` | `0.8.10` |
+| `v0.8.11` | `0.8.11` | `0.8.11` |
+| `v0.8.12` | `0.8.12` | `0.8.12` |
+| `v0.8.13` | `0.8.13` | `0.8.13` |
+| `v0.8.14` | `0.8.14` | `0.8.14` |
+| `v0.8.15` | `0.8.15` | `0.8.15` |
 | `v0.1.0-rc.1` | `0.1.0rc1` | `0.1.0-rc.1` |
 | `v0.1.0-dev.1` | `0.1.0.dev1` | `0.1.0-dev.1` |
 
@@ -66,10 +71,11 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 发布产物：
 
 - `wildstring-X.Y.Z-release.apk`：固定签名、R8 优化、无内置测试曲库的 Android 安装包。
+- `wildstring-X.Y.Z-mapping.txt`：对应正式包的 R8 混淆映射，用于还原崩溃堆栈。
 - `wildstring-web-vX.Y.Z.zip`：Web 静态文件、LICENSE 与使用说明；运行时需要后端。
 - `WildString-macOS.dmg`：原生 Mac 客户端，最低 macOS 14；是否经过 Developer ID 签名与公证取决于 Apple secrets 配置，发布说明须明确实际状态。正式版发布且配置了 `HOMEBREW_TAP_TOKEN` 时，工作流会通过 [`scripts/generate_homebrew_cask.py`](../scripts/generate_homebrew_cask.py) 自动更新 `qingmuhy744/homebrew-tap` 的 `Casks/wildstring.rb`。
 - 数据源插件 ZIP：按各插件独立版本打包。
-- `SHA256SUMS`：APK、Web ZIP、插件 ZIP、Mac DMG 与公开签名指纹文件的 SHA-256。
+- `SHA256SUMS`：APK、R8 mapping、Web ZIP、插件 ZIP、Mac DMG 与公开签名指纹文件的 SHA-256。
 - `android-signing-certificate.sha256`：Android 发布签名的公开证书指纹。
 - `ghcr.io/qingmuhy744/wildstring:vX.Y.Z`：同时包含后端、Web 与 FFmpeg 的双架构镜像；同时发布版本标签和提交标签。正式版更新 `latest`，预发布不更新。
 

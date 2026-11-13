@@ -189,9 +189,12 @@ struct MacDiscoverView: View {
     .background(MacTheme.canvas)
     .navigationTitle(L10n("macRec.dailyRecommendations"))
     .toolbar {
-      Button(refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew")) { Task { await refresh() } }
-        .disabled(refreshing || section != "daily")
-      Button(L10n("macRec.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }.disabled(loading)
+      QuietToolbarItem {
+        MacToolbarTextButton(title: refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew"), accent: true, isDisabled: refreshing || section != "daily") { Task { await refresh() } }
+      }
+      QuietToolbarItem {
+        MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macRec.refresh"), isDisabled: loading) { Task { await load() } }
+      }
     }
     .sheet(isPresented: $saving) {
       MacAddToPlaylistSheet(client: client, tracks: tracks) { message = $0 }
@@ -379,7 +382,7 @@ struct MacAddToPlaylistSheet: View {
         Spacer()
         Button(L10n("macRec.cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
         Button(busy ? L10n("macRec.adding") : L10n("macRec.confirmAdd")) { Task { await save() } }
-          .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .buttonStyle(.borderedProminent).tint(MacTheme.accentDeep).keyboardShortcut(.defaultAction)
           .disabled(
             tracks.isEmpty || busy || loading
               || (target == "new" && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))

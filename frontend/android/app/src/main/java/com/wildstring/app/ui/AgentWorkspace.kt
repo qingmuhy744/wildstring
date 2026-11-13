@@ -10,6 +10,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
@@ -355,8 +358,16 @@ internal fun summarizeConversationTitle(userText: String): String {
     val links = LocalUriHandler.current
     var showSummary by remember { mutableStateOf(false) }
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
-    var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connection by remember { mutableStateOf<String?>(null) }
-    var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
+    var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connection by rememberSaveable { mutableStateOf<String?>(null) }
+    var input by rememberSaveable { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
+    var selectedConversationId by rememberSaveable { mutableStateOf<String?>(null) }
+    var restoringConversation by remember { mutableStateOf(selectedConversationId != null) }
+    val messagesScroll = rememberLazyListState()
+    val historyScroll = rememberLazyListState()
+    fun selectConversation(value: JsonObject?) {
+        conversation = value
+        selectedConversationId = value?.text("id")
+    }
     var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
     var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     var conversationMenu by remember { mutableStateOf(false) }
@@ -370,7 +381,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                     val summarized = summarizeConversationTitle(firstUser)
                     if (summarized.isNotBlank() && summarized != "\u65b0\u5bf9\u8bdd" && summarized != AppLanguage.string(R.string.agent_ws_conversation_new)) {
                         val patched = vm.agent.request("conversations/${item.text("id")}", "PATCH", jsonBody("title" to summarized))
-                        if (conversation?.text("id") == item.text("id")) conversation = patched
+                        if (conversation?.text("id") == item.text("id")) selectConversation(patched)
                         patched
                     } else item
                 }.getOrDefault(item)
@@ -381,11 +392,13 @@ internal fun summarizeConversationTitle(userText: String): String {
         action.run {
             val loadedConnections = vm.agent.all("connections")
             connections = loadedConnections
+            selectedConversationId?.let { selectConversation(vm.agent.request("conversations/$it")) }
             conversations = loadConversationsWithSummarizedTitles()
             if (connection == null) {
                 connection = loadedConnections.firstOrNull { it.flag("enabled") }?.text("id")
             }
         }
+        restoringConversation = false
         if (action.message == AppLanguage.string(R.string.completed) || action.message == "\u5df2\u5b8c\u6210") action.message = null
     }
     val running = conversation?.objects("runs")?.any { it.text("status") == "running" } == true
@@ -398,351 +411,22 @@ internal fun summarizeConversationTitle(userText: String): String {
             delay(650)
             try {
                 val latest = vm.agent.request("conversations/$id")
-                if (conversation?.text("id") == id) conversation = latest
+                if (conversation?.text("id") == id) selectConversation(latest)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* The send operation retains its diagnostic. */ }
         }
     }
     val pageChrome = onNotifications != null || onSettings != null
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (pageChrome && playback.canGoBack) {
-                IconButton(vm::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.agent_ws_back)) }
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                AgentConnectionChoice(connections, connection, !action.busy, compact = true) { connection = it }
-            }
-            TextButton(
-                { scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); history = true; action.message = null } } },
-                enabled = !action.busy,
-                modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-            ) { Text(stringResource(R.string.agent_ws_history), style = MaterialTheme.typography.labelLarge) }
-            TextButton(
-                { conversation = null; input = "" },
-                enabled = !action.busy,
-                modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-            ) { Text(stringResource(R.string.agent_ws_new_chat), style = MaterialTheme.typography.labelLarge) }
-            if (!pageChrome && conversation != null) {
-                IconButton({ scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_conversation)) }
-                IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, stringResource(R.string.agent_ws_delete_conversation)) }
-            }
-            if (pageChrome) {
-                onPlayer?.let { open ->
-                    IconButton(open, Modifier.testTag("assistant-paused-player")) {
-                        Icon(Icons.Default.PlayArrow, stringResource(R.string.agent_ws_open_paused_player))
-                    }
-                }
-                if (conversation != null) {
-                    Box {
-                        IconButton({ conversationMenu = true }, enabled = !action.busy) {
-                            Icon(Icons.Default.MoreVert, stringResource(R.string.agent_ws_more))
-                        }
-                        DropdownMenu(conversationMenu, { conversationMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.agent_ws_refresh)) },
-                                leadingIcon = { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_conversation)) },
-                                enabled = !action.busy,
-                                onClick = {
-                                    conversationMenu = false
-                                    scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.agent_ws_delete)) },
-                                leadingIcon = { Icon(Icons.Default.DeleteOutline, stringResource(R.string.agent_ws_delete_conversation)) },
-                                enabled = !action.busy,
-                                onClick = { conversationMenu = false; deleting = conversation; action.message = null },
-                            )
-                        }
-                    }
-                }
-                onNotifications?.let { open ->
-                    IconButton(open, Modifier.testTag("open-notifications")) {
-                        BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
-                            Icon(Icons.Default.NotificationsNone, stringResource(R.string.agent_ws_notifications))
-                        }
-                    }
-                }
-                onSettings?.let { open -> IconButton(open) { Icon(Icons.Default.Settings, stringResource(R.string.agent_ws_settings)) } }
-            }
-        }
-        val allMessages = conversation?.objects("messages") ?: emptyList()
-        val lastAssistantId = allMessages.lastOrNull { it.text("role") == "assistant" }?.text("id")
-    var activeGapData by remember { mutableStateOf<CatalogGapUiData?>(null) }
-    var gapLoading by remember { mutableStateOf(false) }
-
-
-    fun triggerGapCheck(artistName: String) {
-        scope.launch {
-            gapLoading = true
-            try {
-                val json = vm.repository.checkCatalogGaps(artistName)
-                val artist = json.get("artist")?.asString ?: artistName
-                val totalTarget = json.get("total_target")?.asInt ?: 10
-                val matchedCount = json.get("matched_count")?.asInt ?: 0
-                val missingCount = json.get("missing_count")?.asInt ?: 0
-                val coveragePercent = json.get("coverage_percent")?.asInt ?: 0
-                val summary = json.get("summary")?.asString ?: ""
-                val matched = json.getAsJsonArray("matched")?.mapNotNull { el ->
-                    if (!el.isJsonObject) null else {
-                        val obj = el.asJsonObject
-                        MatchedTrackUi(
-                            title = obj.get("title")?.asString ?: "",
-                            trackId = obj.get("track_id")?.asString ?: "",
-                            album = obj.get("album")?.asString,
-                            format = obj.get("format")?.asString ?: "",
-                        )
-                    }
-                } ?: emptyList()
-                val missing = json.getAsJsonArray("missing")?.mapNotNull { el ->
-                    if (!el.isJsonObject) null else {
-                        val obj = el.asJsonObject
-                        MissingTrackUi(
-                            title = obj.get("title")?.asString ?: "",
-                            album = obj.get("album")?.asString ?: "",
-                            year = obj.get("year")?.asString ?: "",
-                            rank = obj.get("rank")?.asInt ?: 0,
-                        )
-                    }
-                } ?: emptyList()
-                activeGapData = CatalogGapUiData(artist, totalTarget, matchedCount, missingCount, coveragePercent, matched, missing, summary)
-            } catch (_: Exception) {
-            } finally {
-                gapLoading = false
-            }
-        }
-    }
-
-        fun sendMessage(text: String) {
-            val content = text.trim()
-            if (content.isEmpty() || action.busy || running) return
-            if (content.contains("查漏补缺") || content.contains("缺哪几首") || content.contains("代表作") || content.contains("全网榜单")) {
-                val targetArtist = when {
-                    content.contains("周杰伦") -> "周杰伦"
-                    content.contains("陈奕迅") -> "陈奕迅"
-                    content.contains("林俊杰") -> "林俊杰"
-                    content.contains("王菲") -> "王菲"
-                    content.contains("落日飞车") -> "落日飞车"
-                    else -> "许嵩"
-                }
-                triggerGapCheck(targetArtist)
-            }
-            scope.launch { action.run {
-                var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("title" to summarizeConversationTitle(content), "connection_id" to connection)).also { conversation = it }
-                val id = current.text("id")
-                try {
-                    current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection))
-                    conversation = current
-                    input = ""
-                    action.message = null
-                    vm.agent.refreshInbox()
-                } catch (error: CancellationException) { throw error }
-                catch (error: Exception) {
-                    try { conversation = vm.agent.request("conversations/$id") }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { /* The original operation still supplies its diagnostic ID. */ }
-                    throw error
-                }
-            } }
-        }
-
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 2.dp, bottom = 4.dp + handoffClearance)) {
-            conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
-                TextButton({ showSummary = !showSummary }) { Text(stringResource(R.string.agent_ws_context_summary_collapsed)) }
-                if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_clear_summary)) } }
-            } }
-            if (conversation == null) item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(28.dp)) {
-                                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer) }
-                            }
-                            Text(stringResource(R.string.agent_ws_assistant_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        }
-                        Text(stringResource(R.string.agent_ws_assistant_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(stringResource(R.string.agent_ws_assistant_prompt_examples_heading), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
-                                stringResource(R.string.agent_ws_prompt_example_1),
-                                stringResource(R.string.agent_ws_prompt_example_2),
-                                stringResource(R.string.agent_ws_prompt_example_3),
-                                stringResource(R.string.agent_ws_prompt_example_4),
-                                stringResource(R.string.agent_ws_prompt_example_5),
-                            ).forEach { prompt ->
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { sendMessage(prompt) },
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.agent_ws_quote_prompt, prompt),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Icon(
-                                            Icons.Default.ArrowOutward,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (activeGapData != null) item {
-                CatalogGapCard(
-                    data = activeGapData!!,
-                    onPlayTrack = { trackId ->
-                        scope.launch {
-                            try {
-                                val track = vm.repository.track(trackId)
-                                vm.play(listOf(track), 0)
-                            } catch (_: Exception) {}
-                        }
-                    },
-                )
-            }
-            items(allMessages, key = { it.text("id") }) { message ->
-                val isAssistant = message.text("role") == "assistant"
-                val isLatestAssistant = isAssistant && message.text("id") == lastAssistantId
-                if (isAssistant) {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (message.flag("partial")) Text(stringResource(R.string.agent_ws_generating_partial), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SelectionContainer { AssistantMarkdown(message.text("content")) }
-                        message.objects("sources").forEach { source ->
-                            source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.clickable { runCatching { links.openUri(url) }.onFailure { action.message = AppLanguage.string(R.string.agent_ws_cannot_open_source) } },
-                                ) {
-                                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                                        Text(stringResource(R.string.agent_ws_source_label, source.text("title").ifBlank { url }), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
-                            }
-                        }
-                        if (isLatestAssistant && !message.flag("partial") && !running) {
-                            val suggestions = remember(message.text("content")) { generateFollowUpSuggestions(message.text("content")) }
-                            if (suggestions.isNotEmpty()) {
-                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    suggestions.forEach { (label, prompt) ->
-                                        SuggestionChip(
-                                            onClick = { sendMessage(prompt) },
-                                            label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                            ),
-                                            border = null,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 300.dp)) {
-                            SelectionContainer {
-                                Text(message.text("content"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
-                }
-            }
-            conversation?.objects("runs")?.forEach { run ->
-                val failed = run.text("error_code").isNotBlank() || run.text("status") in setOf("failed", "interrupted")
-                val fallback = run.text("status") == "local_fallback"
-                val drafts = run.getAsJsonArray("draft_ids")
-                if (!failed && !fallback && (drafts == null || drafts.size() == 0)) return@forEach
-                item(key = "run-${run.text("id")}") {
-                    if (fallback) Text(stringResource(R.string.agent_ws_local_search_fallback), style = MaterialTheme.typography.bodySmall)
-                    if (failed) Text(stringResource(R.string.agent_ws_run_failed_status, run.text("status"), run.text("error_code")), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    if (failed) AgentTrace(run)
-                    drafts?.forEach { draft ->
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.clickable { openDraft(draft.asString) },
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
-                                Text(stringResource(R.string.agent_ws_draft_generated_banner), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                        }
-                    }
-                }
-            }
+    val historyContent: @Composable (Modifier) -> Unit = { modifier ->
+        LazyColumn(modifier.testTag("agent-history"), state = historyScroll) {
             item {
-                if (!action.busy && !action.message.isNullOrBlank() && action.message != AppLanguage.string(R.string.completed) && action.message != "\u5df2\u5b8c\u6210") ActionStatus(action)
+                if (action.busy || (!action.message.isNullOrBlank() && action.message != AppLanguage.string(R.string.completed) && action.message != "\u5df2\u5b8c\u6210")) ActionStatus(action)
             }
-        }
-        conversation?.objects("runs")?.firstOrNull { it.text("status") == "running" }?.let { run ->
-            Text(when (run.text("stage")) { "search" -> stringResource(R.string.agent_ws_stage_search); "tools" -> stringResource(R.string.agent_ws_stage_tools); "writing" -> stringResource(R.string.agent_ws_stage_writing); else -> stringResource(R.string.agent_ws_stage_analyzing) }, Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
-            TextField(
-                input,
-                { input = it },
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("agent-chat-input"),
-                placeholder = { Text(stringResource(R.string.agent_ws_chat_placeholder)) },
-                shape = RoundedCornerShape(24.dp),
-                maxLines = 4,
-                enabled = !action.busy && !running,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { sendMessage(input) }),
-                trailingIcon = {
-                    IconButton(
-                        onClick = { sendMessage(input) },
-                        enabled = !action.busy && !running && input.isNotBlank(),
-                        modifier = Modifier.testTag("agent-chat-send"),
-                    ) {
-                        if (action.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.agent_ws_chat_send))
-                    }
-                },
-                colors = TextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                ),
-            )
-        }
-    }
-    if (history) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text(stringResource(R.string.agent_ws_history_dialog_title)) }, text = {
-        LazyColumn(Modifier.heightIn(max = 400.dp).testTag("agent-history")) {
-            item { ActionStatus(action) }
-            if (conversations.isEmpty()) item { AgentEmpty(stringResource(R.string.agent_ws_empty_history)) }
+            if (conversations.isEmpty() && !action.busy) item { AgentEmpty(stringResource(R.string.agent_ws_empty_history)) }
             items(conversations, key = { it.text("id") }) { item ->
                 ListItem(headlineContent = { Text(item.text("title"), maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    modifier = Modifier.testTag("history-open-${item.text("id")}").clickable(enabled = !action.busy) { history = false; scope.launch { action.run { conversation = vm.agent.request("conversations/${item.text("id")}"); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } },
+                    colors = ListItemDefaults.colors(containerColor = if (conversation?.text("id") == item.text("id")) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
+                    modifier = Modifier.testTag("history-open-${item.text("id")}").semantics { selected = conversation?.text("id") == item.text("id") }.clickable(enabled = !action.busy) { history = false; scope.launch { action.run { selectConversation(vm.agent.request("conversations/${item.text("id")}")); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } },
                     trailingContent = { Box {
                         IconButton({ historyMenu = item.text("id") }, enabled = !action.busy, modifier = Modifier.testTag("history-actions-${item.text("id")}")) { Icon(Icons.Default.MoreVert, stringResource(R.string.agent_ws_conversation_actions, item.text("title"))) }
                         DropdownMenu(historyMenu == item.text("id"), { historyMenu = null }) {
@@ -753,20 +437,378 @@ internal fun summarizeConversationTitle(userText: String): String {
                 )
             }
         }
-    }, confirmButton = { TextButton({ history = false }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_close)) } })
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+        Row(Modifier.fillMaxSize().testTag(if (split) "agent-two-pane" else "agent-single-pane")) {
+            if (split) {
+                Column(Modifier.width(240.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.agent_ws_history), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        IconButton({ scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); action.message = null } } }, enabled = !action.busy) {
+                            Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh))
+                        }
+                    }
+                    historyContent(Modifier.weight(1f).fillMaxWidth())
+                }
+                VerticalDivider()
+            }
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                Column(Modifier.widthIn(max = 760.dp).fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (pageChrome && playback.canGoBack) {
+                            IconButton(vm::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.agent_ws_back)) }
+                        }
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            AgentConnectionChoice(connections, connection, !action.busy, compact = true) { connection = it }
+                        }
+                        if (!split) TextButton(
+                            { scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); history = true; action.message = null } } },
+                            enabled = !action.busy,
+                            modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        ) { Text(stringResource(R.string.agent_ws_history), style = MaterialTheme.typography.labelLarge) }
+                        TextButton(
+                            { selectConversation(null); input = "" },
+                            enabled = !action.busy,
+                            modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        ) { Text(stringResource(R.string.agent_ws_new_chat), style = MaterialTheme.typography.labelLarge) }
+                        if (!pageChrome && conversation != null) {
+                            IconButton({ scope.launch { action.run { selectConversation(vm.agent.request("conversations/${conversation!!.text("id")}")); action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_conversation)) }
+                            IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, stringResource(R.string.agent_ws_delete_conversation)) }
+                        }
+                        if (pageChrome) {
+                            onPlayer?.let { open ->
+                                IconButton(open, Modifier.testTag("assistant-paused-player")) {
+                                    Icon(Icons.Default.PlayArrow, stringResource(R.string.agent_ws_open_paused_player))
+                                }
+                            }
+                            if (conversation != null) {
+                                Box {
+                                    IconButton({ conversationMenu = true }, enabled = !action.busy) {
+                                        Icon(Icons.Default.MoreVert, stringResource(R.string.agent_ws_more))
+                                    }
+                                    DropdownMenu(conversationMenu, { conversationMenu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.agent_ws_refresh)) },
+                                            leadingIcon = { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_conversation)) },
+                                            enabled = !action.busy,
+                                            onClick = {
+                                                conversationMenu = false
+                                                scope.launch { action.run { selectConversation(vm.agent.request("conversations/${conversation!!.text("id")}")); action.message = null } }
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.agent_ws_delete)) },
+                                            leadingIcon = { Icon(Icons.Default.DeleteOutline, stringResource(R.string.agent_ws_delete_conversation)) },
+                                            enabled = !action.busy,
+                                            onClick = { conversationMenu = false; deleting = conversation; action.message = null },
+                                        )
+                                    }
+                                }
+                            }
+                            onNotifications?.let { open ->
+                                IconButton(open, Modifier.testTag("open-notifications")) {
+                                    BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
+                                        Icon(Icons.Default.NotificationsNone, stringResource(R.string.agent_ws_notifications))
+                                    }
+                                }
+                            }
+                            onSettings?.let { open -> IconButton(open) { Icon(Icons.Default.Settings, stringResource(R.string.agent_ws_settings)) } }
+                        }
+                    }
+                    val allMessages = conversation?.objects("messages") ?: emptyList()
+                    val lastAssistantId = allMessages.lastOrNull { it.text("role") == "assistant" }?.text("id")
+                var activeGapData by remember { mutableStateOf<CatalogGapUiData?>(null) }
+                var gapLoading by remember { mutableStateOf(false) }
+
+
+                fun triggerGapCheck(artistName: String) {
+                    scope.launch {
+                        gapLoading = true
+                        try {
+                            val json = vm.repository.checkCatalogGaps(artistName)
+                            val artist = json.get("artist")?.asString ?: artistName
+                            val totalTarget = json.get("total_target")?.asInt ?: 10
+                            val matchedCount = json.get("matched_count")?.asInt ?: 0
+                            val missingCount = json.get("missing_count")?.asInt ?: 0
+                            val coveragePercent = json.get("coverage_percent")?.asInt ?: 0
+                            val summary = json.get("summary")?.asString ?: ""
+                            val matched = json.getAsJsonArray("matched")?.mapNotNull { el ->
+                                if (!el.isJsonObject) null else {
+                                    val obj = el.asJsonObject
+                                    MatchedTrackUi(
+                                        title = obj.get("title")?.asString ?: "",
+                                        trackId = obj.get("track_id")?.asString ?: "",
+                                        album = obj.get("album")?.asString,
+                                        format = obj.get("format")?.asString ?: "",
+                                    )
+                                }
+                            } ?: emptyList()
+                            val missing = json.getAsJsonArray("missing")?.mapNotNull { el ->
+                                if (!el.isJsonObject) null else {
+                                    val obj = el.asJsonObject
+                                    MissingTrackUi(
+                                        title = obj.get("title")?.asString ?: "",
+                                        album = obj.get("album")?.asString ?: "",
+                                        year = obj.get("year")?.asString ?: "",
+                                        rank = obj.get("rank")?.asInt ?: 0,
+                                    )
+                                }
+                            } ?: emptyList()
+                            activeGapData = CatalogGapUiData(artist, totalTarget, matchedCount, missingCount, coveragePercent, matched, missing, summary)
+                        } catch (_: Exception) {
+                        } finally {
+                            gapLoading = false
+                        }
+                    }
+                }
+
+                    fun sendMessage(text: String) {
+                        val content = text.trim()
+                        if (content.isEmpty() || action.busy || running) return
+                        if (content.contains("查漏补缺") || content.contains("缺哪几首") || content.contains("代表作") || content.contains("全网榜单")) {
+                            val targetArtist = when {
+                                content.contains("周杰伦") -> "周杰伦"
+                                content.contains("陈奕迅") -> "陈奕迅"
+                                content.contains("林俊杰") -> "林俊杰"
+                                content.contains("王菲") -> "王菲"
+                                content.contains("落日飞车") -> "落日飞车"
+                                else -> "许嵩"
+                            }
+                            triggerGapCheck(targetArtist)
+                        }
+                        scope.launch { action.run {
+                            var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("title" to summarizeConversationTitle(content), "connection_id" to connection)).also { selectConversation(it) }
+                            val id = current.text("id")
+                            try {
+                                current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection))
+                                selectConversation(current)
+                                conversations = listOf(current) + conversations.filterNot { it.text("id") == id }
+                                input = ""
+                                action.message = null
+                                vm.agent.refreshInbox()
+                            } catch (error: CancellationException) { throw error }
+                            catch (error: Exception) {
+                                try { selectConversation(vm.agent.request("conversations/$id")) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { /* The original operation still supplies its diagnostic ID. */ }
+                                throw error
+                            }
+                        } }
+                    }
+
+                    // Do not clamp a restored scroll anchor against the temporary welcome page.
+                    if (restoringConversation) Box(Modifier.weight(1f).fillMaxWidth()) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    } else LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).testTag("agent-messages"), state = messagesScroll, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 2.dp, bottom = 4.dp + handoffClearance)) {
+                        conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
+                            TextButton({ showSummary = !showSummary }) { Text(stringResource(R.string.agent_ws_context_summary_collapsed)) }
+                            if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); selectConversation(vm.agent.request("conversations/$id")) } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_clear_summary)) } }
+                        } }
+                        if (conversation == null) item {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(28.dp)) {
+                                            Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                                        }
+                                        Text(stringResource(R.string.agent_ws_assistant_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Text(stringResource(R.string.agent_ws_assistant_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(R.string.agent_ws_assistant_prompt_examples_heading), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        listOf(
+                                            stringResource(R.string.agent_ws_prompt_example_1),
+                                            stringResource(R.string.agent_ws_prompt_example_2),
+                                            stringResource(R.string.agent_ws_prompt_example_3),
+                                            stringResource(R.string.agent_ws_prompt_example_4),
+                                            stringResource(R.string.agent_ws_prompt_example_5),
+                                        ).forEach { prompt ->
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { sendMessage(prompt) },
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(
+                                                        text = stringResource(R.string.agent_ws_quote_prompt, prompt),
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                    Icon(
+                                                        Icons.Default.ArrowOutward,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(14.dp),
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (activeGapData != null) item {
+                            CatalogGapCard(
+                                data = activeGapData!!,
+                                onPlayTrack = { trackId ->
+                                    scope.launch {
+                                        try {
+                                            val track = vm.repository.track(trackId)
+                                            vm.play(listOf(track), 0)
+                                        } catch (_: Exception) {}
+                                    }
+                                },
+                            )
+                        }
+                        items(allMessages, key = { it.text("id") }) { message ->
+                            val isAssistant = message.text("role") == "assistant"
+                            val isLatestAssistant = isAssistant && message.text("id") == lastAssistantId
+                            if (isAssistant) {
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (message.flag("partial")) Text(stringResource(R.string.agent_ws_generating_partial), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    SelectionContainer { AssistantMarkdown(message.text("content")) }
+                                    message.objects("sources").forEach { source ->
+                                        source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                modifier = Modifier.clickable { runCatching { links.openUri(url) }.onFailure { action.message = AppLanguage.string(R.string.agent_ws_cannot_open_source) } },
+                                            ) {
+                                                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                                    Text(stringResource(R.string.agent_ws_source_label, source.text("title").ifBlank { url }), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (isLatestAssistant && !message.flag("partial") && !running) {
+                                        val suggestions = remember(message.text("content")) { generateFollowUpSuggestions(message.text("content")) }
+                                        if (suggestions.isNotEmpty()) {
+                                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                suggestions.forEach { (label, prompt) ->
+                                                    SuggestionChip(
+                                                        onClick = { sendMessage(prompt) },
+                                                        label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        colors = SuggestionChipDefaults.suggestionChipColors(
+                                                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                        ),
+                                                        border = null,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 300.dp)) {
+                                        SelectionContainer {
+                                            Text(message.text("content"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        conversation?.objects("runs")?.forEach { run ->
+                            val failed = run.text("error_code").isNotBlank() || run.text("status") in setOf("failed", "interrupted")
+                            val fallback = run.text("status") == "local_fallback"
+                            val drafts = run.getAsJsonArray("draft_ids")
+                            if (!failed && !fallback && (drafts == null || drafts.size() == 0)) return@forEach
+                            item(key = "run-${run.text("id")}") {
+                                if (fallback) Text(stringResource(R.string.agent_ws_local_search_fallback), style = MaterialTheme.typography.bodySmall)
+                                if (failed) Text(stringResource(R.string.agent_ws_run_failed_status, run.text("status"), run.text("error_code")), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                if (failed) AgentTrace(run)
+                                drafts?.forEach { draft ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.clickable { openDraft(draft.asString) },
+                                    ) {
+                                        Row(
+                                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
+                                            Text(stringResource(R.string.agent_ws_draft_generated_banner), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            if (!action.busy && !action.message.isNullOrBlank() && action.message != AppLanguage.string(R.string.completed) && action.message != "\u5df2\u5b8c\u6210") ActionStatus(action)
+                        }
+                    }
+                    conversation?.objects("runs")?.firstOrNull { it.text("status") == "running" }?.let { run ->
+                        Text(when (run.text("stage")) { "search" -> stringResource(R.string.agent_ws_stage_search); "tools" -> stringResource(R.string.agent_ws_stage_tools); "writing" -> stringResource(R.string.agent_ws_stage_writing); else -> stringResource(R.string.agent_ws_stage_analyzing) }, Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
+                        TextField(
+                            input,
+                            { input = it },
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("agent-chat-input"),
+                            placeholder = { Text(stringResource(R.string.agent_ws_chat_placeholder)) },
+                            shape = RoundedCornerShape(24.dp),
+                            maxLines = 4,
+                            enabled = !action.busy && !running,
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { sendMessage(input) }),
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { sendMessage(input) },
+                                    enabled = !action.busy && !running && input.isNotBlank(),
+                                    modifier = Modifier.testTag("agent-chat-send"),
+                                ) {
+                                    if (action.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    else Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.agent_ws_chat_send))
+                                }
+                            },
+                            colors = TextFieldDefaults.colors(
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        if (history && !split) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text(stringResource(R.string.agent_ws_history_dialog_title)) }, text = {
+            historyContent(Modifier.heightIn(max = 400.dp))
+        }, confirmButton = { TextButton({ history = false }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_close)) } })
+    }
     renaming?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) renaming = null }, title = { Text(stringResource(R.string.agent_ws_rename_dialog_title)) }, text = {
         Column { OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.agent_ws_conversation_name_label)) }, singleLine = true, enabled = !action.busy, modifier = Modifier.testTag("conversation-title")); ActionStatus(action) }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val changed = vm.agent.request("conversations/${item.text("id")}", "PATCH", jsonBody("title" to title.trim()))
         conversations = conversations.map { if (it.text("id") == item.text("id")) changed else it }
-        if (conversation?.text("id") == item.text("id")) conversation = changed
+        if (conversation?.text("id") == item.text("id")) selectConversation(changed)
         renaming = null
     } } }, enabled = !action.busy && title.isNotBlank()) { Text(stringResource(R.string.agent_ws_save)) } }, dismissButton = { TextButton({ renaming = null }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
     deleting?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) deleting = null }, title = { Text(stringResource(R.string.agent_ws_delete_conversation_title)) }, text = {
         Column { Text(stringResource(R.string.agent_ws_delete_conversation_confirm, item.text("title"))); ActionStatus(action) }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         vm.agent.request("conversations/${item.text("id")}", "DELETE")
-        if (conversation?.text("id") == item.text("id")) conversation = null
+        if (conversation?.text("id") == item.text("id")) selectConversation(null)
         conversations = conversations.filterNot { it.text("id") == item.text("id") }; deleting = null
     } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
 }
@@ -1001,7 +1043,6 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") stringResource(R.string.agent_ws_scope_instance) else stringResource(R.string.agent_ws_scope_personal)}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.agent_ws_connection_status_budget, if (connection.flag("enabled")) stringResource(R.string.agent_ws_enabled) else stringResource(R.string.agent_ws_disabled), connection.number("daily_call_budget")), style = MaterialTheme.typography.bodySmall)
-            if (connection.text("id") == "legacy") Text(stringResource(R.string.agent_ws_legacy_connection_hint), style = MaterialTheme.typography.bodySmall)
             connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text(stringResource(R.string.agent_ws_field_key_value, fieldName(name), displayValue(value)), style = MaterialTheme.typography.labelSmall) } }
             Row {
                 TextButton({ scope.launch { action.run {

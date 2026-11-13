@@ -215,7 +215,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("history-actions-history-a").performClick()
             compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
             compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("这段对话正在生成回复", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText(uiString(R.string.agent_plat_err_conversation_busy), substring = true).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-a").fetchSemanticsNodes().isEmpty() }
             compose.onNode(hasText(uiString(R.string.agent_ws_close), substring = false) and hasAnyAncestor(hasTestTag("agent-history-dialog"))).performClick()

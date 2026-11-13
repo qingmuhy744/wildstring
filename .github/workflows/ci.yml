@@ -55,15 +55,7 @@ jobs:
           key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
           restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
-        run: |
-          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
-          if [ -d ~/.cache/apt-archives ] && [ -n "$(ls -A ~/.cache/apt-archives/*.deb 2>/dev/null)" ]; then
-            sudo cp -n ~/.cache/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-          fi
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
-          sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
-          mkdir -p ~/.cache/apt-archives
-          sudo cp -n /var/cache/apt/archives/*.deb ~/.cache/apt-archives/ 2>/dev/null || true
+        run: scripts/install_audio_deps.sh
       - name: Run backend pytest suite
         run: |
           uv sync --frozen --project backend --extra community-sources
@@ -93,15 +85,7 @@ jobs:
           key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
           restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
-        run: |
-          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
-          if [ -d ~/.cache/apt-archives ] && [ -n "$(ls -A ~/.cache/apt-archives/*.deb 2>/dev/null)" ]; then
-            sudo cp -n ~/.cache/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-          fi
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
-          sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
-          mkdir -p ~/.cache/apt-archives
-          sudo cp -n /var/cache/apt/archives/*.deb ~/.cache/apt-archives/ 2>/dev/null || true
+        run: scripts/install_audio_deps.sh
       - name: Cache Playwright browser
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

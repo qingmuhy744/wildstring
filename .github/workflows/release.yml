@@ -106,7 +106,8 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          ram-size: 2048M
+          cores: 2
+          ram-size: 4096M
           disable-animations: true
           script: make android-release-smoke
       - name: Release smoke retry after flake
@@ -118,7 +119,8 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          ram-size: 2048M
+          cores: 2
+          ram-size: 4096M
           disable-animations: true
           script: make android-release-smoke
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -202,7 +204,7 @@ jobs:
         working-directory: artifacts/release
         run: |
           sha256sum --check SHA256SUMS
-          sha256sum -- *.apk *.zip *.dmg android-signing-certificate.sha256 > SHA256SUMS
+          sha256sum -- *.apk *.zip *.dmg android-signing-certificate.sha256 *mapping.txt > SHA256SUMS
       - name: Image identity
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"

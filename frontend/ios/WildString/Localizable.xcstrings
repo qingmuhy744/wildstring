@@ -5050,6 +5050,23 @@
         }
       }
     },
+    "kit.podcast.queueBatchFull": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The queue is full, so this batch was not added. Remove some episodes, then refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待播列表已满，这次的新集没有加入。移除一些单集后再刷新。"
+          }
+        }
+      }
+    },
     "kit.podcast.queueFull": {
       "extractionState": "manual",
       "localizations": {
@@ -5097,6 +5114,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "暂时无法同步，本机播放不受影响。%@ 可以重试。"
+          }
+        }
+      }
+    },
+    "kit.podcast.unavailableEpisode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This episode is unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这一集暂时不可用"
           }
         }
       }
@@ -8966,13 +9000,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Play after current"
+            "value": "Auto-add to the front"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "插到当前之后"
+            "value": "自动加到最前"
           }
         }
       }
@@ -9640,6 +9674,23 @@
         }
       }
     },
+    "podcasts.keepLocalQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this device only, don’t overwrite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅保留本机、暂不覆盖"
+          }
+        }
+      }
+    },
     "podcasts.overwriteWithLocal": {
       "extractionState": "manual",
       "localizations": {
@@ -10167,6 +10218,23 @@
         }
       }
     },
+    "queueView.keepLocalQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this device only, don’t overwrite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅保留本机、暂不覆盖"
+          }
+        }
+      }
+    },
     "queueView.overwriteWithLocal": {
       "extractionState": "manual",
       "localizations": {
@@ -10673,6 +10741,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "验证中…"
+          }
+        }
+      }
+    },
+    "routes.testHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test this route"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "测试这条线路是否可用"
+          }
+        }
+      }
+    },
+    "routes.testing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Testing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在测试…"
+          }
+        }
+      }
+    },
+    "routes.testOk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected · %d ms"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已连接 · %d ms"
+          }
+        }
+      }
+    },
+    "routes.testSessionExpired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reachable · session expired, sign in again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可达 · 会话已过期，需要重新登录"
+          }
+        }
+      }
+    },
+    "routes.testFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unreachable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接"
           }
         }
       }

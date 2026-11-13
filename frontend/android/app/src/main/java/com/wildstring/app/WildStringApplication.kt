@@ -32,6 +32,15 @@ class WildStringApplication : Application() {
         // runAttachLifecycle()". The legacy min-size path has no such read. Set before any Compose
         // code loads, as the flag documentation asks; MovableTextFieldTest guards the regression.
         ComposeFoundationFlags.isBasicTextFieldMinSizeOptimizationEnabled = false
+        // Foundation 1.12.1 turns pausable lazy prefetch composition back on by default. A
+        // prefetch paused mid-composition can resume on a later frame and call LayoutNode.onReuse
+        // after the item has already been detached (IllegalArgumentException: "onReuse is only
+        // expected on attached node"). Google disabled this same flag in 1.10.6 for stability
+        // (b/482223006, b/488433633). The swipe-to-dismiss crash was triggered by moving a
+        // live catalog LazyColumn with movableContentOf; the composition slot is now stable,
+        // and this flag stays off as defense in depth. Pair with the R8 -assumevalues rule so
+        // release minification cannot constant-fold the default `true`.
+        ComposeFoundationFlags.isPausableCompositionInPrefetchEnabled = false
         super.onCreate()
         AppLanguage.install(this)
         CrashHandler.install(this)
@@ -62,5 +71,7 @@ object ApplicationModule {
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =
         Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").addMigrations(QueueDatabase.MIGRATION_1_2).build()
     @Provides @Singleton fun images(@ApplicationContext context: Context, client: OkHttpClient): ImageLoader =
-        ImageLoader.Builder(context).okHttpClient(client).diskCache(null).build()
+        // A local server can be reachable without an Android INTERNET network; let HTTP and
+        // our private cover cache decide instead of Coil forcing cache-only requests.
+        ImageLoader.Builder(context).okHttpClient(client).networkObserverEnabled(false).diskCache(null).build()
 }

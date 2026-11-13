@@ -17,33 +17,38 @@ struct MacMusicView: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        MacPlayableTracks(
-            client: client,
-            playback: playback,
-            favorites: favorites,
-            tracks: tracks,
-            emptyTitle: message == nil ? (query.isEmpty ? L10n("macLibrary.emptyLibrary") : L10n("macLibrary.noSearchResults", query)) : L10n("macLibrary.loadFailed"),
-            emptyDetail: message,
-            canManage: canManage,
-            isLoading: loading
-        )
-        .navigationTitle(L10n("macLibrary.allTracksTitle"))
-        .toolbar {
-            TextField(L10n("macLibrary.searchPlaceholder"), text: $query)
-                .textFieldStyle(.roundedBorder).frame(width: 260).focused($searchFocused)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                MacSearchField(placeholder: L10n("macLibrary.searchPlaceholder"), text: $query, focused: $searchFocused)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            MacPlayableTracks(
+                client: client,
+                playback: playback,
+                favorites: favorites,
+                tracks: tracks,
+                emptyTitle: message == nil ? (query.isEmpty ? L10n("macLibrary.emptyLibrary") : L10n("macLibrary.noSearchResults", query)) : L10n("macLibrary.loadFailed"),
+                emptyDetail: message,
+                canManage: canManage,
+                isLoading: loading
+            )
+
+            if tracks.count < total {
+                MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", total - tracks.count)) {
+                    Task { await load(reset: false) }
+                }
+            }
         }
+        .navigationTitle(L10n("macLibrary.allTracksTitle"))
         .onChange(of: focusSearch) { _, requested in
             if requested { searchFocused = true; focusSearch = false }
         }
         .onAppear {
             if focusSearch { searchFocused = true; focusSearch = false }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if tracks.count < total {
-                Button(L10n("macLibrary.moreTracksRemaining", total - tracks.count)) { Task { await load(reset: false) } }
-                    .buttonStyle(.bordered)
-                    .padding(8)
-            }
         }
         .task(id: query) { await load(reset: true) }
     }
@@ -386,6 +391,7 @@ struct MacSettingsView: View {
                             session.updater.openDownload(for: release)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
 
                         Button(L10n("macLibrary.viewReleaseNotes")) {
                             session.updater.openReleasePage(for: release)

@@ -141,7 +141,7 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   await expect(dialog.getByRole('status')).toContainText('已加入 1 首');
   await dialog.getByRole('button', { name: '完成', exact: true }).click();
   await manageTab(page, '任务记录');
-  await expect(page.getByRole('region', { name: '元数据更新任务' })).toContainText('等待 0 首');
+  await expect(page.getByRole('region', { name: '歌曲信息补全' })).toContainText('都处理完了');
   expect(await audio(page)).toEqual(before);
 });
 

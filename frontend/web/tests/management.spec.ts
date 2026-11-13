@@ -214,43 +214,6 @@ test('自动导入设置、待整理快照、冲突反馈与手机布局', async
   }
 });
 
-test('AI 服务保存、密钥不回显、连接测试与清除密钥', async ({ page }, info) => {
-  await login(page);
-  await manage(page, info.project.name === 'mobile');
-  await manageTab(page, '模型连接');
-  await page.getByRole('button', { name: '管理统一模型连接', exact: true }).click();
-  await page.getByText('原有实例连接（兼容配置）', { exact: true }).click();
-  const panel = page.getByLabel('AI 服务配置', { exact: true });
-  await panel.getByLabel('AI API 地址', { exact: true }).fill('https://model.example.invalid/v1');
-  await panel.getByLabel('AI 模型名称', { exact: true }).fill(`browser-model-${info.project.name}`);
-  await panel.getByLabel('AI API Key', { exact: true }).fill('disposable-browser-model-key');
-  await panel.getByRole('button', { name: '保存 AI 配置', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('AI 服务配置已保存');
-  await expect(panel.getByLabel('AI API Key', { exact: true })).toHaveValue('');
-  await expect(panel.getByLabel('AI API Key', { exact: true })).toHaveAttribute(
-    'placeholder',
-    '已保存；留空保留原密钥',
-  );
-  const read = await page.request.get('/api/v1/manage/ai');
-  expect(await read.text()).not.toContain('disposable-browser-model-key');
-  // The UI test stubs the provider probe; backend tests validate its bounded transport.
-  await page.route('**/api/v1/manage/ai/test', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ok: true, model: 'browser-model', scope: 'chat_completion' }),
-    }),
-  );
-  await panel.getByRole('button', { name: '测试模型连接', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('模型响应正常');
-  await page.screenshot({ path: `../../artifacts/manage-ai-${info.project.name}.png` });
-  await panel.getByLabel('清除已保存的密钥').check();
-  await panel.getByRole('button', { name: '保存 AI 配置', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('AI 服务配置已保存');
-  expect((await (await page.request.get('/api/v1/manage/ai')).json()).has_api_key).toBe(false);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-});
-
 test('服务器名称的页面覆盖可以保存并恢复环境配置', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');

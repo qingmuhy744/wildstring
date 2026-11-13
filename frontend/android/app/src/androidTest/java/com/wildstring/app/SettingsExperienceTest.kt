@@ -1,6 +1,7 @@
 package com.wildstring.app
 
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -73,7 +74,11 @@ class SettingsExperienceTest {
     private fun capture(name: String) {
         compose.waitForIdle()
         val root = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir") ?: return
-        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: return
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.waitForIdle(500, 5_000)
+        // System bars can present a later frame than the Compose content after a theme change.
+        android.os.SystemClock.sleep(600)
+        val screenshot = automation.takeScreenshot() ?: return
         File(root).mkdirs()
         File(root, name).outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
         screenshot.recycle()
@@ -136,6 +141,49 @@ class SettingsExperienceTest {
         }
     }
 
+    @Test fun tabletCategoriesKeepSelectionAcrossWindowSizes() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            fun shell(command: String) {
+                ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+            }
+            try {
+                settings()
+                category("playback")
+                shell("wm size 1600x1000")
+                shell("wm density 160")
+                compose.waitUntil(20_000) { compose.onAllNodesWithTag("settings-two-pane").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("setting-category-playback").assertIsSelected()
+                compose.onNodeWithTag("setting-quality").assertIsDisplayed()
+                category("storage")
+                compose.onNodeWithTag("setting-category-storage").assertIsSelected()
+                capture("settings-tablet-landscape-light.png")
+                compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
+                compose.onNodeWithTag("setting-option-audio-cache-2048").performScrollTo().performClick()
+                compose.runOnIdle { assertEquals(2048, vm.settings.state.value.audioMb) }
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("settings-tablet-landscape-dark.png")
+                compose.runOnIdle { vm.settings.appearance("light") }
+                shell("wm size 800x1200")
+                compose.waitUntil(20_000) { compose.onAllNodesWithTag("settings-two-pane").fetchSemanticsNodes().isEmpty() }
+                compose.onNodeWithTag("setting-audio-cache").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithTag("settings-back").performClick()
+                compose.onNodeWithTag("setting-category-storage").assertIsDisplayed()
+                shell("wm size 1000x1600")
+                compose.waitUntil(20_000) { compose.onAllNodesWithTag("settings-two-pane").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("setting-category-account").assertIsSelected()
+                capture("settings-tablet-portrait-light.png")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("settings-tablet-portrait-dark.png")
+            } finally {
+                shell("wm size reset")
+                shell("wm density reset")
+                compose.runOnIdle { vm.settings.appearance("system") }
+                runBlocking { vm.logout().join() }
+            }
+        }
+    }
+
     @Test fun languageSelectionRecreatesTheAppAndLocalizesDiscoveryAndSettings() {
         Fixture().use { fixture ->
             val vm = connect(fixture)
@@ -155,6 +203,10 @@ class SettingsExperienceTest {
                 compose.onNodeWithText("Check for updates").assertIsDisplayed()
                 compose.onNodeWithTag("settings-back").performClick()
                 category("appearance")
+                compose.onNodeWithTag("interface-animations").assertIsDisplayed().performClick()
+                compose.runOnIdle { assertFalse(vm.settings.state.value.interfaceAnimations) }
+                compose.onNodeWithTag("interface-animations").performClick()
+                compose.runOnIdle { assertTrue(vm.settings.state.value.interfaceAnimations) }
                 compose.onNodeWithTag("setting-language").performScrollTo().performClick()
                 compose.onNodeWithTag("setting-option-language-zh").performClick()
                 compose.waitUntil(10_000) {

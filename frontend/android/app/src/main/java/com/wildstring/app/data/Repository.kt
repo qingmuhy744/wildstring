@@ -144,14 +144,11 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
-    val podcastImageClient: OkHttpClient = podcastArtworkClient().newBuilder()
-        .addInterceptor(CoverCacheInterceptor(cache, session) { true }).build()
-    fun cover(id: String): String =
-        knownTracks[id]?.podcast?.coverUrl?.let(::podcastArtworkUrl)
-            ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
-    fun imageClient(uri: String): OkHttpClient = if (knownTracks.values.any {
-        it.podcast?.coverUrl?.let(::podcastArtworkUrl) == uri
-    }) podcastImageClient else client
+    fun podcastDirectoryArtwork(item: PodcastDirectoryResult): String? = item.catalogPodcastId?.let { podcastArtwork(it) }
+        ?: item.artworkKey?.let { url("api", "v1", "podcasts", "directory-cover", it) }
+    fun podcastArtwork(id: String): String = url("api", "v1", "podcasts", id, "cover")
+    fun cover(id: String): String = knownTracks[id]?.podcast?.let { podcastArtwork(it.podcastId) }
+        ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
     suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
         val owner = session.cacheScope(); requireProfile(owner)
         val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->
@@ -320,18 +317,6 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = expectedOwner; requireProfile(owner)
         if (settings.userId != session.account?.id) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         return api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy), RequestOwner(owner)).also { requireProfile(owner) }
-    }
-    suspend fun podcastInbox(): PodcastInboxSnapshot {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().podcastInbox(RequestOwner(owner)).also { requireProfile(owner) }
-    }
-    suspend fun addPodcastInbox(episodeId: String): PodcastInboxWriteResult {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().addPodcastInboxItem(episodeId, com.google.gson.JsonObject(), RequestOwner(owner)).also { requireProfile(owner) }
-    }
-    suspend fun removePodcastInbox(episodeId: String): PodcastInboxWriteResult {
-        val owner = session.cacheScope(); requireProfile(owner)
-        return api().removePodcastInboxItem(episodeId, RequestOwner(owner)).also { requireProfile(owner) }
     }
     suspend fun podcastQueue(): PodcastQueueSnapshot {
         val owner = session.cacheScope(); requireProfile(owner)

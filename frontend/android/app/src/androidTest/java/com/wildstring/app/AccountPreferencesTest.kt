@@ -34,13 +34,16 @@ class AccountPreferencesTest {
         settings.bindAccount("server-a", "account-b")
         assertEquals("system", settings.state.value.appearance)
         assertEquals(0, settings.state.value.aacBitrate)
+        assertTrue(settings.state.value.interfaceAnimations)
         assertEquals(SongListSize.MEDIUM, settings.state.value.songListSize)
         assertEquals(CatalogSort("title", "asc"), settings.catalogSort("other-login", "tracks"))
-        settings.quality(320); settings.appearance("light")
+        settings.quality(320); settings.appearance("light"); settings.interfaceAnimations(false)
         settings.bindAccount("server-b", "account-a")
         assertEquals(0, settings.state.value.aacBitrate)
+        assertTrue(settings.state.value.interfaceAnimations)
         settings.bindAccount("server-a", "account-a")
         assertEquals(192, settings.state.value.aacBitrate)
+        assertTrue(settings.state.value.interfaceAnimations)
         assertEquals(SongListSize.LARGE, settings.state.value.songListSize)
         assertEquals(CatalogSort("duration_ms", "desc"), settings.catalogSort("new-login", "tracks"))
         settings.bindAccount(null, null)
@@ -48,6 +51,7 @@ class AccountPreferencesTest {
         val reopened = AppSettings(context)
         reopened.bindAccount("server-a", "account-b")
         assertEquals(320, reopened.state.value.aacBitrate)
+        assertFalse(reopened.state.value.interfaceAnimations)
         assertEquals("light", reopened.state.value.appearance)
     }
 
@@ -65,6 +69,27 @@ class AccountPreferencesTest {
         assertEquals("cover", reopened.state.value.playbackStyle)
         reopened.bindAccount("server", "second")
         assertEquals("cassette", reopened.state.value.playbackStyle)
+    }
+
+    @Test fun podcastBoostPersistsPerShowAccountAndServerAndResetsToUnity() = isolated { context ->
+        val settings = AppSettings(context)
+        settings.bindAccount("server-a", "listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        val revision = settings.gainRevision.value
+        settings.podcastGainDb("quiet-show", 6)
+        assertTrue(settings.gainRevision.value > revision)
+        assertEquals(0, settings.podcastGainDb("another-show"))
+        settings.bindAccount("server-a", "other-listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        settings.bindAccount("server-b", "listener")
+        assertEquals(0, settings.podcastGainDb("quiet-show"))
+        val reopened = AppSettings(context)
+        reopened.bindAccount("server-a", "listener")
+        assertEquals(6, reopened.podcastGainDb("quiet-show"))
+        reopened.podcastGainDb("quiet-show", 0)
+        assertEquals(0, reopened.podcastGainDb("quiet-show"))
+        assertThrows(IllegalArgumentException::class.java) { reopened.podcastGainDb("quiet-show", 13) }
+        assertThrows(IllegalArgumentException::class.java) { reopened.podcastGainDb("quiet-show", -1) }
     }
 
     @Test fun networkAndDownloadOptionsAreIsolatedAndKeepLegacyValuesForOneAccount() = isolated { context ->

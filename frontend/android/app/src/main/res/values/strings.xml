@@ -57,14 +57,9 @@
     <string name="podcast_continue">Auto-play the next episode</string>
     <string name="podcast_continue_hint">When the queue is empty, continue with the next episode of this show. This syncs to your account and does not add that episode to the queue.</string>
     <string name="podcast_queue_title">Queue</string>
-    <string name="podcast_inbox_title">Listen later</string>
     <string name="podcast_add_queue">Add to queue</string>
-    <string name="podcast_add_inbox">Save for later</string>
     <string name="podcast_added_queue">Added to the queue</string>
-    <string name="podcast_added_inbox">Saved for later</string>
-    <string name="podcast_queue_empty_on">Auto-continue is on. The next episode plays when the queue is empty.</string>
-    <string name="podcast_queue_empty_off">Auto-continue is off. Playback stops when the queue is empty.</string>
-    <string name="podcast_inbox_empty">New episodes from shows you follow will show up here.</string>
+    <string name="podcast_player_queue_empty">The queue is empty. Add an episode from its show and it shows up here.</string>
     <string name="podcast_browse_shows">Browse shows</string>
     <string name="podcast_sync_failed">Couldn\'t sync just now. Playback on this device is unaffected</string>
     <string name="podcast_sync_retry">Retry</string>
@@ -72,18 +67,20 @@
     <string name="podcast_queue_conflict_body">This device kept its queue and did not replace it. Choose which copy to keep.</string>
     <string name="podcast_queue_use_server">Use the server queue</string>
     <string name="podcast_queue_overwrite">Overwrite with this device</string>
+    <string name="podcast_queue_keep_local">Keep this device only, don\'t overwrite yet</string>
+    <string name="podcast_queue_full">The queue is full, so these new episodes were not added. Remove some, then refresh the show.</string>
+    <string name="podcast_new_episode_summary">New episodes</string>
     <string name="podcast_new_episode_action">Auto-add new episodes</string>
-    <string name="podcast_action_inbox">Listen later</string>
     <string name="podcast_action_queue_last">Auto-add to end</string>
-    <string name="podcast_action_queue_next">Auto-add to next</string>
+    <string name="podcast_action_queue_next">Auto-add to the front</string>
     <string name="podcast_action_ignore">Off (follow only)</string>
     <string name="podcast_action_queue_last_short">To end</string>
-    <string name="podcast_action_queue_next_short">Next</string>
+    <string name="podcast_action_queue_next_short">Front</string>
     <string name="podcast_action_ignore_short">Follow only</string>
     <string name="podcast_my_follows">My follows</string>
     <string name="podcast_download_tasks">Server download tasks</string>
     <string name="podcast_rules_tab">New episodes</string>
-    <string name="podcast_queue_unified_title">Pending queue</string>
+    <string name="podcast_queue_unified_title">Up next</string>
     <string name="podcast_pending_episodes_title">Queued episodes</string>
     <string name="podcast_play_all">Play all</string>
     <string name="podcast_play_queue_header">Play queue (%1$d)</string>
@@ -102,11 +99,11 @@
     <string name="podcast_auto_limit_value">%1$d per show</string>
     <string name="podcast_queue_limit">The queue is full at 5000 episodes. This one was not added.</string>
     <string name="podcast_episode_unavailable">This episode can\'t be played. Remove it from the queue, then pick another.</string>
+    <string name="podcast_queue_row_unavailable">This episode is unavailable</string>
     <string name="podcast_remove">Remove</string>
     <string name="podcast_player_preparing">The player is still starting. Try again in a moment.</string>
     <string name="podcast_show_pref_saved">Saved how new episodes are handled.</string>
     <string name="podcast_preferences_failed">Couldn\'t save this show. Other shows were left unchanged.</string>
-    <string name="podcast_inbox_remove_failed">Added to the queue, but it is still in Listen later. Try again.</string>
     <string name="podcast_play_next">Play next</string>
     <string name="podcast_play">Play</string>
     <string name="podcast_previous_episode">Previous episode</string>
@@ -132,6 +129,8 @@
     <string name="style_vinyl">Vinyl</string>
     <string name="style_cassette">Cassette</string>
     <string name="settings_day_night">Day &amp; night</string>
+    <string name="settings_interface_animations">Interface transitions</string>
+    <string name="settings_interface_animations_hint">Use brief transitions when switching player views. Android system animation settings still take priority.</string>
     <string name="appearance_system">Follow system</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
@@ -364,6 +363,7 @@
     <string name="artist_count">Artists: %1$d</string>
     <string name="album_count">Albums: %1$d</string>
     <string name="open_artist_named">Go to artist · %1$s</string>
+    <string name="open_show_named">Open show %1$s</string>
     <string name="track_count">Songs: %1$d</string>
     <string name="play_count_value">Plays: %1$d</string>
     <string name="minutes_value">%1$d min</string>
@@ -398,6 +398,9 @@
     <string name="queue_position">Song %1$d of %2$d</string>
     <string name="queue_move_up">Move up</string>
     <string name="queue_move_down">Move down</string>
+    <string name="queue_remove">Remove</string>
+    <string name="queue_undo">Undo</string>
+    <string name="queue_removed">Removed</string>
     <string name="remove_named">Remove %1$s</string>
     <string name="smart_playlist_suffix"> · Smart playlist</string>
     <string name="jump_to">Jump to %1$s</string>
@@ -549,7 +552,7 @@
     <string name="agent_plat_diagnostic_id">Diagnostic ID: %1$s</string>
     <string name="agent_plat_err_ai_content_filtered">Model service filtered this output. Please adjust the scope of your prompt before resuming; resuming may incur fees.</string>
     <string name="agent_plat_err_ai_output_incomplete">Model output incomplete. Please increase output token limit or narrow the question scope.</string>
-    <string name="agent_plat_err_ai_output_limit">Model reached output token limit; analysis incomplete. Please increase limit or decrease reasoning effort in AI Connections; for legacy connections, please create a new configurable connection. Resume after adjustments; resuming may incur fees.</string>
+    <string name="agent_plat_err_ai_output_limit">Model reached output token limit; analysis incomplete. Please increase the limit in this AI connection or decrease reasoning effort. Resume after adjustments; resuming may incur fees.</string>
     <string name="agent_plat_err_ai_response_failed">Model service failed to complete this response. Please check service status before resuming; resuming may incur fees.</string>
     <string name="agent_plat_err_album_membership_changed">Album track scope has changed. Please reload and generate the batch draft again.</string>
     <string name="agent_plat_err_application_policy_version_conflict">Curation settings were updated on another device. Please reload and save again.</string>
@@ -781,7 +784,6 @@
     <string name="agent_ws_issue_same_title_versions">Versions with same title need verification</string>
     <string name="agent_ws_issue_track_number_conflict">Duplicate track number on same disc</string>
     <string name="agent_ws_issue_track_number_out_of_range">Track number exceeds total tracks</string>
-    <string name="agent_ws_legacy_connection_hint">Uses the server\'s existing AI configuration for manual inspections. For scheduled inspections, please add and authorize a new connection.</string>
     <string name="agent_ws_local_search_fallback">Local keyword search · Model not invoked</string>
     <string name="agent_ws_lyrics_song_source">Track: %1$s · %2$s</string>
     <string name="agent_ws_manual_ai_budget_notice">Starting authorizes this single AI inspection only; model fees may occur, constrained by call limits and daily budget. Results are reviewed or applied according to curation settings.</string>
@@ -1556,6 +1558,7 @@
     <string name="pod_exp_followed">Followed</string>
     <string name="pod_exp_following">Following…</string>
     <string name="pod_exp_hot_ranking">Apple Podcasts top charts · %1$s</string>
+    <string name="pod_exp_hot_ranking_plain">Apple Podcasts top charts</string>
     <string name="pod_exp_latest_episodes">Latest episodes</string>
     <string name="pod_exp_no_results">No shows found. Try other regions or keywords.</string>
     <string name="pod_exp_open_show">Open show</string>
@@ -1676,7 +1679,8 @@
     <string name="pod_scr_no_followed_shows_yet">No followed shows yet</string>
     <string name="pod_scr_no_show_intro">No show description</string>
     <string name="pod_scr_pending_empty_prompt">Queue is empty · Tap to set new episode rules</string>
-    <string name="pod_scr_pending_summary">%1$d episodes in queue · Tap to view</string>
+    <string name="pod_scr_pending_summary">%1$d episodes in queue</string>
+    <string name="pod_scr_open_queue">Open the queue</string>
     <string name="pod_scr_play">Play</string>
     <string name="pod_scr_play_btn">▶ Play</string>
     <string name="pod_scr_play_episode_btn">Play episode</string>
@@ -1713,7 +1717,7 @@
     <string name="q_panel_auto_continue">Autoplay next</string>
     <string name="q_panel_close">Close</string>
     <string name="q_panel_not_written_to_queue">Not added to queue</string>
-    <string name="q_panel_queue_title">Queue (%1$d)</string>
+    <string name="q_panel_queue_title">Up next (%1$d)</string>
     <string name="q_panel_remove_from_queue">Remove from queue</string>
     <string name="rec_dlg_added_to_named_playlist">Added to \"%1$s\"</string>
     <string name="rec_dlg_adding">Adding…</string>
@@ -2131,4 +2135,8 @@
     </string-array>
     <string name="player_landscape_prompt">The phone is lying sideways. Switch to landscape player?</string>
     <string name="player_landscape_prompt_action">Switch</string>
+    <string name="podcast_select_show">Select a show</string>
+    <string name="podcast_gain_title">Show volume boost</string>
+    <string name="podcast_gain_local">Saved on this device for all episodes of this show.</string>
+    <string name="podcast_gain_distortion">If the sound distorts, lower the boost.</string>
 </resources>

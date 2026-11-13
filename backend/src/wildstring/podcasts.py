@@ -611,6 +611,8 @@ def parse_feed_document(data: bytes, feed_url: str) -> dict[str, Any]:
         or ""
     )
     description = channel.findtext("description") or channel.findtext(f"{ITUNES_NS}summary") or ""
+    raw_type = (channel.findtext(f"{ITUNES_NS}type") or "").strip().lower()
+    show_type = raw_type if raw_type in {"serial", "episodic"} else ""
 
     cover_url = ""
     itunes_img = channel.find(f"{ITUNES_NS}image")
@@ -690,6 +692,7 @@ def parse_feed_document(data: bytes, feed_url: str) -> dict[str, Any]:
         "description": description.strip(),
         "cover_url": cover_url.strip(),
         "new_feed_url": (channel.findtext(f"{ITUNES_NS}new-feed-url") or "").strip(),
+        "show_type": show_type,
         "episodes": episodes,
     }
 
@@ -752,6 +755,7 @@ def _parse_atom_feed(root: ET.Element, feed_url: str) -> dict[str, Any]:
         "author": author.strip(),
         "description": description.strip(),
         "cover_url": cover_url.strip(),
+        "show_type": "",
         "episodes": episodes,
     }
 
@@ -1270,8 +1274,8 @@ class PodcastManager:
                     auto_update, update_interval_minutes, download_policy, retention_policy,
                     slow_download, max_retries, retry_backoff_base, last_updated_at, created_at,
                     itunes_id, feed_url_normalized, resolved_feed_url_normalized,
-                    itunes_check_status, itunes_checked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    itunes_check_status, itunes_checked_at, show_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     podcast_id,
@@ -1294,6 +1298,7 @@ class PodcastManager:
                     normalize_feed_url(resolved_url) or None,
                     "verified" if verified else None,
                     created_time if verified else None,
+                    parsed.get("show_type") or "",
                 ),
             )
             for ep in parsed["episodes"]:
@@ -1422,7 +1427,8 @@ class PodcastManager:
             conn.execute(
                 """
                 UPDATE podcasts
-                SET title = ?, author = ?, description = ?, cover_url = ?, last_updated_at = ?
+                SET title = ?, author = ?, description = ?, cover_url = ?, last_updated_at = ?,
+                    show_type = ?
                 WHERE id = ?
                 """,
                 (
@@ -1431,6 +1437,7 @@ class PodcastManager:
                     parsed["description"],
                     parsed["cover_url"],
                     updated_time,
+                    parsed.get("show_type") or "",
                     podcast_id,
                 ),
             )

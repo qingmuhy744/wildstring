@@ -76,13 +76,34 @@ test('悬停转键盘聚焦保留说明关联，切换参数只显示一份并�
   const dialog = await gain(page);
   const preamp = dialog.getByLabel('自动均衡前级（dB）', { exact: true });
   const label = dialog.locator('.desktop-help-label').filter({ hasText: '自动均衡前级' });
-  await label.hover();
   if (info.project.name === 'mobile') {
+    await label.hover();
     await preamp.focus();
     await expect(page.getByRole('tooltip')).toHaveCount(0);
     return;
   }
-  await expect(page.getByRole('tooltip')).toContainText('自动响度均衡');
+  await dialog.getByRole('combobox', { name: '自动响度均衡', exact: true }).blur();
+  await page.clock.install();
+  const labelBox = await label.boundingBox();
+  await page.mouse.move(labelBox!.x + 2, labelBox!.y + labelBox!.height / 2);
+  await page.clock.runFor(600);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await preamp.hover();
+  await page.clock.runFor(600);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await label.locator('.desktop-help-marker').hover();
+  await page.clock.runFor(420);
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText('自动响度均衡');
+  const tooltipBox = await tooltip.boundingBox();
+  const inputBox = await preamp.boundingBox();
+  expect(
+    tooltipBox!.x + tooltipBox!.width <= inputBox!.x ||
+      tooltipBox!.x >= inputBox!.x + inputBox!.width ||
+      tooltipBox!.y + tooltipBox!.height <= inputBox!.y ||
+      tooltipBox!.y >= inputBox!.y + inputBox!.height,
+  ).toBe(true);
+  await page.screenshot({ path: info.outputPath('field-help-tooltip.png') });
   await preamp.focus();
   const id = await page.getByRole('tooltip').getAttribute('id');
   await expect(preamp).toHaveAttribute('aria-describedby', id!);

@@ -6,13 +6,13 @@ import pytest
 from test_agent_platform import BASE, HEADERS, post
 from test_agent_platform import agent as agent
 
-from wildstring.ai_config import AIService, AIUpdate
 
-
-def legacy_connection(service):
-    ai = AIService(service.database.path.parent)
-    ai.save(AIUpdate(version=1, base_url="https://fixture.invalid/v1", model="synthetic"))
-    return "legacy"
+def model_connection(client):
+    return post(
+        client,
+        "/connections",
+        {"name": "手动模型", "base_url": "https://fixture.invalid/v1", "model": "synthetic"},
+    )["id"]
 
 
 def manual_parameters(identity):
@@ -27,18 +27,9 @@ def fake_model(calls):
     return respond
 
 
-@pytest.mark.parametrize("legacy", [True, False])
-def test_manual_ui_inspection_uses_connection_without_background_permission(agent, legacy):
+def test_manual_ui_inspection_uses_connection_without_background_permission(agent):
     client, service = agent
-    identity = (
-        legacy_connection(service)
-        if legacy
-        else post(
-            client,
-            "/connections",
-            {"name": "手动模型", "base_url": "https://fixture.invalid/v1", "model": "synthetic"},
-        )["id"]
-    )
+    identity = model_connection(client)
     calls = []
     service.transport = fake_model(calls)
     task = post(client, "/tasks", manual_parameters(identity))
@@ -57,9 +48,9 @@ def test_manual_ui_inspection_uses_connection_without_background_permission(agen
     assert selected["my_usage"]["calls"] == 1
 
 
-def test_legacy_manual_consent_does_not_authorize_schedule_tools_or_forged_fields(agent):
+def test_manual_consent_does_not_authorize_schedule_tools_or_forged_fields(agent):
     client, service = agent
-    parameters = manual_parameters(legacy_connection(service))
+    parameters = manual_parameters(model_connection(client))
     denied = client.post(
         BASE + "/schedules",
         json={"name": "定时任务", "parameters": parameters},
@@ -134,10 +125,11 @@ def test_scheduled_task_requires_automatic_permission_at_execution(agent, revoke
     assert len(calls) == (0 if revoke else 1)
 
 
-@pytest.mark.parametrize("change", ["old_task", "configuration", "account"])
+@pytest.mark.parametrize("change", ["old_task", "connection", "account"])
 def test_manual_task_requires_recorded_consent_and_current_authority(agent, change):
     client, service = agent
-    task = post(client, "/tasks", manual_parameters(legacy_connection(service)))
+    identity = model_connection(client)
+    task = post(client, "/tasks", manual_parameters(identity))
     with service.database.connect(write=True) as connection:
         if change == "old_task":
             # A task queued by an older version has no explicit single-task consent.
@@ -147,10 +139,11 @@ def test_manual_task_requires_recorded_consent_and_current_authority(agent, chan
             )
         elif change == "account":
             connection.execute("UPDATE users SET version=version+1 WHERE id='admin'")
-    if change == "configuration":
-        AIService(service.database.path.parent).save(
-            AIUpdate(version=2, base_url="https://fixture.invalid/v1", model="changed")
-        )
+    if change == "connection":
+        with service.database.connect(write=True) as connection:
+            connection.execute(
+                "UPDATE agent_connections SET version=version+1 WHERE id=?", (identity,)
+            )
     calls = []
     service.transport = fake_model(calls)
     service.execute_task(service.claim_task())
