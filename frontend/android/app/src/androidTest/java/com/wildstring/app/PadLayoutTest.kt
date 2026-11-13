@@ -296,6 +296,8 @@ class PadLayoutTest {
             appearance(vm, "dark")
             compose.onNodeWithTag("nav-assistant").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
+            // The workspace's initial load keeps History disabled; a click before it finishes is ignored.
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText(uiString(R.string.agent_ws_history)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(uiString(R.string.agent_ws_history), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-one").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("history-open-history-one").performClick()
