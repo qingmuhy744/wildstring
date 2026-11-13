@@ -8,6 +8,7 @@
 !backend/tests/**
 !scripts/
 !scripts/generate_homebrew_cask.py
+!scripts/run_android_instrumented.py
 !plugins/
 !plugins/**
 !tests/
