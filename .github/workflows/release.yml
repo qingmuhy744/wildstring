@@ -253,3 +253,29 @@ jobs:
             if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE+=(--prerelease); fi
             gh release create "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "WildString / 野弦 ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE[@]}"
           fi
+      - name: Update Homebrew Tap cask
+        if: ${{ !contains(env.RELEASE_TAG, '-') }}
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: qingmuhy744/homebrew-tap
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN is not set; skipping Homebrew Tap update."
+            exit 0
+          fi
+          TAP_DIR="$RUNNER_TEMP/homebrew-tap"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TAP_DIR"
+          mkdir -p "$TAP_DIR/Casks"
+          python3 scripts/generate_homebrew_cask.py \
+            --version "${RELEASE_TAG#v}" \
+            --checksums-file artifacts/release/SHA256SUMS \
+            --output "$TAP_DIR/Casks/wildstring.rb"
+          git -C "$TAP_DIR" config user.name "github-actions[bot]"
+          git -C "$TAP_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$TAP_DIR" add Casks/wildstring.rb
+          if git -C "$TAP_DIR" diff --cached --quiet; then
+            echo "Homebrew Tap cask is already up to date."
+            exit 0
+          fi
+          git -C "$TAP_DIR" commit -m "chore(cask): update wildstring to ${RELEASE_TAG#v}"
+          git -C "$TAP_DIR" push origin HEAD

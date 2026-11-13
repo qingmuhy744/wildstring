@@ -6,6 +6,8 @@
 !backend/src/**
 !backend/tests/
 !backend/tests/**
+!scripts/
+!scripts/generate_homebrew_cask.py
 !plugins/
 !plugins/**
 !tests/
