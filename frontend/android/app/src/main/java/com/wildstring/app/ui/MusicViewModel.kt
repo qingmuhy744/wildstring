@@ -68,6 +68,8 @@ class MusicViewModel @Inject constructor(
         repository::refreshPodcast, repository::refreshAllPodcasts)
     private val mutablePosition = MutableStateFlow(0L)
     val position = mutablePosition.asStateFlow()
+    private val mutableBuffered = MutableStateFlow(0L)
+    val buffered = mutableBuffered.asStateFlow()
     var controller: MediaController? = null
         private set
     private val controllerFuture = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
@@ -1258,6 +1260,7 @@ class MusicViewModel @Inject constructor(
         }
         lastPositionEntryId = currentEntry
         mutablePosition.value = resolvedPos
+        mutableBuffered.value = c.bufferedPosition.coerceAtLeast(0L)
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,

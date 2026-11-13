@@ -136,7 +136,7 @@ internal fun PodcastExploreResultsSkeleton(modifier: Modifier = Modifier, count:
 internal fun PodcastExplorePreviewSkeleton(modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().testTag("podcast-explore-preview-skeleton"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            SkeletonBlock(Modifier.size(92.dp), RoundedCornerShape(10.dp))
+            SkeletonBlock(Modifier.size(92.dp), RoundedCornerShape(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SkeletonLine(widthFraction = .7f)
                 SkeletonLine(widthFraction = .42f)

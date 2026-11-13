@@ -196,14 +196,16 @@ internal fun Modifier.dismissPlayerSwipe(
     )
 }
 internal val classicDarkColors = darkColorScheme(
-    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), primaryContainer = Color(0xFF43302A), onPrimaryContainer = Color(0xFFFFDBCC),
-    secondary = Color(0xFFBCC6B0), onSecondary = Color(0xFF263020), secondaryContainer = Color(0xFF2E2924), onSecondaryContainer = Color(0xFFE3DDD0),
-    outline = Color(0xFF9A9288), outlineVariant = Color(0xFF3A352F),
+    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF211B17), primaryContainer = Color(0xFF43302A), onPrimaryContainer = Color(0xFFFFDBCC),
+    secondary = Color(0xFFB4C09E), onSecondary = Color(0xFF1B2312), secondaryContainer = Color(0xFF2E2924), onSecondaryContainer = Color(0xFFE3DDD0),
+    outline = Color(0xFF9A948A), outlineVariant = Color(0xFF3A352F),
     background = Color(0xFF181614), surface = Color(0xFF181614),
     surfaceVariant = Color(0xFF2E2924), onSurface = Color(0xFFE8E3D9), onSurfaceVariant = Color(0xFFAAA59A),
     surfaceContainerLowest = Color(0xFF131110), surfaceContainerLow = Color(0xFF1D1A18),
     surfaceContainer = Color(0xFF211E1B), surfaceContainerHigh = Color(0xFF2A2622),
     surfaceContainerHighest = Color(0xFF34302A),
+    tertiary = Color(0xFFE98A6D), onTertiary = Color(0xFF211B17), tertiaryContainer = Color(0xFF43302A), onTertiaryContainer = Color(0xFFFFDBCC),
+    error = Color(0xFFF2A392), onError = Color(0xFF211B17), errorContainer = Color(0xFF3F241E), onErrorContainer = Color(0xFFF2A392),
 )
 @Composable
 fun WildStringApp(model: MusicViewModel) {
@@ -269,11 +271,9 @@ fun WildStringApp(model: MusicViewModel) {
                         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp).padding(bottom = bottomPad), contentAlignment = Alignment.BottomCenter) {
                             Surface(
                                 Modifier.widthIn(max = 380.dp).fillMaxWidth().testTag("playback-handoff-notice"),
-                                shape = RoundedCornerShape(20.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                                tonalElevation = 3.dp,
-                                shadowElevation = 6.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             ) {
                                 Row(
                                     Modifier.padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
@@ -285,7 +285,7 @@ fun WildStringApp(model: MusicViewModel) {
                                         Text(stringResource(R.string.handoff_available), style = MaterialTheme.typography.labelLarge)
                                         Text(
                                             stringResource(R.string.handoff_position, saved.index + 1, saved.trackIds.size, formatTime(saved.positionMs)),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -355,8 +355,8 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
         }
     }
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.Center) {
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(64.dp), tint = Color.Unspecified)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(48.dp), tint = Color.Unspecified)
             Text(stringResource(R.string.brand_name), fontSize = 32.sp, fontWeight = FontWeight.Medium)
             Text(stringResource(R.string.connect_collection), color = Muted)
             TextButton(manageServers, Modifier.testTag("connection-servers")) { Icon(Icons.Default.Dns, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.settings_servers)) }
@@ -819,10 +819,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         .width(360.dp).heightIn(max = 520.dp).fillMaxHeight()
                         .testTag("player-queue-popup")
                         .pointerInput(Unit) { detectTapGestures {} },
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shadowElevation = 8.dp,
                 ) {
                     QueuePanel(vm, state, Modifier.fillMaxSize(), onClose = { queue = false })
                 }
@@ -886,7 +885,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         .pointerInput(Unit) { detectTapGestures {} },
                     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shadowElevation = 12.dp,
                 ) {
                     Column(Modifier.fillMaxWidth()) {
                         Box(
@@ -990,6 +988,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             SongAction(stringResource(if (landscapeNow) R.string.player_landscape_exit else R.string.player_landscape_enter), Icons.Default.ScreenRotation) {
                 vm.playerLandscape.value = !landscapeNow; actions = null
             }
+            SongAction(stringResource(R.string.sleep_timer), Icons.Default.Bedtime) { sleepDialog = true; actions = null }
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         }
         SongAction(stringResource(R.string.open_album), Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
@@ -1196,21 +1195,19 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         else -> null
     }
     Row(Modifier.fillMaxWidth().heightIn(min = size.rowDp.dp).testTag("catalog-item-$index")
-        .background(if (current) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else Color.Transparent)
+        .background(if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
         .semantics { selected = current }.clickable(onClick = tactile(play))
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (current) Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(1.5.dp)).background(MaterialTheme.colorScheme.primary).padding(end = 6.dp))
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
             if (current) PlaybackIndicator(state.playing, state.buffering)
             else Text(track.trackNumber?.toString()?.padStart(2, '0') ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
         } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
             Cover(vm, track.coverId, track.title, Modifier.fillMaxSize())
-            if (current) {
-                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .46f)))
-                PlaybackIndicator(state.playing, state.buffering, color = Color.White)
-            }
+            if (current) PlaybackIndicator(state.playing, state.buffering)
         }
         Column(Modifier.weight(if (columns) 2.4f else 1f).padding(start = 14.dp, end = 8.dp)) {
-            Text(track.title, Modifier.testTag("track-title-$index"), color = if (!track.isAvailable) Muted else if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.title, Modifier.testTag("track-title-$index"), color = if (!track.isAvailable) Muted else MaterialTheme.colorScheme.onSurface, fontWeight = if (current) FontWeight.SemiBold else FontWeight.Medium, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val subtitle = listOfNotNull(track.unavailableReason, if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, if (!columns) track.artist else null, metric).joinToString(" · ")
             if (subtitle.isNotBlank()) Text(subtitle, Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1220,6 +1217,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
             Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
+        if (current) Icon(Icons.Default.GraphicEq, null, Modifier.size(18.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }
     }
 }
@@ -1382,7 +1380,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         if (!deckLayout) Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             PlayerCollapseButton(onBack)
             Spacer(Modifier.weight(1f))
-            PlayerSleepButton(sleepActive, onSleep)
             PlayerMoreButton(onAdd)
         }
         val openQueueOnSwipeUp = { if (!queue) onQueue() }
@@ -1499,8 +1496,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
 }
 
 @Composable private fun PlayerCollapseButton(onBack: () -> Unit, modifier: Modifier = Modifier) = IconButton(onBack, modifier) { Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.player_collapse)) }
-@Composable private fun PlayerSleepButton(active: Boolean, onSleep: () -> Unit) =
-    IconButton(onSleep) { Icon(Icons.Default.Bedtime, stringResource(R.string.sleep_timer), tint = if (active) Accent else Muted) }
 @Composable private fun PlayerMoreButton(onAdd: () -> Unit) = IconButton(onAdd) { Icon(Icons.Default.MoreVert, stringResource(R.string.current_track_actions)) }
 
 @Composable
@@ -1653,12 +1648,10 @@ internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long, inline: Boo
     val elapsed = formatTime(scrub?.toLong() ?: position)
     val total = formatTime(duration)
     val timeStyle = @Composable { text: String -> Text(text, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
+    val buffered by vm.buffered.collectAsStateWithLifecycle()
     val slider = @Composable { modifier: Modifier ->
-        Slider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it }, modifier = modifier,
-            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0,
-            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+        PlaybackSlider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it }, bufferedValue = buffered.toFloat(), modifier = modifier,
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0)
     }
     if (inline) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         timeStyle(elapsed); slider(Modifier.weight(1f)); timeStyle(total)

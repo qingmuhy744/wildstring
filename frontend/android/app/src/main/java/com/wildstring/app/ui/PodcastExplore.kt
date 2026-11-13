@@ -137,6 +137,8 @@ import kotlinx.coroutines.launch
                         onValueChange = { query = it.take(512) },
                         label = { Text(if (canAdd) stringResource(R.string.pod_exp_search_label_rss) else stringResource(R.string.pod_exp_search_label)) },
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent),
                         trailingIcon = {
                             if (query.isNotEmpty() && !busy) {
                                 IconButton({ query = ""; selected = null }) {
@@ -268,7 +270,7 @@ import kotlinx.coroutines.launch
 
 @Composable private fun PodcastDirectoryArtwork(vm: MusicViewModel, item: PodcastDirectoryResult, modifier: Modifier) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
-    Box(modifier.clip(RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+    Box(modifier.clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
         Icon(Icons.Default.Podcasts, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         vm.repository.podcastDirectoryArtwork(item)?.let { artwork ->
             AsyncImage(

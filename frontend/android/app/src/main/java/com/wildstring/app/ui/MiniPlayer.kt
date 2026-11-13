@@ -138,7 +138,7 @@ import androidx.compose.ui.unit.dp
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = colors.surfaceContainerHighest,
-                                border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
+                                border = BorderStroke(1.dp, colors.outlineVariant),
                             ) {
                                 Cover(vm, currentTrack.coverId, currentTrack.title, Modifier.size(44.dp))
                             }

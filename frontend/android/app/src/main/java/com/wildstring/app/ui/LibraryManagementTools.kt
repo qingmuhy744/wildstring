@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonArray
@@ -192,8 +193,7 @@ private fun OnlineMetadataMatcherCard(
 
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 1.dp,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -317,7 +317,8 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
       }
       // Keep the primary action reachable while editing any field or while the IME is open.
       // The enclosing FeatureDialog applies imePadding, so this footer remains above the keyboard.
-      Surface(tonalElevation = 2.dp) {
+      HorizontalDivider()
+      Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
         ActionStatus(action)
         Button({ focus.clearFocus(); keyboard?.hide(); scope.launch { action.run {
@@ -368,9 +369,9 @@ internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
             } else {
                 Text(stringResource(R.string.lib_mgmt_timing_hint), style = MaterialTheme.typography.bodySmall)
                 if (state.current?.id != track.id) Button({ vm.play(listOf(track)) }) { Text(stringResource(R.string.lib_mgmt_play_to_time)) }
-                else Row(verticalAlignment = Alignment.CenterVertically) { TextButton(vm::toggle) { Text(if (state.playing) stringResource(R.string.lib_mgmt_pause) else stringResource(R.string.lib_mgmt_play)) }; Text(formatTime(position)); TextButton({ vm.seek(0) }) { Text(stringResource(R.string.lib_mgmt_seek_start)) } }
+                else Row(verticalAlignment = Alignment.CenterVertically) { TextButton(vm::toggle) { Text(if (state.playing) stringResource(R.string.lib_mgmt_pause) else stringResource(R.string.lib_mgmt_play)) }; Text(formatTime(position), style = TextStyle(fontFeatureSettings = "tnum")); TextButton({ vm.seek(0) }) { Text(stringResource(R.string.lib_mgmt_seek_start)) } }
                 lines.forEachIndexed { index, line -> Row(Modifier.fillMaxWidth().clickable { cursor = index }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: stringResource(R.string.lib_mgmt_unmarked)) + "  " + line.ifBlank { stringResource(R.string.lib_mgmt_interlude) }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: stringResource(R.string.lib_mgmt_unmarked)) + "  " + line.ifBlank { stringResource(R.string.lib_mgmt_interlude) }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = TextStyle(fontFeatureSettings = "tnum"))
                 } }
                 Button({
                     if (cursor < lines.size) {
@@ -648,7 +649,8 @@ internal fun AlbumMetadataPanel(vm: MusicViewModel, albumId: String, dismiss: ()
             }
             ActionStatus(action)
         }
-        Surface(tonalElevation = 2.dp) {
+        HorizontalDivider()
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(dismiss, enabled = !action.busy, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.lib_mgmt_close)) }
                 Button({ scope.launch { action.run {

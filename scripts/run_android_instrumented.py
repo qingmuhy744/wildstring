@@ -159,6 +159,24 @@ def adb(*arguments: str, timeout: float = 120, check: bool = True) -> str:
     return completed.stdout
 
 
+def suppress_system_dialogs() -> None:
+    """Suppress blocking OS-level crash, ANR, immersive mode, and setup dialogs."""
+    settings = (
+        ("global", "hide_error_dialogs", "1"),
+        ("secure", "immersive_mode_confirmations", "confirmed"),
+        ("global", "device_provisioned", "1"),
+        ("secure", "user_setup_complete", "1"),
+        ("global", "setup_wizard_has_run", "1"),
+        ("global", "package_verifier_enable", "0"),
+        ("global", "verifier_verify_adb_installs", "0"),
+    )
+    for namespace, key, value in settings:
+        try:
+            adb("shell", "settings", "put", namespace, key, value, timeout=10, check=False)
+        except Exception:  # nosec B110
+            pass
+
+
 def device_ready(timeout: float = 60) -> bool:
     """True if the emulator answers; False if it is gone (for example it crashed or hung)."""
     try:
@@ -456,6 +474,7 @@ def main() -> None:
     options.output.mkdir(parents=True, exist_ok=True)
 
     adb("wait-for-device", timeout=300)
+    suppress_system_dialogs()
     if not options.no_install:
         for apk in (options.app_apk, options.test_apk):
             if not apk.is_file():

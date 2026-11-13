@@ -66,7 +66,15 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                 Text(podcast.title, style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
                 val current = value
-                if (current == null && error == null) CircularProgressIndicator(Modifier.size(24.dp))
+                if (current == null && error == null) Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+                    SkeletonLine(widthFraction = .35f)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SkeletonBlock(Modifier.weight(1f).height(22.dp), RoundedCornerShape(6.dp))
+                        SkeletonBlock(Modifier.width(96.dp).height(48.dp), RoundedCornerShape(10.dp))
+                    }
+                    SkeletonLine(widthFraction = .42f)
+                    SkeletonLine(widthFraction = .8f)
+                }
                 if (current != null) {
                     if (!current.active) Text(stringResource(R.string.pod_dl_unfollowed_notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val policies = listOf(
@@ -86,7 +94,7 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                                 enabled = !busy && current.active,
                                 shape = RoundedCornerShape(10.dp),
                                 contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
-                                modifier = Modifier.height(40.dp).testTag("podcast-auto-download-policy"),
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-auto-download-policy"),
                             ) {
                                 Text(policies.firstOrNull { it.first == current.downloadPolicy }?.second ?: stringResource(R.string.pod_dl_policy_none), fontSize = 14.sp, maxLines = 1, softWrap = false)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -233,7 +241,7 @@ fun PodcastDownloadQueueDialog(
                         Text(
                             text = stringResource(R.string.pod_dl_tasks_title),
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         Text(
                             text = stringResource(R.string.pod_dl_tasks_subtitle),
@@ -311,9 +319,16 @@ fun PodcastDownloadQueueDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     if (info == null && error == null) {
-                        item {
-                            Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.size(28.dp))
+                        items(4) {
+                            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    SkeletonBlock(Modifier.size(44.dp), RoundedCornerShape(8.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        SkeletonLine(widthFraction = .8f)
+                                        SkeletonLine(widthFraction = .5f)
+                                    }
+                                }
                             }
                         }
                     } else if (activeTab == "active") {
@@ -508,7 +523,7 @@ fun PodcastDownloadQueueDialog(
                                         },
                                         enabled = !retrying,
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(32.dp),
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                     ) {
                                         Text(if (retrying) stringResource(R.string.pod_dl_retrying) else stringResource(R.string.pod_dl_retry_all), fontSize = 12.sp)
                                     }
@@ -559,7 +574,7 @@ fun PodcastDownloadQueueDialog(
                                                 }
                                             },
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp),
+                                            modifier = Modifier.heightIn(min = 48.dp),
                                         ) {
                                             Text(stringResource(R.string.pod_dl_retry), fontSize = 12.sp)
                                         }

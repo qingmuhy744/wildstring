@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
@@ -302,7 +303,7 @@ import kotlin.math.roundToInt
             val target = candidate?.let { lines.getOrNull(it)?.timeMs }
             if (target != null) Row(Modifier.align(Alignment.Center).fillMaxWidth().testTag("lyric-seek-preview"),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(formatTime(target), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatTime(target), fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(Modifier.weight(1f).padding(horizontal = 8.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
                 IconButton({ feedback(TactileKind.Tap); onSeek(target); follow = true }, Modifier.testTag("lyric-seek-confirm")) {
                     Icon(Icons.Default.PlayArrow, stringResource(R.string.lyric_vp_jump_to_time, formatTime(target)))

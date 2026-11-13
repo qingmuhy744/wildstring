@@ -240,7 +240,7 @@ private fun reviewLabel(key: String): String =
                 if (tab == "lyrics") item { key(active) { OnlineLyricsPanel(vm, Track(id = current.text("id"), title = current.text("title"), artists = current.getAsJsonArray("artists")?.map { it.asString } ?: emptyList(), album = current.text("album"), durationMs = 0, albumId = current.text("album_id"))) {} } }
             }
         }
-        Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val fixedCoverNotice = if (cover != null) stringResource(R.string.meta_rev_with_fixed_cover_suffix) else ""
             Text(stringResource(R.string.meta_rev_footer_selection, selected.size, selected.sumOf { choices[it.text("id")]?.fields?.size ?: 0 }, fixedCoverNotice), style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

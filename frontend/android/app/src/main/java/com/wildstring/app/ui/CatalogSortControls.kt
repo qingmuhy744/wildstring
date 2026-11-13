@@ -24,7 +24,7 @@ import com.wildstring.app.data.*
     val choices = catalogSortChoices(context)
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        TextButton({ expanded = true }, Modifier.testTag("catalog-sort").semantics {
+        TextButton({ expanded = true }, Modifier.heightIn(min = 48.dp).testTag("catalog-sort").semantics {
             stateDescription = if (state.order == "asc") resources.getString(R.string.sort_ascending) else resources.getString(R.string.sort_descending)
         }, contentPadding = PaddingValues(horizontal = 6.dp)) {
             Text(stringResource(catalogSortLabel(state.sort, context)), modifier = Modifier.weight(1f, fill = false),

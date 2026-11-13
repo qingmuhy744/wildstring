@@ -76,16 +76,17 @@ import androidx.compose.ui.unit.dp
     LaunchedEffect(query) {
         if (input.text != query && input.composition == null) input = TextFieldValue(query, TextRange(query.length))
     }
-    TextField(input, { value ->
+    OutlinedTextField(input, { value ->
         input = value
         if (value.composition == null && value.text != query) search(value.text)
     }, modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 4.dp).testTag("catalog-search"),
-        placeholder = { Text(stringResource(R.string.search_music)) }, singleLine = true, shape = RoundedCornerShape(28.dp),
+        placeholder = { Text(stringResource(R.string.search_music)) }, singleLine = true, shape = RoundedCornerShape(10.dp),
         leadingIcon = { Icon(Icons.Default.Search, null) }, trailingIcon = {
             if (input.text.isNotEmpty()) IconButton({ input = TextFieldValue(""); search("") }) { Icon(Icons.Default.Close, stringResource(R.string.clear_search)) }
-        }, colors = TextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+        }, colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant),
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
             input = input.copy(composition = null)
@@ -100,11 +101,10 @@ import androidx.compose.ui.unit.dp
             AccountAvatar(vm, Modifier.size(56.dp))
             Column {
                 Text(state.account?.username ?: stringResource(R.string.my_music), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.personal_music_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            ListItem(headlineContent = { Text(stringResource(R.string.recently_played)) }, supportingContent = { Text(stringResource(R.string.resume_music_hint)) },
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            ListItem(headlineContent = { Text(stringResource(R.string.recently_played)) },
                 leadingContent = { Icon(Icons.Default.History, null) }, trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                 colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow), modifier = Modifier.clickable(onClick = recent))
         }

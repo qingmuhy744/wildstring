@@ -58,7 +58,7 @@ internal fun PodcastArticleText(raw: String, modifier: Modifier = Modifier, dura
         buildPodcastArticleText(raw, durationMs, if (onSeek == null) null else { time -> latestSeek.value?.invoke(time) })
     }
     val foreground = MaterialTheme.colorScheme.onSurface.toArgb()
-    val link = MaterialTheme.colorScheme.primary.toArgb()
+    val link = MaterialTheme.colorScheme.tertiary.toArgb()
     AndroidView(modifier = modifier, factory = { context ->
         TextView(context).apply {
             textSize = 17f

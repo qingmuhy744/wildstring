@@ -116,7 +116,7 @@ internal fun PodcastQueuePanel(
             Text(
                 text = stringResource(R.string.q_panel_queue_title, cloud.queueRows.size),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
             )
             if (onClose != null) {
                 IconButton(onClick = onClose) {
@@ -149,7 +149,7 @@ internal fun PodcastQueuePanel(
                     Text(
                         text = stringResource(R.string.q_panel_auto_continue),
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     )
@@ -597,7 +597,7 @@ private fun QueueChromeRow(
     val card = MaterialTheme.colorScheme.surfaceContainer
     val rowFill = when {
         highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
-        current -> MaterialTheme.colorScheme.primary.copy(alpha = .08f).compositeOver(card)
+        current -> MaterialTheme.colorScheme.primary.copy(alpha = .14f).compositeOver(card)
         else -> card
     }
     Row(
@@ -613,7 +613,7 @@ private fun QueueChromeRow(
             else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         Column(Modifier.weight(1f).clickable(enabled = playEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onPlay).padding(vertical = 12.dp, horizontal = 8.dp)) {
-            Text(title, color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
+            Text(title, color = if (current) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.size(48.dp).testTag(handleTag)
