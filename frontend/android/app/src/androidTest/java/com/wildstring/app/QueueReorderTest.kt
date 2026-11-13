@@ -68,6 +68,46 @@ class QueueReorderTest {
         compose.runOnIdle { assertTrue(actions.first { it.label == uiString(R.string.queue_move_up) }.action()) }
         compose.runOnIdle { assertEquals("entry-0", rows.value[1].entryId) }
     }
+    @Test fun swipeRemovalWaitsForReleaseAndUndoRestoresOriginalPosition() {
+        val removed = mutableListOf<QueueRow>()
+        val rows = mutableStateOf(initial.take(3))
+        compose.setContent {
+            MaterialTheme {
+                QueueList(
+                    rows.value,
+                    "entry-0",
+                    Modifier.width(360.dp).height(360.dp),
+                    onPlay = {},
+                    onRemove = {},
+                    onHaptic = {},
+                    onSwipeRemove = { row ->
+                        val originalIndex = rows.value.indexOfFirst { it.entryId == row.entryId }
+                        removed += row
+                        rows.value = rows.value.toMutableList().apply { removeAt(originalIndex) }
+                        ({ rows.value = rows.value.toMutableList().apply { add(originalIndex, row) } })
+                    },
+                    onMove = { _, _ -> },
+                )
+            }
+        }
+        val row = compose.onNodeWithTag("queue-row-entry-1")
+        val bounds = row.fetchSemanticsNode().boundsInRoot
+        val center = bounds.center - bounds.topLeft
+        row.performTouchInput {
+            down(center)
+            moveTo(Offset(-bounds.width * .9f, center.y), delayMillis = 400)
+        }
+        compose.runOnIdle { assertTrue("Holding a swipe must not remove the row", removed.isEmpty()) }
+        row.performTouchInput { up() }
+        compose.waitUntil(5_000) { removed.size == 1 }
+        compose.onNodeWithText(uiString(R.string.queue_undo), substring = false).performClick()
+        compose.waitUntil(5_000) { rows.value.map { it.entryId } == listOf("entry-0", "entry-1", "entry-2") }
+        compose.runOnIdle {
+            val restored = compose.onNodeWithTag("queue-row-entry-1").fetchSemanticsNode().boundsInRoot
+            val neighbor = compose.onNodeWithTag("queue-row-entry-2").fetchSemanticsNode().boundsInRoot
+            assertEquals("Undo must reset the dismissed offset", neighbor.left, restored.left, 1f)
+        }
+    }
     @Test fun edgeScrollReachesOffscreenRowsAndExternalChangeCancelsDrop() {
         show()
         val queue = compose.onNodeWithTag("playback-queue")
