@@ -1201,6 +1201,7 @@ private fun PodcastDetailView(
                             ?: detail?.episodes.orEmpty().maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
                         val nextResumable = (nextPlayable?.positionSeconds ?: 0) > 0
                         val context = androidx.compose.ui.platform.LocalContext.current
+                        val shareTitle = stringResource(R.string.pod_scr_share_show)
                         var headerActionsExpanded by rememberSaveable { mutableStateOf(false) }
                         nextPlayable?.let { target ->
                             Button(
@@ -1250,7 +1251,7 @@ private fun PodcastDetailView(
                             DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
                                 headerActionsExpanded = false
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
-                                context.startActivity(android.content.Intent.createChooser(intent, context.getString(R.string.pod_scr_share_show)))
+                                context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
                             }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
                             if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
                                 headerActionsExpanded = false
