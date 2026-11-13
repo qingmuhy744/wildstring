@@ -60,6 +60,9 @@ WildString supports two themes: **Light (Warm Paper — Daylight)** and **Dark (
 | `--success` | `#496332` | Success status text and icons |
 | `--warning` | `#80591E` | Warning status text and icons |
 | `--danger` | `#A64027` | Destructive actions (`取消订阅`, `删除`) |
+| `--danger-container` | `#F5D8CE` | Muted fill behind danger chips/actions |
+| `--on-danger-container` | `#7A2815` | Text/icon on `--danger-container` |
+| `--accent-container` | `#F5DDD4` | Tonal accent fill (accent-container semantics, badges); pairs with an ink `#3A160B` (`on-accent-container`) |
 | `--tag-bg` | `#E0E5D6` | Neutral tag and chip fill |
 | `--accent-hover` | `#A8472E` | Hover state for primary accent controls |
 | `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill |
@@ -90,11 +93,13 @@ Dark shares the hue family of Light: every neutral sits at hue 25°–35° with 
 | `--success` | `#B2C69A` | Success status text and icons |
 | `--warning` | `#E5BD7C` | Warning status text and icons |
 | `--danger` | `#F2A392` | Error banners and destructive menu items |
+| `--danger-container` | `#3F241E` | Muted fill behind danger chips/actions |
+| `--on-danger-container` | `#F2A392` | Text/icon on `--danger-container` |
 | `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill and selected states that need warmth |
 
 Dark has no `--border-strong`; secondary button and input outlines use `--border`. Verified contrast: `--text` ≥ 10.2:1, `--muted` ≥ 5.3:1 and `--olive` ≥ 6.8:1 on every surface above; `--accent` ≥ 5.2:1.
 
-**Android Material mapping**: `background`/`surface` = `canvas`; `surfaceContainerLowest` = `--surface-input`; `surfaceContainerLow` = `--sidebar`; `surfaceContainer` = `panel`; `surfaceContainerHigh` = `raised`; `surfaceContainerHighest` = `--bg-hover`; `surfaceVariant` and `secondaryContainer` = `--nav-active`; `primaryContainer` = `--accent-container`; `outlineVariant` = `--border`; `onSurface` = `--text`; `onSurfaceVariant` = `--muted`.
+**Android Material mapping**: `background`/`surface` = `canvas`; `surfaceContainerLowest` = `--surface-input`; `surfaceContainerLow` = `--sidebar`; `surfaceContainer` = `panel`; `surfaceContainerHigh` = `raised`; `surfaceContainerHighest` = `--bg-hover`; `surfaceVariant` and `secondaryContainer` = `--nav-active`; `primaryContainer` = `--accent-container`; `tertiary` = `--accent-text`; `tertiaryContainer` = `--accent-container`; `error` = `--danger`; `errorContainer` = `--danger-container`; `onError` / `onTertiary` / `onErrorContainer` = `--on-accent` / `--on-accent` / `--on-danger-container`; `outlineVariant` = `--border`; `onSurface` = `--text`; `onSurfaceVariant` = `--muted`.
 
 ---
 
@@ -157,6 +162,7 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 ### 5.3 Narrow Screens & Native Clients
 
 - **Web breakpoints**: the shell reflows at `1100px`, `980px`, `760px` and `700px`. Below `760px` the sidebar collapses and the layout is single-column; the supported minimum width is `320px`, and acceptance is checked at `390px`.
+- **Android AVD & input**: Local emulators and test profiles must enable physical hardware keyboard input (`hw.keyboard = yes`), ensuring typing and keyboard navigation work seamlessly in Android Studio Running Devices and standalone windows. The reference testing baseline pins two standard profiles: Phone (1080×1920) and Pad (2560×1600).
 - **Android Phone / Pad**: Classify the current available window as Pad when its shorter dimension is at least `600dp`; smaller split windows and folded foldables use Phone. Rotation of a phone does not turn it into Pad. Both layouts are touch-first and share navigation, ViewModel, playback and selection state. Preserve drafts and scroll anchors when the window changes; do not key pages by layout mode.
 - **Navigation**: Android Phone uses the Material bottom `NavigationBar`; Pad uses a `NavigationRail`. The mini player sits at the bottom of the content, above Phone navigation, and expands to the fullscreen player. iOS uses `TabView`; Web keeps the transport bar at the bottom of the viewport.
 - **Android catalog and search**: Keep absolute server item positions and the same scroll state across layouts. Albums use the existing adaptive cover grid. On Pad, artists and playlists use cards of at least `260dp`; track lists show artist, album and tabular duration columns when content width reaches `720dp`. Narrower lists retain the stacked metadata row. All row menus retain `48dp` touch targets.
