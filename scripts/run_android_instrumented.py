@@ -360,6 +360,25 @@ def select(classes: dict[str, list[str]], wanted: str) -> dict[str, list[str]]:
     return selected
 
 
+def shard(classes: dict[str, list[str]], index: int, count: int) -> dict[str, list[str]]:
+    """Split discovered classes into deterministic shards, each class in exactly one.
+
+    A long single-emulator run can lose the emulator mid-suite on memory-constrained hosts;
+    sharding lets CI give each half a fresh emulator without dropping or skipping a class.
+    """
+    if count < 1:
+        raise SystemExit("--shard-count must be at least 1")
+    if not 0 <= index < count:
+        raise SystemExit(f"--shard-index must be between 0 and {count - 1}")
+    if count == 1:
+        return classes
+    return {
+        klass: classes[klass]
+        for position, klass in enumerate(sorted(classes))
+        if position % count == index
+    }
+
+
 def summarize(runs: list[ClassRun], options: argparse.Namespace) -> bool:
     final: dict[tuple[int, str], ClassRun] = {}
     for run in runs:
@@ -459,6 +478,18 @@ def main() -> None:
     )
     parser.add_argument("--class-timeout", type=float, default=900)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard to run after discovery (default: 0)",
+    )
+    parser.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Split discovered classes into this many shards (default: 1, no split)",
+    )
     options = parser.parse_args()
     options.runner = f"{options.test_package}/{RUNNER}"
     options.extras = []
@@ -482,8 +513,19 @@ def main() -> None:
             # -g matches connectedAndroidTest, which grants runtime permissions on install.
             adb("install", "-r", "-t", "-g", str(apk), timeout=600)
     classes = select(discover(options.runner, options.extras), options.classes)
+    classes = shard(classes, options.shard_index, options.shard_count)
+    if not classes:
+        print(
+            f"No instrumented test classes in shard {options.shard_index}/{options.shard_count}",
+            flush=True,
+        )
+        return
     total = sum(len(names) for names in classes.values())
-    print(f"Discovered {total} tests in {len(classes)} classes", flush=True)
+    print(
+        f"Discovered {total} tests in {len(classes)} classes"
+        f" (shard {options.shard_index}/{options.shard_count})",
+        flush=True,
+    )
 
     runs: list[ClassRun] = []
     try:

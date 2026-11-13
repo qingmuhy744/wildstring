@@ -112,15 +112,16 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Native login, streaming and lyrics test
-        id: emulator_regression
+      - name: Native instrumented tests (shard 1 of 2)
         if: ${{ env.RUN_EMULATOR == 'true' }}
-        # Each test class runs in its own instrumentation process, so an app crash
-        # only fails the class that caused it. Failed classes are retried once
-        # against a restarted synthetic API; every attempt keeps its own report,
-        # logcat and screenshots under artifacts/android-instrumented/.
-        timeout-minutes: 45
+        # A single long emulator session can lose the emulator partway through the suite on
+        # memory-constrained hosts, which fails every remaining class as "not run". Each shard
+        # gets a fresh emulator and runs half the discovered classes; together they still cover
+        # every class exactly once.
+        timeout-minutes: 40
         env:
+          ANDROID_TEST_SHARD_INDEX: "0"
+          ANDROID_TEST_SHARD_COUNT: "2"
           ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
@@ -146,7 +147,31 @@ jobs:
             adb reboot
             timeout 120 adb wait-for-device
             timeout 120 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
-            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES
+            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
+      - name: Native instrumented tests (shard 2 of 2)
+        if: ${{ env.RUN_EMULATOR == 'true' }}
+        timeout-minutes: 40
+        env:
+          ANDROID_TEST_SHARD_INDEX: "1"
+          ANDROID_TEST_SHARD_COUNT: "2"
+          ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 4096M
+          disable-animations: true
+          script: |
+            adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
+            timeout 60 adb wait-for-device
+            adb shell setprop persist.sys.locale zh-CN
+            adb reboot
+            timeout 120 adb wait-for-device
+            timeout 120 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
       - name: Stop synthetic API
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}
         run: bash scripts/ci_synthetic_api.sh stop
