@@ -687,11 +687,24 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 val header: @Composable () -> Unit = {
                                 Column(Modifier.fillMaxWidth()) {
                                     if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
-                                        PersonalHeader(vm, state, { vm.recent() }, compact = compact)
-                                        MobileShortcuts { if (it == "settings") settings = true else feature = it }
-                                        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                            Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
-                                            IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
+                                        if (rail) {
+                                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.Top) {
+                                                Column(Modifier.width(336.dp)) { PersonalHeader(vm, state, { vm.recent() }, compact = false) }
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                                    MobileShortcuts { if (it == "settings") settings = true else feature = it }
+                                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
+                                                        IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            PersonalHeader(vm, state, { vm.recent() }, compact = compact)
+                                            MobileShortcuts { if (it == "settings") settings = true else feature = it }
+                                            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
+                                                IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
+                                            }
                                         }
                                     }
                                     if (state.kind == "artists" && state.collection == null) {
