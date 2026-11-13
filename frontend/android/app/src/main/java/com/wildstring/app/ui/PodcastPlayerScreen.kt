@@ -113,7 +113,6 @@ internal fun PodcastPlayerScreen(
                 IconButton(tactile(onBack)) {
                     Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
                 }
-                val aiComingSoon = stringResource(R.string.pod_player_ai_notes_coming_soon)
                 if (wide) Spacer(Modifier.weight(1f)) else Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
@@ -134,13 +133,6 @@ internal fun PodcastPlayerScreen(
                             label = stringResource(R.string.pod_player_tab_article),
                             tag = "podcast-article-tab",
                             onClick = tactile { article = true },
-                        )
-                        PodcastModeTab(
-                            selected = false,
-                            label = stringResource(R.string.pod_player_tab_ai_notes),
-                            tag = "podcast-ai-tab",
-                            muted = true,
-                            onClick = tactile { vm.notify(aiComingSoon) },
                         )
                     }
                 }
@@ -203,13 +195,13 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 )
                                 episode?.pubDate?.takeIf { it.isNotBlank() }?.let { pub ->
                                     Text(
-                                        pub.take(16),
+                                        formatShortPubDate(pub),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            HorizontalDivider()
                             val description = episode?.description.orEmpty()
                             if (description.isNotBlank()) PodcastArticleText(description, Modifier.fillMaxWidth(), duration) { vm.seek(it) }
                             else if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stringResource(R.string.pod_player_loading_article)) }
@@ -426,11 +418,11 @@ private fun PodcastModeTab(
     val bg = if (selected) MaterialTheme.colorScheme.surface.copy(alpha = 0.92f) else Color.Transparent
     val fg = when {
         selected -> MaterialTheme.colorScheme.onSurface
-        muted -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Box(
         modifier = Modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(15.dp))
             .background(bg)
             .clickable(onClick = onClick)
@@ -509,6 +501,7 @@ private fun PodcastPlayerControls(
     modifier: Modifier,
 ) {
     val position by vm.position.collectAsStateWithLifecycle()
+    val buffered by vm.buffered.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     var scrub by remember { mutableStateOf<Float?>(null) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -579,8 +572,9 @@ private fun PodcastPlayerControls(
     val rowGap by animateDpAsState(if (compact) 0.dp else 8.dp, dpSpec, label = "podcast-row-gap")
     run {
         Column(modifier.fillMaxWidth().testTag(if (compact) "podcast-controls-compact" else "podcast-controls-full")) {
-            Slider(
+            PlaybackSlider(
                 value = scrub ?: position.coerceAtMost(duration).toFloat(),
+                bufferedValue = buffered.toFloat(),
                 onValueChange = { scrub = it },
                 onValueChangeFinished = {
                     scrub?.let {
@@ -591,13 +585,6 @@ private fun PodcastPlayerControls(
                 },
                 valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
                 enabled = duration > 0,
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-                    activeTickColor = Color.Transparent,
-                    inactiveTickColor = Color.Transparent,
-                ),
             )
             Row(
                 Modifier.fillMaxWidth(),
@@ -698,7 +685,7 @@ private fun PodcastPlayerControls(
                 IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(skipIcon))
-                        Text("15", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
+                        Text("15", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
                     }
                 }
                 FilledIconButton(

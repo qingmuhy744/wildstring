@@ -148,7 +148,7 @@ import kotlin.math.roundToInt
                 }
             }
         }
-        if (indexed) AlphabetRail(groups, activeKey, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(30.dp)) { offset ->
+        if (indexed) AlphabetRail(groups, activeKey, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(48.dp)) { offset ->
             vm.ensureRange(offset, retry = true)
             jumpJob?.cancel()
             jumpJob = scope.launch {
@@ -208,9 +208,9 @@ import kotlin.math.roundToInt
             }, verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
             groups.forEach { group ->
                 val enabled = group.count > 0 && group.offset != null
-                Text(group.key, style = MaterialTheme.typography.labelSmall, fontSize = if (group.key == "0–9") 9.sp else 11.sp,
-                    fontWeight = if (group.key == activeKey) FontWeight.Bold else FontWeight.Normal,
-                    color = if (group.key == activeKey) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .28f),
+                Text(group.key, style = MaterialTheme.typography.labelSmall, fontSize = 11.sp,
+                    fontWeight = if (group.key == activeKey) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (group.key == activeKey) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .28f),
                     modifier = Modifier.fillMaxWidth().weight(1f)
                         .background(if (group.key == activeKey) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
                         .wrapContentSize(Alignment.Center).testTag("alphabet-${group.key}")
@@ -221,7 +221,7 @@ import kotlin.math.roundToInt
         preview?.let { letter -> Surface(Modifier.align(Alignment.TopEnd).offset {
             IntOffset(with(density) { (-44).dp.roundToPx() }, (previewY + padding - bubbleSize / 2).coerceIn(0f, (height + 2 * padding - bubbleSize).coerceAtLeast(0f)).roundToInt())
         }.size(72.dp).testTag("alphabet-preview"),
-            shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp) {
+            shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
             Box(contentAlignment = Alignment.Center) { Text(letter, style = MaterialTheme.typography.headlineLarge) }
         } }
     }
@@ -235,7 +235,7 @@ import kotlin.math.roundToInt
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("DISC ${disc.number.toString().padStart(2, '0')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
-        Text(stringResource(R.string.track_count, disc.trackCount), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 10.sp)
+        Text(stringResource(R.string.track_count, disc.trackCount), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 11.sp)
         HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
     }
 }

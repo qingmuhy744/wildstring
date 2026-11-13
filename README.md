@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **正式版 [v0.8.15](docs/releases/v0.8.15.md)** · 修复 Android 下滑收起播放器时的闪退；打磨平板探索页、固定「已关注」按钮宽度，播放器节目名可跳转并补上单集收藏。Release 附带 R8 mapping。0.8.12 及更早客户端仍不能对接 0.8.13 及更新的服务器。
+- **正式版 [v0.8.16](docs/releases/v0.8.16.md)** · 修复 Android 连接与线路对话框的键盘遮挡，新增逐条线路测试，并完成 Android 设计规范对齐；正式版可自动更新 Homebrew Tap。0.8.12 及更早客户端仍不能对接 0.8.13 及更新的服务器。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 

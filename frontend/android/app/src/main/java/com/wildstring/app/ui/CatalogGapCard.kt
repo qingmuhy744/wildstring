@@ -1,6 +1,7 @@
 package com.wildstring.app.ui
 
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import com.wildstring.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -73,7 +74,7 @@ fun CatalogGapCard(
                         Text(
                             text = stringResource(R.string.gap_card_title, data.artist),
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     Spacer(Modifier.height(3.dp))
@@ -85,13 +86,13 @@ fun CatalogGapCard(
                 }
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = if (data.coveragePercent == 100) Color(0xFF10B981).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer,
+                    color = if (data.coveragePercent == 100) SuccessColor.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Text(
                         text = stringResource(R.string.gap_card_coverage, data.coveragePercent),
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (data.coveragePercent == 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (data.coveragePercent == 100) SuccessColor else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
@@ -122,12 +123,12 @@ fun CatalogGapCard(
                 FilterChip(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    label = { Text(stringResource(R.string.gap_card_tab_missing, data.missingCount), fontSize = 12.sp) },
+                    label = { Text(stringResource(R.string.gap_card_tab_missing, data.missingCount), fontSize = 12.sp, style = TextStyle(fontFeatureSettings = "tnum")) },
                 )
                 FilterChip(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    label = { Text(stringResource(R.string.gap_card_tab_collected, data.matchedCount), fontSize = 12.sp) },
+                    label = { Text(stringResource(R.string.gap_card_tab_collected, data.matchedCount), fontSize = 12.sp, style = TextStyle(fontFeatureSettings = "tnum")) },
                 )
             }
 
@@ -136,7 +137,7 @@ fun CatalogGapCard(
             // List
             if (selectedTab == 1) {
                 if (data.missing.isEmpty()) {
-                    Text(stringResource(R.string.gap_card_all_collected), style = MaterialTheme.typography.bodySmall, color = Color(0xFF10B981))
+                    Text(stringResource(R.string.gap_card_all_collected), style = MaterialTheme.typography.bodySmall, color = SuccessColor)
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         data.missing.forEach { item ->
@@ -200,7 +201,7 @@ fun CatalogGapCard(
                                     }
                                     FilledIconButton(
                                         onClick = { onPlayTrack(item.trackId) },
-                                        modifier = Modifier.size(32.dp),
+                                        modifier = Modifier.size(48.dp),
                                         shape = CircleShape,
                                         colors = IconButtonDefaults.filledIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.primaryContainer,

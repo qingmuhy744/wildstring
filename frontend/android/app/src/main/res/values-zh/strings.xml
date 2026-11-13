@@ -219,8 +219,6 @@
     <string name="view_more">查看更多</string>
     <string name="album_actions">专辑操作</string>
     <string name="all_music">全部音乐</string>
-    <string name="personal_music_hint">音乐，留在自己的收藏里</string>
-    <string name="resume_music_hint">继续上次的旋律</string>
     <string name="discovery_albums_offline">本机暂无专辑缓存，联网后刷新。</string>
     <string name="discovery_albums_empty">还没有专辑，请先在网页端导入音乐。</string>
     <string name="discovery_added_offline">本机暂无新入库歌曲缓存，联网后刷新。</string>
@@ -355,7 +353,7 @@
     <string name="connect_collection">连接自己的音乐收藏</string>
     <string name="password">密码</string>
     <string name="connect_sign_in">连接并登录</string>
-    <string name="connection_protocol_hint">未填写协议时默认使用 HTTPS；HTTP 仅在你明确确认风险后使用。</string>
+    <string name="connection_protocol_hint">未填写协议时默认使用 HTTPS；\nHTTP 仅在你明确确认风险后使用。</string>
     <string name="http_warning_title">使用未加密 HTTP？</string>
     <string name="http_warning_message">账号密码、播放记录和音频会以明文传输。请只在你信任的网络中使用；公网 HTTP 也不会被自动阻挡，但风险由你确认。</string>
     <string name="http_warning_confirm">我了解风险，继续</string>
@@ -479,6 +477,7 @@
     <string name="statistics_minutes">累计收听 %1$d 分钟</string>
     <string name="statistics_tracks">听过 %1$d 首 · 收藏 %2$d 首</string>
     <string name="daily_recommendations">每日推荐</string>
+    <string name="discovery_ai_badge">AI 整理</string>
     <string name="listening_rankings">收听排行</string>
     <string name="discover_new_music">库外推荐</string>
     <string name="offline_save">离线保存</string>
@@ -1064,12 +1063,12 @@
     <string name="gain_panel_settings_saved">均衡设置已保存。</string>
     <string name="gain_panel_status_summary">请求 %1$s dB · 实际 %2$s dB</string>
     <string name="gain_panel_track_gain_label">本曲额外微调 dB</string>
-    <string name="gap_card_all_collected">全网榜单代表作已全部收录！👏</string>
+    <string name="gap_card_all_collected">榜单代表作已全部收录。</string>
     <string name="gap_card_coverage">%1$d%% 收录</string>
     <string name="gap_card_no_local_match">本地暂无该歌手的匹配收录</string>
     <string name="gap_card_play">播放</string>
     <string name="gap_card_status_missing">暂缺</string>
-    <string name="gap_card_subtitle">全网权威榜单代表作对比</string>
+    <string name="gap_card_subtitle">对照公开热门榜单代表作</string>
     <string name="gap_card_tab_collected">已收录 (%1$d)</string>
     <string name="gap_card_tab_missing">待补齐 (%1$d)</string>
     <string name="gap_card_title">%1$s · 曲库查漏补缺</string>
@@ -1590,10 +1589,8 @@
     <string name="pod_player_rewind_15">后退 15 秒</string>
     <string name="pod_player_saved_article">当前显示已保存的文章。</string>
     <string name="pod_player_sleep_timer">睡眠定时</string>
-    <string name="pod_player_tab_ai_notes">AI 导读</string>
     <string name="pod_player_tab_article">文章</string>
     <string name="pod_player_tab_cover">封面</string>
-    <string name="pod_player_ai_notes_coming_soon">AI 识别与总结即将推出</string>
     <string name="pod_prog_conflict_resolution_notice">另一台设备更新了本集。本机进度已保留，下次播放时请选择接续位置。</string>
     <string name="pod_prog_load_failed_retry">暂时无法读取单集进度，请重试。</string>
     <string name="pod_prog_newer_on_other_device">这集在其他设备有更新的进度</string>
@@ -1660,11 +1657,9 @@
     <string name="pod_scr_explore_trending">探索热门播客</string>
     <string name="pod_scr_favorite_desc">已收藏</string>
     <string name="pod_scr_filter_all">全部</string>
-    <string name="pod_scr_filter_my_downloads">我的下载</string>
     <string name="pod_scr_follow">关注</string>
     <string name="pod_scr_follow_show">关注节目</string>
     <string name="pod_scr_keep_show">保留节目</string>
-    <string name="pod_scr_listened_to">已听至 %1$s</string>
     <string name="pod_scr_loading_episodes">正在加载单集…</string>
     <string name="pod_scr_manage_btn">管理</string>
     <string name="pod_scr_menu_auto_download">自动下载设置</string>
@@ -1696,7 +1691,6 @@
     <string name="pod_scr_rss_address_label">RSS 地址</string>
     <string name="pod_scr_save_to_server">保存到服务器</string>
     <string name="pod_scr_saved">已保存</string>
-    <string name="pod_scr_saved_hint">包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。</string>
     <string name="pod_scr_saved_preparing">已保存，正在准备服务器音频</string>
     <string name="pod_scr_saved_reused">已复用服务器已有音频，无需重复下载</string>
     <string name="pod_scr_server_no_shows">本服暂无节目</string>
@@ -1712,6 +1706,11 @@
     <string name="pod_scr_unknown_host">未知播客主</string>
     <string name="pod_scr_unplayed_count">还有 %1$d 集可听</string>
     <string name="pod_scr_unplayed_episodes">还有 %1$d 集可听</string>
+    <string name="pod_scr_continue_listening">继续收听</string>
+    <string name="pod_scr_play_latest">播放最新一集</string>
+    <string name="pod_scr_share_show">分享节目</string>
+    <string name="pod_scr_filter_unplayed">未听完</string>
+    <string name="pod_scr_remaining_minutes">剩 %1$d 分钟</string>
     <string name="pod_scr_unsaved_shared_retained">已取消个人保存，共享音频由服务器按策略保留</string>
     <string name="q_panel_add_to_queue">加入待播</string>
     <string name="q_panel_auto_continue">自动续播</string>
@@ -1934,6 +1933,11 @@
     <string name="srv_scr_server_routes_title">服务器线路</string>
     <string name="srv_scr_server_url_label">完整服务器地址</string>
     <string name="srv_scr_verify_and_save">验证并保存线路</string>
+    <string name="srv_scr_test">测试</string>
+    <string name="srv_scr_test_ok">已连接 · %1$d ms</string>
+    <string name="srv_scr_test_session_expired">可达 · 会话已过期，需要重新登录</string>
+    <string name="srv_scr_test_failed">无法连接</string>
+    <string name="srv_scr_test_failed_detail">无法连接 · %1$s</string>
     <string name="srv_scr_verifying">验证中…</string>
     <string name="upd_dl_cancel_action">取消下载</string>
     <string name="upd_dl_channel_name">应用更新</string>

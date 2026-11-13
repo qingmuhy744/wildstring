@@ -116,7 +116,7 @@ internal fun PodcastQueuePanel(
             Text(
                 text = stringResource(R.string.q_panel_queue_title, cloud.queueRows.size),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
             )
             if (onClose != null) {
                 IconButton(onClick = onClose) {
@@ -149,7 +149,7 @@ internal fun PodcastQueuePanel(
                     Text(
                         text = stringResource(R.string.q_panel_auto_continue),
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     )
@@ -217,6 +217,7 @@ internal fun PodcastQueueRows(
     val ids = remember(rows) { rows.map { it.episodeId } }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val dismissalEpochs = remember { mutableStateMapOf<String, Int>() }
     val removedLabel = stringResource(R.string.queue_removed)
     val undoLabel = stringResource(R.string.queue_undo)
     val resources = androidx.compose.ui.platform.LocalResources.current
@@ -225,7 +226,10 @@ internal fun PodcastQueueRows(
     fun offerUndo(row: PodcastQueueRow, index: Int) {
         scope.launch {
             val result = snackbar.showSnackbar(removedLabel, undoLabel, duration = SnackbarDuration.Short)
-            if (result == SnackbarResult.ActionPerformed) restoreNow.value(row, index)
+            if (result == SnackbarResult.ActionPerformed) {
+                dismissalEpochs[row.episodeId] = (dismissalEpochs[row.episodeId] ?: 0) + 1
+                restoreNow.value(row, index)
+            }
         }
     }
     LaunchedEffect(ids) { if (drag.entryId != null && drag.originalIds != ids) drag.cancel() }
@@ -299,14 +303,19 @@ internal fun PodcastQueueRows(
                 val canSwipeNow by rememberUpdatedState(canSwipe)
                 val rowNow by rememberUpdatedState(row)
                 val indexNow by rememberUpdatedState(index)
-                val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-                    if (value != SwipeToDismissBoxValue.EndToStart || !canSwipeNow) false
-                    else {
-                        removeNow.value(rowNow)
-                        offerUndo(rowNow, indexNow)
-                        true
-                    }
-                })
+                val dismissState = rememberSwipeToDismissBoxState()
+                val dismissAction = rememberUpdatedState<(SwipeToDismissBoxValue) -> Unit>(
+                    newValue = { value ->
+                        if (value == SwipeToDismissBoxValue.EndToStart) {
+                            if (canSwipeNow) {
+                                removeNow.value(rowNow)
+                                offerUndo(rowNow, indexNow)
+                            } else scope.launch { dismissState.reset() }
+                        }
+                    },
+                )
+                val onDismiss = remember { { value: SwipeToDismissBoxValue -> dismissAction.value(value) } }
+                key(row.episodeId, dismissalEpochs[row.episodeId] ?: 0) {
                 SwipeToDismissBox(
                     state = dismissState,
                     modifier = Modifier.animateItem(placementSpec = if (active) null else androidx.compose.animation.core.spring())
@@ -325,6 +334,7 @@ internal fun PodcastQueueRows(
                             Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
+                    onDismiss = onDismiss,
                 ) {
                     QueueChromeRow(
                         index = index,
@@ -348,6 +358,7 @@ internal fun PodcastQueueRows(
                         onRemoveButton = {},
                         titleMaxLines = 2,
                     )
+                }
                 }
             }
             item { footer() }
@@ -384,13 +395,17 @@ internal fun QueueList(
     val speed = with(density) { 900.dp.toPx() }
     val elevation = with(density) { 6.dp.toPx() }
     val snackbar = remember { SnackbarHostState() }
+    val dismissalEpochs = remember { mutableStateMapOf<String, Int>() }
     val removedLabel = stringResource(R.string.queue_removed)
     val undoLabel = stringResource(R.string.queue_undo)
     val swipeRemove by rememberUpdatedState(onSwipeRemove)
-    fun offerUndo(restore: () -> Unit) {
+    fun offerUndo(row: QueueRow, restore: () -> Unit) {
         scope.launch {
             val result = snackbar.showSnackbar(removedLabel, undoLabel, duration = SnackbarDuration.Short)
-            if (result == SnackbarResult.ActionPerformed) restore()
+            if (result == SnackbarResult.ActionPerformed) {
+                dismissalEpochs[row.entryId] = (dismissalEpochs[row.entryId] ?: 0) + 1
+                restore()
+            }
         }
     }
 
@@ -524,7 +539,7 @@ internal fun QueueList(
                             haptic(TactileKind.Tap)
                             val restore = swipeRemove?.invoke(row)
                             if (swipeRemove != null) {
-                                if (restore != null) offerUndo(restore)
+                                if (restore != null) offerUndo(row, restore)
                             } else onRemove(row)
                         }) else null,
                         showRemoveButton = allowRemove && onSwipeRemove == null,
@@ -534,27 +549,39 @@ internal fun QueueList(
                 if (onSwipeRemove != null && allowRemove) {
                     val canSwipeNow by rememberUpdatedState(canSwipe)
                     val rowNow by rememberUpdatedState(row)
-                    val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-                        if (value != SwipeToDismissBoxValue.EndToStart || !canSwipeNow) false
-                        else swipeRemove?.invoke(rowNow)?.also(::offerUndo) != null
-                    })
-                    SwipeToDismissBox(
-                        state = dismissState,
-                        modifier = rowModifier,
-                        enableDismissFromStartToEnd = false,
-                        enableDismissFromEndToStart = canSwipe,
-                        gesturesEnabled = canSwipe,
-                        backgroundContent = {
-                            Box(
-                                Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val dismissState = rememberSwipeToDismissBoxState()
+                    val dismissAction = rememberUpdatedState<(SwipeToDismissBoxValue) -> Unit>(
+                        newValue = { value ->
+                            if (value == SwipeToDismissBoxValue.EndToStart) {
+                                if (canSwipeNow) {
+                                    val restore = swipeRemove?.invoke(rowNow)
+                                    if (restore != null) offerUndo(rowNow, restore)
+                                    else scope.launch { dismissState.reset() }
+                                } else scope.launch { dismissState.reset() }
                             }
                         },
-                    ) { body() }
+                    )
+                    val onDismiss = remember { { value: SwipeToDismissBoxValue -> dismissAction.value(value) } }
+                    key(row.entryId, dismissalEpochs[row.entryId] ?: 0) {
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            modifier = rowModifier,
+                            enableDismissFromStartToEnd = false,
+                            enableDismissFromEndToStart = canSwipe,
+                            gesturesEnabled = canSwipe,
+                            onDismiss = onDismiss,
+                            backgroundContent = {
+                                Box(
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    Text(stringResource(R.string.queue_remove), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
+                        ) { body() }
+                    }
                 } else {
                     Box(rowModifier) { body() }
                 }
@@ -597,7 +624,7 @@ private fun QueueChromeRow(
     val card = MaterialTheme.colorScheme.surfaceContainer
     val rowFill = when {
         highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
-        current -> MaterialTheme.colorScheme.primary.copy(alpha = .08f).compositeOver(card)
+        current -> MaterialTheme.colorScheme.primary.copy(alpha = .14f).compositeOver(card)
         else -> card
     }
     Row(
@@ -613,7 +640,7 @@ private fun QueueChromeRow(
             else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         Column(Modifier.weight(1f).clickable(enabled = playEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onPlay).padding(vertical = 12.dp, horizontal = 8.dp)) {
-            Text(title, color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
+            Text(title, color = if (current) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.size(48.dp).testTag(handleTag)

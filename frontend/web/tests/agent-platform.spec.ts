@@ -728,9 +728,15 @@ test('通知游标过期自动完整补拉，隐藏页面停止定时请求，�
     });
   });
   await login(page);
+  await section(page, '通知中心');
+  const panel = page.getByRole('region', { name: '通知中心', exact: true });
+  const refresh = panel.getByRole('button', { name: '刷新', exact: true });
   await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect.poll(() => fullReads).toBe(2);
+  // A route match only means the request started. Drain cursor and queued reads
+  // before measuring whether hiding the page starts any additional requests.
+  await expect(refresh).toBeEnabled();
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -744,6 +750,7 @@ test('通知游标过期自动完整补拉，隐藏页面停止定时请求，�
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect.poll(() => reads).toBeGreaterThan(before);
+  await expect(refresh).toBeEnabled();
   const after = reads;
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect.poll(() => reads).toBeGreaterThan(after);

@@ -286,7 +286,7 @@ private fun candidateQualitySummary(candidate: JsonObject): CandidateQualitySumm
                                 TextButton({ vm.play(listOf(track)) }) { Text(stringResource(R.string.src_plugin_play_to_audition)) }
                             } else {
                                 TextButton(vm::toggle) { Text(if (state.playing) stringResource(R.string.src_plugin_audition_pause) else stringResource(R.string.src_plugin_audition_play)) }
-                                Text(formatTime(position) + " / " + formatTime(track.durationMs), style = MaterialTheme.typography.bodySmall)
+                                Text(formatTime(position) + " / " + formatTime(track.durationMs), style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"))
                             }
                         }
                         if (isCurrentTrack && track.durationMs > 0) {

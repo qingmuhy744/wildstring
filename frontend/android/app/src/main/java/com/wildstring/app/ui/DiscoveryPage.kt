@@ -98,6 +98,6 @@ private fun DiscoveryTrackRow(vm: MusicViewModel, track: Track, section: String,
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        TextButton(click, Modifier.heightIn(min = 48.dp)) { Text(action) }
+        TextButton(click, Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)) { Text(action) }
     }
 }

@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Latest release [v0.8.15](docs/releases/v0.8.15.md)** · Fixes the Android crash when swiping the player down to dismiss it, and polishes the tablet explore layout, a fixed-width Followed button, tappable show names in the podcast player, and an episode favorite control. Releases now include the R8 mapping file. Clients older than 0.8.13 still cannot talk to a 0.8.13 or later server.
+- **Latest release [v0.8.16](docs/releases/v0.8.16.md)** · Fixes Android connection and route-dialog keyboard overlap, adds per-route testing, and aligns Android screens with the design system. Stable releases can update the Homebrew Tap automatically. Clients older than 0.8.13 still cannot talk to a 0.8.13 or later server.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 

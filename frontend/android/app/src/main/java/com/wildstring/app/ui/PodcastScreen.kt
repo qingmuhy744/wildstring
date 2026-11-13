@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +29,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
@@ -391,7 +394,7 @@ private fun PodcastUnifiedQueueBanner(
                         Text(
                             stringResource(R.string.podcast_queue_unified_title),
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         if (pendingCount > 0) {
                             Surface(
@@ -402,7 +405,7 @@ private fun PodcastUnifiedQueueBanner(
                                     pendingCount.toString(),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -421,7 +424,7 @@ private fun PodcastUnifiedQueueBanner(
                         onClick = onPlayAll,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.height(34.dp).testTag("podcast-banner-play-all")
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-banner-play-all")
                     ) {
                         Text(stringResource(R.string.pod_scr_play_btn), fontSize = 12.sp)
                     }
@@ -430,7 +433,7 @@ private fun PodcastUnifiedQueueBanner(
                         onClick = onOpenQueue,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.height(34.dp)
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(stringResource(R.string.pod_scr_manage_btn), fontSize = 12.sp)
                     }
@@ -491,7 +494,7 @@ private fun PodcastUnifiedQueueSheet(
                     Text(
                         text = stringResource(R.string.podcast_queue_unified_title),
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
                     if (sheetTab == "episodes" && pendingRows.isNotEmpty()) {
@@ -499,7 +502,7 @@ private fun PodcastUnifiedQueueSheet(
                             onClick = onPlayAll,
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(34.dp).testTag("podcast-play-all-pending")
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-play-all-pending")
                         ) {
                             Text("▶ " + stringResource(R.string.podcast_play_all), fontSize = 13.sp, maxLines = 1, softWrap = false)
                         }
@@ -757,7 +760,7 @@ internal fun PodcastFollowedMenu(
             onClick = { open = true },
             shape = RoundedCornerShape(10.dp),
             contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
-            modifier = Modifier.height(40.dp).widthIn(min = podcastFollowButtonMinWidth()).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
+            modifier = Modifier.heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
         ) {
             // The current rule rides on the button; "仅关注" is the quiet default and adds nothing.
             Text(
@@ -841,7 +844,7 @@ private fun PodcastListView(
             Text(
                 stringResource(R.string.podcast_my_follows),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             FilledTonalIconButton(
@@ -862,6 +865,18 @@ private fun PodcastListView(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item { queueHeader() }
+                if (podcasts.isEmpty() && loading) items(4) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SkeletonBlock(Modifier.size(44.dp), RoundedCornerShape(10.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SkeletonLine(widthFraction = .7f)
+                                SkeletonLine(widthFraction = .42f)
+                            }
+                        }
+                    }
+                }
                 if (podcasts.isEmpty() && !loading) item {
                     Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
@@ -902,7 +917,7 @@ private fun PodcastCardItem(
     var deleting by remember { mutableStateOf(false) }
 
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
         modifier = modifier.testTag("podcast-show-${podcast.id}").semantics { this.selected = selected }.clickable(onClick = onClick),
     ) {
@@ -912,8 +927,8 @@ private fun PodcastCardItem(
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
@@ -948,13 +963,13 @@ private fun PodcastCardItem(
                 ) {
                     Text(
                         text = stringResource(R.string.pod_scr_episodes_count, podcast.totalEpisodes),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (podcast.unplayedEpisodes > 0) {
                         Text(
                             text = stringResource(R.string.pod_scr_unplayed_count, podcast.unplayedEpisodes),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
@@ -969,7 +984,7 @@ private fun PodcastCardItem(
                     onClick = onFollow,
                     shape = RoundedCornerShape(18.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(34.dp),
+                    modifier = Modifier.heightIn(min = 48.dp),
                 ) {
                     Text(stringResource(R.string.pod_scr_follow), fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
@@ -1041,57 +1056,6 @@ private fun PodcastCardItem(
 }
 
 @Composable
-private fun EmptyPodcastState(
-    canAdd: Boolean,
-    onPresetSelect: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-            modifier = Modifier.size(88.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Podcasts,
-                    contentDescription = null,
-                    modifier = Modifier.size(46.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = stringResource(R.string.pod_scr_server_no_shows),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = if (canAdd) stringResource(R.string.pod_scr_empty_admin_hint) else stringResource(R.string.pod_scr_empty_user_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Spacer(Modifier.height(24.dp))
-        if (canAdd) Button(
-            onClick = onPresetSelect,
-            shape = RoundedCornerShape(20.dp),
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.pod_scr_add_show))
-        }
-    }
-}
-
-@Composable
 private fun PodcastDetailView(
     vm: MusicViewModel,
     podcast: PodcastSummary,
@@ -1130,7 +1094,7 @@ private fun PodcastDetailView(
         val list = detail?.episodes.orEmpty().filter {
             when (episodeScope) {
                 "favorite" -> it.loved || it.favorite || isEpisodeFavorite(it.id)
-                "saved" -> it.resourceSaved || it.resourceAutomatic || it.resourcePlaybackCached
+                "unplayed" -> !it.completed
                 else -> true
             }
         }
@@ -1161,7 +1125,7 @@ private fun PodcastDetailView(
             Text(
                 text = podcast.title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -1185,8 +1149,8 @@ private fun PodcastDetailView(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(96.dp)
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .size(92.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -1202,7 +1166,8 @@ private fun PodcastDetailView(
                                 Text(
                                     text = podcast.title,
                                     style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Serif,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1216,65 +1181,58 @@ private fun PodcastDetailView(
                                 publisher()
                                 val episodeTotal = podcast.totalEpisodes.coerceAtLeast(detail?.episodes?.size ?: 0)
                                 if (episodeTotal > 0 || podcast.unplayedEpisodes > 0) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    Text(
+                                        text = stringResource(R.string.pod_scr_total_episodes, episodeTotal) + if (podcast.unplayedEpisodes > 0) " · " + stringResource(R.string.pod_scr_unplayed_episodes, podcast.unplayedEpisodes) else "",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
                                         modifier = Modifier.padding(top = 2.dp),
-                                    ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = MaterialTheme.colorScheme.secondaryContainer,
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.pod_scr_total_episodes, episodeTotal),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            )
-                                        }
-                                        if (podcast.unplayedEpisodes > 0) {
-                                            Text(
-                                                text = stringResource(R.string.pod_scr_unplayed_episodes, podcast.unplayedEpisodes),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                            )
-                                        }
-                                    }
+                                    )
                                 }
                             }
                         }
 
                         Spacer(Modifier.height(14.dp))
 
-                        // One action row: the primary play action, the queue, and follow state with its secondary rules in a menu.
+                        // Header action: full-width primary continue/latest CTA, then a compact secondary row (queue, follow, overflow).
+                        val nextPlayable = detail?.episodes.orEmpty().asSequence()
+                            .filter { !it.completed }
+                            .maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                            ?: detail?.episodes.orEmpty().maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                        val nextResumable = (nextPlayable?.positionSeconds ?: 0) > 0
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        val shareTitle = stringResource(R.string.pod_scr_share_show)
+                        var headerActionsExpanded by rememberSaveable { mutableStateOf(false) }
+                        nextPlayable?.let { target ->
+                            Button(
+                                onClick = { onPlayEpisode(target) },
+                                shape = RoundedCornerShape(999.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(if (nextResumable) R.string.pod_scr_continue_listening else R.string.pod_scr_play_latest), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (totalPendingCount > 0) {
-                                Button(
-                                    onClick = onPlayPendingQueue,
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.weight(1f).height(40.dp),
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                }
                                 OutlinedButton(
-                                    onClick = onOpenQueueSheet,
-                                    shape = RoundedCornerShape(10.dp),
+                                    onClick = onPlayPendingQueue,
+                                    shape = RoundedCornerShape(999.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.height(40.dp),
+                                    modifier = Modifier.heightIn(min = 48.dp),
                                 ) {
-                                    Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
                             }
                             if (!podcast.followed) {
                                 FilledTonalButton(
                                     onClick = onFollow,
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(999.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = (if (totalPendingCount > 0) Modifier else Modifier.weight(1f)).height(40.dp).widthIn(min = podcastFollowButtonMinWidth()),
+                                    modifier = (if (nextPlayable != null || totalPendingCount > 0) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
                                 ) {
                                     Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
@@ -1282,9 +1240,23 @@ private fun PodcastDetailView(
                                 preference = showPreference, loading = preferenceLoading, error = preferenceError,
                                 onChange = onShowPreference, onRetry = onRetryPreference,
                                 onAutoDownload = onAutoDownload, onUnfollow = onFollow,
-                                modifier = if (totalPendingCount > 0) Modifier else Modifier.weight(1f),
-                                fillWidth = totalPendingCount <= 0,
+                                modifier = Modifier.weight(1f),
+                                fillWidth = nextPlayable == null && totalPendingCount <= 0,
                             )
+                            IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {
+                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.pod_scr_more_options))
+                            }
+                        }
+                        DropdownMenu(expanded = headerActionsExpanded, onDismissRequest = { headerActionsExpanded = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
+                                headerActionsExpanded = false
+                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
+                                context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
+                            }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
+                            if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
+                                headerActionsExpanded = false
+                                onFollow()
+                            }, leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -1316,11 +1288,8 @@ private fun PodcastDetailView(
                     ) {
                         FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text(stringResource(R.string.pod_scr_filter_all), maxLines = 1, softWrap = false) })
                         FilterChip(episodeScope == "favorite", { episodeScope = "favorite" }, label = { Text(stringResource(R.string.podcast_filter_favorites), maxLines = 1, softWrap = false) })
-                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text(stringResource(R.string.pod_scr_filter_my_downloads), maxLines = 1, softWrap = false) })
+                        FilterChip(episodeScope == "unplayed", { episodeScope = "unplayed" }, label = { Text(stringResource(R.string.pod_scr_filter_unplayed), maxLines = 1, softWrap = false) })
                     }
-                    if (episodeScope == "saved") Text(stringResource(R.string.pod_scr_saved_hint),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(12.dp))
 
                     Row(
@@ -1333,7 +1302,7 @@ private fun PodcastDetailView(
                         Text(
                             text = stringResource(R.string.pod_scr_episodes_header, sortedEpisodes.size),
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         TextButton(
                             onClick = { sortDescending = !sortDescending },
@@ -1351,9 +1320,16 @@ private fun PodcastDetailView(
                 }
 
                 if (sortedEpisodes.isEmpty() && loading) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                            Text(stringResource(R.string.pod_scr_loading_episodes), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    items(4) {
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                SkeletonBlock(Modifier.size(38.dp), CircleShape)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    SkeletonLine(widthFraction = .9f)
+                                    SkeletonLine(widthFraction = .55f)
+                                }
+                            }
                         }
                     }
                 } else if (sortedEpisodes.isEmpty() && !loading) {
@@ -1426,9 +1402,11 @@ private fun EpisodeRowItem(
             .fillMaxWidth()
             .testTag("podcast-episode-${episode.id}")
             .combinedClickable(onClick = { details = true }, onLongClick = { showMenu = true }, onLongClickLabel = stringResource(R.string.pod_scr_episode_actions))
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .alpha(if (episode.completed) 0.62f else 1f),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (isActive) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerLow,
+        border = if (isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1442,8 +1420,8 @@ private fun EpisodeRowItem(
                     modifier = Modifier.size(38.dp),
                     shape = CircleShape,
                     colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        containerColor = if (episode.completed) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = if (episode.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer,
                     ),
                 ) {
                     Icon(
@@ -1461,7 +1439,7 @@ private fun EpisodeRowItem(
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (episode.completed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface,
+                    color = if (episode.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f).padding(top = 2.dp),
                 )
 
@@ -1477,6 +1455,14 @@ private fun EpisodeRowItem(
                             contentDescription = stringResource(R.string.pod_scr_episode_actions_title, episode.title),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    if (episode.positionSeconds > 0 && !episode.completed && episode.durationSeconds > 0) {
+                        LinearProgressIndicator(
+                            progress = { (episode.positionSeconds.toFloat() / episode.durationSeconds).coerceIn(0f, 1f) },
+                            modifier = Modifier.height(3.5.dp).padding(top = 10.dp, bottom = 2.dp),
+                            color = MaterialTheme.colorScheme.tertiary,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         )
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -1545,13 +1531,13 @@ private fun EpisodeRowItem(
                                 Icons.Default.Check,
                                 contentDescription = null,
                                 modifier = Modifier.size(13.dp),
-                                tint = MaterialTheme.colorScheme.outline,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.width(2.dp))
                             Text(
                                 text = stringResource(R.string.pod_scr_completed),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
                             )
@@ -1577,8 +1563,8 @@ private fun EpisodeRowItem(
                     if (durationText.isNotBlank()) {
                         Text(
                             text = durationText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -1587,7 +1573,7 @@ private fun EpisodeRowItem(
                         Text(
                             text = if (episode.resourceSaved) stringResource(R.string.pod_scr_saved) else stringResource(R.string.pod_scr_auto_saved),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -1602,9 +1588,9 @@ private fun EpisodeRowItem(
                     }
                     if (!episode.completed && episode.positionSeconds > 0) {
                         Text(
-                            text = stringResource(R.string.pod_scr_listened_to, "${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            text = stringResource(R.string.pod_scr_remaining_minutes, ((episode.durationSeconds - episode.positionSeconds + 59) / 60).coerceAtLeast(1)),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -1633,7 +1619,7 @@ private fun EpisodeRowItem(
                         onClick = { feedback(TactileKind.Tap); onRemoveFromQueue() },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(26.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.podcast_queue_added),
@@ -1648,7 +1634,7 @@ private fun EpisodeRowItem(
                         onClick = { feedback(TactileKind.Tap); onAddToQueue() },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(26.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.podcast_queue_add),
@@ -1678,12 +1664,14 @@ private fun EpisodeRowItem(
     }
 }
 
-private fun formatShortPubDate(raw: String): String {
-    val trimmed = raw.trim()
-    if (trimmed.isEmpty()) return ""
-    // Strip RFC2822 weekday prefix like "Mon, 25 Aug 2025 ..." -> "25 Aug 2025"
-    val withoutDay = trimmed.replace(Regex("^[A-Za-z]{3},\\s*"), "")
-    return withoutDay.take(11).trim()
+internal fun formatShortPubDate(raw: String): String {
+    if (raw.isBlank()) return ""
+    val ms = podcastPublishedMillis(raw)
+    if (ms <= 0L) return ""
+    val date = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    val now = java.time.LocalDate.now()
+    val style = if (date.year == now.year) java.time.format.FormatStyle.SHORT else java.time.format.FormatStyle.MEDIUM
+    return java.time.format.DateTimeFormatter.ofLocalizedDate(style).withLocale(java.util.Locale.getDefault()).format(date)
 }
 
 private fun formatDuration(seconds: Int): String {

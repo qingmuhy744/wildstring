@@ -6,9 +6,10 @@ Debug 构建不访问钥匙串，而是把会话放在独立的本机开发用 `
 
 ## Homebrew 安装与更新
 
-通过个人 Tap 源安装（首次会自动添加 `qingmuhy744/tap` 源，并在 `postflight` 中清理 `com.apple.quarantine` 隔离属性）：
+先显式添加个人 Tap，再安装客户端；当前 Cask 的 `postflight` 会移除应用的 `com.apple.quarantine` 属性，绕过 Gatekeeper 下载隔离检查，不代表已签名或公证。仅在信任发布来源时使用；也可从 GitHub Release 下载 DMG 并保留系统检查。普通安装者不需要 PAT。
 
 ```sh
+brew tap qingmuhy744/tap
 brew install --cask qingmuhy744/tap/wildstring
 ```
 

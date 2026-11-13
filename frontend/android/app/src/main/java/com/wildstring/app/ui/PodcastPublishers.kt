@@ -99,7 +99,7 @@ internal fun PodcastPublisherPage(vm: MusicViewModel, publisher: PodcastPublishe
         if (!loading && error == null && shows.isEmpty()) Text(stringResource(R.string.pod_pub_no_shows), Modifier.padding(20.dp))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(shows, key = { it.id }) { podcast ->
-                Surface(Modifier.fillMaxWidth().clickable { onSelect(podcast) }, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Surface(Modifier.fillMaxWidth().clickable { onSelect(podcast) }, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     ListItem(headlineContent = { Text(podcast.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                         supportingContent = { Text(stringResource(R.string.pod_pub_episode_count, podcast.totalEpisodes, podcast.unplayedEpisodes)) },
                         leadingContent = { Icon(Icons.Default.Podcasts, null) },

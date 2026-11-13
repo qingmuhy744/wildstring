@@ -138,4 +138,24 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             }
         }
     }
+    /** Read-only one-off probe for one route; never mutates selection, sessions or profile. */
+    sealed interface RouteProbe {
+        data class Connected(val latencyMs: Int) : RouteProbe
+        data object SessionExpired : RouteProbe
+        data class Unreachable(val detail: String?) : RouteProbe
+    }
+
+    suspend fun test(route: ServerRoute): RouteProbe = withContext(Dispatchers.IO) {
+        val started = System.currentTimeMillis()
+        val result = try {
+            status(route)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: IOException) {
+            return@withContext RouteProbe.Unreachable(error.message?.takeIf { it.isNotBlank() })
+        }
+        val latencyMs = (System.currentTimeMillis() - started).toInt()
+        if (result?.authenticated != true) return@withContext RouteProbe.SessionExpired
+        RouteProbe.Connected(latencyMs)
+    }
 }

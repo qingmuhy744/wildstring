@@ -219,8 +219,6 @@
     <string name="view_more">View more</string>
     <string name="album_actions">Album actions</string>
     <string name="all_music">All music</string>
-    <string name="personal_music_hint">Your music, in your own collection</string>
-    <string name="resume_music_hint">Pick up where you left off</string>
     <string name="discovery_albums_offline">No albums cached here yet. Refresh when online.</string>
     <string name="discovery_albums_empty">No albums yet. Import music on the web to get started.</string>
     <string name="discovery_added_offline">New arrivals are not cached yet. Refresh when online.</string>
@@ -355,7 +353,7 @@
     <string name="connect_collection">Connect to your music collection</string>
     <string name="password">Password</string>
     <string name="connect_sign_in">Connect &amp; sign in</string>
-    <string name="connection_protocol_hint">HTTPS is used when no protocol is specified. HTTP requires your explicit confirmation.</string>
+    <string name="connection_protocol_hint">HTTPS is used when no protocol is specified.\nHTTP requires your explicit confirmation.</string>
     <string name="http_warning_title">Use unencrypted HTTP?</string>
     <string name="http_warning_message">Your password, listening history and audio will be sent without encryption. Only use a network you trust. Public HTTP is also allowed after you confirm this risk.</string>
     <string name="http_warning_confirm">I understand, continue</string>
@@ -479,6 +477,7 @@
     <string name="statistics_minutes">Total listening: %1$d min</string>
     <string name="statistics_tracks">Songs played: %1$d · Favorites: %2$d</string>
     <string name="daily_recommendations">Daily mix</string>
+    <string name="discovery_ai_badge">AI Curated</string>
     <string name="listening_rankings">Top played</string>
     <string name="discover_new_music">Beyond your library</string>
     <string name="offline_save">Save offline</string>
@@ -1064,12 +1063,12 @@
     <string name="gain_panel_settings_saved">Leveling settings saved.</string>
     <string name="gain_panel_status_summary">Requested %1$s dB · Applied %2$s dB</string>
     <string name="gain_panel_track_gain_label">Track trim dB</string>
-    <string name="gap_card_all_collected">All chart hits are already collected! 👏</string>
+    <string name="gap_card_all_collected">All chart hits are in your library.</string>
     <string name="gap_card_coverage">%1$d%% in library</string>
     <string name="gap_card_no_local_match">No matching tracks found locally for this artist</string>
     <string name="gap_card_play">Play</string>
     <string name="gap_card_status_missing">Missing</string>
-    <string name="gap_card_subtitle">Comparison with authoritative chart hits</string>
+    <string name="gap_card_subtitle">Compared against public chart hits</string>
     <string name="gap_card_tab_collected">Collected (%1$d)</string>
     <string name="gap_card_tab_missing">Missing (%1$d)</string>
     <string name="gap_card_title">%1$s · Library Gap Analysis</string>
@@ -1590,10 +1589,8 @@
     <string name="pod_player_rewind_15">Rewind 15 seconds</string>
     <string name="pod_player_saved_article">Showing saved article.</string>
     <string name="pod_player_sleep_timer">Sleep timer</string>
-    <string name="pod_player_tab_ai_notes">AI Notes</string>
     <string name="pod_player_tab_article">Article</string>
     <string name="pod_player_tab_cover">Cover</string>
-    <string name="pod_player_ai_notes_coming_soon">AI transcription and summary are coming soon</string>
     <string name="pod_prog_conflict_resolution_notice">Another device updated this episode. Local progress is kept. Please choose a resume position next time you play.</string>
     <string name="pod_prog_load_failed_retry">Couldn\'t read episode progress right now. Please retry.</string>
     <string name="pod_prog_newer_on_other_device">This episode has newer progress on another device</string>
@@ -1660,11 +1657,9 @@
     <string name="pod_scr_explore_trending">Explore trending podcasts</string>
     <string name="pod_scr_favorite_desc">Favorited</string>
     <string name="pod_scr_filter_all">All</string>
-    <string name="pod_scr_filter_my_downloads">My downloads</string>
     <string name="pod_scr_follow">Follow</string>
     <string name="pod_scr_follow_show">Follow show</string>
     <string name="pod_scr_keep_show">Keep show</string>
-    <string name="pod_scr_listened_to">Played to %1$s</string>
     <string name="pod_scr_loading_episodes">Loading episodes…</string>
     <string name="pod_scr_manage_btn">Manage</string>
     <string name="pod_scr_menu_auto_download">Auto-download settings</string>
@@ -1696,7 +1691,6 @@
     <string name="pod_scr_rss_address_label">RSS feed URL</string>
     <string name="pod_scr_save_to_server">Save to server</string>
     <string name="pod_scr_saved">Saved</string>
-    <string name="pod_scr_saved_hint">Includes manual downloads, auto-downloads, and playback cache. Cache may be recycled per server cleanup rules.</string>
     <string name="pod_scr_saved_preparing">Saved, preparing server audio</string>
     <string name="pod_scr_saved_reused">Reused existing server audio, no download needed</string>
     <string name="pod_scr_server_no_shows">No shows on this server</string>
@@ -1712,6 +1706,11 @@
     <string name="pod_scr_unknown_host">Unknown host</string>
     <string name="pod_scr_unplayed_count">%1$d left to listen</string>
     <string name="pod_scr_unplayed_episodes">%1$d left to listen</string>
+    <string name="pod_scr_continue_listening">Resume listening</string>
+    <string name="pod_scr_play_latest">Play latest episode</string>
+    <string name="pod_scr_share_show">Share show</string>
+    <string name="pod_scr_filter_unplayed">Unplayed</string>
+    <string name="pod_scr_remaining_minutes">%1$d min left</string>
     <string name="pod_scr_unsaved_shared_retained">Personal save removed; shared audio is retained by server policy</string>
     <string name="q_panel_add_to_queue">Add to queue</string>
     <string name="q_panel_auto_continue">Autoplay next</string>
@@ -1934,6 +1933,11 @@
     <string name="srv_scr_server_routes_title">Server Routes</string>
     <string name="srv_scr_server_url_label">Full server address</string>
     <string name="srv_scr_verify_and_save">Verify and Save Route</string>
+    <string name="srv_scr_test">Test</string>
+    <string name="srv_scr_test_ok">Connected · %1$d ms</string>
+    <string name="srv_scr_test_session_expired">Reachable · session expired, sign in again</string>
+    <string name="srv_scr_test_failed">Unreachable</string>
+    <string name="srv_scr_test_failed_detail">Unreachable · %1$s</string>
     <string name="srv_scr_verifying">Verifying…</string>
     <string name="upd_dl_cancel_action">Cancel download</string>
     <string name="upd_dl_channel_name">App update</string>

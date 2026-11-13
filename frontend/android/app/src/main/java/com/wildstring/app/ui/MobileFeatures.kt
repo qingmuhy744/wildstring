@@ -4,6 +4,7 @@ package com.wildstring.app.ui
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,24 +43,24 @@ internal fun MobileShortcuts(discovery: Boolean = false, compactWidth: Boolean =
         Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart),
         Triple("settings", stringResource(R.string.settings_title), Icons.Default.Settings)
     )
-    val dark = LocalDarkAppearance.current
     Row((if (compactWidth) Modifier.widthIn(max = 720.dp) else Modifier).fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 20.dp, vertical = 4.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
-            val primaryEntry = discovery && route == "daily"
-            val container = if (primaryEntry) MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.16f else 0.10f) else MaterialTheme.colorScheme.surfaceContainerLow
-            val content = if (primaryEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-            val border = if (primaryEntry) MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.42f else 0.32f) else MaterialTheme.colorScheme.outlineVariant
             OutlinedButton(
                 onClick = { open(route) },
                 modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 54.dp),
                 shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, border),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = container, contentColor = content),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface),
                 contentPadding = PaddingValues(vertical = 6.dp, horizontal = 6.dp),
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
-                    Icon(icon, null, Modifier.size(18.dp), tint = if (primaryEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        if (discovery && route == "daily") {
+                            Text(stringResource(R.string.discovery_ai_badge), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, maxLines = 1, softWrap = false, modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(999.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
                 }
             }
         }

@@ -34,6 +34,7 @@
 
 - Python 使用 3.12 和 `backend/uv.lock`；Web 与插件运行时使用 Node 22 与对应 `package-lock.json`；Android 使用 JDK 21；macOS / iOS 使用 XcodeGen（`project.yml`）。开发入口统一放入 `Makefile`。
 - 初始化用 `make setup`，日常改动自检用 `make check` 与 `make test-affected`（或 `make test-affected-desktop`），全量检查用 `make ci`。
+- 本地 Android 模拟器测试基准保持极简的两套标准形态（Phone: 1080×1920，Pad: 2560×1600），配置与启动时必须开启物理键盘输入（`hw.keyboard = yes`），确保在 Android Studio 内嵌窗口与独立窗口中均可直接使用电脑键盘输入。
 - Android CI 保持快速反馈：普通 push / pull_request 只执行构建、静态检查和单元测试，不自动启动模拟器。保留既有每周定时模拟器回归和 Release 流程中的自动设备回归、正式包安装冒烟；发版前也可手动启用 `run_emulator=true`。调整模拟器资源时保持该触发策略，不将模拟器测试加入常规 CI，也不把常规 CI 通过当作设备回归通过。
 - 修改依赖后更新对应锁文件；Gradle 的 `verification-metadata.xml` 在 macOS 上生成时不含 linux 变体（如 aapt2）校验，Android 升级依赖后需从官方 Maven 补齐 linux 条目再推送。
 - Python 使用 Ruff 与 Bandit；pre-commit 工具复用 uv 锁文件，不另维护一套 hook 版本。

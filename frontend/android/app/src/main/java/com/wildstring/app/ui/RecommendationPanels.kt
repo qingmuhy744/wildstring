@@ -146,7 +146,7 @@ internal fun recommendationIssue(code: String): String = when {
     Column(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("daily-recommendations"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
-            Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         DailyCoverMosaic(vm, entries.take(4).map { it.track })
@@ -202,7 +202,7 @@ internal fun recommendationIssue(code: String): String = when {
                 Box(Modifier.width(if (selecting) 40.dp else 28.dp), contentAlignment = Alignment.Center) {
                     if (selecting) Checkbox(chosen, { selectTrack(track.id) }, Modifier.testTag("daily-select-${track.id}"))
                     else if (active) PlaybackIndicator(current.playing, current.buffering)
-                    else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Cover(vm, track.coverId, track.title, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

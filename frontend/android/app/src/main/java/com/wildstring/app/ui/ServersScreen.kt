@@ -14,7 +14,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -22,6 +24,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.ServerConfiguration
 import com.wildstring.app.data.friendlyError
+import com.wildstring.app.data.ServerRouteManager.RouteProbe
 import kotlinx.coroutines.launch
 
 @Composable internal fun ServersScreen(vm: MusicViewModel, dismiss: () -> Unit) {
@@ -113,6 +116,8 @@ import kotlinx.coroutines.launch
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(session.manualRoute) }
+    var testing by remember { mutableStateOf(emptySet<String>()) }
+    var probes by remember { mutableStateOf(emptyMap<String, RouteProbe>()) }
     Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
         val darkBars = LocalDarkAppearance.current
@@ -128,20 +133,44 @@ import kotlinx.coroutines.launch
         }
         Surface(Modifier.fillMaxSize()) {
             Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.srv_scr_server_routes_title)) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.srv_scr_back)) } }) }) { padding ->
-                Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.padding(padding).imePadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.srv_scr_routes_hint), style = MaterialTheme.typography.bodySmall)
-                    Row { RadioButton(selected == null, { scope.launch { manager.select(null); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_fallback_label)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected == null, { scope.launch { manager.select(null); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_fallback_label)) }
                     Text(stringResource(R.string.srv_scr_fallback_hint), style = MaterialTheme.typography.bodySmall)
                     routes.forEachIndexed { index, route ->
                         ElevatedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
-                                Row { RadioButton(selected == route.url, { scope.launch { manager.select(route.url); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_manual_prefix, route.name) + if (session.activeRouteUrl == route.url) stringResource(R.string.srv_scr_current_suffix) else "") }
+                                Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected == route.url, { scope.launch { manager.select(route.url); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_manual_prefix, route.name) + if (session.activeRouteUrl == route.url) stringResource(R.string.srv_scr_current_suffix) else "") }
                                 Text(route.url, style = MaterialTheme.typography.bodySmall)
-                                Row {
-                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !busy) { Text(stringResource(R.string.srv_scr_move_up)) }
-                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index < routes.lastIndex && !busy) { Text(stringResource(R.string.srv_scr_move_down)) }
-                                    TextButton({ name = route.name; url = route.url; http = route.allowHttp }) { Text(stringResource(R.string.srv_scr_rename_relogin)) }
-                                    TextButton({ session.editRoutes(routes.filterNot { it.url == route.url }) }, enabled = session.activeRouteUrl != route.url && !busy) { Text(stringResource(R.string.srv_scr_delete)) }
+                                probes[route.url]?.let { probe ->
+                                    val line = when (probe) {
+                                        is RouteProbe.Connected -> stringResource(R.string.srv_scr_test_ok, probe.latencyMs)
+                                        RouteProbe.SessionExpired -> stringResource(R.string.srv_scr_test_session_expired)
+                                        is RouteProbe.Unreachable -> probe.detail?.let { stringResource(R.string.srv_scr_test_failed_detail, it) } ?: stringResource(R.string.srv_scr_test_failed)
+                                    }
+                                    val tint = when (probe) {
+                                        is RouteProbe.Connected -> SuccessColor
+                                        RouteProbe.SessionExpired -> WarnColor
+                                        is RouteProbe.Unreachable -> MaterialTheme.colorScheme.error
+                                    }
+                                    Text(line, style = MaterialTheme.typography.bodySmall, color = tint)
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton({ session.editRoutes(routes.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !busy) { Icon(Icons.Default.ArrowUpward, contentDescription = stringResource(R.string.srv_scr_move_up)) }
+                                    IconButton({ session.editRoutes(routes.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index < routes.lastIndex && !busy) { Icon(Icons.Default.ArrowDownward, contentDescription = stringResource(R.string.srv_scr_move_down)) }
+                                    IconButton({ name = route.name; url = route.url; http = route.allowHttp }) { Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.srv_scr_rename_relogin)) }
+                                    IconButton({
+                                        val target = route
+                                        scope.launch {
+                                            testing = testing + target.url
+                                            val result = manager.test(target)
+                                            probes = probes + (target.url to result)
+                                            testing = testing - target.url
+                                        }
+                                    }, enabled = route.url !in testing) {
+                                        if (route.url in testing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Default.NetworkCheck, contentDescription = stringResource(R.string.srv_scr_test))
+                                    }
+                                    IconButton({ session.editRoutes(routes.filterNot { it.url == route.url }) }, enabled = session.activeRouteUrl != route.url && !busy) { Icon(Icons.Default.DeleteOutline, contentDescription = stringResource(R.string.srv_scr_delete)) }
                                 }
                             }
                         }
@@ -150,7 +179,7 @@ import kotlinx.coroutines.launch
                     Text(stringResource(R.string.srv_scr_add_or_update_route), style = MaterialTheme.typography.titleMedium)
                     OutlinedTextField(name, { name = it.take(80) }, label = { Text(stringResource(R.string.srv_scr_route_name_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
                     OutlinedTextField(url, { url = it; http = false }, label = { Text(stringResource(R.string.srv_scr_server_url_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    Row { Checkbox(http, { http = it }, enabled = !busy); Text(stringResource(R.string.srv_scr_allow_http_label)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(http, { http = it }, enabled = !busy); Text(stringResource(R.string.srv_scr_allow_http_label)) }
                     OutlinedTextField(username, { username = it }, label = { Text(stringResource(R.string.srv_scr_account_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
                     OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.srv_scr_password_label)) }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = !busy)
                     Button({ busy = true; error = null; scope.launch {

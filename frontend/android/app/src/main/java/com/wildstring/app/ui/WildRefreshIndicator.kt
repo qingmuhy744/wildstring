@@ -33,7 +33,7 @@ import kotlin.math.sin
         alpha = if (refreshing) 1f else pull
         scaleX = .75f + .25f * pull; scaleY = scaleX
     }.testTag("wildstring-refresh").semantics { contentDescription = if (refreshing) resources.getString(R.string.refreshing) else resources.getString(R.string.release_to_refresh) },
-        shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 3.dp) {
+        shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Canvas(Modifier.fillMaxSize().padding(10.dp)) {
             for (row in 0..2) {
                 val path = Path()
