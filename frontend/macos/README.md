@@ -4,6 +4,20 @@
 
 Debug 构建不访问钥匙串，而是把会话放在独立的本机开发用 `UserDefaults` suite 中，避免临时签名在重编译或重启后失去钥匙串访问。Release 构建仍使用钥匙串；不要把 Debug 构建当作正式安全配置。
 
+## Homebrew 安装与更新
+
+通过个人 Tap 源安装（首次会自动添加 `qingmuhy744/tap` 源，并在 `postflight` 中清理 `com.apple.quarantine` 隔离属性）：
+
+```sh
+brew install --cask qingmuhy744/tap/wildstring
+```
+
+后续升级只需执行：
+
+```sh
+brew upgrade --cask wildstring
+```
+
 ## 菜单
 
 左边是应用菜单：

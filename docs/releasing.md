@@ -67,7 +67,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 
 - `wildstring-X.Y.Z-release.apk`：固定签名、R8 优化、无内置测试曲库的 Android 安装包。
 - `wildstring-web-vX.Y.Z.zip`：Web 静态文件、LICENSE 与使用说明；运行时需要后端。
-- `WildString-macOS.dmg`：原生 Mac 客户端，最低 macOS 14；是否经过 Developer ID 签名与公证取决于 Apple secrets 配置，发布说明须明确实际状态。
+- `WildString-macOS.dmg`：原生 Mac 客户端，最低 macOS 14；是否经过 Developer ID 签名与公证取决于 Apple secrets 配置，发布说明须明确实际状态。正式版发布且配置了 `HOMEBREW_TAP_TOKEN` 时，工作流会通过 [`scripts/generate_homebrew_cask.py`](../scripts/generate_homebrew_cask.py) 自动更新 `qingmuhy744/homebrew-tap` 的 `Casks/wildstring.rb`。
 - 数据源插件 ZIP：按各插件独立版本打包。
 - `SHA256SUMS`：APK、Web ZIP、插件 ZIP、Mac DMG 与公开签名指纹文件的 SHA-256。
 - `android-signing-certificate.sha256`：Android 发布签名的公开证书指纹。
