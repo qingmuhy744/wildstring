@@ -83,7 +83,6 @@
     <string name="podcast_queue_unified_title">待播列表</string>
     <string name="podcast_pending_episodes_title">待播单集</string>
     <string name="podcast_play_all">播放全部</string>
-    <string name="podcast_play_queue_header">播放待播 (%1$d)</string>
     <string name="podcast_filter_favorites">收藏</string>
     <string name="podcast_mark_completed">标为已听完</string>
     <string name="podcast_mark_unplayed">标为未听</string>

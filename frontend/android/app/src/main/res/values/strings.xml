@@ -83,7 +83,6 @@
     <string name="podcast_queue_unified_title">Up next</string>
     <string name="podcast_pending_episodes_title">Queued episodes</string>
     <string name="podcast_play_all">Play all</string>
-    <string name="podcast_play_queue_header">Play queue (%1$d)</string>
     <string name="podcast_filter_favorites">Favorites</string>
     <string name="podcast_mark_completed">Mark finished</string>
     <string name="podcast_mark_unplayed">Mark unplayed</string>

@@ -215,8 +215,6 @@ fun PodcastChannelPage(
                                             vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                                         },
                                         onRemoveQueuedEpisode = vm::removePodcastQueueEpisode,
-                                        totalPendingCount = pendingCount,
-                                        onPlayPendingQueue = { vm.playPodcastPendingQueue() },
                                         isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } },
                                         isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
                                         isEpisodeFavorite = { epId -> epId in favoriteIds },
@@ -1066,8 +1064,6 @@ private fun PodcastDetailView(
     onPlayEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
     onRemoveQueuedEpisode: (String) -> Unit = {},
-    totalPendingCount: Int = 0,
-    onPlayPendingQueue: () -> Unit = {},
     isEpisodeQueued: (String) -> Boolean = { false },
     isEpisodeActive: (String) -> Boolean = { false },
     isEpisodeFavorite: (String) -> Boolean = { false },
@@ -1215,26 +1211,12 @@ private fun PodcastDetailView(
                             Spacer(Modifier.height(8.dp))
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (totalPendingCount > 0) {
-                                FilledTonalButton(
-                                    onClick = onPlayPendingQueue,
-                                    shape = RoundedCornerShape(999.dp),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-detail-play-queue"),
-                                ) {
-                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                }
-                            }
                             if (!podcast.followed) {
                                 FilledTonalButton(
                                     onClick = onFollow,
                                     shape = RoundedCornerShape(999.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = (if (nextPlayable != null || totalPendingCount > 0) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
+                                    modifier = (if (nextPlayable != null) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
                                 ) {
                                     Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
@@ -1243,7 +1225,7 @@ private fun PodcastDetailView(
                                 onChange = onShowPreference, onRetry = onRetryPreference,
                                 onAutoDownload = onAutoDownload, onUnfollow = onFollow,
                                 modifier = Modifier.weight(1f),
-                                fillWidth = nextPlayable == null && totalPendingCount <= 0,
+                                fillWidth = nextPlayable == null,
                             )
                             Box {
                                 IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {
