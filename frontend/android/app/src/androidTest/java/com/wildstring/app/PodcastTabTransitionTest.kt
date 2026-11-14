@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -26,35 +27,80 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Switching between Cover and Article must move the reading area along one continuous curve.
- * The tests step the Compose clock one frame at a time and measure the real layout, so a second
- * step (a control row dropping out when its exit animation ends, or a container that trails the
- * controls and drags the content with it) shows up as numbers instead of depending on how the
- * animation looks.
+ * Switching between Cover and Article must move the reading area and the controls along one
+ * continuous curve, and the screen must be still once it has landed.
+ *
+ * The tests step the Compose clock one frame at a time and measure the real layout and pixels, so
+ * a second step shows up as numbers instead of depending on how the animation looks: a control row
+ * dropping out when its exit animation ends, a container that trails the controls and drags the
+ * content with it, or a row that re-spaces its buttons when a finished item is removed.
  */
 class PodcastTabTransitionTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    /** Edges of the reading area (the content slot), the control bar and the header, in root pixels. */
-    private data class Frame(val time: Int, val top: Float, val bottom: Float, val controlsTop: Float, val headerBottom: Float)
+    /** The buttons of the bottom row that are on screen in both modes. */
+    private val steadyButtons = listOf("podcast-rewind", "podcast-play-pause", "podcast-forward")
 
-    private fun sample(time: Int): Frame? {
-        fun bounds(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().firstOrNull()?.boundsInRoot
-        val slot = bounds("podcast-view-slot") ?: return null
-        val controls = bounds("podcast-controls-full") ?: bounds("podcast-controls-compact") ?: return null
-        val header = bounds("podcast-player-header") ?: return null
-        return Frame(time, slot.top, slot.bottom, controls.top, header.bottom)
+    /**
+     * Edges of the reading area (the content slot), the control bar and the header, the left edge of
+     * each [steadyButtons] entry, and how many pixels of the control bar changed since the last frame
+     * (-1 while its size is changing).
+     */
+    private data class Frame(
+        val time: Int, val top: Float, val bottom: Float, val controlsTop: Float, val headerBottom: Float,
+        val buttonsLeft: List<Float>, val changedPixels: Int,
+    )
+
+    private fun bounds(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().firstOrNull()?.boundsInRoot
+
+    private fun controlsImage(): Bitmap? = runCatching {
+        val full = compose.onAllNodesWithTag("podcast-controls-full").fetchSemanticsNodes().isNotEmpty()
+        compose.onNodeWithTag(if (full) "podcast-controls-full" else "podcast-controls-compact")
+            .captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false)
+    }.getOrNull()
+
+    private fun changedPixels(before: Bitmap?, after: Bitmap?): Int {
+        if (before == null || after == null || before.width != after.width || before.height != after.height) return -1
+        val a = IntArray(after.width * after.height).also { after.getPixels(it, 0, after.width, 0, 0, after.width, after.height) }
+        val b = IntArray(a.size).also { before.getPixels(it, 0, before.width, 0, 0, before.width, before.height) }
+        return a.indices.count { a[it] != b[it] }
     }
 
     private fun record(frames: Int): List<Frame> = buildList {
+        var previous: Bitmap? = null
         repeat(frames) { index ->
             compose.mainClock.advanceTimeByFrame()
-            sample((index + 1) * 16)?.let(::add)
+            val slot = bounds("podcast-view-slot")
+            val controls = bounds("podcast-controls-full") ?: bounds("podcast-controls-compact")
+            val header = bounds("podcast-player-header")
+            val buttons = steadyButtons.map { bounds(it)?.left }
+            val image = controlsImage()
+            if (slot != null && controls != null && header != null && buttons.all { it != null }) {
+                add(Frame((index + 1) * 16, slot.top, slot.bottom, controls.top, header.bottom, buttons.map { it!! }, changedPixels(previous, image)))
+            }
+            previous = image
         }
     }
 
     private fun table(frames: List<Frame>) = frames.joinToString("\n") {
-        "t=%3dms top=%7.1f bottom=%7.1f controlsTop=%7.1f headerBottom=%6.1f".format(it.time, it.top, it.bottom, it.controlsTop, it.headerBottom)
+        "t=%3dms top=%7.1f bottom=%7.1f controlsTop=%7.1f headerBottom=%6.1f buttons=%s changedPx=%d".format(
+            it.time, it.top, it.bottom, it.controlsTop, it.headerBottom, it.buttonsLeft.joinToString("/") { x -> "%.0f".format(x) }, it.changedPixels,
+        )
+    }
+
+    /** One edge or button must move along one curve: no frame takes a big share, and the fastest frame is not the last. */
+    private fun shapeProblems(name: String, edge: List<Float>, maxShare: Float): List<String> = buildList {
+        val travel = abs(edge.last() - edge.first())
+        if (travel < 10f) return@buildList
+        val steps = edge.zipWithNext { a, b -> b - a }
+        val biggest = steps.maxOf { abs(it) }
+        if (biggest > travel * maxShare) add("The $name moved %.1f of %.1f px in one frame".format(biggest, travel))
+        val moving = steps.indices.filter { abs(steps[it]) > 0.5f }
+        if (moving.size >= 4) {
+            val first = moving.first(); val last = moving.last()
+            val peak = steps.indices.maxBy { abs(steps[it]) }
+            if (peak > first + 0.65f * (last - first)) add("The $name moves fastest near the end of the switch (frame $peak of $first..$last)")
+        }
     }
 
     /** Problems a viewer would notice in a switch that is meant to be one continuous movement. */
@@ -69,19 +115,17 @@ class PodcastTabTransitionTest {
         // The reading area and the control bar move as one: the gap between them is constant.
         val gap = frames.map { it.controlsTop - it.bottom }
         if (gap.max() - gap.min() > 2f) add("The reading area trails the controls by up to %.1f px".format(gap.max() - gap.min()))
-        // One continuous movement: no frame carries a large share of the travel, and the motion
-        // never pauses and then restarts (a second jump).
-        for ((name, edge) in listOf("bottom edge" to frames.map { it.bottom }, "controls" to frames.map { it.controlsTop })) {
-            val steps = edge.zipWithNext { a, b -> b - a }
-            val biggest = steps.maxOf { abs(it) }
-            if (biggest > travel * 0.35f) add("The $name moved %.1f of %.1f px in one frame".format(biggest, travel))
-            val moving = steps.indexOfFirst { abs(it) > 3f }
-            val settled = steps.indexOfLast { abs(it) > 3f }
-            if (moving >= 0 && steps.subList(moving, settled + 1).any { abs(it) < 0.5f }) add("The $name paused in the middle of the switch")
+        // One continuous movement, for the reading area, the control bar and each steady button.
+        addAll(shapeProblems("bottom edge", frames.map { it.bottom }, 0.35f))
+        addAll(shapeProblems("controls", frames.map { it.controlsTop }, 0.35f))
+        steadyButtons.forEachIndexed { index, tag ->
+            addAll(shapeProblems(tag.removePrefix("podcast-") + " button", frames.map { it.buttonsLeft[index] }, 0.30f))
         }
-        // It lands within the designed 240 ms plus the 60 ms entry delay.
-        val late = frames.filter { it.time >= 320 }.map { it.bottom }
-        if (late.isNotEmpty() && late.max() - late.min() > 1f) add("The reading area was still moving after 320 ms")
+        // It lands within the designed 240 ms plus the 60 ms entry delay, and is then still: no flash.
+        val late = frames.filter { it.time >= 320 }
+        if (late.isNotEmpty() && late.maxOf { it.bottom } - late.minOf { it.bottom } > 1f) add("The reading area was still moving after 320 ms")
+        val flashes = late.filter { it.changedPixels > 0 }
+        if (flashes.isNotEmpty()) add("The controls still changed after landing: " + flashes.joinToString { "t=${it.time}ms ${it.changedPixels}px" })
     }
 
     private fun withPlayer(animations: Boolean, body: () -> Unit) {
