@@ -204,6 +204,8 @@ internal val classicDarkColors = darkColorScheme(
     surfaceContainerLowest = Color(0xFF131110), surfaceContainerLow = Color(0xFF1D1A18),
     surfaceContainer = Color(0xFF211E1B), surfaceContainerHigh = Color(0xFF2A2622),
     surfaceContainerHighest = Color(0xFF34302A),
+    inverseSurface = Color(0xFF2A2622), inverseOnSurface = Color(0xFFE8E3D9),
+    inversePrimary = Color(0xFFE98A6D),
     tertiary = Color(0xFFE98A6D), onTertiary = Color(0xFF211B17), tertiaryContainer = Color(0xFF43302A), onTertiaryContainer = Color(0xFFFFDBCC),
     error = Color(0xFFF2A392), onError = Color(0xFF211B17), errorContainer = Color(0xFF3F241E), onErrorContainer = Color(0xFFF2A392),
 )
