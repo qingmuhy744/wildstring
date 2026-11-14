@@ -544,11 +544,23 @@ test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与�
   // A steady sample and a brief peak both move the bar and its held marker together.
   await expect(meter).toHaveCSS('--level-current', '0.767');
   await expect(meter).toHaveCSS('--level-peak', '0.767');
+  // The meter samples every frame, so compare the held value and the marker in one pass and
+  // accept it once both are stable; a reset or a repaint in between must not read as a bad offset.
+  await expect
+    .poll(
+      async () =>
+        meter.evaluate((element) => {
+          const track = element.querySelector('.retro-vu-track')!.getBoundingClientRect();
+          const marker = element.querySelector('.retro-vu-track b')!.getBoundingClientRect();
+          const peak = Number(element.style.getPropertyValue('--level-peak'));
+          return peak > 0.7 && Math.abs(marker.x - track.x - peak * track.width) < 1;
+        }),
+      { message: 'the held marker must sit at the peak value' },
+    )
+    .toBe(true);
   const marker = meter.locator('.retro-vu-track b');
   const track = meter.locator('.retro-vu-track');
-  const markerX = await marker.evaluate((el) => el.getBoundingClientRect().x);
   const trackBox = (await track.boundingBox())!;
-  expect(Math.abs(markerX - trackBox.x - 0.767 * trackBox.width)).toBeLessThan(1);
   await meter.screenshot({
     path: `../../artifacts/player-audit/radio-meter-${info.project.name}.png`,
   });
