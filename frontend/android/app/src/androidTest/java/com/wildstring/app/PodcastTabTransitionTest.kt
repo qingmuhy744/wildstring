@@ -238,4 +238,23 @@ class PodcastTabTransitionTest {
         File(directory, "podcast-wide.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
+
+    @Test fun coverArticlePillIsHorizontallyCentredAndActionsSitOnTheRight() = withPlayer(animations = true) {
+        compose.waitForIdle()
+        val header = bounds("podcast-player-header")!!
+        val cover = bounds("podcast-cover-tab")!!
+        val article = bounds("podcast-article-tab")!!
+        val back = bounds("podcast-back")!!
+        val sleep = bounds("podcast-sleep-timer")!!
+        val pillCenter = (cover.left + article.right) / 2f
+        val headerCenter = (header.left + header.right) / 2f
+        assertTrue("Pill centre %.1f vs header centre %.1f".format(pillCenter, headerCenter), abs(pillCenter - headerCenter) <= 3f)
+        // Material IconButtons keep their tap target optically centred; both are inset by ~10px.
+        assertTrue("Back button is not at the left edge", back.left - header.left <= 16f && back.left > header.left - 1f)
+        assertTrue("Sleep timer is not at the right edge", header.right - sleep.right <= 16f && sleep.right < header.right + 1f)
+        val backCenter = (back.left + back.right) / 2f
+        val sleepCenter = (sleep.left + sleep.right) / 2f
+        assertTrue("Header actions are not symmetric", abs((backCenter - header.left) - (header.right - sleepCenter)) <= 2f)
+        assertTrue("Sleep timer is not right of the pill", sleep.left >= article.right)
+    }
 }
