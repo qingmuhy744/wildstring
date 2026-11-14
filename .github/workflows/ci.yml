@@ -15,6 +15,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Decides which expensive suites a pull request needs. Every other trigger (push to main,
+    # release reuse, manual runs) runs everything. The required jobs below always start and
+    # report under their own names; only their steps are skipped, because a skipped job would
+    # stay "pending" for the merge rules forever.
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.areas.outputs.backend }}
+      web: ${{ steps.areas.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+          else
+            printf 'backend=true\nweb=true\n' | tee -a "$GITHUB_OUTPUT"
+          fi
+
   quality:
     name: Code Quality & Packaging
     runs-on: ubuntu-latest
@@ -39,63 +67,85 @@ jobs:
 
   backend:
     name: Backend Tests
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Backend suite not needed for this change
+        if: needs.changes.outputs.backend != 'true'
+        run: echo "No backend, script or shared-input changes; the suite is skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.backend == 'true'
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: needs.changes.outputs.backend == 'true'
         with:
           version: "0.13.1"
       - name: Cache apt packages
+        if: needs.changes.outputs.backend == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-archives
           key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
           restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
+        if: needs.changes.outputs.backend == 'true'
         run: scripts/install_audio_deps.sh
       - name: Run backend pytest suite
+        if: needs.changes.outputs.backend == 'true'
         run: |
           uv sync --frozen --project backend --extra community-sources
-          make test
+          make test PYTEST_ARGS="-n auto"
 
   web:
     name: Web E2E Tests
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Web suite not needed for this change
+        if: needs.changes.outputs.web != 'true'
+        run: echo "No Web, backend, script or shared-input changes; the browser suites are skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.web == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.changes.outputs.web == 'true'
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/web/package-lock.json
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: needs.changes.outputs.web == 'true'
         with:
           version: "0.13.1"
       - run: make setup
+        if: needs.changes.outputs.web == 'true'
       - name: Cache apt packages
+        if: needs.changes.outputs.web == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-archives
           key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
           restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
+        if: needs.changes.outputs.web == 'true'
         run: scripts/install_audio_deps.sh
       - name: Cache Playwright browser
+        if: needs.changes.outputs.web == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/web/package-lock.json') }}
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
+        if: needs.changes.outputs.web == 'true'
       - name: Run Web tests and browser regressions
+        if: needs.changes.outputs.web == 'true'
         run: make test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web
       - name: Upload browser visual evidence
-        if: always()
+        if: always() && needs.changes.outputs.web == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-visual-evidence
@@ -107,15 +157,28 @@ jobs:
           retention-days: 7
 
   container:
+    # Runs only when the backend, scripts or deploy inputs changed. History shows the suite
+    # inside the container fails on its own (read-only filesystem, container FFmpeg), so pull
+    # requests that touch those inputs keep the full run.
     name: Container Smoke & Test
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Container checks not needed for this change
+        if: needs.changes.outputs.backend != 'true'
+        run: echo "No backend, script or deploy changes; the container checks are skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.backend == 'true'
         with:
           persist-credentials: false
-      - run: make docker-up docker-smoke docker-test
-      - if: failure()
+      - name: Build, start and smoke-check the container
+        if: needs.changes.outputs.backend == 'true'
+        run: make docker-up docker-smoke
+      - name: Run the backend suite with the container FFmpeg
+        if: needs.changes.outputs.backend == 'true'
+        run: make docker-test
+      - if: failure() && needs.changes.outputs.backend == 'true'
         run: make docker-logs LOG_ARGS='--tail=200'
-      - if: always()
+      - if: always() && needs.changes.outputs.backend == 'true'
         run: make docker-down

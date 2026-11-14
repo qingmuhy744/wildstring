@@ -11,7 +11,7 @@ COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src/ ./src/
 RUN uv sync --locked
 COPY backend/tests/ ./tests/
-COPY scripts/generate_homebrew_cask.py scripts/run_android_instrumented.py /workspace/scripts/
+COPY scripts/ci_changed_areas.py scripts/generate_homebrew_cask.py scripts/run_android_instrumented.py /workspace/scripts/
 COPY plugins/ /workspace/plugins/
 COPY tests/fixtures/audio/ /workspace/tests/fixtures/audio/
 USER 10001:10001
