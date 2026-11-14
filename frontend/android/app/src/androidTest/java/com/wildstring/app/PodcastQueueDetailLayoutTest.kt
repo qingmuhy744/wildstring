@@ -13,7 +13,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.wildstring.app.data.PodcastEpisode
 import com.wildstring.app.data.PodcastSummary
-import com.wildstring.app.data.Track
 import com.wildstring.app.ui.MusicViewModel
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -102,11 +101,12 @@ class PodcastQueueDetailLayoutTest {
             coverUrl = "", description = "用于待播布局验证的节目简介。", followed = true,
             totalEpisodes = 3, unplayedEpisodes = 3,
         )
-        private val episodes = (0..2).map {
+        // episode-1 is half listened: its progress bar must not squeeze the title.
+        val episodes = (0..2).map {
             PodcastEpisode(
                 "episode-$it", "show-0", "$it", "合成单集 ${it + 1}：一个足够长的标题用来检查换行与挤压",
                 audioUrl = "https://example.invalid/$it.mp3", durationSeconds = 1800,
-                pubDate = "2026-11-1${it + 1}T00:00:00Z",
+                pubDate = "2026-11-1${it + 1}T00:00:00Z", positionSeconds = if (it == 1) 900 else 0,
             )
         }
         private val cover = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).let { bitmap ->
@@ -178,6 +178,17 @@ class PodcastQueueDetailLayoutTest {
             compose.onNodeWithTag("podcast-show-show-0").performClick()
             compose.waitUntil(30_000) { compose.onAllNodesWithTag("podcast-episodes").fetchSemanticsNodes().isNotEmpty() }
             compose.waitUntil(30_000) { vm.podcastBrowser.state.value.details["show-0"]?.episodes?.size == 3 }
+            val partial = fixture.episodes[1]
+            // The card sits at the lower edge of the viewport; bring it fully in so clipped bounds don't hide its footer.
+            compose.onNodeWithTag("podcast-episodes").performScrollToNode(hasTestTag("podcast-episode-${partial.id}"))
+            compose.waitForIdle()
+            val card = compose.onNodeWithTag("podcast-episode-${partial.id}").fetchSemanticsNode().boundsInRoot
+            val title = compose.onNodeWithText(partial.title, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            // The title is checked first so a squeezed title is reported as such on any layout.
+            assertTrue("a listened episode keeps a readable title: title=$title card=$card", title.width >= card.width * .5f)
+            val progress = compose.onNodeWithTag("podcast-episode-progress-${partial.id}", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("progress sits below the title: progress=$progress title=$title card=$card", progress.top >= title.bottom - 0.5f)
+            assertTrue("progress stays inside the card: progress=$progress card=$card", progress.left >= card.left - 0.5f && progress.right <= card.right + 0.5f && progress.bottom <= card.bottom + 0.5f)
             capture("phone-detail-before-queue")
 
             compose.onAllNodesWithText(uiString(R.string.podcast_queue_add)).onFirst().performClick()

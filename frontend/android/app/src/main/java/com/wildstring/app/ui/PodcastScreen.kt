@@ -1459,14 +1459,6 @@ private fun EpisodeRowItem(
                             modifier = Modifier.size(18.dp),
                         )
                     }
-                    if (episode.positionSeconds > 0 && !episode.completed && episode.durationSeconds > 0) {
-                        LinearProgressIndicator(
-                            progress = { (episode.positionSeconds.toFloat() / episode.durationSeconds).coerceIn(0f, 1f) },
-                            modifier = Modifier.height(3.5.dp).padding(top = 10.dp, bottom = 2.dp),
-                            color = MaterialTheme.colorScheme.tertiary,
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        )
-                    }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.podcast_play_next)) },
@@ -1649,6 +1641,18 @@ private fun EpisodeRowItem(
                         )
                     }
                 }
+            }
+            // Full-width under the metadata: an unsized LinearProgressIndicator defaults to 240dp and
+            // must never share a row with the title.
+            if (episode.positionSeconds > 0 && !episode.completed && episode.durationSeconds > 0) {
+                LinearProgressIndicator(
+                    progress = { (episode.positionSeconds.toFloat() / episode.durationSeconds).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 50.dp, top = 8.dp).height(3.dp).testTag("podcast-episode-progress-${episode.id}"),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
+                )
             }
         }
     }
