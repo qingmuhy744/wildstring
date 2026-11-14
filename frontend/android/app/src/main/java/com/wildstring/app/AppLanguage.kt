@@ -106,3 +106,5 @@ object AppLanguage {
         }.getOrDefault(emptyMap())
     }
 }
+
+// CI probe: Android-only change, safe to close.
