@@ -2,15 +2,18 @@ package com.wildstring.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandIn
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -106,6 +109,7 @@ internal fun PodcastPlayerScreen(
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = 2.dp)
+                    .testTag("podcast-player-header")
                     .then(swipeModifier),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -290,18 +294,27 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             }
             val content: @Composable (Modifier) -> Unit = { modifier ->
                 val ms = if (motionAllowed) 240 else 0
-                AnimatedContent(
-                    targetState = article,
-                    modifier = modifier,
-                    transitionSpec = {
-                        // Same duration and curve as the control bar so both areas settle together.
-                        val curve = FastOutSlowInEasing
-                        if (targetState) (fadeIn(tween(ms, ms / 4, curve)) togetherWith fadeOut(tween(ms * 2 / 3, easing = curve)))
-                        else (fadeIn(tween(ms, ms / 4, curve)) + scaleIn(tween(ms, ms / 4, curve), initialScale = .96f)) togetherWith
-                            (fadeOut(tween(ms * 2 / 3, easing = curve)) + scaleOut(tween(ms, easing = curve), targetScale = .98f))
-                    },
-                    label = "podcast-view-mode",
-                ) { showArticle -> if (showArticle) articlePane() else coverPane() }
+                // Same duration and curve as the control bar so both areas settle together.
+                val curve = FastOutSlowInEasing
+                // Both panes fill one fixed slot, so its edges are decided by the layout alone. The
+                // control bar animates its own height; a container that also animated its size
+                // trailed that change and dragged the reading surface up and down.
+                Box(modifier.testTag("podcast-view-slot")) {
+                    PodcastSwitchPane(
+                        visible = !article,
+                        zIndex = if (article) 0f else 1f,
+                        enter = fadeIn(tween(ms, ms / 4, curve)) + scaleIn(tween(ms, ms / 4, curve), initialScale = .96f),
+                        exit = fadeOut(tween(ms * 2 / 3, easing = curve)) + scaleOut(tween(ms, easing = curve), targetScale = .98f),
+                        content = coverPane,
+                    )
+                    PodcastSwitchPane(
+                        visible = article,
+                        zIndex = if (article) 1f else 0f,
+                        enter = fadeIn(tween(ms, ms / 4, curve)),
+                        exit = fadeOut(tween(ms * 2 / 3, easing = curve)),
+                        content = articlePane,
+                    )
+                }
             }
             val tabSwipeModifier = Modifier.podcastTabSwipe(
                 enabled = !wide,
@@ -332,6 +345,18 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         }
     }
     if (preview) ArtworkPreview(vm, track) { preview = false }
+}
+
+/** One layer of the Cover/Article switch; the incoming layer is drawn above the outgoing one. */
+@Composable
+private fun PodcastSwitchPane(
+    visible: Boolean,
+    zIndex: Float,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(visible, Modifier.zIndex(zIndex), enter, exit) { content() }
 }
 
 
@@ -597,10 +622,13 @@ private fun PodcastPlayerControls(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                 )
+                // Size both axes with the same curve as everything else in the control area: the
+                // 48dp "more" button would otherwise keep this row tall until the exit finishes
+                // and then drop it in one frame, taking the reading surface with it.
                 AnimatedVisibility(
                     !compact,
-                    enter = fadeIn(fade) + expandHorizontally(sizeSpec),
-                    exit = fadeOut(fade) + shrinkHorizontally(sizeSpec),
+                    enter = fadeIn(fade) + expandIn(sizeSpec, Alignment.Center) { IntSize(0, 0) },
+                    exit = fadeOut(fade) + shrinkOut(sizeSpec, Alignment.Center) { IntSize(0, 0) },
                 ) { Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
