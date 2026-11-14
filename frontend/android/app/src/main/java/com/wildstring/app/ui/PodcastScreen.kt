@@ -1245,20 +1245,26 @@ private fun PodcastDetailView(
                                 modifier = Modifier.weight(1f),
                                 fillWidth = nextPlayable == null && totalPendingCount <= 0,
                             )
-                            IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {
-                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.pod_scr_more_options))
+                            Box {
+                                IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.pod_scr_more_options))
+                                }
+                                DropdownMenu(
+                                    expanded = headerActionsExpanded,
+                                    onDismissRequest = { headerActionsExpanded = false },
+                                    modifier = Modifier.testTag("podcast-show-actions-menu"),
+                                ) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
+                                        headerActionsExpanded = false
+                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
+                                        context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
+                                    }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
+                                    if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
+                                        headerActionsExpanded = false
+                                        onFollow()
+                                    }, leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
+                                }
                             }
-                        }
-                        DropdownMenu(expanded = headerActionsExpanded, onDismissRequest = { headerActionsExpanded = false }) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
-                                headerActionsExpanded = false
-                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
-                                context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
-                            }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
-                            if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
-                                headerActionsExpanded = false
-                                onFollow()
-                            }, leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
                         }
 
                         Spacer(Modifier.height(12.dp))
