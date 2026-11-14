@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -119,6 +120,9 @@ def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     assert output == ["backend=true", "web=true", "android=true"]
 
 
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="the test image has no git; the host run covers this"
+)
 def test_the_script_reads_a_real_diff(tmp_path):
     def git(*args: str) -> str:
         return subprocess.run(  # noqa: S603
