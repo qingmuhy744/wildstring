@@ -79,37 +79,6 @@ def test_no_changes_skip_everything():
     assert decide() == (False, False)
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "frontend/android/app/build.gradle.kts",
-        "Makefile",
-        ".github/workflows/codeql.yml",
-        ".github/codeql/config.yml",
-    ],
-)
-def test_android_build_inputs_run_the_kotlin_analysis(path):
-    assert areas.touches_android([path]) is True
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "backend/src/wildstring/main.py",
-        "frontend/web/src/App.tsx",
-        "frontend/ios/x.swift",
-        "docs/a.md",
-        "CHANGELOG.md",
-    ],
-)
-def test_other_changes_skip_the_kotlin_analysis(path):
-    assert areas.touches_android([path]) is False
-
-
-def test_unclassified_paths_run_the_kotlin_analysis():
-    assert areas.touches_android(["newdir/thing.py"]) is True
-
-
 def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     def broken(*args, **kwargs):
         raise subprocess.CalledProcessError(128, "git")
@@ -117,7 +86,7 @@ def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     monkeypatch.setattr(areas.subprocess, "run", broken)
     assert areas.main(["ci_changed_areas.py", "base", "head"]) == 0
     output = capsys.readouterr().out.split()
-    assert output == ["backend=true", "web=true", "android=true"]
+    assert output == ["backend=true", "web=true"]
 
 
 @pytest.mark.skipif(
@@ -150,7 +119,7 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=false", "web=false", "android=true"]
+    assert out == ["backend=false", "web=false"]
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend/x.py").write_text("x\n")
     git("add", "-A")
@@ -162,4 +131,4 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=true", "web=true", "android=true"]
+    assert out == ["backend=true", "web=true"]
