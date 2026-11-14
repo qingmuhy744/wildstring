@@ -88,44 +88,21 @@ class PodcastTabTransitionTest {
         )
     }
 
-    /** One edge or button must move along one curve: no frame takes a big share, and the fastest frame is not the last. */
-    private fun shapeProblems(name: String, edge: List<Float>, maxShare: Float): List<String> = buildList {
-        val travel = abs(edge.last() - edge.first())
-        if (travel < 10f) return@buildList
-        val steps = edge.zipWithNext { a, b -> b - a }
-        val biggest = steps.maxOf { abs(it) }
-        if (biggest > travel * maxShare) add("The $name moved %.1f of %.1f px in one frame".format(biggest, travel))
-        val moving = steps.indices.filter { abs(steps[it]) > 0.5f }
-        if (moving.size >= 4) {
-            val first = moving.first(); val last = moving.last()
-            val peak = steps.indices.maxBy { abs(steps[it]) }
-            if (peak > first + 0.65f * (last - first)) add("The $name moves fastest near the end of the switch (frame $peak of $first..$last)")
-        }
-    }
-
     /** Problems a viewer would notice in a switch that is meant to be one continuous movement. */
     private fun continuityProblems(frames: List<Frame>): List<String> = buildList {
-        val travel = abs(frames.last().bottom - frames.first().bottom)
-        if (travel <= 1f) add("The reading area must change height during the switch")
-        // The reading area hangs from the header: its top edge never moves.
-        val top = frames.map { it.top }
-        if (top.max() - top.min() > 2f) add("The top edge drifted %.1f px; it must stay put".format(top.max() - top.min()))
-        val header = frames.map { it.headerBottom }
-        if (header.max() - header.min() > 1f) add("The header moved %.1f px".format(header.max() - header.min()))
-        // The reading area and the control bar move as one: the gap between them is constant.
-        val gap = frames.map { it.controlsTop - it.bottom }
-        if (gap.max() - gap.min() > 2f) add("The reading area trails the controls by up to %.1f px".format(gap.max() - gap.min()))
-        // One continuous movement, for the reading area, the control bar and each steady button.
-        addAll(shapeProblems("bottom edge", frames.map { it.bottom }, 0.35f))
-        addAll(shapeProblems("controls", frames.map { it.controlsTop }, 0.35f))
+        if (abs(frames.last().bottom - frames.first().bottom) <= 1f) add("The reading area must change height during the switch")
+        // The reading area hangs from a fixed header and moves together with the control bar.
+        addAll(MotionAssertions.staysPut("reading area's top edge", frames.map { it.top }))
+        addAll(MotionAssertions.staysPut("header", frames.map { it.headerBottom }, tolerancePx = 1f))
+        addAll(MotionAssertions.movesTogether("reading area and the controls", frames.map { it.bottom }, frames.map { it.controlsTop }))
+        // One continuous movement for the reading area, the control bar and each steady button.
+        addAll(MotionAssertions.continuousCurve("bottom edge", frames.map { it.bottom }))
+        addAll(MotionAssertions.continuousCurve("controls", frames.map { it.controlsTop }))
         steadyButtons.forEachIndexed { index, tag ->
-            addAll(shapeProblems(tag.removePrefix("podcast-") + " button", frames.map { it.buttonsLeft[index] }, 0.30f))
+            addAll(MotionAssertions.continuousCurve(tag.removePrefix("podcast-") + " button", frames.map { it.buttonsLeft[index] }, maxShare = 0.30f))
         }
         // It lands within the designed 240 ms plus the 60 ms entry delay, and is then still: no flash.
-        val late = frames.filter { it.time >= 320 }
-        if (late.isNotEmpty() && late.maxOf { it.bottom } - late.minOf { it.bottom } > 1f) add("The reading area was still moving after 320 ms")
-        val flashes = late.filter { it.changedPixels > 0 }
-        if (flashes.isNotEmpty()) add("The controls still changed after landing: " + flashes.joinToString { "t=${it.time}ms ${it.changedPixels}px" })
+        addAll(MotionAssertions.landsAndStays("reading area", frames.map { it.time }, frames.map { it.bottom }, frames.map { it.changedPixels }))
     }
 
     private fun withPlayer(animations: Boolean, body: () -> Unit) {

@@ -184,6 +184,19 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 | Permission denied | Same shape as Error without retry: state what is not allowed and who can change it (library owner) or which account to switch to. |
 | Offline / AI unavailable | Basic browsing and playback continue; only the affected feature shows the Error pattern. |
 
+### 5.5 Motion Continuity
+
+A transition reads as one movement only if every element that takes part in it, and the layout around them, changes continuously from the first frame to the last. A screenshot or a before/after comparison cannot show a second jump, so this is verified frame by frame.
+
+- **One curve per transition.** Elements that move together share one duration and easing (the Android player uses `240ms` with the `FastOutSlowIn` curve). Staggered starts are allowed; separate durations are not.
+- **Presence, not count.** An item that enters or leaves animates width, spacing and opacity from one `0..1` progress value. Layout that depends on how many items are visible (`SpaceEvenly`, equal-weight rows, `wrap`) must follow that progress instead of the count; otherwise the remaining items are re-spaced in the single frame where the finished item is removed. The final layout must equal the count-based one.
+- **Both axes.** An element that exits by shrinking in one axis keeps its size in the other until it is removed, then the whole row jumps. Animate the axis that decides the container's size, or animate both.
+- **One owner of the size.** While a parent's size is animating (a control bar changing height), the container that hosts the content does not run a second size animation behind it; fix the slot's edges from layout and fade or scale only the content.
+- **Still after landing.** Once the duration plus the entry delay has passed, no element moves and no pixel of the animated area changes. A late repaint, a re-measure or a re-spacing is a defect, even if each state looks correct.
+- **Reduced motion.** With the app preference or the system animation setting off, the layout lands in the first frame.
+
+Acceptance for any change to a transition: record the animated edges per frame and check them against these rules; screenshots complement that check and do not replace it. Android steps the Compose clock by hand and checks the series with `MotionAssertions` (`app/src/sharedTest`), which is unit-tested on the JVM and reused by instrumented tests such as `PodcastTabTransitionTest`. Web, macOS and iOS have no shared sampler yet: sample the edges per frame in the test (on Web, `requestAnimationFrame` with `getBoundingClientRect()`), apply the same rules, and say in the delivery what was measured. Add a shared helper when the first transition on that platform needs one.
+
 ---
 
 ## 6. Core Component Specifications
@@ -290,5 +303,5 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 - **DON'T** clutter high-frequency listening views with marketing slogans, redundant helper paragraphs, or decorative secondary badges—if a screen needs explanatory text to be understood, fix the layout hierarchy instead.
 - **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds, or stack heavy drop shadows on bordered cards; rely on spacing, `1px solid var(--border)` strokes, and subtle surface tonal shifts for depth.
 - **DON'T** use olive or sage as a surface, chip or button fill in the dark theme; use `--nav-active`, `--accent-container` or `--accent-tint`. Olive remains a text colour.
-- **DON'T** animate layout properties (`top`, `left`, `width`, `height`) or attach unthrottled scroll listeners; animate only `transform` and `opacity` and always respect `prefers-reduced-motion`.
+- **DON'T** animate layout properties (`top`, `left`, `width`, `height`) on Web or attach unthrottled scroll listeners; animate only `transform` and `opacity` and always respect `prefers-reduced-motion`. Native clients may animate size where §5.3 asks for it, under the continuity rules in §5.5.
 - **DON'T** place destructive buttons (`取消订阅`, `删除`) next to primary `播放` / `继续收听` buttons; always place them inside the `⋯` menu.
