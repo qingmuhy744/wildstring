@@ -1672,10 +1672,9 @@
     <string name="pod_scr_no_followed_shows_yet">No followed shows yet</string>
     <string name="pod_scr_no_show_intro">No show description</string>
     <string name="pod_scr_pending_empty_prompt">Queue is empty · Tap to set new episode rules</string>
-    <string name="pod_scr_pending_summary">%1$d episodes in queue</string>
     <string name="pod_scr_open_queue">Open the queue</string>
     <string name="pod_scr_play">Play</string>
-    <string name="pod_scr_play_btn">▶ Play</string>
+    <string name="pod_scr_play_btn">Play</string>
     <string name="pod_scr_play_episode_btn">Play episode</string>
     <string name="pod_scr_play_episode_desc">Play episode</string>
     <string name="pod_scr_playback_cached">Cached</string>

@@ -408,13 +408,16 @@ private fun PodcastUnifiedQueueBanner(
                             }
                         }
                     }
-                    Text(
-                        if (pendingCount > 0) stringResource(R.string.pod_scr_pending_summary, pendingCount) else stringResource(R.string.pod_scr_pending_empty_prompt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // The badge already carries the count; only the empty queue needs a next-step hint.
+                    if (pendingCount == 0) {
+                        Text(
+                            stringResource(R.string.pod_scr_pending_empty_prompt),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 if (pendingCount > 0) {
                     FilledTonalButton(
@@ -423,7 +426,9 @@ private fun PodcastUnifiedQueueBanner(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-banner-play-all")
                     ) {
-                        Text(stringResource(R.string.pod_scr_play_btn), fontSize = 12.sp)
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.pod_scr_play_btn), fontSize = 13.sp, maxLines = 1, softWrap = false)
                     }
                 } else {
                     OutlinedButton(
@@ -1202,7 +1207,8 @@ private fun PodcastDetailView(
                                 onClick = { onPlayEpisode(target) },
                                 shape = RoundedCornerShape(999.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp),
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                // Full width on Phone; on Pad the 760dp reading column would stretch it into a banner.
+                                modifier = (if (LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad) Modifier.widthIn(min = 240.dp, max = 360.dp) else Modifier.fillMaxWidth()).heightIn(min = 48.dp),
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
