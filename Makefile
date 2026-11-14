@@ -10,6 +10,7 @@ TEST_BUILDER_IMAGE ?= wildstring-builder:dev
 TEST_IMAGE ?= wildstring-tests:dev
 LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
+PYTEST_ARGS ?=
 IOS_DEVELOPMENT_TEAM ?=
 -include .env.ios-local
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
@@ -189,8 +190,8 @@ format-check: ## Check formatting without modifying files
 security: ## Scan Python application and maintenance scripts
 	$(RUN) bandit -r backend/src scripts -ll -c backend/pyproject.toml
 
-test: ## Run backend tests without external services
-	$(RUN) pytest -c backend/pyproject.toml backend/tests
+test: ## Run backend tests without external services (PYTEST_ARGS="-n auto" runs them in parallel)
+	$(RUN) pytest -c backend/pyproject.toml backend/tests $(PYTEST_ARGS)
 
 build-web: ## Build the versioned Web release input
 	npm --prefix frontend/web run build
