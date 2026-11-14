@@ -6,7 +6,7 @@ workflows therefore keep each required job and skip only its expensive steps whe
 says its inputs are untouched. Anything unknown counts as touching everything, so a new
 top-level directory is tested until it is classified here.
 
-Usage: ci_changed_areas.py BASE HEAD     # prints `backend=`, `web=` and `android=` as true|false
+Usage: ci_changed_areas.py BASE HEAD     # prints `backend=true|false` and `web=true|false`
 Pushes to main, tags, manual runs and release reuse never call this and run everything.
 """
 
@@ -65,16 +65,6 @@ WEB = (
     ".github/workflows/ci.yml",
 )
 
-# What the CodeQL Kotlin build reads (`make android-codeql`): the Gradle project, the Makefile
-# that drives it, and the CodeQL configuration itself. Everything else already classified
-# above cannot change that build; unknown paths still count as touching it.
-ANDROID = (
-    "frontend/android/",
-    "Makefile",
-    ".github/workflows/codeql.yml",
-    ".github/codeql/",
-)
-
 
 def changed_files(base: str, head: str) -> list[str]:
     result = subprocess.run(  # nosec B603 B607
@@ -99,11 +89,6 @@ def touches(files: list[str], prefixes: tuple[str, ...]) -> bool:
     return False
 
 
-def touches_android(files: list[str]) -> bool:
-    known = INERT + BACKEND + WEB
-    return any(name.startswith(ANDROID) or not name.startswith(known) for name in files)
-
-
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
@@ -116,12 +101,7 @@ def main(argv: list[str]) -> int:
         files = ["?unknown"]
     backend = touches(files, BACKEND)
     web = touches(files, WEB)
-    android = touches_android(files)
-    for line in (
-        f"backend={str(backend).lower()}",
-        f"web={str(web).lower()}",
-        f"android={str(android).lower()}",
-    ):
+    for line in (f"backend={str(backend).lower()}", f"web={str(web).lower()}"):
         print(line)
     print(f"{len(files)} changed files", file=sys.stderr)
     return 0
