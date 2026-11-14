@@ -221,4 +221,48 @@ class PodcastQueueDetailLayoutTest {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
         } }
     }
+
+    @Test fun showActionsStayAnchoredToOverflowAcrossWindowSizesAndThemes() {
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        Fixture().use { fixture -> try {
+            compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto") }
+            window(390, 844)
+            val address = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(address, "qa", "synthetic-password", true) }
+            compose.waitUntil(60_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
+            compose.onNodeWithTag("nav-podcast").performClick()
+            compose.waitUntil(30_000) { compose.onAllNodesWithTag("podcast-show-show-0").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("podcast-show-show-0").performClick()
+            compose.waitUntil(30_000) { vm.podcastBrowser.state.value.details["show-0"]?.episodes?.size == 3 }
+            compose.onAllNodesWithText(uiString(R.string.podcast_queue_add)).onFirst().performClick()
+            compose.waitUntil(30_000) { vm.podcastCloud.value.queue.size == 1 }
+
+            for ((width, height) in listOf(390 to 844, 1100 to 900)) {
+                window(width, height)
+                for (mode in listOf("light", "dark")) {
+                    appearance(vm, mode)
+                    compose.onNodeWithTag("podcast-episodes").performScrollToIndex(0)
+                    val anchor = compose.onNodeWithTag("podcast-more-actions")
+                    anchor.performClick()
+                    val menu = compose.onNodeWithTag("podcast-show-actions-menu").assertIsDisplayed().fetchSemanticsNode()
+                    val button = anchor.fetchSemanticsNode()
+                    // Popup and Activity have separate roots; compare their screen coordinates.
+                    val buttonCentre = button.positionOnScreen.x + button.boundsInRoot.width / 2
+                    val menuLeft = menu.positionOnScreen.x
+                    val menuTop = menu.positionOnScreen.y
+                    assertTrue("show actions must open beside the overflow button, not at the header's left edge",
+                        buttonCentre >= menuLeft && buttonCentre <= menuLeft + menu.boundsInRoot.width)
+                    assertTrue("show actions must open at the overflow row, not below the whole detail header",
+                        menuTop >= button.positionOnScreen.y - 1 && menuTop <= button.positionOnScreen.y + button.boundsInRoot.height + 12)
+                    compose.onNodeWithText(uiString(R.string.pod_scr_share_show)).assertIsDisplayed()
+                    compose.onNodeWithText(uiString(R.string.pod_scr_unfollow_show)).assertIsDisplayed()
+                    capture("show-actions-$width-$mode")
+                    androidx.test.espresso.Espresso.pressBack()
+                    compose.onNodeWithTag("podcast-show-actions-menu").assertDoesNotExist()
+                }
+            }
+        } finally {
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+        } }
+    }
 }
