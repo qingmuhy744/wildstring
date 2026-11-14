@@ -217,7 +217,6 @@ fun PodcastChannelPage(
                                         onRemoveQueuedEpisode = vm::removePodcastQueueEpisode,
                                         totalPendingCount = pendingCount,
                                         onPlayPendingQueue = { vm.playPodcastPendingQueue() },
-                                        onOpenQueueSheet = { showQueueSheet = true },
                                         isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } },
                                         isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
                                         isEpisodeFavorite = { epId -> epId in favoriteIds },
@@ -1069,7 +1068,6 @@ private fun PodcastDetailView(
     onRemoveQueuedEpisode: (String) -> Unit = {},
     totalPendingCount: Int = 0,
     onPlayPendingQueue: () -> Unit = {},
-    onOpenQueueSheet: () -> Unit = {},
     isEpisodeQueued: (String) -> Boolean = { false },
     isEpisodeActive: (String) -> Boolean = { false },
     isEpisodeFavorite: (String) -> Boolean = { false },
@@ -1218,11 +1216,15 @@ private fun PodcastDetailView(
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (totalPendingCount > 0) {
-                                OutlinedButton(
+                                FilledTonalButton(
                                     onClick = onPlayPendingQueue,
                                     shape = RoundedCornerShape(999.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    ),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp),
+                                    modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-detail-play-queue"),
                                 ) {
                                     Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
@@ -1457,14 +1459,6 @@ private fun EpisodeRowItem(
                             modifier = Modifier.size(18.dp),
                         )
                     }
-                    if (episode.positionSeconds > 0 && !episode.completed && episode.durationSeconds > 0) {
-                        LinearProgressIndicator(
-                            progress = { (episode.positionSeconds.toFloat() / episode.durationSeconds).coerceIn(0f, 1f) },
-                            modifier = Modifier.height(3.5.dp).padding(top = 10.dp, bottom = 2.dp),
-                            color = MaterialTheme.colorScheme.tertiary,
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        )
-                    }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.podcast_play_next)) },
@@ -1615,16 +1609,19 @@ private fun EpisodeRowItem(
                         )
                     }
                 } else if (isQueued) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = { feedback(TactileKind.Tap); onRemoveFromQueue() },
                         shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         modifier = Modifier.heightIn(min = 48.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.podcast_queue_added),
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -1644,6 +1641,18 @@ private fun EpisodeRowItem(
                         )
                     }
                 }
+            }
+            // Full-width under the metadata: an unsized LinearProgressIndicator defaults to 240dp and
+            // must never share a row with the title.
+            if (episode.positionSeconds > 0 && !episode.completed && episode.durationSeconds > 0) {
+                LinearProgressIndicator(
+                    progress = { (episode.positionSeconds.toFloat() / episode.durationSeconds).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 50.dp, top = 8.dp).height(3.dp).testTag("podcast-episode-progress-${episode.id}"),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
+                )
             }
         }
     }

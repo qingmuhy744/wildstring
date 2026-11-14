@@ -16,6 +16,8 @@ internal val classicLightColors = lightColorScheme(
     surfaceContainerLowest = Color(0xFFFFFDF8), surfaceContainerLow = Color(0xFFEEEEE5), surfaceContainer = Color(0xFFFAF9F4),
     surfaceContainerHigh = Color(0xFFFFFDF8), surfaceContainerHighest = Color(0xFFE4E7DB),
     outline = Color(0xFF6A6E5B), outlineVariant = Color(0xFFDEDED2),
+    inverseSurface = Color(0xFF2A2B25), inverseOnSurface = Color(0xFFF6F3ED),
+    inversePrimary = Color(0xFFE98A6D),
     tertiary = Color(0xFF9F422B), onTertiary = Color(0xFFFFFAF3), tertiaryContainer = Color(0xFFF5DDD4), onTertiaryContainer = Color(0xFF3A160B),
     error = Color(0xFFA64027), onError = Color(0xFFFFFAF3), errorContainer = Color(0xFFF5D8CE), onErrorContainer = Color(0xFF7A2815),
 )
