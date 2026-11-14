@@ -2,15 +2,17 @@ package com.wildstring.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.shrinkOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -30,13 +32,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -106,6 +111,7 @@ internal fun PodcastPlayerScreen(
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = 2.dp)
+                    .testTag("podcast-player-header")
                     .then(swipeModifier),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -290,18 +296,27 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             }
             val content: @Composable (Modifier) -> Unit = { modifier ->
                 val ms = if (motionAllowed) 240 else 0
-                AnimatedContent(
-                    targetState = article,
-                    modifier = modifier,
-                    transitionSpec = {
-                        // Same duration and curve as the control bar so both areas settle together.
-                        val curve = FastOutSlowInEasing
-                        if (targetState) (fadeIn(tween(ms, ms / 4, curve)) togetherWith fadeOut(tween(ms * 2 / 3, easing = curve)))
-                        else (fadeIn(tween(ms, ms / 4, curve)) + scaleIn(tween(ms, ms / 4, curve), initialScale = .96f)) togetherWith
-                            (fadeOut(tween(ms * 2 / 3, easing = curve)) + scaleOut(tween(ms, easing = curve), targetScale = .98f))
-                    },
-                    label = "podcast-view-mode",
-                ) { showArticle -> if (showArticle) articlePane() else coverPane() }
+                // Same duration and curve as the control bar so both areas settle together.
+                val curve = FastOutSlowInEasing
+                // Both panes fill one fixed slot, so its edges are decided by the layout alone. The
+                // control bar animates its own height; a container that also animated its size
+                // trailed that change and dragged the reading surface up and down.
+                Box(modifier.testTag("podcast-view-slot")) {
+                    PodcastSwitchPane(
+                        visible = !article,
+                        zIndex = if (article) 0f else 1f,
+                        enter = fadeIn(tween(ms, ms / 4, curve)) + scaleIn(tween(ms, ms / 4, curve), initialScale = .96f),
+                        exit = fadeOut(tween(ms * 2 / 3, easing = curve)) + scaleOut(tween(ms, easing = curve), targetScale = .98f),
+                        content = coverPane,
+                    )
+                    PodcastSwitchPane(
+                        visible = article,
+                        zIndex = if (article) 1f else 0f,
+                        enter = fadeIn(tween(ms, ms / 4, curve)),
+                        exit = fadeOut(tween(ms * 2 / 3, easing = curve)),
+                        content = articlePane,
+                    )
+                }
             }
             val tabSwipeModifier = Modifier.podcastTabSwipe(
                 enabled = !wide,
@@ -334,6 +349,65 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     if (preview) ArtworkPreview(vm, track) { preview = false }
 }
 
+/** One layer of the Cover/Article switch; the incoming layer is drawn above the outgoing one. */
+@Composable
+private fun PodcastSwitchPane(
+    visible: Boolean,
+    zIndex: Float,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(visible, Modifier.zIndex(zIndex), enter, exit) { content() }
+}
+
+private class PresenceData(val presence: Float) : androidx.compose.ui.layout.ParentDataModifier {
+    override fun androidx.compose.ui.unit.Density.modifyParentData(parentData: Any?): Any = this@PresenceData
+}
+
+/**
+ * Shows a child of [PresenceRow] at [value] of its presence, from 0 (gone) to 1 (fully shown): its
+ * width, the gap in front of it and its opacity all follow the same value, and its content is
+ * clipped to the width it currently occupies.
+ */
+private fun Modifier.presence(value: Float): Modifier {
+    val shown = value.coerceIn(0f, 1f)
+    return this
+        .layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            val width = (placeable.width * shown).roundToInt()
+            layout(width, placeable.height) { placeable.placeRelative((width - placeable.width) / 2, 0) }
+        }
+        .clipToBounds()
+        .alpha(shown)
+        .then(PresenceData(shown))
+}
+
+/**
+ * A row that spreads its free space like `SpaceEvenly`, but divides it by the children's presence
+ * instead of by their number. `SpaceEvenly` re-spaces every child in one frame when an item that
+ * has finished leaving is removed; here each child carries the gap in front of it, scaled by its
+ * own presence, plus one closing gap, so the layout is continuous from the first frame to the last
+ * and equals `SpaceEvenly` whenever every presence is 0 or 1. Children without [presence] count as 1.
+ */
+@Composable
+private fun PresenceRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val presences = measurables.map { (it.parentData as? PresenceData)?.presence ?: 1f }
+        val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        val free = (constraints.maxWidth - placeables.sumOf { it.width }).coerceAtLeast(0)
+        val gap = free / (presences.sum() + 1f)
+        val height = placeables.maxOfOrNull { it.height } ?: 0
+        layout(constraints.maxWidth, height) {
+            var x = 0f
+            placeables.forEachIndexed { index, placeable ->
+                x += gap * presences[index]
+                placeable.placeRelative(x.roundToInt(), (height - placeable.height) / 2)
+                x += placeable.width
+            }
+        }
+    }
+}
 
 @Composable
 private fun PodcastShowName(
@@ -570,6 +644,8 @@ private fun PodcastPlayerControls(
     val playButton by animateDpAsState(if (compact) 48.dp else 64.dp, dpSpec, label = "podcast-play-size")
     val playIcon by animateDpAsState(if (compact) 26.dp else 34.dp, dpSpec, label = "podcast-play-icon")
     val rowGap by animateDpAsState(if (compact) 0.dp else 8.dp, dpSpec, label = "podcast-row-gap")
+    val sideShown by animateFloatAsState(if (compact) 0f else 1f, fade, label = "podcast-side-controls")
+    val moreShown by animateFloatAsState(if (compact) 1f else 0f, fade, label = "podcast-more-control")
     run {
         Column(modifier.fillMaxWidth().testTag(if (compact) "podcast-controls-compact" else "podcast-controls-full")) {
             PlaybackSlider(
@@ -597,10 +673,13 @@ private fun PodcastPlayerControls(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                 )
+                // Size both axes with the same curve as everything else in the control area: the
+                // 48dp "more" button would otherwise keep this row tall until the exit finishes
+                // and then drop it in one frame, taking the reading surface with it.
                 AnimatedVisibility(
                     !compact,
-                    enter = fadeIn(fade) + expandHorizontally(sizeSpec),
-                    exit = fadeOut(fade) + shrinkHorizontally(sizeSpec),
+                    enter = fadeIn(fade) + expandIn(sizeSpec, Alignment.Center) { IntSize(0, 0) },
+                    exit = fadeOut(fade) + shrinkOut(sizeSpec, Alignment.Center) { IntSize(0, 0) },
                 ) { Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -670,19 +749,16 @@ private fun PodcastPlayerControls(
                     fontSize = 11.sp,
                 )
             }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = rowGap),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AnimatedVisibility(!compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
-                    IconButton(tactile { vm.skipPodcastEpisode(-1) }) {
+            PresenceRow(Modifier.fillMaxWidth().padding(top = rowGap)) {
+                // Items that come and go carry a 0..1 presence on the shared 240ms curve, and the row
+                // spreads its free space by presence instead of by item count. Removing a finished
+                // item then never re-spaces the others in a single frame.
+                if (sideShown > 0f) Box(Modifier.presence(sideShown)) {
+                    IconButton(tactile { vm.skipPodcastEpisode(-1) }, Modifier.testTag("podcast-skip-previous")) {
                         Icon(Icons.Default.SkipPrevious, stringResource(R.string.podcast_previous_episode), Modifier.size(sideIcon))
                     }
                 }
-                IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }) {
+                IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }, Modifier.testTag("podcast-rewind")) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(skipIcon))
                         Text("15", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
@@ -709,17 +785,15 @@ private fun PodcastPlayerControls(
                         }
                     }
                 }
-                IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) {
+                IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }, Modifier.testTag("podcast-forward")) {
                     Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(skipIcon))
                 }
-                AnimatedVisibility(!compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
-                    IconButton(tactile { vm.skipPodcastEpisode(1) }) {
+                if (sideShown > 0f) Box(Modifier.presence(sideShown)) {
+                    IconButton(tactile { vm.skipPodcastEpisode(1) }, Modifier.testTag("podcast-skip-next")) {
                         Icon(Icons.Default.SkipNext, stringResource(R.string.podcast_next_episode), Modifier.size(sideIcon))
                     }
                 }
-                AnimatedVisibility(compact, enter = fadeIn(fade) + expandHorizontally(sizeSpec), exit = fadeOut(fade) + shrinkHorizontally(sizeSpec)) {
-                    moreButton()
-                }
+                if (moreShown > 0f) Box(Modifier.presence(moreShown)) { moreButton() }
             }
             state.playbackError?.let { message ->
                 Surface(
