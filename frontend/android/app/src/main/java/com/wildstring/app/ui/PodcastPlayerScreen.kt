@@ -114,12 +114,15 @@ internal fun PodcastPlayerScreen(
                     .testTag("podcast-player-header")
                     .then(swipeModifier),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(tactile(onBack)) {
-                    Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
+                // Equal-weight slots on both sides centre the pill exactly, whatever their contents.
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    IconButton(tactile(onBack), Modifier.testTag("podcast-back")) {
+                        Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
+                    }
                 }
-                if (wide) Spacer(Modifier.weight(1f)) else Surface(
+                // Wide screens keep the pill hidden; the left and right weight(1f) slots centre nothing there.
+                if (!wide) Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
                 ) {
@@ -142,26 +145,29 @@ internal fun PodcastPlayerScreen(
                         )
                     }
                 }
-                val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
-                val pendingFavorites by vm.pendingPodcastFavorites.collectAsStateWithLifecycle()
-                val favoriteOverrides by vm.podcastFavoriteOverrides.collectAsStateWithLifecycle()
-                val episodeId = track.podcastEpisodeId
-                val loved = episodeId != null && (
-                    favoriteOverrides[episodeId] ?: (episodeId in favoriteIds || episode?.isFavorite == true)
-                )
-                if (episodeId != null) {
-                    FavoriteControl(
-                        loved = loved,
-                        pending = episodeId in pendingFavorites,
-                        click = tactile { vm.togglePodcastEpisodeFavorite(episodeId, !loved) },
+                // Favourite and sleep timer are one group, pushed to the right.
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
+                    val pendingFavorites by vm.pendingPodcastFavorites.collectAsStateWithLifecycle()
+                    val favoriteOverrides by vm.podcastFavoriteOverrides.collectAsStateWithLifecycle()
+                    val episodeId = track.podcastEpisodeId
+                    val loved = episodeId != null && (
+                        favoriteOverrides[episodeId] ?: (episodeId in favoriteIds || episode?.isFavorite == true)
                     )
-                }
-                IconButton(tactile(onSleep)) {
-                    Icon(
-                        Icons.Default.Bedtime,
-                        stringResource(R.string.pod_player_sleep_timer),
-                        tint = if (sleep.deadline != null || sleep.entryId != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                    )
+                    if (episodeId != null) {
+                        FavoriteControl(
+                            loved = loved,
+                            pending = episodeId in pendingFavorites,
+                            click = tactile { vm.togglePodcastEpisodeFavorite(episodeId, !loved) },
+                        )
+                    }
+                    IconButton(tactile(onSleep), Modifier.testTag("podcast-sleep-timer")) {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            stringResource(R.string.pod_player_sleep_timer),
+                            tint = if (sleep.deadline != null || sleep.entryId != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        )
+                    }
                 }
             }
             val articlePane: @Composable () -> Unit = {
