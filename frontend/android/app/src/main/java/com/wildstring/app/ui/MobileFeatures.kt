@@ -4,7 +4,6 @@ package com.wildstring.app.ui
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.res.stringResource
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,12 +54,7 @@ internal fun MobileShortcuts(discovery: Boolean = false, compactWidth: Boolean =
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
                     Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
-                        if (discovery && route == "daily") {
-                            Text(stringResource(R.string.discovery_ai_badge), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, maxLines = 1, softWrap = false, modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(999.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
-                        }
-                    }
+                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
             }
         }

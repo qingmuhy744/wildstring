@@ -477,9 +477,8 @@
     <string name="statistics_minutes">Total listening: %1$d min</string>
     <string name="statistics_tracks">Songs played: %1$d · Favorites: %2$d</string>
     <string name="daily_recommendations">Daily mix</string>
-    <string name="discovery_ai_badge">AI Curated</string>
     <string name="listening_rankings">Top played</string>
-    <string name="discover_new_music">Beyond your library</string>
+    <string name="discover_new_music">Outside library</string>
     <string name="offline_save">Save offline</string>
     <string name="listening_statistics">Listening stats</string>
     <string name="server_switch_hint">Switching servers stops playback and pauses downloads. Each server keeps its own sign-in and offline music.</string>
