@@ -477,7 +477,6 @@
     <string name="statistics_minutes">累计收听 %1$d 分钟</string>
     <string name="statistics_tracks">听过 %1$d 首 · 收藏 %2$d 首</string>
     <string name="daily_recommendations">每日推荐</string>
-    <string name="discovery_ai_badge">AI 整理</string>
     <string name="listening_rankings">收听排行</string>
     <string name="discover_new_music">库外推荐</string>
     <string name="offline_save">离线保存</string>
