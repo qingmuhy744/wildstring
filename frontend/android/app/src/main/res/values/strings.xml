@@ -7,7 +7,7 @@
     <string name="settings_servers">Servers / switch server</string>
     <string name="settings_profile">Profile</string>
     <string name="settings_change_password">Change password</string>
-    <string name="settings_group_assistant">Assistant preferences &amp; notifications</string>
+    <string name="settings_group_assistant">Assistant</string>
     <string name="settings_assistant">WildString assistant / notifications &amp; drafts</string>
     <string name="settings_unread">%1$d unread notifications</string>
     <string name="settings_assistant_hint">Chat from the AI tab. Review metadata, artwork and lyric candidates on the web.</string>
@@ -191,7 +191,7 @@
     <string name="settings_playback_summary">Quality, lyrics and device handoff</string>
     <string name="settings_category_podcast">Podcasts</string>
     <string name="settings_podcast_summary">Episode resume and automatic caching</string>
-    <string name="settings_category_appearance">Appearance &amp; language</string>
+    <string name="settings_category_appearance">Appearance</string>
     <string name="settings_appearance_summary">Theme, language, icons and haptics</string>
     <string name="settings_category_storage">Cache &amp; downloads</string>
     <string name="settings_storage_summary">Cache limits, cleanup and offline music</string>
@@ -1671,7 +1671,7 @@
     <string name="pod_scr_no_followed_shows">No followed shows yet</string>
     <string name="pod_scr_no_followed_shows_yet">No followed shows yet</string>
     <string name="pod_scr_no_show_intro">No show description</string>
-    <string name="pod_scr_pending_empty_prompt">Queue is empty · Tap to set new episode rules</string>
+    <string name="pod_scr_pending_empty_prompt">Queue is empty</string>
     <string name="pod_scr_open_queue">Open the queue</string>
     <string name="pod_scr_play">Play</string>
     <string name="pod_scr_play_btn">Play</string>
@@ -1701,7 +1701,7 @@
     <string name="pod_scr_unfollow_show">Unfollow</string>
     <string name="pod_scr_unknown_creator">Unknown creator</string>
     <string name="pod_scr_unknown_host">Unknown host</string>
-    <string name="pod_scr_unplayed_count">%1$d left to listen</string>
+    <string name="pod_scr_unplayed_count">%1$d left</string>
     <string name="pod_scr_unplayed_episodes">%1$d left to listen</string>
     <string name="pod_scr_continue_listening">Resume listening</string>
     <string name="pod_scr_play_latest">Play latest episode</string>

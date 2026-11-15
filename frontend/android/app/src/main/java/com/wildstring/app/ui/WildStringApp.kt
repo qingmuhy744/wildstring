@@ -831,14 +831,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 .safeDrawingPadding()) {
                 Surface(
                     Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp)
-                        .width(360.dp).heightIn(max = 520.dp).fillMaxHeight()
+                        .width(360.dp).heightIn(max = 520.dp)
                         .testTag("player-queue-popup")
                         .pointerInput(Unit) { detectTapGestures {} },
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    QueuePanel(vm, state, Modifier.fillMaxSize(), onClose = { queue = false })
+                    QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false })
                 }
             }
         }

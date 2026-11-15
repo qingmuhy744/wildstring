@@ -903,6 +903,7 @@ private fun PodcastListView(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PodcastCardItem(
     vm: MusicViewModel,
@@ -958,8 +959,9 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                // Wraps under the count when the pane is narrow instead of clipping "N left".
+                FlowRow(
+                    itemVerticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(top = 2.dp),
                 ) {
@@ -967,13 +969,14 @@ private fun PodcastCardItem(
                         text = stringResource(R.string.pod_scr_episodes_count, podcast.totalEpisodes),
                         style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, softWrap = false,
                     )
                     if (podcast.unplayedEpisodes > 0) {
                         Text(
                             text = stringResource(R.string.pod_scr_unplayed_count, podcast.unplayedEpisodes),
                             style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 1, softWrap = false,
                         )
                     }
                 }
