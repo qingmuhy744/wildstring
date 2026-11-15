@@ -439,7 +439,7 @@ internal fun summarizeConversationTitle(userText: String): String {
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+        val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 760.dp
         Row(Modifier.fillMaxSize().testTag(if (split) "agent-two-pane" else "agent-single-pane")) {
             if (split) {
                 Column(Modifier.width(240.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow)) {

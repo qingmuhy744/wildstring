@@ -83,7 +83,6 @@
     <string name="podcast_queue_unified_title">待播列表</string>
     <string name="podcast_pending_episodes_title">待播单集</string>
     <string name="podcast_play_all">播放全部</string>
-    <string name="podcast_play_queue_header">播放待播 (%1$d)</string>
     <string name="podcast_filter_favorites">收藏</string>
     <string name="podcast_mark_completed">标为已听完</string>
     <string name="podcast_mark_unplayed">标为未听</string>
@@ -1672,11 +1671,10 @@
     <string name="pod_scr_no_followed_shows">暂无关注的节目</string>
     <string name="pod_scr_no_followed_shows_yet">还没有关注的节目</string>
     <string name="pod_scr_no_show_intro">暂无节目介绍</string>
-    <string name="pod_scr_pending_empty_prompt">待播列表为空 · 点击设置新集规则</string>
-    <string name="pod_scr_pending_summary">共 %1$d 集待播</string>
+    <string name="pod_scr_pending_empty_prompt">待播列表为空</string>
     <string name="pod_scr_open_queue">打开待播列表</string>
     <string name="pod_scr_play">播放</string>
-    <string name="pod_scr_play_btn">▶ 播放</string>
+    <string name="pod_scr_play_btn">播放</string>
     <string name="pod_scr_play_episode_btn">播放单集</string>
     <string name="pod_scr_play_episode_desc">播放单集</string>
     <string name="pod_scr_playback_cached">播放缓存</string>
