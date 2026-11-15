@@ -32,7 +32,7 @@
 
 | 模块 | 静态核查结果 | 本轮需要补齐 |
 | --- | --- | --- |
-| [AI 配置](../../backend/src/wildstring/ai_config.py) | 实例级 `ai/.env`，模型测试使用 `http.client` | 与正式调用共用 Provider、网络策略和响应解析 |
+| AI 配置（`ai_config.py`，0.8.12 已移除，改为数据库中的用户模型连接） | 开工时为实例级 `ai/.env`，模型测试使用 `http.client` | 与正式调用共用 Provider、网络策略和响应解析 |
 | [推荐服务](../../backend/src/wildstring/recommendations.py) | 本地检索后最多发送 80 首候选，正式模型请求使用 `urllib` 并读取代理设置 | 解耦传输、模型与选歌业务，增加多轮工具调用 |
 | [来源检测](../../backend/src/wildstring/provider_network.py)／[来源客户端](../../backend/src/wildstring/providers.py) | 已检测 MusicBrainz、Last.fm、CAA、AcoustID；正式来源请求另有重定向、大小与超时策略 | 统一客户端；区分服务响应、凭据可用和完整功能链路 |
 | Web／Android | 已有 AI 找歌、候选预览、歌单保存；尚无多轮 Agent 页面 | 共用会话、草案、巡检及通知入口 |
@@ -364,7 +364,7 @@ P1 先保留实例级配置及旧接口，P6 再提供实例／个人连接的�
 
 | 范围 | 现有入口 | 计划改动 |
 | --- | --- | --- |
-| 传输与模型 | `ai_config.py`、`recommendations.py`、`providers.py`、`provider_network.py` | 公共 outbound 客户端、来源策略及 AI Provider；迁移旧测试和请求 |
+| 传输与模型 | `ai_config.py`（已移除）、`recommendations.py`、`providers.py`、`provider_network.py` | 公共 outbound 客户端、来源策略及 AI Provider；迁移旧测试和请求 |
 | 日志与诊断 | `main.py`、`__main__.py`、`request_privacy.py`、worker、`deploy/` | 公共日志／上下文／脱敏模块、查询与诊断包，覆盖本地及 Docker 入口 |
 | 工具与草案 | `auth.py`、`library/`、`management.py`、来源路由 | 公共业务服务、工具上下文、凭据、草案批准与幂等应用 |
 | 数据和任务 | `database.py`、现有任务 schema／worker | 增量迁移、事件、Agent 任务、lease／checkpoint／scheduler，保留旧任务语义 |
