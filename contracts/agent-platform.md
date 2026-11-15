@@ -78,7 +78,7 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 详细执行和验证边界见[助手联网与记忆](../docs/architecture/assistant-research.md)。
 
 
-## 用户选择应用方式（当前开发分支）
+## 用户选择应用方式（现行行为）
 
 详见 [整理方式与接口](../docs/product/agent-application-policy.md)。新增仅会话可写的 `application-policy` 和原子 `drafts/{id}/accept`；MCP 只能读取应用策略。默认仍需审核；明确开启自动整理且拥有应用 scope 时，授权类型的 `create_draft` 可能返回 `applied`。调用方必须按真实状态反馈。旧版 approve/apply 接口保留兼容。
 

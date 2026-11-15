@@ -206,7 +206,7 @@ Acceptance for any change to a transition: record the animated edges per frame a
 - **Header Bar**: Sticky column headers (`歌曲`, `艺人`, `专辑`, `时长`) on `var(--surface)` with `1px` bottom border.
 - **Row Styling**:
   - Rounded card row (`10px` radius, `padding: 8px 12px`, `6px` vertical gap) with `var(--surface)` fill and `1px solid var(--border)`.
-  - **Currently Playing State**: Fill shifts to `var(--row-active)` (`#DDE2D0` light / `#262B21` dark), border tints to `var(--accent)` at 45% opacity, with a `3px` vertical `--accent` pill indicator on the left edge and a `speaker.wave.2.fill` icon on the right.
+  - **Currently Playing State**: Fill shifts to `var(--row-active)` (theme values from §3), border tints to `var(--accent)` at 45% opacity, with a `3px` vertical `--accent` pill indicator on the left edge and a `speaker.wave.2.fill` icon on the right.
   - Artist and Album names are interactive links that navigate directly to the Artist or Album detail view.
 
 ### 6.2 Daily Recommendations & Rankings (`每日推荐` / `收听排行`)

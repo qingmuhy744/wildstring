@@ -77,7 +77,7 @@ make docker-down
 
 播客 RSS、封面和音频只连接公网地址。宿主机或容器的 DNS 若由 Clash/mihomo 的 fake-ip 模式接管（域名解析到 `198.18.0.0/15`），订阅会返回 `remote_url_fake_ip`。优先在 `HTTP_PROXY` / `HTTPS_PROXY` 或网页联网设置中配置出站代理，此时目标域名由代理解析；无法配置代理时可在 `.env` 设置 `WILDSTRING_PODCAST_ALLOW_FAKE_IP=true` 并重启。该开关只放行 DNS 解析得到的 `198.18.0.0/15`，URL 中直接写出的 IP 和其他私有、回环、链路本地地址仍拒绝；详见 [远程播客访问](../contracts/storage-and-podcast-resources.md#远程播客访问)。
 
-运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到最新 schema（当前 `SCHEMA_VERSION = 48`，覆盖多音乐库与库授权、四角色用户、歌词覆盖与洗版扫描、Host 白名单、转码缓存、元数据来源与发行锁定、播客订阅/目录搜索/共享清理、跨设备快照、个人推荐、Agent/MCP 草案与诊断日志等），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到最新 schema（当前版本以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准，覆盖多音乐库与库授权、四角色用户、歌词覆盖与洗版扫描、Host 白名单、转码缓存、元数据来源与发行锁定、播客订阅/目录搜索/共享清理、跨设备快照、个人推荐、Agent/MCP 草案与诊断日志等），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。升级前 Cookie 配置保留。新部署可在管理中心 → 服务器 → 访问设置选择 HTTP + HTTPS 或仅 HTTPS；新策略按访问协议自动设置 Secure。页面保存值优先于 `WILDSTRING_CONNECTION_POLICY` / `WILDSTRING_SERVER_NAME`，清除覆盖后恢复环境默认。TLS 反向代理须用 `WILDSTRING_TRUSTED_PROXIES` 明确配置代理地址或网段，应用不默认信任转发协议头；不要额外启用 Uvicorn 的代理头处理。
 

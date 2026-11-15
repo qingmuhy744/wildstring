@@ -4,7 +4,7 @@
 
 更新日期：2026-10-17。
 
-状态：**用户已确认合并到 0.4.0，首版实现进入联合验收**。本文件保留开工时的阶段计划及验收清单，未逐项勾选不用于推断线上状态。当前代码、已执行验证与仍需真实账号／设备核对的边界见 [运行说明](../architecture/agent-platform.md) 与 [0.4.0 发布说明](../releases/v0.4.0.md)。
+状态：已交付于 v0.4.0（PR #20）；后续以现行契约为准。本文件保留开工时的阶段计划及验收清单，未逐项勾选不用于推断线上状态。当前代码、已执行验证与仍需真实账号／设备核对的边界见 [运行说明](../architecture/agent-platform.md) 与 [0.4.0 发布说明](../releases/v0.4.0.md)。
 
 ## 1. 已确认的方向
 
@@ -34,7 +34,7 @@
 
 | 模块 | 静态核查结果 | 本轮需要补齐 |
 | --- | --- | --- |
-| AI 配置（`ai_config.py`，0.8.12 已移除，改为数据库中的用户模型连接） | 开工时为实例级 `ai/.env`，模型测试使用 `http.client` | 与正式调用共用 Provider、网络策略和响应解析 |
+| AI 配置（`ai_config.py`，[0.8.12](../releases/v0.8.12.md) 已移除，改为数据库中的用户模型连接） | 开工时为实例级 `ai/.env`，模型测试使用 `http.client` | 与正式调用共用 Provider、网络策略和响应解析 |
 | [推荐服务](../../backend/src/wildstring/recommendations.py) | 本地检索后最多发送 80 首候选，正式模型请求使用 `urllib` 并读取代理设置 | 解耦传输、模型与选歌业务，增加多轮工具调用 |
 | [来源检测](../../backend/src/wildstring/provider_network.py)／[来源客户端](../../backend/src/wildstring/providers.py) | 已检测 MusicBrainz、Last.fm、CAA、AcoustID；正式来源请求另有重定向、大小与超时策略 | 统一客户端；区分服务响应、凭据可用和完整功能链路 |
 | Web／Android | 已有 AI 找歌、候选预览、歌单保存；尚无多轮 Agent 页面 | 共用会话、草案、巡检及通知入口 |

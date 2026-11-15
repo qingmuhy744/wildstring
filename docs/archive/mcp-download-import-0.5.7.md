@@ -2,7 +2,7 @@
 
 > 历史记录：已被后续实现取代，仅保留当时的方案与验收过程。现行状态见 [范围变更记录](../product/scope-history.md)、[产品范围](../product/scope.md) 与 `docs/releases/`。
 
-用户于 2026-10-19 确认，从 main `f57fa2e` 的独立 worktree 开发；主工作目录的 iOS 规划不在本批范围内。本文是实施与验收清单，勾选前不代表已经实现。
+状态：已交付于 [v0.5.7](../releases/v0.5.7.md)（PR #49）。原方案确认日期：2026-10-19（从 `f57fa2e` 独立 worktree 开发，不含当时的 iOS 规划）。本文保留当批实施清单，现行接口以 [Agent 契约](../../contracts/agent-platform.md) 与 [自动导入契约](../../contracts/automatic-import.md) 为准。
 
 ## 已核对的现状
 
