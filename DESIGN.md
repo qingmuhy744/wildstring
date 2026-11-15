@@ -140,8 +140,9 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
   - Bottom pinned area: Segmented Appearance Switcher (`自动 | 浅色 | 深色`), `管理`, `设置`, `退出登录`.
 - **Main Content Area (`flex: 1`, `background: var(--bg)`)**:
   - Content max-width `1180px` (`860px` for reading-heavy podcast detail panes), `24px` horizontal padding.
-- **Right Inspector Drawer (`336px` collapsible)**:
-  - Toggles between synchronized **Lyrics (`歌词`)** and **Playback Queue (`播放队列`)** without leaving the current catalog page.
+- **Right Inspector & Queue Overlay**:
+  - **Right Inspector Drawer (`336px` collapsible)**: Displays synchronized **Lyrics (`歌词`)** alongside the current catalog page without leaving it (music only on macOS).
+  - **Playback Queue (`播放队列`)**: Opens from the bottom transport bar as a dismissible overlay without shifting or resizing the catalog page behind it (on macOS, a bottom-trailing floating panel `≤360×520pt`, `18pt` radius, `16pt` from the trailing edge and `10pt` above the transport bar, dismissed by clicking outside or pressing `Esc`; on Web, a fixed right overlay panel over a dismissible scrim).
 - **Bottom Transport Bar (`84px` height, `background: var(--surface)`, `1px` top border)**:
   - **Left (`26%`, max `330px`)**: `48×48` rounded artwork (`6px` radius), track/episode title, clickable artist/show subtitle, favorite heart icon.
   - **Center (`max-width: 560px`)**:
