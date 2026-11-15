@@ -101,11 +101,15 @@ def test_idna_and_exact_ip_normalization():
     assert normalize_host("2001:0db8::1") == "2001:db8::1"
 
 
-def test_unscoped_connection_guards_and_single_connection_library_access(
-    settings, authenticated_client, monkeypatch
-):
+def test_unscoped_connection_guards_and_single_connection_library_access(settings, monkeypatch):
+    from contextvars import ContextVar
+
+    from fastapi.testclient import TestClient
+    from pydantic import SecretStr
+
     from wildstring.library import scope as scope_module
     from wildstring.library.scanner import scan_library
+    from wildstring.main import create_app
 
     scan_library(settings)
     database = Database(settings.data_dir)
@@ -128,12 +132,37 @@ def test_unscoped_connection_guards_and_single_connection_library_access(
         assert connection.execute("SELECT 1").fetchone()[0] == 1
     assert scope_calls == []
 
-    with authenticated_client(settings) as client:
+    # Isolate request-path DB calls from lifespan background worker threads.
+    in_http_request: ContextVar[bool] = ContextVar("in_http_request", default=False)
+    app = create_app(settings)
+
+    class TrackedHttpApp:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            token = in_http_request.set(scope.get("type") == "http")
+            try:
+                return await self.inner(scope, receive, send)
+            finally:
+                in_http_request.reset(token)
+
+    settings.admin_password = SecretStr("test-admin-password-123")
+    with TestClient(TrackedHttpApp(app)) as client:
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": "test-admin-password-123"},
+                headers=HEADERS,
+            ).status_code
+            == 200
+        )
         calls = []
         original_connect = Database.connect
 
         def tracked_connect(self, *, write=False, create=False, scoped=True):
-            calls.append((write, create, scoped))
+            if in_http_request.get():
+                calls.append((write, create, scoped))
             return original_connect(self, write=write, create=create, scoped=scoped)
 
         monkeypatch.setattr(Database, "connect", tracked_connect)
@@ -155,7 +184,7 @@ def test_unscoped_connection_guards_and_single_connection_library_access(
         )
         assert rejected.status_code == 413
         assert "X-Wildstring-Library-Access" in rejected.headers
-        assert all(scoped is False for _, _, scoped in calls)
+        assert calls and all(scoped is False for _, _, scoped in calls)
 
         # Invalid session cookie still passes through to public auth routes.
         client.cookies.clear()
@@ -174,4 +203,4 @@ def test_unscoped_connection_guards_and_single_connection_library_access(
         )
         assert response.status_code == 401
         assert "X-Wildstring-Library-Access" not in response.headers
-        assert all(scoped is False for _, _, scoped in calls)
+        assert calls and all(scoped is False for _, _, scoped in calls)
