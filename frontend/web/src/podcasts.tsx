@@ -1033,7 +1033,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               {canAddPodcast ? t('podcasts.addShow') : t('podcasts.searchShows')}
             </button>
           )}
-          {queuedSet.size > 0 && onPlayQueue && (
+          {!selectedPodcast && queuedSet.size > 0 && onPlayQueue && (
             <button
               type="button"
               className="podcasts-action-btn"

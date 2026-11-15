@@ -17596,23 +17596,6 @@
         }
       }
     },
-    "macPodcasts.playPendingQueue": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Play Queue (%d)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "播放待播 (%d)"
-          }
-        }
-      }
-    },
     "macPodcasts.queuedBadge": {
       "extractionState": "manual",
       "localizations": {
@@ -25497,23 +25480,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "下一集播放"
-          }
-        }
-      }
-    },
-    "podcasts.playPendingQueueCount": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Play Queue (%d)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "播放待播 (%d)"
           }
         }
       }

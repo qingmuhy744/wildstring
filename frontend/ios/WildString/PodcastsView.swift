@@ -119,15 +119,6 @@ struct PodcastsView: View {
             message = ErrorText.message(for: error)
         }
     }
-
-    private func playPendingQueue() {
-        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
-        Task {
-            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item, line: .queue)
-            }
-        }
-    }
 }
 
 @MainActor
@@ -153,15 +144,6 @@ private struct PodcastDetailView: View {
                     HStack(spacing: 12) {
                         Button(detail.podcast.followed ? L10n("podcasts.unfollow") : L10n("podcasts.follow")) {
                             Task { await toggleFollow(detail.podcast) }
-                        }
-                        let pendingQueueCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
-                        if pendingQueueCount > 0 {
-                            Button {
-                                playPendingQueue()
-                            } label: {
-                                Label(L10n("podcasts.playPendingQueueCount", pendingQueueCount), systemImage: "play.fill")
-                                    .fontWeight(.semibold)
-                            }
                         }
                     }
                 }

@@ -944,6 +944,9 @@ test('音乐单曲循环不接管播客结束，节目线不改走待播列表',
   expect(remoteQueueState.items.map((item) => item.episode_id)).toEqual(['radio-1']);
 
   await page.getByRole('button', { name: '收起全屏播放' }).click();
+  // The queue play action lives on the station list, not on a show page.
+  await expect(page.getByRole('button', { name: '▶ 播放待播 (1)', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '← 返回电台列表' }).click();
   await page.getByRole('button', { name: '▶ 播放待播 (1)', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-1/stream');
   const secondDuration = await audioDuration(page);
@@ -990,7 +993,6 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
     'aria-pressed',
     'true',
   );
-  await expect(page.getByRole('button', { name: '▶ 播放待播 (2)', exact: true })).toBeVisible();
 
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
@@ -1005,9 +1007,7 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
   // 2. Clicking "✓ 已待播" removes the episode from the queue
   await row(5).getByRole('button', { name: '✓ 已待播', exact: true }).click();
   await expect(row(5).getByRole('button', { name: '+ 待播', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '▶ 播放待播 (1)', exact: true })).toBeVisible();
   await row(4).getByRole('button', { name: '+ 待播', exact: true }).click();
-  await expect(page.getByRole('button', { name: '▶ 播放待播 (2)', exact: true })).toBeVisible();
 
   // 3. The pending dialog is the queue order, including a manually reordered row.
   await page.getByRole('button', { name: '待播列表', exact: true }).click();

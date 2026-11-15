@@ -393,19 +393,6 @@ struct MacPodcastsView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        let pendingQueueCount = cloud?.unifiedPendingEpisodes.count ?? 0
-                        if pendingQueueCount > 0 {
-                            Button { playPendingQueue() } label: {
-                                Label(L10n("macPodcasts.playPendingQueue", pendingQueueCount), systemImage: "play.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(MacTheme.ink)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(MacTheme.panel, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                        }
                         if detail.podcast.followed {
                             Menu {
                                 Button {
@@ -644,15 +631,6 @@ struct MacPodcastsView: View {
         }
         cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
         detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
-    }
-
-    private func playPendingQueue() {
-        guard let first = cloud?.unifiedPendingEpisodes.first else { return }
-        Task {
-            if let item = await cloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item, line: .queue)
-            }
-        }
     }
 
     private func toggleEpisodeCompleted(_ episode: PodcastEpisode) async {
