@@ -14,6 +14,15 @@ from starlette.responses import JSONResponse
 from wildstring.mcp_bridge import BridgeError, BridgeProtocol
 
 
+def _normalized_authority(scheme: str, netloc: str) -> str:
+    lowered = netloc.strip().lower()
+    if scheme == "http" and lowered.endswith(":80"):
+        return lowered[:-3]
+    if scheme == "https" and lowered.endswith(":443"):
+        return lowered[:-4]
+    return lowered
+
+
 class LocalBridge(BridgeProtocol):
     """Reuse the stdio contract, keeping request identity out of shared state."""
 
@@ -75,7 +84,8 @@ class HTTPMCP:
                 parsed = urlsplit(origin)
                 if (
                     parsed.scheme not in {"http", "https"}
-                    or parsed.netloc.lower() != request.headers.get("host", "").lower()
+                    or _normalized_authority(parsed.scheme, parsed.netloc)
+                    != _normalized_authority(parsed.scheme, request.headers.get("host", ""))
                     or parsed.username
                     or parsed.password
                     or parsed.query

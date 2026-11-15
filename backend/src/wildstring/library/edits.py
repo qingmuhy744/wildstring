@@ -222,8 +222,8 @@ class MetadataEditor:
                 )
             }
             source_row = connection.execute(
-                "SELECT source_path FROM imported_files WHERE target_path=? LIMIT 1",
-                (row["path"],),
+                "SELECT source_path FROM imported_files WHERE target_root=? AND target_path=? LIMIT 1",
+                (str(self.repository.root), row["path"]),
             ).fetchone()
         observed, overrides = (
             DETAIL_DEFAULTS | json.loads(row["observed"]),

@@ -3,9 +3,22 @@ import shutil
 from pathlib import Path
 
 from fastapi import HTTPException
+from filelock import FileLock, Timeout
 
 from wildstring.library.import_files import organized_path
 from wildstring.library.metadata import Metadata
+
+SIDECAR_SUFFIXES = {
+    ".lrc",
+    ".lryc",
+    ".txt",
+    ".cue",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".log",
+}
 
 
 def get_track_file_info(repository, track_id: str):
@@ -23,8 +36,8 @@ def get_track_file_info(repository, track_id: str):
         if row is None:
             raise HTTPException(404, "track_not_found")
         source_row = connection.execute(
-            "SELECT source_path FROM imported_files WHERE target_path=? LIMIT 1",
-            (row["path"],),
+            "SELECT source_path FROM imported_files WHERE target_root=? AND target_path=? LIMIT 1",
+            (str(Path(repository.root)), row["path"]),
         ).fetchone()
 
     current_path = row["path"]
@@ -76,57 +89,71 @@ def get_track_file_info(repository, track_id: str):
 
 
 def reorganize_track_file(repository, track_id: str):
-    info = get_track_file_info(repository, track_id)
-    current_path = info["path"]
-    suggested_path = info["suggested_path"]
+    lock_path = repository.database.path.parent / "library-scan.lock"
+    try:
+        with FileLock(str(lock_path), timeout=2):
+            info = get_track_file_info(repository, track_id)
+            current_path = info["path"]
+            suggested_path = info["suggested_path"]
 
-    if current_path == suggested_path:
-        return {"status": "already_organized", "path": current_path, "changed": False}
+            if current_path == suggested_path:
+                return {"status": "already_organized", "path": current_path, "changed": False}
 
-    root = Path(repository.root)
-    old_abs = root / current_path
-    new_abs = root / suggested_path
+            root = Path(repository.root)
+            old_abs = root / current_path
+            new_abs = root / suggested_path
 
-    if not old_abs.is_file():
-        raise HTTPException(404, "source_file_missing")
+            if not old_abs.is_file():
+                raise HTTPException(404, "source_file_missing")
 
-    if new_abs.exists() and new_abs.resolve() != old_abs.resolve():
-        raise HTTPException(409, "destination_file_exists")
+            if new_abs.exists() and new_abs.resolve() != old_abs.resolve():
+                raise HTTPException(409, "destination_file_exists")
 
-    new_abs.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(old_abs), str(new_abs))
+            new_abs.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_abs), str(new_abs))
+            new_mtime_ns = int(new_abs.stat().st_mtime_ns)
 
-    moved_sidecars: list[tuple[str, str]] = []
-    old_parent = old_abs.parent
-    old_stem = old_abs.stem
-    new_stem = new_abs.stem
-    if old_parent.is_dir():
-        for item in old_parent.iterdir():
-            if item.is_file() and item != new_abs and item.stem.lower() == old_stem.lower():
-                target_sidecar = new_abs.parent / f"{new_stem}{item.suffix}"
-                if not target_sidecar.exists():
-                    shutil.move(str(item), str(target_sidecar))
-                    moved_sidecars.append(
-                        (str(item.relative_to(root)), str(target_sidecar.relative_to(root)))
+            moved_sidecars: list[tuple[str, str]] = []
+            old_parent = old_abs.parent
+            old_stem = old_abs.stem
+            new_stem = new_abs.stem
+            if old_parent.is_dir():
+                for item in old_parent.iterdir():
+                    if (
+                        item.is_file()
+                        and item != new_abs
+                        and item.suffix.lower() in SIDECAR_SUFFIXES
+                        and item.stem.lower() == old_stem.lower()
+                    ):
+                        target_sidecar = new_abs.parent / f"{new_stem}{item.suffix}"
+                        if not target_sidecar.exists():
+                            shutil.move(str(item), str(target_sidecar))
+                            moved_sidecars.append(
+                                (
+                                    str(item.relative_to(root)),
+                                    str(target_sidecar.relative_to(root)),
+                                )
+                            )
+
+            cleanup_empty_parents(root, old_abs)
+
+            with repository.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "UPDATE tracks SET path=?, mtime_ns=? WHERE id=? AND library_id=?",
+                    (suggested_path, new_mtime_ns, track_id, repository.library_id()),
+                )
+                connection.execute(
+                    "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
+                    (suggested_path, str(root), current_path),
+                )
+                for old_sc, new_sc in moved_sidecars:
+                    connection.execute(
+                        "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
+                        (new_sc, str(root), old_sc),
                     )
-
-    cleanup_empty_parents(root, old_abs)
-
-    with repository.database.connect(write=True) as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute(
-            "UPDATE tracks SET path=? WHERE id=? AND library_id=?",
-            (suggested_path, track_id, repository.library_id()),
-        )
-        connection.execute(
-            "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
-            (suggested_path, str(root), current_path),
-        )
-        for old_sc, new_sc in moved_sidecars:
-            connection.execute(
-                "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
-                (new_sc, str(root), old_sc),
-            )
+    except Timeout:
+        raise HTTPException(409, "scan_busy") from None
 
     return {
         "status": "reorganized",

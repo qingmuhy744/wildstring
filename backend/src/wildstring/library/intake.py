@@ -396,9 +396,37 @@ class Intake:
 
     def approve(self, item_id, body, connection=None):
         if connection is None:
+            pre_item = self.item(item_id)
+            if pre_item["version"] != body.version or pre_item["state"] != "review":
+                raise HTTPException(409, "metadata_version_conflict")
+            pre_overrides = self.approval(pre_item, body)
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                return self.approve(item_id, body, connection)
+                item = self.item(item_id, connection)
+                if item["version"] != body.version or item["state"] != "review":
+                    raise HTTPException(409, "metadata_version_conflict")
+                overrides = (
+                    pre_overrides
+                    if item["signature"] == pre_item["signature"]
+                    and item["source_root"] == pre_item["source_root"]
+                    and item["overrides"] == pre_item["overrides"]
+                    and item["metadata"] == pre_item["metadata"]
+                    and item["issues"] == pre_item["issues"]
+                    else self.approval(item, body)
+                )
+                result = connection.execute(
+                    "UPDATE intake_items SET state='approved',overrides=?,version=version+1,updated_at=? WHERE id=? AND library_id=? AND version=? AND state='review'",
+                    (
+                        json.dumps(overrides, ensure_ascii=False),
+                        time.time(),
+                        item_id,
+                        self.repository.library_id(),
+                        body.version,
+                    ),
+                )
+                if not result.rowcount:
+                    raise HTTPException(409, "metadata_version_conflict")
+                return self.public(self.item(item_id, connection))
         item = self.item(item_id, connection)
         overrides = self.approval(item, body)
         result = connection.execute(
@@ -472,6 +500,12 @@ class Intake:
         child.root = self.root
         child.import_sidecars(relative, staged)
         self.update(item["id"], staged=staged.as_posix(), staged_sha256=sha)
+        item_dir = self.root / item["id"]
+        if item_dir.is_dir():
+            keep_ver = str(item["version"])
+            for entry in item_dir.iterdir():
+                if entry.is_dir() and entry.name != keep_ver:
+                    shutil.rmtree(entry, ignore_errors=True)
         return staged
 
     def check_space(self, required):
@@ -674,11 +708,18 @@ class Intake:
                     if self.signature(relative) != item["signature"]:
                         raise SourceChangedError
                     published = []
+                    track_overrides = (
+                        overrides
+                        if not image
+                        else {k: v for k, v in overrides.items() if k != "title"}
+                    )
                     for output in outputs:
                         target = prepared.import_track(output.relative_to(temporary))
                         importer.targets.update(prepared.targets)
                         if target is not None:
-                            published.append({"path": target.as_posix(), "overrides": {}})
+                            published.append(
+                                {"path": target.as_posix(), "overrides": dict(track_overrides)}
+                            )
                     for key in importer.counts:
                         importer.counts[key] += prepared.counts[key]
                     importer.errors.extend(prepared.errors[: max(0, 100 - len(importer.errors))])

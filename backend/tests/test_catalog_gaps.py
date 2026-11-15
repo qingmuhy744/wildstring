@@ -29,6 +29,16 @@ def test_catalog_gaps_api(settings: Settings, authenticated_client):
         assert len(data["missing"]) > 0 or len(data["matched"]) > 0
         assert "许嵩" in data["summary"]
 
+        unknown = client.post(
+            "/api/v1/ai/catalog-gaps",
+            json={"artist": "不存在的独立乐队XYZ", "limit": 10},
+        )
+        assert unknown.status_code == 200
+        udata = unknown.json()
+        assert udata["total_target"] == 0
+        assert udata["missing"] == []
+        assert udata["matched"] == []
+
 
 def test_catalog_gaps_respects_selected_library(settings, authenticated_client):
     hidden = settings.library_dir / "hidden.flac"

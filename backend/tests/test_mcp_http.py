@@ -106,6 +106,19 @@ def test_native_http_credentials_origins_limits_and_parallel_scope_isolation(
             ).status_code
             == 403
         )
+        assert (
+            api.post(
+                "/mcp",
+                headers={
+                    "Authorization": "Bearer " + first,
+                    "Origin": "http://testserver:80",
+                    "Accept": "application/json, text/event-stream",
+                    "MCP-Protocol-Version": "2025-11-25",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            ).status_code
+            == 200
+        )
         oversized = api.post(
             "/mcp",
             headers={

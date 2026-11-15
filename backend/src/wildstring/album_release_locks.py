@@ -136,16 +136,17 @@ def transfer(connection, library_id, old_album_id, new_album_id):
         "SELECT count(*) FROM tracks WHERE library_id=? AND album_id=? AND status='available'",
         (library_id, old_album_id),
     ).fetchone()[0]
-    if remaining > 1 and target is None:
-        # A single-track edit creates a split. Keep the old group protected and
-        # copy the lock to the new group until the last old member moves.
-        connection.execute(
-            """INSERT INTO album_release_locks
-            (album_id,library_id,provider,release_id,source_url,snapshot,version,created_at,updated_at)
-            SELECT ?,library_id,provider,release_id,source_url,snapshot,version,created_at,updated_at
-            FROM album_release_locks WHERE library_id=? AND album_id=?""",
-            (new_album_id, library_id, old_album_id),
-        )
+    if remaining > 1:
+        if target is None:
+            # A single-track edit creates a split. Keep the old group protected and
+            # copy the lock to the new group until the last old member moves.
+            connection.execute(
+                """INSERT INTO album_release_locks
+                (album_id,library_id,provider,release_id,source_url,snapshot,version,created_at,updated_at)
+                SELECT ?,library_id,provider,release_id,source_url,snapshot,version,created_at,updated_at
+                FROM album_release_locks WHERE library_id=? AND album_id=?""",
+                (new_album_id, library_id, old_album_id),
+            )
         return
     if target is not None:
         if (
