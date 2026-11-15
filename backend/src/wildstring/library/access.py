@@ -4,6 +4,7 @@ import hashlib
 import json
 from urllib.parse import parse_qs
 
+import anyio
 from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse
 from starlette.routing import Match
@@ -15,6 +16,33 @@ from wildstring.library.scope import (
     object_library,
     object_source,
     references,
+)
+
+MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+EXEMPT_PREFIXES = (
+    "auth",
+    "server",
+    "manage/server",
+    "users",
+    "manage/users",
+    "podcasts",
+    "libraries",
+    "site-access",
+    "manage/access",
+    "settings",
+)
+BROWSING_PREFIXES = (
+    "tracks",
+    "albums",
+    "artists",
+    "browse-index",
+    "playlists",
+    "favorites",
+    "listening",
+    "playback",
+    "recommendations",
+    "agent",
+    "ai",
 )
 
 
@@ -33,32 +61,12 @@ class LibraryAccess:
             )
         ]
 
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith("/api/v1/"):
-            return await self.app(scope, receive, send)
-        request = Request(scope, receive)
-        try:
-            user = self.auth.require_session(request)
-        except HTTPException:
-            return await self.app(scope, receive, send)
+    def _resolve_context(self, scope, request: Request, user: dict, body_bytes: bytes | None):
         path = scope["path"]
         query = parse_qs(scope.get("query_string", b"").decode())
         context = LibraryContext(user["id"])
-        exempt = any(
-            path.startswith("/api/v1/" + p)
-            for p in (
-                "auth",
-                "server",
-                "manage/server",
-                "users",
-                "manage/users",
-                "podcasts",
-                "libraries",
-                "site-access",
-                "settings",
-            )
-        )
-        replay = None
+        exempt = any(path.startswith("/api/v1/" + p) for p in EXEMPT_PREFIXES)
+        visible: set[str] = set()
         try:
             with self.catalog.database.connect() as db:
                 visible = allowed_ids(db, user["id"])
@@ -106,15 +114,9 @@ class LibraryAccess:
                     for key in ("track_id", "album_id"):
                         if key in query:
                             targets.append(("id" if key == "track_id" else key, query[key][0]))
-                    if request.headers.get("content-type", "").startswith(
-                        "application/json"
-                    ) and scope["method"] in {"POST", "PUT", "PATCH"}:
-                        body = await request.body()
-                        if len(body) > 2 * 1024 * 1024:
-                            raise HTTPException(413, "request_too_large")
-                        replay = body
+                    if body_bytes is not None:
                         try:
-                            value = json.loads(body)
+                            value = json.loads(body_bytes)
                         except (ValueError, UnicodeError):
                             value = None
                         if isinstance(value, dict):
@@ -160,25 +162,14 @@ class LibraryAccess:
                         and scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}
                     ):
                         raise HTTPException(422, "library_selection_required")
-                    browsing = any(
-                        path.startswith("/api/v1/" + p)
-                        for p in (
-                            "tracks",
-                            "albums",
-                            "artists",
-                            "browse-index",
-                            "playlists",
-                            "favorites",
-                            "listening",
-                            "playback",
-                            "recommendations",
-                            "agent",
-                        )
-                    )
+                    browsing = any(path.startswith("/api/v1/" + p) for p in BROWSING_PREFIXES)
                     if not browsing and selected is None:
                         if not visible:
                             raise HTTPException(403, "library_access_required")
-                        default = self.catalog.default_id()
+                        default_row = db.execute(
+                            "SELECT id FROM libraries WHERE is_default=1 AND enabled=1 LIMIT 1"
+                        ).fetchone()
+                        default = default_row[0] if default_row else None
                         selected = default if default in visible else sorted(visible)[0]
                     context = LibraryContext(
                         user["id"], selected, source if isinstance(source, str) else "import"
@@ -187,6 +178,7 @@ class LibraryAccess:
                     if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"} and (
                         path.startswith("/api/v1/manage/")
                         or path.endswith("/apply")
+                        or path.endswith("/accept")
                         or path.endswith("/writeback")
                     ):
                         from wildstring.library.storage import busy
@@ -196,13 +188,53 @@ class LibraryAccess:
                                 raise HTTPException(409, "library_migration_busy")
         except HTTPException as error:
             fingerprint = hashlib.sha256(json.dumps(sorted(visible)).encode()).hexdigest()[:16]
+            return None, fingerprint, error
+        fingerprint = hashlib.sha256(json.dumps(sorted(visible)).encode()).hexdigest()[:16]
+        return context, fingerprint, None
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/v1/"):
+            return await self.app(scope, receive, send)
+        request = Request(scope, receive)
+        token_value = self.auth.session_token(request)
+        if not token_value or len(token_value) > 128:
+            return await self.app(scope, receive, send)
+        try:
+            user = await anyio.to_thread.run_sync(self.auth.require_session, request)
+        except HTTPException:
+            return await self.app(scope, receive, send)
+        path = scope["path"]
+        exempt = any(path.startswith("/api/v1/" + p) for p in EXEMPT_PREFIXES)
+        replay = None
+        if (
+            not exempt
+            and request.headers.get("content-type", "").startswith("application/json")
+            and scope["method"] in {"POST", "PUT", "PATCH"}
+        ):
+            buffer = bytearray()
+            async for chunk in request.stream():
+                if len(buffer) + len(chunk) > MAX_JSON_BODY_BYTES:
+                    visible = await anyio.to_thread.run_sync(self._visible_for, user["id"])
+                    fingerprint = hashlib.sha256(json.dumps(sorted(visible)).encode()).hexdigest()[
+                        :16
+                    ]
+                    return await JSONResponse(
+                        {"detail": "request_too_large"},
+                        status_code=413,
+                        headers={"X-Wildstring-Library-Access": fingerprint},
+                    )(scope, receive, send)
+                buffer.extend(chunk)
+            replay = bytes(buffer)
+        context, fingerprint, error = await anyio.to_thread.run_sync(
+            self._resolve_context, scope, request, user, replay
+        )
+        if error is not None:
             return await JSONResponse(
                 {"detail": error.detail},
                 status_code=error.status_code,
                 headers={"X-Wildstring-Library-Access": fingerprint},
             )(scope, receive, send)
         token = current_library.set(context)
-        fingerprint = hashlib.sha256(json.dumps(sorted(visible)).encode()).hexdigest()[:16]
 
         async def send_scoped(message):
             if message["type"] == "http.response.start":
@@ -227,3 +259,7 @@ class LibraryAccess:
             )
         finally:
             current_library.reset(token)
+
+    def _visible_for(self, user_id: str) -> set[str]:
+        with self.catalog.database.connect() as db:
+            return allowed_ids(db, user_id)

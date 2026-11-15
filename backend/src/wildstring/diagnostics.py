@@ -286,7 +286,7 @@ class Diagnostics:
         self.settings = LogSettings()
 
     def connect(self):
-        connection = sqlite3.connect(self.path, timeout=1)
+        connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -295,6 +295,7 @@ class Diagnostics:
             self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             with self.connect() as connection:
                 connection.executescript(
+                    "PRAGMA journal_mode=WAL;"
                     "CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,"
                     "id TEXT UNIQUE,at REAL NOT NULL,trace_id TEXT,level TEXT,event TEXT,task_id TEXT,"
                     "payload TEXT NOT NULL);"

@@ -4,6 +4,7 @@ import json
 import sqlite3
 import sys
 import time
+from contextlib import closing
 
 from wildstring.source_plugins import PluginError
 
@@ -11,7 +12,7 @@ from wildstring.source_plugins import PluginError
 def permit(policy, clock=None):
     """Reserve at most one request; callers wait outside all DB transactions."""
     now = time.time() if clock is None else clock
-    with sqlite3.connect(policy["database"], timeout=10) as db:
+    with closing(sqlite3.connect(policy["database"], timeout=10)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         if policy.get("batch_id"):
             row = db.execute(
@@ -52,7 +53,7 @@ def wait(policy, deadline=None):
 
 def cooldown(policy, delay=900, reason="source_plugin_rate_limited"):
     if policy:
-        with sqlite3.connect(policy["database"], timeout=10) as db:
+        with closing(sqlite3.connect(policy["database"], timeout=10)) as db, db:
             db.execute(
                 "INSERT INTO plugin_request_gates(plugin_id,cooldown_until,reason) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET cooldown_until=max(cooldown_until,excluded.cooldown_until),reason=excluded.reason",
                 (policy["plugin_id"], time.time() + max(1, min(86400, delay)), reason),

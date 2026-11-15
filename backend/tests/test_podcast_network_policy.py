@@ -228,3 +228,26 @@ def test_stream_route_returns_502_for_proxy_and_keeps_legacy_redirect(
     assert "location" not in proxied.headers
     assert legacy.status_code == 307
     assert legacy.headers["location"] == "https://cdn.example.test/a.mp3"
+
+
+def test_parse_feed_rejects_xml_entity_expansion():
+    billion_laughs = b"""<?xml version="1.0"?>
+    <!DOCTYPE lolz [
+      <!ENTITY lol "lol">
+      <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+    ]>
+    <rss version="2.0"><channel><title>&lol2;</title></channel></rss>"""
+    with pytest.raises(HTTPException) as error:
+        podcasts.parse_feed_document(billion_laughs, "https://example.com/feed.xml")
+    assert error.value.status_code == 422
+    assert error.value.detail == "podcast_feed_parse_failed"
+
+
+def test_single_label_hostname_and_proxied_private_dns_are_rejected(monkeypatch):
+    with pytest.raises(PodcastURLRejected, match="remote_url_private_host"):
+        podcasts.validate_remote_url("http://intranet/feed.xml")
+
+    monkeypatch.setattr(socket, "getaddrinfo", answers("10.0.0.8"))
+    opener = podcasts.podcast_opener("explicit", "http://proxy.example.test:8080")
+    with pytest.raises(PodcastURLRejected, match="remote_url_private_host"):
+        opener.open("http://internal.corp.example/feed.xml", timeout=1)

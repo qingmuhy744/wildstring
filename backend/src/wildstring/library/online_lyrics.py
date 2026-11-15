@@ -123,11 +123,13 @@ def selected_lyrics(connection, selection):
         for line in all_lines:
             if line["time_ms"] is not None:
                 line["time_ms"] = max(0, line["time_ms"] + offset)
-            if "end_ms" in line:
+            if line.get("end_ms") is not None:
                 line["end_ms"] = max(0, line["end_ms"] + offset)
             for word in line.get("words", []):
-                word["start_ms"] = max(0, word["start_ms"] + offset)
-                word["end_ms"] = max(0, word["end_ms"] + offset)
+                if word.get("start_ms") is not None:
+                    word["start_ms"] = max(0, word["start_ms"] + offset)
+                if word.get("end_ms") is not None:
+                    word["end_ms"] = max(0, word["end_ms"] + offset)
         return result | {
             "source_id": row["source_id"],
             "source_url": row["source_url"],

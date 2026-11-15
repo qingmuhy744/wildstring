@@ -412,3 +412,34 @@ def test_progressive_reader_does_not_drop_final_write_after_temporary_eof(
 
         anyio.run(run)
         assert b"".join(bodies) == b"firstlast" and entry.readers == 0
+
+
+@real_audio
+def test_encode_batches_sqlite_checks_and_aborts_abandoned_seek(
+    settings, authenticated_client, monkeypatch
+):
+    _, url, track = tone(settings)
+    with authenticated_client(settings) as client:
+        service = client.app.state.transcoding
+        with service.database.connect() as connection:
+            indexes = {row[1] for row in connection.execute("PRAGMA index_list(tracks)")}
+        assert "tracks_by_album" in indexes
+
+        db_usage_calls = 0
+        original_db_usage = service._db_usage
+
+        def counted_db_usage():
+            nonlocal db_usage_calls
+            db_usage_calls += 1
+            return original_db_usage()
+
+        monkeypatch.setattr(service, "_db_usage", counted_db_usage)
+        assert client.get(url + "/stream?format=aac&bitrate_kbps=256").status_code == 200
+        wait(service.entries[service.plan(track, "aac", 256).key])
+        assert 1 <= db_usage_calls <= 2
+
+        seek_plan = service.plan(track, "aac", 192, start_ms=2000)
+        seek_entry = service.acquire(seek_plan)
+        service.release(seek_entry)
+        assert seek_entry.done.wait(15)
+        assert not seek_entry.final.exists()

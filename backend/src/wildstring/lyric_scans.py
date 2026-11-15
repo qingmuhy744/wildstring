@@ -326,14 +326,15 @@ class LyricScans:
 
     def finish_item(self, item, status):
         with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
             self.checkpoint(db, item["batch_id"])
             db.execute(
-                "UPDATE lyric_scan_items SET status=?,updated_at=? WHERE id=?",
+                "UPDATE lyric_scan_items SET status=?,updated_at=? WHERE id=? AND status!='cancelled'",
                 (status, time.time(), item["id"]),
             )
             if item.get("job_id"):
                 db.execute(
-                    "UPDATE lyric_lookup_jobs SET status=?,updated_at=? WHERE id=?",
+                    "UPDATE lyric_lookup_jobs SET status=?,updated_at=? WHERE id=? AND status!='cancelled'",
                     (
                         "completed"
                         if item.get("candidate_id")
@@ -624,6 +625,7 @@ class LyricScans:
             good = matched(candidate) and improves(before, candidate_quality, options["preference"])
             candidate_id = uuid4().hex
             with self.database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
                 self.checkpoint(db, item["batch_id"])
                 self.sources.current(identity, provider["version"])
                 db.execute(
@@ -655,6 +657,7 @@ class LyricScans:
             if best_quality and reaches(best_quality, options["goal"]):
                 break
         with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
             self.checkpoint(db, item["batch_id"])
             db.execute(
                 "INSERT INTO lyric_scan_coverage VALUES (?,?,?,?,?,?,?) ON CONFLICT(track_id,plugin_id,fingerprint,target) DO UPDATE SET outcome=excluded.outcome,candidate_id=excluded.candidate_id,updated_at=excluded.updated_at",
@@ -690,9 +693,10 @@ class LyricScans:
         ):
             item["candidate_id"], item["quality"] = candidate_id, json.dumps(candidate_quality)
         with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
             self.checkpoint(db, item["batch_id"])
             db.execute(
-                "UPDATE lyric_scan_items SET status='queued',provider_index=provider_index+1,attempts=0,next_at=0,candidate_id=?,quality=?,results=?,error=?,updated_at=? WHERE id=?",
+                "UPDATE lyric_scan_items SET status='queued',provider_index=provider_index+1,attempts=0,next_at=0,candidate_id=?,quality=?,results=?,error=?,updated_at=? WHERE id=? AND status!='cancelled'",
                 (
                     item["candidate_id"],
                     item["quality"],

@@ -828,6 +828,38 @@ class Providers:
         except HTTPException as error:
             raise ProviderError(str(error.detail), False) from error
 
+    def _promote_refresh_intent(self, connection, job):
+        intent = connection.execute(
+            "SELECT * FROM provider_refresh_intents WHERE track_id=?",
+            (job["track_id"],),
+        ).fetchone()
+        if intent is None:
+            return
+        latest = connection.execute(
+            "SELECT version FROM track_metadata WHERE track_id=?", (job["track_id"],)
+        ).fetchone()
+        if latest is not None:
+            successor = uuid4().hex
+            connection.execute(
+                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
+                (
+                    successor,
+                    job["track_id"],
+                    latest["version"],
+                    time.time(),
+                    time.time(),
+                    intent["refresh_mode"],
+                    intent["force"],
+                ),
+            )
+            connection.execute(
+                "UPDATE provider_refresh_members SET job_id=? WHERE job_id=?",
+                (successor, job["id"]),
+            )
+        connection.execute(
+            "DELETE FROM provider_refresh_intents WHERE track_id=?", (job["track_id"],)
+        )
+
     def process_scoped_job(self, job):
         track = self.repository.track(job["track_id"])
         if track is None:
@@ -840,6 +872,7 @@ class Providers:
         input_fingerprint = lookup_fingerprint(snapshot=input_snapshot)
         manual = MetadataEditor(self.repository).read(job["track_id"])["overrides"]
         with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             version = connection.execute(
                 "SELECT version FROM track_metadata WHERE track_id=?", (job["track_id"],)
             ).fetchone()[0]
@@ -904,39 +937,11 @@ class Providers:
                     )
                     saved += 1
                 status = "completed" if saved else "failed" if warnings else "no_match"
-            intent = connection.execute(
-                "SELECT * FROM provider_refresh_intents WHERE track_id=?",
-                (job["track_id"],),
-            ).fetchone()
             connection.execute(
                 "UPDATE provider_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
                 (status, json.dumps(warnings), time.time(), job["id"]),
             )
-            if intent is not None:
-                latest = connection.execute(
-                    "SELECT version FROM track_metadata WHERE track_id=?", (job["track_id"],)
-                ).fetchone()
-                if latest is not None:
-                    successor = uuid4().hex
-                    connection.execute(
-                        "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
-                        (
-                            successor,
-                            job["track_id"],
-                            latest["version"],
-                            time.time(),
-                            time.time(),
-                            intent["refresh_mode"],
-                            intent["force"],
-                        ),
-                    )
-                    connection.execute(
-                        "UPDATE provider_refresh_members SET job_id=? WHERE job_id=?",
-                        (successor, job["id"]),
-                    )
-                    connection.execute(
-                        "DELETE FROM provider_refresh_intents WHERE track_id=?", (job["track_id"],)
-                    )
+            self._promote_refresh_intent(connection, job)
             metadata_result(self, connection, job["id"])
 
     def start(self):
@@ -974,9 +979,10 @@ class Providers:
                         "UPDATE lastfm_outbox SET status=CASE WHEN kind='now_playing' THEN 'cancelled' ELSE 'queued' END WHERE status='sending'"
                     )
                 self.sources.scans.start()
-                while not self.exit.wait(1):
+                delay = 1.0
+                while not self.exit.wait(delay):
                     try:
-                        self.step()
+                        delay = 0.02 if self.step() else 1.0
                     except (
                         OSError,
                         sqlite3.Error,
@@ -992,6 +998,7 @@ class Providers:
                             error=failure,
                             code=getattr(failure, "code", "provider_worker_failed"),
                         )
+                        delay = 1.0
                         continue
         except (OSError, sqlite3.Error) as failure:
             record_event(
@@ -1008,78 +1015,85 @@ class Providers:
     def step(self):
         self.check_storage()
         if self.sources.step():
-            return
-        if self.loudness.step():
-            return
+            return True
         clock = time.time()
         if clock - self.history_cleaned_at >= 3600:
             clear_history(self.repository, clock - RETENTION_DAYS * 86400)
             self.history_cleaned_at = clock
+        worked = False
         config = self.settings()
-        if not config["enabled"]:
-            return
-        with self.database.connect(write=True) as connection:
-            connection.execute(
-                "DELETE FROM lastfm_outbox WHERE status IN ('sent','cancelled','failed') AND updated_at<?",
-                (time.time() - 30 * 86400,),
-            )
-        if config["auto_new"]:
-            with self.database.connect() as connection:
-                unseen = [
-                    row[0]
-                    for row in connection.execute(
-                        "SELECT t.id FROM tracks t LEFT JOIN provider_seen s ON s.track_id=t.id WHERE s.track_id IS NULL AND t.status='available' LIMIT 20"
-                    )
-                ]
-            if unseen:
-                self.enqueue(unseen)
-        with self.database.connect(write=True) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            # A user-requested fresh lookup must not sit behind a large
-            # automatic/backfill queue.  Keep FIFO ordering within each class,
-            # while letting explicit `force` refreshes provide timely feedback.
-            job = connection.execute(
-                "SELECT * FROM provider_jobs WHERE status='queued' "
-                "ORDER BY force DESC, created_at, id LIMIT 1"
-            ).fetchone()
-            if job:
+        if config["enabled"]:
+            with self.database.connect(write=True) as connection:
                 connection.execute(
-                    "UPDATE provider_jobs SET status='running',updated_at=? WHERE id=?",
-                    (time.time(), job["id"]),
+                    "DELETE FROM lastfm_outbox WHERE status IN ('sent','cancelled','failed') AND updated_at<?",
+                    (time.time() - 30 * 86400,),
                 )
-        if job:
-            try:
-                with trace_context(
-                    job["id"].replace("-", ""),
-                    task_id=job["id"],
-                    sink=getattr(self, "diagnostics", None),
-                ):
-                    record_event("provider.task.started")
-                    self.process_job(job)
-                    with self.database.connect() as connection:
-                        finished = connection.execute(
-                            "SELECT status,error FROM provider_jobs WHERE id=?", (job["id"],)
-                        ).fetchone()
-                    record_event(
-                        "provider.task.finished", stage=finished["status"], code=finished["error"]
-                    )
-            except (ProviderError, ValueError, TypeError, KeyError, AttributeError) as failure:
-                record_event(
-                    "provider.task.failed",
-                    level="WARNING" if isinstance(failure, ProviderError) else "ERROR",
-                    sink=getattr(self, "diagnostics", None),
-                    trace_id=job["id"].replace("-", ""),
-                    task_id=job["id"],
-                    error=failure,
-                    code=getattr(failure, "code", "provider_unavailable"),
-                )
-                with self.database.connect(write=True) as connection:
+            if config["auto_new"]:
+                with self.database.connect() as connection:
+                    unseen = [
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT t.id FROM tracks t LEFT JOIN provider_seen s ON s.track_id=t.id WHERE s.track_id IS NULL AND t.status='available' LIMIT 20"
+                        )
+                    ]
+                if unseen:
+                    self.enqueue(unseen)
+            with self.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                # A user-requested fresh lookup must not sit behind a large
+                # automatic/backfill queue.  Keep FIFO ordering within each class,
+                # while letting explicit `force` refreshes provide timely feedback.
+                job = connection.execute(
+                    "SELECT * FROM provider_jobs WHERE status='queued' "
+                    "ORDER BY force DESC, created_at, id LIMIT 1"
+                ).fetchone()
+                if job:
                     connection.execute(
-                        "UPDATE provider_jobs SET status='failed',error='provider_unavailable',updated_at=? WHERE id=?",
+                        "UPDATE provider_jobs SET status='running',updated_at=? WHERE id=?",
                         (time.time(), job["id"]),
                     )
-                    metadata_result(self, connection, job["id"])
-        self.deliver()
+            if job:
+                worked = True
+                try:
+                    with trace_context(
+                        job["id"].replace("-", ""),
+                        task_id=job["id"],
+                        sink=getattr(self, "diagnostics", None),
+                    ):
+                        record_event("provider.task.started")
+                        self.process_job(job)
+                        with self.database.connect() as connection:
+                            finished = connection.execute(
+                                "SELECT status,error FROM provider_jobs WHERE id=?", (job["id"],)
+                            ).fetchone()
+                        record_event(
+                            "provider.task.finished",
+                            stage=finished["status"],
+                            code=finished["error"],
+                        )
+                except (ProviderError, ValueError, TypeError, KeyError, AttributeError) as failure:
+                    record_event(
+                        "provider.task.failed",
+                        level="WARNING" if isinstance(failure, ProviderError) else "ERROR",
+                        sink=getattr(self, "diagnostics", None),
+                        trace_id=job["id"].replace("-", ""),
+                        task_id=job["id"],
+                        error=failure,
+                        code=getattr(failure, "code", "provider_unavailable"),
+                    )
+                    with self.database.connect(write=True) as connection:
+                        connection.execute("BEGIN IMMEDIATE")
+                        connection.execute(
+                            "UPDATE provider_jobs SET status='failed',error='provider_unavailable',updated_at=? WHERE id=?",
+                            (time.time(), job["id"]),
+                        )
+                        self._promote_refresh_intent(connection, job)
+                        metadata_result(self, connection, job["id"])
+            if self.deliver():
+                worked = True
+        if not worked and self.loudness.step():
+            return True
+        return worked
 
     def enqueue_listening(self, connection, user_id, session, track, accepted, playing):
         if not connection.execute("SELECT enabled FROM provider_settings WHERE id=1").fetchone()[0]:
@@ -1136,7 +1150,7 @@ class Providers:
                 (time.time(),),
             ).fetchone()
             if item is None:
-                return
+                return False
             user = connection.execute(
                 "SELECT * FROM lastfm_users WHERE user_id=?", (item["user_id"],)
             ).fetchone()
@@ -1167,7 +1181,7 @@ class Providers:
                 ("cancelled" if stale else "sending", item["id"]),
             )
         if stale:
-            return
+            return True
         payload = json.loads(item["payload"])
         if flag == "now_playing":
             payload.pop("timestamp", None)
@@ -1223,6 +1237,7 @@ class Providers:
                     item["id"],
                 ),
             )
+        return True
 
     def user_status(self, user_id):
         with self.database.connect() as connection:

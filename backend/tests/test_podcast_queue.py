@@ -403,3 +403,37 @@ def test_queue_put_accepts_null_added_at_and_preserves_manual_order(context):
     loaded = queue(client)
     assert [item["episode_id"] for item in loaded["items"]] == ["ep-null-2", "ep-null-1"]
     assert loaded["items"][1]["added_at"] == saved["items"][0]["added_at"]
+
+
+def test_dateless_batch_tiebreaker_and_put_deduplication(context):
+    client, database = context
+    follow(client)
+    set_preference(client, "queue_last")
+    # RSS feeds list newest items first; when pub_date is absent, oldest item (tail of RSS)
+    # should enter queue_last first.
+    deliver(database, ["rss-newest", "rss-middle", "rss-oldest"], ["", "", ""])
+    assert [item["episode_id"] for item in queue(client)["items"]] == [
+        "rss-oldest",
+        "rss-middle",
+        "rss-newest",
+    ]
+
+    current = queue(client)
+    deduped = client.put(
+        "/api/v1/podcasts/queue",
+        headers=HEADERS,
+        json={
+            "version": current["version"],
+            "device_id": "web",
+            "items": [
+                {"episode_id": "rss-newest", "origin": "manual"},
+                {"episode_id": "rss-oldest", "origin": "manual"},
+                {"episode_id": "rss-newest", "origin": "manual"},
+            ],
+        },
+    )
+    assert deduped.status_code == 200
+    assert [item["episode_id"] for item in deduped.json()["items"]] == [
+        "rss-newest",
+        "rss-oldest",
+    ]

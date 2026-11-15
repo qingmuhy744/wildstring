@@ -132,3 +132,30 @@ def test_explicit_ffmpeg_analysis_is_read_only(settings, authenticated_client, m
         assert value["peak_known"] and 0 < value["tags"]["track_peak"] <= 1
         assert 2 <= value["tags"]["track_gain"] <= 30
         assert hashlib.sha256(target.read_bytes()).digest() == original
+
+
+def test_shutdown_interruption_keeps_loudness_job_queued(
+    settings, authenticated_client, monkeypatch
+):
+    from fastapi import HTTPException
+
+    from wildstring.providers import Providers
+
+    monkeypatch.setattr(Providers, "start", lambda self: None)
+    music(settings, "interrupt.flac", ["合成乐队"], ["合成乐队"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        endpoint = f"/api/v1/manage/tracks/{track['id']}/analyze-loudness"
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        loudness = client.app.state.providers.loudness
+
+        def interrupt_analyze(track_id, expected):
+            loudness.stopping.set()
+            raise HTTPException(409, "loudness_analysis_interrupted")
+
+        monkeypatch.setattr(loudness, "analyze", interrupt_analyze)
+        assert loudness.step()
+        loudness.stopping.clear()
+        value = loudness.detail("fixture-user", track["id"])
+        assert value["analysis"]["status"] == "queued"

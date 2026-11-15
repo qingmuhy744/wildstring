@@ -73,6 +73,7 @@ PROFILE_SCOPES = {
             "agent:use",
             "web:search",
             "drafts:write",
+            "drafts:apply",
             "tasks:write",
             "notifications:read",
         }

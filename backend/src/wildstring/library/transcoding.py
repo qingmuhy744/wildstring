@@ -121,6 +121,7 @@ class Transcoding:
         self.stopping = threading.Event()
         self.thread = None
         self.probes = {}
+        self._cache_epoch = 0
 
     def settings(self):
         with self.database.connect() as connection:
@@ -265,16 +266,19 @@ class Transcoding:
                 return "hit"
         return "miss"
 
-    def usage(self):
+    def _db_usage(self):
         with self.database.connect() as connection:
-            total = connection.execute(
+            return connection.execute(
                 "SELECT COALESCE(sum(size_bytes),0) FROM transcoding_cache"
             ).fetchone()[0]
-        return (
-            total
-            + sum(entry.size for entry in self.entries.values() if not entry.complete)
-            + sum(entry.size for entry in self.retired)
+
+    def _live_usage(self):
+        return sum(entry.size for entry in self.entries.values() if not entry.complete) + sum(
+            entry.size for entry in self.retired
         )
+
+    def usage(self):
+        return self._db_usage() + self._live_usage()
 
     def discard(self, entry):
         if entry.readers or not entry.done.is_set():
@@ -329,6 +333,7 @@ class Transcoding:
                         deferred += 1
             for entry in list(self.retired):
                 self.discard(entry)
+            self._cache_epoch += 1
             return {"freed_bytes": freed, "removed": removed, "deferred": deferred}
 
     def acquire(self, plan):
@@ -498,27 +503,52 @@ class Transcoding:
                     deadline = time.monotonic() + min(
                         3600, max(60, plan.source["duration_ms"] / 500)
                     )
+                    cached_max_bytes = None
+                    cached_db_bytes = 0
+                    cached_free_bytes = 0
+                    bytes_since_check = 0
+                    seen_epoch = -1
                     with selectors.DefaultSelector() as selector:
                         selector.register(process.stdout, selectors.EVENT_READ)
                         while True:
                             if self.stopping.is_set() or time.monotonic() > deadline:
                                 raise TimeoutError("Encoder stopped")
+                            with self.lock:
+                                if entry.readers <= 0 and (entry.purge or plan.start_ms > 0):
+                                    raise TimeoutError("Reader disconnected")
                             if not selector.select(timeout=0.5):
                                 continue
                             chunk = os.read(process.stdout.fileno(), 64 * 1024)
                             if not chunk:
                                 break
                             with self.lock:
-                                settings = self.settings()
-                                if self.usage() + len(chunk) > settings["max_size_mb"] * MIB:
-                                    self.cleanup(required=len(chunk))
+                                if entry.readers <= 0 and (entry.purge or plan.start_ms > 0):
+                                    raise TimeoutError("Reader disconnected")
+                                live_bytes = self._live_usage()
                                 if (
-                                    self.usage() + len(chunk) > settings["max_size_mb"] * MIB
-                                    or shutil.disk_usage(self.root).free < len(chunk) + 8 * MIB
+                                    cached_max_bytes is None
+                                    or seen_epoch != self._cache_epoch
+                                    or bytes_since_check >= 2 * MIB
+                                    or cached_db_bytes + live_bytes + len(chunk) > cached_max_bytes
+                                    or cached_free_bytes - bytes_since_check < len(chunk) + 8 * MIB
+                                ):
+                                    cached_max_bytes = self.settings()["max_size_mb"] * MIB
+                                    cached_db_bytes = self._db_usage()
+                                    if cached_db_bytes + live_bytes + len(chunk) > cached_max_bytes:
+                                        self.cleanup(required=len(chunk))
+                                        live_bytes = self._live_usage()
+                                        cached_db_bytes = self._db_usage()
+                                    cached_free_bytes = shutil.disk_usage(self.root).free
+                                    bytes_since_check = 0
+                                    seen_epoch = self._cache_epoch
+                                if (
+                                    cached_db_bytes + live_bytes + len(chunk) > cached_max_bytes
+                                    or cached_free_bytes - bytes_since_check < len(chunk) + 8 * MIB
                                 ):
                                     raise OSError("Cache storage exhausted")
                                 output.write(chunk)
                                 entry.size += len(chunk)
+                                bytes_since_check += len(chunk)
                                 if entry.size > 1024:
                                     entry.ready.set()
                     if process.wait(timeout=5) != 0 or entry.size <= 1024:
@@ -536,6 +566,7 @@ class Transcoding:
                             "INSERT OR REPLACE INTO transcoding_cache VALUES (?,?,?,?,?)",
                             (entry.key, entry.final.name, plan.track_id, entry.size, time.time()),
                         )
+                    self._cache_epoch += 1
         except (
             OSError,
             ValueError,

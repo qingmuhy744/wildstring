@@ -228,10 +228,16 @@ class Loudness:
         except Exception as error:
             code = error.detail if isinstance(error, HTTPException) else "loudness_analysis_failed"
             with self.database.connect(write=True) as db:
-                db.execute(
-                    "UPDATE loudness_analysis SET status='failed',error=?,updated_at=? WHERE track_id=?",
-                    (code, time.time(), job["track_id"]),
-                )
+                if self.stopping.is_set() and code == "loudness_analysis_interrupted":
+                    db.execute(
+                        "UPDATE loudness_analysis SET status='queued',error=NULL,updated_at=? WHERE track_id=?",
+                        (time.time(), job["track_id"]),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE loudness_analysis SET status='failed',error=?,updated_at=? WHERE track_id=?",
+                        (code, time.time(), job["track_id"]),
+                    )
         return True
 
     def analyze(self, track_id, expected):

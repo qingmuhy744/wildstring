@@ -11,13 +11,14 @@ import time
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from wildstring import get_app_version
 from wildstring.album_release_locks import ReleaseLockInput
@@ -117,6 +118,8 @@ class Management:
         self.next_discovery = 0
         self.next_recommendation = 0
         self.discovery_due = {}
+        self._recommendation_lock = Lock()
+        self.recommendation_thread: Thread | None = None
         self.recommendation_inflight: set[tuple[str, str]] = set()
 
     @property
@@ -144,6 +147,10 @@ class Management:
         self.stopping.set()
         if self.thread is not None:
             self.thread.join(timeout=5)
+        with self._recommendation_lock:
+            rec_thread = self.recommendation_thread
+        if rec_thread is not None:
+            rec_thread.join(timeout=5)
 
     def preferences(self):
         with self.database.connect() as connection:
@@ -505,6 +512,21 @@ class Management:
         return {"album_id": album_id, "image_sha256": key, "tracks_updated": len(tracks)}
 
     def remove_album_cover(self, album_id: str):
+        assets = TrackAssets(self.repository)
+        with self.database.connect() as connection:
+            tracks = connection.execute(
+                "SELECT id FROM tracks WHERE album_id=? AND library_id=? AND status='available'",
+                (album_id, self.repository.library_id()),
+            ).fetchall()
+        if not tracks:
+            raise HTTPException(404, "album_not_found")
+        has_local: dict[str, int] = {}
+        for track in tracks:
+            try:
+                has_local[track["id"]] = 1 if assets.local_cover(track["id"], 96) is not None else 0
+            except HTTPException:
+                has_local[track["id"]] = 0
+
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             tracks = connection.execute(
@@ -514,15 +536,32 @@ class Management:
             if not tracks:
                 raise HTTPException(404, "album_not_found")
             for track in tracks:
-                connection.execute("DELETE FROM artwork_choices WHERE track_id=?", (track["id"],))
+                tid = track["id"]
+                connection.execute("DELETE FROM artwork_choices WHERE track_id=?", (tid,))
                 # 重新判断是否有内嵌封面或者同目录本地封面，若无则设为 0
-                connection.execute("UPDATE tracks SET has_cover=0 WHERE id=?", (track["id"],))
                 connection.execute(
-                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (track["id"],)
+                    "UPDATE tracks SET has_cover=? WHERE id=?",
+                    (has_local.get(tid, 0), tid),
+                )
+                connection.execute(
+                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (tid,)
                 )
         return {"album_id": album_id, "cleared": True}
 
     def _save_album_sidecar_cover(self, tracks, file_bytes: bytes):
+        import io
+
+        from PIL import Image, ImageOps
+
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as original:
+                normalized = ImageOps.exif_transpose(original).convert("RGB")
+                buf = io.BytesIO()
+                normalized.save(buf, format="JPEG", quality=90, optimize=True)
+                jpeg_bytes = buf.getvalue()
+        except Exception:
+            jpeg_bytes = file_bytes
+
         library_root = self.repository.root.resolve()
         dirs = set()
         for track in tracks:
@@ -535,12 +574,19 @@ class Management:
         for rel_dir in dirs:
             target_dir = (library_root / rel_dir).resolve()
             if target_dir.is_relative_to(library_root) and target_dir.is_dir():
+                temp_path: Path | None = None
                 try:
-                    cover_file = target_dir / "cover.jpg"
-                    cover_file.write_bytes(file_bytes)
+                    with NamedTemporaryFile(
+                        dir=target_dir, prefix=".cover_", delete=False
+                    ) as stream:
+                        temp_path = Path(stream.name)
+                        stream.write(jpeg_bytes)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    temp_path.replace(target_dir / "cover.jpg")
                 except OSError:
-                    # Ignore write failures when writing album covers to non-writable directories
-                    pass
+                    if temp_path is not None:
+                        temp_path.unlink(missing_ok=True)
 
     def source_roots(self):
         with self.database.connect() as db:
@@ -633,7 +679,7 @@ class Management:
             raise HTTPException(404, "album_not_found")
         identity = uuid4().hex
         trash_root = self.settings.data_dir / "trash" / identity
-        root = self.settings.library_dir.resolve()
+        root = self.repository.root.resolve()
         entries = []
         moved: list[tuple[Path, Path]] = []
         trash_root.mkdir(parents=True, exist_ok=False)
@@ -679,7 +725,7 @@ class Management:
             ).fetchone()
         if row is None:
             raise HTTPException(404, "trash_not_found")
-        root = self.settings.library_dir.resolve()
+        root = self.repository.root.resolve()
         trash_root = self.settings.data_dir / "trash" / identity
         entries = json.loads(row["entries"])
         moved: list[tuple[Path, Path]] = []
@@ -715,13 +761,24 @@ class Management:
 
     def purge_trash(self, identity):
         library_id = self.repository.library_id()
+        root = self.repository.root.resolve()
         with self.database.connect(write=True) as connection:
-            result = connection.execute(
-                "UPDATE library_trash SET status='purged' WHERE id=? AND library_id=? AND status='trashed'",
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT entries FROM library_trash WHERE id=? AND library_id=? AND status='trashed'",
+                (identity, library_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "trash_not_found")
+            entries = json.loads(row["entries"])
+            connection.execute(
+                "UPDATE library_trash SET status='purged' WHERE id=? AND library_id=?",
                 (identity, library_id),
             )
-            if not result.rowcount:
-                raise HTTPException(404, "trash_not_found")
+            connection.executemany(
+                "DELETE FROM imported_files WHERE target_root=? AND target_path=?",
+                [(str(root), entry["path"]) for entry in entries],
+            )
         shutil.rmtree(self.settings.data_dir / "trash" / identity, ignore_errors=True)
         return {"id": identity, "status": "purged"}
 
@@ -931,7 +988,7 @@ class Management:
                                 logger.warning("Automatic import source is unavailable; will retry")
                         if time.monotonic() >= self.next_recommendation:
                             self.next_recommendation = time.monotonic() + 30
-                            self.generate_scheduled_recommendations()
+                            self._trigger_scheduled_recommendations()
                         self.stopping.wait(0.5)
                 finally:
                     self.worker_lock.release(force=True)
@@ -979,6 +1036,19 @@ class Management:
                 # A source may be removed or its library disabled after taking the snapshot.
                 self.discovery_due.pop(key, None)
 
+    def _trigger_scheduled_recommendations(self):
+        with self._recommendation_lock:
+            if self.stopping.is_set():
+                return
+            if self.recommendation_thread is not None and self.recommendation_thread.is_alive():
+                return
+            self.recommendation_thread = Thread(
+                target=self.generate_scheduled_recommendations,
+                name="wildstring-recommendations",
+                daemon=True,
+            )
+            self.recommendation_thread.start()
+
     def generate_scheduled_recommendations(self):
         """Generate each account's opted-in daily list after its local clock time."""
         platform = getattr(self, "platform", None)
@@ -995,18 +1065,23 @@ class Management:
                 WHERE p.daily_enabled=1 AND u.enabled=1""",
             ).fetchall()
         for row in rows:
+            if self.stopping.is_set():
+                break
             identity = (row["user_id"], row["library_id"])
-            if identity in self.recommendation_inflight or clock < row["daily_time"]:
+            if clock < row["daily_time"]:
                 continue
-            with self.database.connect() as connection:
-                cached = connection.execute(
-                    "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
-                    (row["user_id"], row["library_id"]),
-                ).fetchone()
-            if cached and cached["day"] == day:
-                continue
-            self.recommendation_inflight.add(identity)
+            with self._recommendation_lock:
+                if identity in self.recommendation_inflight:
+                    continue
+                self.recommendation_inflight.add(identity)
             try:
+                with self.database.connect() as connection:
+                    cached = connection.execute(
+                        "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
+                        (row["user_id"], row["library_id"]),
+                    ).fetchone()
+                if cached and cached["day"] == day:
+                    continue
                 from wildstring.library.scope import library_context, require_current_library
 
                 with library_context(row["user_id"], row["library_id"]):
@@ -1016,7 +1091,8 @@ class Management:
             except Exception:
                 logger.exception("Scheduled daily recommendation failed for account %s", identity)
             finally:
-                self.recommendation_inflight.discard(identity)
+                with self._recommendation_lock:
+                    self.recommendation_inflight.discard(identity)
 
     def check_storage(self):
         info = self.settings.data_dir.stat()
@@ -1250,8 +1326,11 @@ def management_router(service, auth):
     ):
         from wildstring.library.upload import handle_upload
 
+        target_settings = service.settings.model_copy(
+            update={"library_dir": service.repository.root}
+        )
         return handle_upload(
-            service.settings,
+            target_settings,
             service.database,
             file,
             relative_path_raw=relative_path,
@@ -1268,9 +1347,15 @@ def management_router(service, auth):
         ],
     )
     def library_scan():
-        from wildstring.library.scanner import scan_library
+        from wildstring.library.scanner import ScanBusyError, scan_library
 
-        return scan_library(service.settings)
+        target_settings = service.settings.model_copy(
+            update={"library_dir": service.repository.root}
+        )
+        try:
+            return scan_library(target_settings)
+        except ScanBusyError:
+            raise HTTPException(409, "scan_busy") from None
 
     @router.get("/library/trash")
     def library_trash():
@@ -1367,9 +1452,17 @@ def management_router(service, auth):
         file: Annotated[UploadFile, File()],
         save_sidecar: Annotated[bool, Form()] = True,
     ):
-        content = await file.read()
-        return service.update_album_cover(
-            album_id, content, filename=file.filename or "cover.jpg", save_sidecar=save_sidecar
+        buffer = bytearray()
+        while chunk := await file.read(64 * 1024):
+            if len(buffer) + len(chunk) > MAX_COVER_BYTES:
+                raise HTTPException(413, "cover_too_large")
+            buffer.extend(chunk)
+        return await run_in_threadpool(
+            service.update_album_cover,
+            album_id,
+            bytes(buffer),
+            filename=file.filename or "cover.jpg",
+            save_sidecar=save_sidecar,
         )
 
     @router.delete(

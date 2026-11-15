@@ -14,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory, TemporaryFile
 from urllib.parse import urlsplit
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 
 from fastapi import HTTPException
 
@@ -22,6 +22,21 @@ from wildstring.source_plugins import Manifest, PluginError
 
 MAX_ARCHIVE = 16 * 1024 * 1024
 MAX_EXPANDED = 32 * 1024 * 1024
+ALLOWED_COMPRESS_TYPES = {ZIP_STORED, ZIP_DEFLATED}
+
+
+def _verify_and_count_archive(archive: ZipFile) -> None:
+    total = 0
+    for entry in archive.infolist():
+        if entry.compress_type not in ALLOWED_COMPRESS_TYPES:
+            raise ValueError
+        if entry.is_dir():
+            continue
+        with archive.open(entry) as source:
+            while chunk := source.read(64 * 1024):
+                total += len(chunk)
+                if total > MAX_EXPANDED:
+                    raise ValueError
 
 
 def inspect_package(data):
@@ -133,9 +148,8 @@ def inspect_package(data):
             ):
                 raise ValueError
             keys.add(field["key"])
-        # Detect corrupted entries before any package is made active.
-        if archive.testzip() is not None:
-            raise ValueError
+        # Detect corrupted or spoofed-size entries before any package is made active.
+        _verify_and_count_archive(archive)
         return manifest, archive
     except (
         ValueError,
@@ -145,6 +159,8 @@ def inspect_package(data):
         UnicodeError,
         NotImplementedError,
         RuntimeError,
+        EOFError,
+        OSError,
     ):
         raise HTTPException(422, "source_plugin_invalid_zip") from None
 
@@ -158,7 +174,9 @@ def install(manager, data, expected_version=None, expected_id=None):
     root = manager.providers.directory / "source-plugins"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = root / digest
+    retired_digest = None
     with archive, TemporaryDirectory(dir=root) as temporary:
+        written = 0
         for entry in archive.infolist():
             path = Path(temporary) / entry.filename
             if entry.is_dir():
@@ -166,7 +184,11 @@ def install(manager, data, expected_version=None, expected_id=None):
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(entry) as source, path.open("wb") as output:
-                    shutil.copyfileobj(source, output, length=64 * 1024)
+                    while chunk := source.read(64 * 1024):
+                        written += len(chunk)
+                        if written > MAX_EXPANDED:
+                            raise HTTPException(422, "source_plugin_invalid_zip")
+                        output.write(chunk)
                 path.chmod(0o600)
         (Path(temporary) / "package.zip").write_bytes(data)
         with manager.database.connect(write=True) as db:
@@ -176,6 +198,9 @@ def install(manager, data, expected_version=None, expected_id=None):
             ).fetchone()
             if (old and expected_version != old[0]) or (not old and expected_version is not None):
                 raise HTTPException(409, "source_plugin_version_conflict")
+            prev_pkg = db.execute(
+                "SELECT sha256 FROM source_plugin_packages WHERE plugin_id=?", (manifest.id,)
+            ).fetchone()
             if not target.exists():
                 os.rename(temporary, target)
                 # TemporaryDirectory tolerates the now-missing temporary path on exit.
@@ -187,6 +212,14 @@ def install(manager, data, expected_version=None, expected_id=None):
                 "INSERT INTO source_plugin_settings(plugin_id,version) VALUES (?,1) ON CONFLICT(plugin_id) DO UPDATE SET enabled=0,version=version+1",
                 (manifest.id,),
             )
+            if prev_pkg and prev_pkg[0] != digest:
+                still_used = db.execute(
+                    "SELECT 1 FROM source_plugin_packages WHERE sha256=? LIMIT 1", (prev_pkg[0],)
+                ).fetchone()
+                if not still_used:
+                    retired_digest = prev_pkg[0]
+    if retired_digest:
+        shutil.rmtree(root / retired_digest, ignore_errors=True)
     return next(item for item in manager.catalog() if item["id"] == manifest.id)
 
 

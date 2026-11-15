@@ -128,15 +128,15 @@ class CatalogGapResponse(BaseModel):
 
 def fetch_artist_essentials(artist_name: str, limit: int = 10) -> list[dict[str, str]]:
     norm = normalize(artist_name)
+    if not norm:
+        return []
     for key, tracks in POPULAR_ARTISTS_ESSENTIALS.items():
-        if norm == normalize(key) or norm in normalize(key) or normalize(key) in norm:
+        key_norm = normalize(key)
+        if norm == key_norm or (
+            len(norm) >= 2 and len(key_norm) >= 2 and (norm in key_norm or key_norm in norm)
+        ):
             return tracks[:limit]
-
-    # Dynamic generation fallback for other artists
-    return [
-        {"title": f"{artist_name} 代表作 #{i + 1}", "album": "经典收录", "year": ""}
-        for i in range(limit)
-    ]
+    return []
 
 
 def audit_catalog_gaps(
@@ -145,6 +145,18 @@ def audit_catalog_gaps(
     limit: int = 10,
 ) -> CatalogGapResponse:
     target_tracks = fetch_artist_essentials(artist, limit=limit)
+    if not target_tracks:
+        return CatalogGapResponse(
+            artist=artist,
+            scope="top0",
+            total_target=0,
+            matched_count=0,
+            missing_count=0,
+            coverage_percent=0,
+            matched=[],
+            missing=[],
+            summary=f"暂未收录【{artist}】的代表作参考榜单。",
+        )
     norm_artist = normalize(artist)
 
     # 1. Fetch all local tracks by artist or containing artist
@@ -192,7 +204,11 @@ def audit_catalog_gaps(
 
         for local in local_tracks:
             score = SequenceMatcher(None, target_norm, local["norm_title"]).ratio()
-            if target_norm in local["norm_title"] or local["norm_title"] in target_norm:
+            if (
+                len(target_norm) >= 2
+                and len(local["norm_title"]) >= 2
+                and (target_norm in local["norm_title"] or local["norm_title"] in target_norm)
+            ):
                 score = max(score, 0.85)
             if score > best_score:
                 best_score = score

@@ -10,6 +10,7 @@ A few minutes after start-up the server runs the job once on its own (see
 it uncovers appear in the duplicate report for a library admin to confirm. It never merges.
 """
 
+import json
 import logging
 import shutil
 import threading
@@ -104,6 +105,14 @@ class IdentityBackfill:
         self.auto_thread: threading.Thread | None = None
         self.last_feed_fetch = float("-inf")
         self.run_state: dict[str, Any] = {"running": False, "last_run": None}
+
+    def shutdown(self) -> None:
+        self.stop.set()
+        for worker in (self.auto_thread, self.thread):
+            if worker is not None and worker.is_alive():
+                worker.join(timeout=2)
+        self.auto_thread = None
+        self.thread = None
 
     # Status -----------------------------------------------------------------------------
     def status(self) -> dict[str, Any]:
@@ -503,8 +512,13 @@ class IdentityBackfill:
                 "AND download_status IN ('queued','downloading') LIMIT 1",
                 (keep_id, merge_id),
             ).fetchone()
-        active = set(getattr(manager, "_active_downloads", {})) | set(
-            getattr(manager, "_queued_episodes", {})
+        active = (
+            manager.active_or_queued_episode_ids()
+            if hasattr(manager, "active_or_queued_episode_ids")
+            else (
+                set(getattr(manager, "_active_downloads", {}))
+                | set(getattr(manager, "_queued_episodes", {}))
+            )
         )
         if busy or active.intersection(episode_ids):
             raise HTTPException(409, "podcast_merge_busy")
@@ -517,8 +531,31 @@ class IdentityBackfill:
             "follows_moved": 0,
         }
         orphans: list[str] = []
+        episode_map: dict[str, str] = {}
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
+            recheck_busy = db.execute(
+                "SELECT 1 FROM podcast_episodes WHERE podcast_id IN (?, ?) "
+                "AND download_status IN ('queued','downloading') LIMIT 1",
+                (keep_id, merge_id),
+            ).fetchone()
+            in_flight_now = (
+                manager.active_or_queued_episode_ids()
+                if hasattr(manager, "active_or_queued_episode_ids")
+                else (
+                    set(getattr(manager, "_active_downloads", {}))
+                    | set(getattr(manager, "_queued_episodes", {}))
+                )
+            )
+            current_ids = {
+                row[0]
+                for row in db.execute(
+                    "SELECT id FROM podcast_episodes WHERE podcast_id IN (?, ?)",
+                    (keep_id, merge_id),
+                )
+            }
+            if recheck_busy or in_flight_now.intersection(current_ids):
+                raise HTTPException(409, "podcast_merge_busy")
             kept = db.execute(
                 "SELECT id, guid, audio_url, local_path, download_status "
                 "FROM podcast_episodes WHERE podcast_id=?",
@@ -544,14 +581,58 @@ class IdentityBackfill:
                     ).fetchone()[0]
                     continue
                 stats["episodes_matched"] += 1
+                episode_map[old["id"]] = target["id"]
                 self._merge_episode(db, old, target, stats, orphans)
-            for table in ("podcast_follows", "podcast_user_catalog", "podcast_user_settings"):
+            for table in (
+                "podcast_follows",
+                "podcast_user_catalog",
+                "podcast_user_settings",
+                "podcast_inbox_baseline",
+                "podcast_queue_prefs",
+            ):
                 changed = db.execute(
                     f"UPDATE OR IGNORE {table} SET podcast_id=? WHERE podcast_id=?",  # nosec B608
                     (keep_id, merge_id),
                 ).rowcount
                 if table == "podcast_follows":
                     stats["follows_moved"] = changed
+            db.execute("DELETE FROM podcast_inbox_baseline WHERE podcast_id=?", (merge_id,))
+            db.execute("DELETE FROM podcast_queue_prefs WHERE podcast_id=?", (merge_id,))
+            if episode_map:
+                for qrow in db.execute(
+                    "SELECT user_id, items_json FROM podcast_queue_state"
+                ).fetchall():
+                    try:
+                        qitems = json.loads(qrow["items_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(qitems, list):
+                        continue
+                    seen_eids: set[str] = set()
+                    rewritten: list[dict[str, Any]] = []
+                    mutated = False
+                    for entry in qitems:
+                        if not isinstance(entry, dict):
+                            continue
+                        eid = entry.get("episode_id")
+                        if not isinstance(eid, str):
+                            continue
+                        mapped = episode_map.get(eid, eid)
+                        if mapped != eid:
+                            mutated = True
+                        if mapped in seen_eids:
+                            mutated = True
+                            continue
+                        seen_eids.add(mapped)
+                        rewritten.append(
+                            {**entry, "episode_id": mapped} if mapped != eid else entry
+                        )
+                    if mutated:
+                        db.execute(
+                            "UPDATE podcast_queue_state SET items_json=?, version=version+1 "
+                            "WHERE user_id=?",
+                            (json.dumps(rewritten, separators=(",", ":")), qrow["user_id"]),
+                        )
             db.execute(
                 "UPDATE podcasts SET publisher_id=COALESCE(publisher_id, ?) WHERE id=?",
                 (shows[merge_id]["publisher_id"], keep_id),

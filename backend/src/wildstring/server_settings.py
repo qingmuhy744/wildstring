@@ -51,8 +51,17 @@ class ServerSettings:
             if row[key] is not None:
                 values[key], values["sources"][key] = row[key], "database"
             elif environment is not None:
-                effective = ServerUpdate.model_validate({key: environment})
-                values[key], values["sources"][key] = getattr(effective, key), "environment"
+                if key == "connection_policy" and environment == "legacy":
+                    values[key], values["sources"][key] = "legacy", "environment"
+                else:
+                    try:
+                        effective = ServerUpdate.model_validate({key: environment})
+                        values[key], values["sources"][key] = (
+                            getattr(effective, key),
+                            "environment",
+                        )
+                    except ValidationError:
+                        values[key], values["sources"][key] = default, "default"
             else:
                 values[key], values["sources"][key] = default, "default"
         return values
@@ -81,7 +90,9 @@ class ServerSettings:
             for key, value in changes.items():
                 if value is None:
                     fallback = getattr(self.settings, "server_name" if key == "name" else key)
-                    if fallback is not None:
+                    if fallback is not None and not (
+                        key == "connection_policy" and fallback == "legacy"
+                    ):
                         try:
                             ServerUpdate.model_validate({key: fallback})
                         except ValidationError:

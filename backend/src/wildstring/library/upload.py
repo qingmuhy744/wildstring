@@ -17,7 +17,7 @@ from wildstring.library.intake import INPUT_SUFFIXES
 from wildstring.library.lyrics import MAX_TEXT_BYTES
 from wildstring.library.metadata import read_metadata
 from wildstring.library.metadata_inference import enrich_metadata
-from wildstring.library.scanner import scan_library
+from wildstring.library.scanner import ScanBusyError, scan_library
 
 MAX_AUDIO_BYTES = 500 * 1024 * 1024  # 500 MB limit per audio file
 LYRIC_SUFFIXES = {".lrc", ".lryc", ".txt"}
@@ -54,16 +54,34 @@ def save_upload_to_temp(file: UploadFile, directory: Path, max_bytes: int) -> tu
             raise
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def find_matching_audio_target(
     database: Database, library_dir: Path, relative_sidecar: Path
 ) -> Path | None:
     """Find the target path of a companion audio track in the same relative folder."""
-    stem = relative_sidecar.stem
+    escaped_stem = _escape_like(relative_sidecar.stem)
+    parent_prefix = relative_sidecar.parent.as_posix()
+    has_parent = bool(parent_prefix and parent_prefix != ".")
+    escaped_parent = _escape_like(parent_prefix) if has_parent else ""
     with database.connect() as db:
-        # 1. Direct stem match (e.g. Song.lrc matching Song.mp3)
+        # 1a. Exact relative folder + stem match first
+        if has_parent:
+            rows = db.execute(
+                "SELECT target_path FROM imported_files WHERE target_root=? AND source_path LIKE ? ESCAPE '\\' ORDER BY source_mtime DESC",
+                (str(library_dir), f"{escaped_parent}/{escaped_stem}.%"),
+            ).fetchall()
+            for row in rows:
+                target = Path(row["target_path"])
+                if (library_dir / target).exists() and target.suffix.lower() in INPUT_SUFFIXES:
+                    return target
+
+        # 1b. Direct stem match fallback (e.g. Song.lrc uploaded without parent path)
         rows = db.execute(
-            "SELECT target_path FROM imported_files WHERE target_root=? AND source_path LIKE ? ORDER BY source_mtime DESC",
-            (str(library_dir), f"%{stem}.%"),
+            "SELECT target_path FROM imported_files WHERE target_root=? AND (source_path LIKE ? ESCAPE '\\' OR source_path LIKE ? ESCAPE '\\') ORDER BY source_mtime DESC",
+            (str(library_dir), f"{escaped_stem}.%", f"%/{escaped_stem}.%"),
         ).fetchall()
         for row in rows:
             target = Path(row["target_path"])
@@ -71,11 +89,10 @@ def find_matching_audio_target(
                 return target
 
         # 2. Directory-level companion (e.g. cover.jpg / folder.png in album folder)
-        parent_prefix = relative_sidecar.parent.as_posix()
-        if parent_prefix and parent_prefix != ".":
+        if has_parent:
             rows = db.execute(
-                "SELECT target_path FROM imported_files WHERE target_root=? AND source_path LIKE ? ORDER BY source_mtime DESC",
-                (str(library_dir), f"{parent_prefix}/%"),
+                "SELECT target_path FROM imported_files WHERE target_root=? AND source_path LIKE ? ESCAPE '\\' ORDER BY source_mtime DESC",
+                (str(library_dir), f"{escaped_parent}/%"),
             ).fetchall()
             for row in rows:
                 target = Path(row["target_path"])
@@ -219,10 +236,14 @@ def handle_upload(
                     ),
                 )
 
+        scan_deferred = False
         if auto_scan:
-            scan_library(settings)
+            try:
+                scan_library(settings)
+            except ScanBusyError:
+                scan_deferred = True
 
-        return {
+        result = {
             "status": "imported",
             "filename": filename,
             "relative_path": relative_path.as_posix(),
@@ -235,5 +256,8 @@ def handle_upload(
             "duration_ms": metadata.duration_ms,
             "sha256": sha256,
         }
+        if scan_deferred:
+            result["scan_deferred"] = True
+        return result
     finally:
         temp_path.unlink(missing_ok=True)

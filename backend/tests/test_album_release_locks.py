@@ -93,3 +93,36 @@ def test_release_lock_can_be_cleared_with_version(settings, authenticated_client
             "album_id": album_id,
             "locked": False,
         }
+
+
+def test_split_transfer_keeps_lock_on_original_album_after_second_track_moves(
+    settings, authenticated_client
+):
+    from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+
+    for num, title in ((1, "一"), (2, "二"), (3, "三")):
+        music(settings, f"split/{num:02d}.flac", "原专辑", title, num)
+    scan_library(settings)
+    repository = LibraryRepository(Database(settings.data_dir), settings.library_dir)
+    old_album_id = repository.albums(limit=1)["items"][0]["id"]
+    tracks = repository.tracks(limit=10)["items"]
+    with authenticated_client(settings) as client:
+        assert (
+            client.put(
+                f"/api/v1/manage/albums/{old_album_id}/release-lock",
+                headers=HEADERS,
+                json={"provider": "musicbrainz", "release_id": "rel-split"},
+            ).status_code
+            == 200
+        )
+        editor = MetadataEditor(repository)
+        for moved in tracks[:2]:
+            state = editor.read(moved["id"])
+            editor.save(
+                moved["id"],
+                MetadataUpdate(version=state["version"], overrides=Overrides(album="新专辑")),
+            )
+        assert (
+            client.get(f"/api/v1/manage/albums/{old_album_id}/release-lock").json()["release_id"]
+            == "rel-split"
+        )

@@ -13,16 +13,18 @@ import socket
 import time
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Event, RLock, Thread
+from threading import Event, RLock, Thread, get_ident
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
+from defusedxml import ElementTree as SafeET
+from defusedxml.common import DefusedXmlException
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from filelock import FileLock, Timeout
@@ -70,6 +72,10 @@ MAX_AUDIO_BYTES = 1024 * 1024 * 1024
 
 class PodcastURLRejected(ValueError):
     """Raised when a podcast URL could access a non-public local resource."""
+
+
+class _PodcastDownloadStopped(Exception):
+    """Raised internally when server shutdown interrupts an in-progress download."""
 
 
 # Clash/mihomo/Surge fake-ip DNS answers come from the RFC 2544 benchmarking range.
@@ -186,6 +192,32 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
             self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
+def _guard_proxied_target(full_url: str, allow_fake_ip: bool = False) -> None:
+    """Reject local/private DNS targets before forwarding a request to an HTTP proxy."""
+    validate_remote_url(full_url)
+    parsed = urlsplit(full_url)
+    host = (parsed.hostname or "").rstrip(".").lower()
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    try:
+        values = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        # Proxy-only environments without local internet DNS may still forward
+        # multi-label public domain names validated by validate_remote_url().
+        return
+    for _, _, _, _, sockaddr in values:
+        raw = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if not address.is_global:
+            if is_fake_ip(address):
+                if not allow_fake_ip:
+                    raise PodcastURLRejected("remote_url_fake_ip")
+            else:
+                raise PodcastURLRejected("remote_url_private_host")
+
+
 class SafeHTTPHandler(urllib.request.HTTPHandler):
     def __init__(self, trusted_proxy_endpoints, allow_fake_ip=False):
         super().__init__()
@@ -193,6 +225,8 @@ class SafeHTTPHandler(urllib.request.HTTPHandler):
         self.allow_fake_ip = allow_fake_ip
 
     def http_open(self, req):
+        if self.trusted_proxy_endpoints:
+            _guard_proxied_target(req.full_url, self.allow_fake_ip)
         return self.do_open(
             lambda host, **kwargs: SafeHTTPConnection(
                 host,
@@ -211,6 +245,8 @@ class SafeHTTPSHandler(urllib.request.HTTPSHandler):
         self.allow_fake_ip = allow_fake_ip
 
     def https_open(self, req):
+        if self.trusted_proxy_endpoints:
+            _guard_proxied_target(req.full_url, self.allow_fake_ip)
         return self.do_open(
             lambda host, **kwargs: SafeHTTPSConnection(
                 host,
@@ -257,6 +293,8 @@ def validate_remote_url(value: str) -> str:
     except ValueError:
         address = None
     if address is not None and not address.is_global:
+        raise PodcastURLRejected("remote_url_private_host")
+    if address is None and "." not in hostname:
         raise PodcastURLRejected("remote_url_private_host")
     return raw
 
@@ -585,8 +623,8 @@ def fetch_and_parse_feed(
 def parse_feed_document(data: bytes, feed_url: str) -> dict[str, Any]:
     """Parse RSS or Atom bytes into the subscription shape shared by add and preview."""
     try:
-        root = ET.fromstring(data)  # nosec B314
-    except Exception as e:
+        root = SafeET.fromstring(data, forbid_entities=True, forbid_external=True)
+    except (ET.ParseError, DefusedXmlException, ValueError) as e:
         logger.error("Failed to parse podcast XML host=%s: %s", urlsplit(feed_url).hostname, e)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -842,6 +880,14 @@ class PodcastManager:
     def _podcast_dir(self, podcast_id: str) -> Path:
         return self.storage_dir / podcast_folder_name(podcast_id)
 
+    def active_episode_ids(self) -> set[str]:
+        with self._queue_lock:
+            return set(self._active_downloads)
+
+    def active_or_queued_episode_ids(self) -> set[str]:
+        with self._queue_lock:
+            return set(self._active_downloads) | set(self._queued_episodes)
+
     def _safe_local_path(self, value: str | None) -> Path | None:
         if not value:
             return None
@@ -974,6 +1020,8 @@ class PodcastManager:
 
     def stop(self):
         self.stopping.set()
+        if self.identity_backfill is not None and hasattr(self.identity_backfill, "shutdown"):
+            self.identity_backfill.shutdown()
         if self.thread is not None:
             self.thread.join(timeout=3)
             self.thread = None
@@ -990,12 +1038,13 @@ class PodcastManager:
             except queue.Empty:
                 continue
 
-            if episode_id in self._cancelled_downloads:
-                self._cancelled_downloads.discard(episode_id)
-                lane_queue.task_done()
-                continue
+            with self._queue_lock:
+                if episode_id in self._cancelled_downloads:
+                    self._cancelled_downloads.discard(episode_id)
+                    lane_queue.task_done()
+                    continue
+                info = self._queued_episodes.pop(episode_id, None)
 
-            info = self._queued_episodes.pop(episode_id, None)
             fresh_info = self._get_episode_display_info(episode_id)
             if fresh_info:
                 info = {**(info or {}), **fresh_info}
@@ -1004,8 +1053,9 @@ class PodcastManager:
             if not slow_lane and is_slow:
                 # If a podcast was switched to slow_download while queued in the fast lane,
                 # hand it off to the dedicated slow lane so it never blocks fast workers.
-                if info:
-                    self._queued_episodes[episode_id] = {**info, "status": "queued"}
+                with self._queue_lock:
+                    if info:
+                        self._queued_episodes[episode_id] = {**info, "status": "queued"}
                 self._slow_download_queue.put(
                     episode_id, priority=bool(info and info.get("interactive_priority"))
                 )
@@ -1016,16 +1066,17 @@ class PodcastManager:
             backoff_base = int(info.get("retry_backoff_base", 5)) if info else 5
 
             if info:
-                self._active_downloads[episode_id] = {
-                    **info,
-                    "status": "downloading",
-                    "slow_mode": is_slow,
-                    "attempt": 0,
-                    "max_retries": max_retries,
-                    "started_at": datetime.now(UTC).isoformat(),
-                }
+                with self._queue_lock:
+                    self._active_downloads[episode_id] = {
+                        **info,
+                        "status": "downloading",
+                        "slow_mode": is_slow,
+                        "attempt": 0,
+                        "max_retries": max_retries,
+                        "started_at": datetime.now(UTC).isoformat(),
+                    }
 
-            success = False
+            outcome: str | bool = False
             handed_off_to_slow = False
             last_error = "下载失败"
 
@@ -1044,16 +1095,17 @@ class PodcastManager:
                             max_retries,
                             backoff_sec,
                         )
-                        if episode_id in self._active_downloads:
-                            self._active_downloads[episode_id].update(
-                                {
-                                    "status": "retrying",
-                                    "attempt": attempt,
-                                    "max_retries": max_retries,
-                                    "backoff_seconds": backoff_sec,
-                                    "error": f"第 {attempt}/{max_retries} 次重试等待中 ({backoff_sec}s): {last_error}",
-                                }
-                            )
+                        with self._queue_lock:
+                            if episode_id in self._active_downloads:
+                                self._active_downloads[episode_id].update(
+                                    {
+                                        "status": "retrying",
+                                        "attempt": attempt,
+                                        "max_retries": max_retries,
+                                        "backoff_seconds": backoff_sec,
+                                        "error": f"第 {attempt}/{max_retries} 次重试等待中 ({backoff_sec}s): {last_error}",
+                                    }
+                                )
                         # 支持快速退出的平缓休眠
                         for _ in range(int(backoff_sec * 10)):
                             if self.stopping.is_set():
@@ -1063,21 +1115,23 @@ class PodcastManager:
                         if self.stopping.is_set():
                             break
 
-                    if episode_id in self._active_downloads:
-                        self._active_downloads[episode_id].update(
-                            {
-                                "status": "downloading",
-                                "attempt": attempt,
-                                "max_retries": max_retries,
-                                "error": None,
-                            }
-                        )
+                    with self._queue_lock:
+                        if episode_id in self._active_downloads:
+                            self._active_downloads[episode_id].update(
+                                {
+                                    "status": "downloading",
+                                    "attempt": attempt,
+                                    "max_retries": max_retries,
+                                    "error": None,
+                                }
+                            )
 
                     try:
-                        success = self.download_episode(episode_id, slow_download=is_slow)
-                        if success:
+                        outcome = self._download_episode_locked(episode_id, slow_download=is_slow)
+                        if outcome:
                             break
-                        fail_rec = self._failed_downloads.get(episode_id)
+                        with self._queue_lock:
+                            fail_rec = self._failed_downloads.get(episode_id)
                         if fail_rec and fail_rec.get("error"):
                             last_error = fail_rec["error"]
                             if "429" in last_error:
@@ -1085,52 +1139,59 @@ class PodcastManager:
                                 if not slow_lane:
                                     # Demote 429 retries from the fast lane to the slow lane
                                     # so fast workers are never blocked by rate-limited feeds.
-                                    self._active_downloads.pop(episode_id, None)
-                                    self._failed_downloads.pop(episode_id, None)
-                                    if info:
-                                        self._queued_episodes[episode_id] = {
-                                            **info,
-                                            "slow_download": True,
-                                            "status": "queued",
-                                        }
+                                    with self._queue_lock:
+                                        self._active_downloads.pop(episode_id, None)
+                                        self._failed_downloads.pop(episode_id, None)
+                                        if info:
+                                            self._queued_episodes[episode_id] = {
+                                                **info,
+                                                "slow_download": True,
+                                                "status": "queued",
+                                            }
                                     self._slow_download_queue.put(episode_id, priority=True)
                                     handed_off_to_slow = True
                                     break
-                                if episode_id in self._active_downloads:
-                                    self._active_downloads[episode_id]["slow_mode"] = True
+                                with self._queue_lock:
+                                    if episode_id in self._active_downloads:
+                                        self._active_downloads[episode_id]["slow_mode"] = True
                     except Exception as exc:
                         last_error = str(exc)
 
                 if handed_off_to_slow:
                     continue
-                item = self._active_downloads.pop(episode_id, info or {})
-                if episode_id in self._cancelled_downloads:
-                    self._cancelled_downloads.discard(episode_id)
-                    continue
-                if success:
-                    self._recent_completed.appendleft(
-                        {
+                with self._queue_lock:
+                    item = self._active_downloads.pop(episode_id, info or {})
+                    if episode_id in self._cancelled_downloads:
+                        self._cancelled_downloads.discard(episode_id)
+                        continue
+                    if outcome == "contended" or self.stopping.is_set():
+                        continue
+                    if outcome:
+                        self._recent_completed.appendleft(
+                            {
+                                **item,
+                                "status": "downloaded",
+                                "completed_at": datetime.now(UTC).isoformat(),
+                            }
+                        )
+                        self._failed_downloads.pop(episode_id, None)
+                    else:
+                        self._failed_downloads[episode_id] = {
                             **item,
-                            "status": "downloaded",
-                            "completed_at": datetime.now(UTC).isoformat(),
+                            "status": "failed",
+                            "error": last_error,
+                            "failed_at": datetime.now(UTC).isoformat(),
                         }
-                    )
-                    self._failed_downloads.pop(episode_id, None)
-                else:
-                    self._failed_downloads[episode_id] = {
-                        **item,
-                        "status": "failed",
-                        "error": last_error,
-                        "failed_at": datetime.now(UTC).isoformat(),
-                    }
             except Exception as e:
-                item = self._active_downloads.pop(episode_id, info or {})
-                self._failed_downloads[episode_id] = {
-                    **item,
-                    "status": "failed",
-                    "error": str(e),
-                    "failed_at": datetime.now(UTC).isoformat(),
-                }
+                with self._queue_lock:
+                    item = self._active_downloads.pop(episode_id, info or {})
+                    if not self.stopping.is_set():
+                        self._failed_downloads[episode_id] = {
+                            **item,
+                            "status": "failed",
+                            "error": str(e),
+                            "failed_at": datetime.now(UTC).isoformat(),
+                        }
             finally:
                 if slow_lane and is_slow and not self.stopping.is_set():
                     # 慢速防限流平缓模式：单集之间平缓延时 4 秒，防止源站并发触发频率限制
@@ -1488,7 +1549,10 @@ class PodcastManager:
         return True
 
     def _ensure_podcast_metadata_files(self, podcast_dir: Path, p_data: Any) -> None:
+        json_tmp: Path | None = None
+        cover_tmp: Path | None = None
         try:
+            suffix = f"{os.getpid()}.{get_ident()}"
             json_file = podcast_dir / "podcast.json"
             if not json_file.exists():
                 meta = {
@@ -1498,20 +1562,26 @@ class PodcastManager:
                     "description": p_data["description"],
                     "created_at": datetime.now(UTC).isoformat(),
                 }
-                with open(json_file, "w", encoding="utf-8") as f:
+                json_tmp = podcast_dir / f".podcast.{suffix}.json.part"
+                with open(json_tmp, "w", encoding="utf-8") as f:
                     json.dump(meta, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                json_tmp.replace(json_file)
 
             cover_file = podcast_dir / "cover.jpg"
             if not cover_file.exists() and p_data["cover_url"]:
+                from PIL import Image
+
                 proxy_mode, proxy_url = self.get_network_policy()
                 cover_url = validate_remote_url(p_data["cover_url"])
                 req = urllib.request.Request(cover_url, headers={"User-Agent": USER_AGENT})
-                temporary = podcast_dir / ".cover.jpg.part"
+                cover_tmp = podcast_dir / f".cover.{suffix}.part"
                 with podcast_opener(proxy_mode, proxy_url, self.allow_fake_ip).open(  # nosec B310
                     req, timeout=15
                 ) as resp:
                     total = 0
-                    with open(temporary, "wb") as stream:
+                    with open(cover_tmp, "wb") as stream:
                         while True:
                             chunk = resp.read(64 * 1024)
                             if not chunk:
@@ -1522,33 +1592,48 @@ class PodcastManager:
                             stream.write(chunk)
                         stream.flush()
                         os.fsync(stream.fileno())
-                temporary.replace(cover_file)
+                with Image.open(cover_tmp) as img:
+                    img.verify()
+                cover_tmp.replace(cover_file)
         except Exception as e:
             logger.debug("Failed saving podcast metadata files: %s", e)
-            if "temporary" in locals():
-                temporary.unlink(missing_ok=True)
+            if json_tmp is not None:
+                json_tmp.unlink(missing_ok=True)
+            if cover_tmp is not None:
+                cover_tmp.unlink(missing_ok=True)
 
     def download_episode(self, episode_id: str, slow_download: bool | None = None) -> bool:
+        return bool(self._download_episode_locked(episode_id, slow_download))
+
+    def _download_episode_locked(
+        self, episode_id: str, slow_download: bool | None = None
+    ) -> str | bool:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256(episode_id.encode()).hexdigest()
         try:
             with FileLock(self.storage_dir / f".download-{key}.lock", timeout=0):
                 with self.database.connect(write=True) as db:
-                    if (
-                        db.execute(
-                            "SELECT 1 FROM podcast_episodes WHERE id=?", (episode_id,)
-                        ).fetchone()
-                        is None
-                    ):
+                    row = db.execute(
+                        "SELECT podcast_id FROM podcast_episodes WHERE id=?", (episode_id,)
+                    ).fetchone()
+                    if row is None:
                         return False
+                    podcast_id = row["podcast_id"]
                     lease = self.resources.acquire(db, episode_id)
                 try:
-                    return self._download_episode(episode_id, slow_download)
+                    ok = self._download_episode(episode_id, slow_download)
+                    return "downloaded" if ok else False
                 finally:
                     self.resources.release_lease(lease)
+                    with self.database.connect() as db:
+                        still_exists = db.execute(
+                            "SELECT 1 FROM podcasts WHERE id=?", (podcast_id,)
+                        ).fetchone()
+                    if still_exists is None and not self.active_episode_ids():
+                        shutil.rmtree(self._podcast_dir(podcast_id), ignore_errors=True)
         except Timeout:
             # Another worker already owns this shared resource.
-            return True
+            return "contended"
 
     def _download_episode(self, episode_id: str, slow_download: bool | None = None) -> bool:
         with self.database.connect() as conn:
@@ -1636,7 +1721,7 @@ class PodcastManager:
                 with open(temp_path, "wb") as f:
                     while True:
                         if self.stopping.is_set():
-                            raise Exception("下载已被停止")
+                            raise _PodcastDownloadStopped
                         t_chunk_start = time.perf_counter()
                         chunk = resp.read(chunk_size)
                         if not chunk:
@@ -1645,7 +1730,9 @@ class PodcastManager:
                         downloaded_bytes += len(chunk)
                         if downloaded_bytes > MAX_AUDIO_BYTES:
                             raise PodcastPayloadTooLarge("podcast_audio_too_large")
-                        if episode_id in self._cancelled_downloads:
+                        with self._queue_lock:
+                            cancelled = episode_id in self._cancelled_downloads
+                        if cancelled:
                             raise PodcastDownloadCancelled
 
                         if target_bps:
@@ -1669,26 +1756,38 @@ class PodcastManager:
                                 if total_bytes > 0
                                 else None
                             )
-                            if episode_id in self._active_downloads:
-                                self._active_downloads[episode_id].update(
-                                    {
-                                        "downloaded_bytes": downloaded_bytes,
-                                        "total_bytes": total_bytes,
-                                        "progress_pct": pct,
-                                        "speed_bps": round(speed_bps, 1),
-                                        "speed_human": format_speed(speed_bps),
-                                        "downloaded_human": format_bytes_human(downloaded_bytes),
-                                        "total_human": (
-                                            format_bytes_human(total_bytes)
-                                            if total_bytes > 0
-                                            else "未知大小"
-                                        ),
-                                        "slow_mode": is_slow,
-                                    }
-                                )
+                            with self._queue_lock:
+                                if episode_id in self._active_downloads:
+                                    self._active_downloads[episode_id].update(
+                                        {
+                                            "downloaded_bytes": downloaded_bytes,
+                                            "total_bytes": total_bytes,
+                                            "progress_pct": pct,
+                                            "speed_bps": round(speed_bps, 1),
+                                            "speed_human": format_speed(speed_bps),
+                                            "downloaded_human": format_bytes_human(
+                                                downloaded_bytes
+                                            ),
+                                            "total_human": (
+                                                format_bytes_human(total_bytes)
+                                                if total_bytes > 0
+                                                else "未知大小"
+                                            ),
+                                            "slow_mode": is_slow,
+                                        }
+                                    )
 
-            if episode_id in self._cancelled_downloads:
+            with self._queue_lock:
+                cancelled = episode_id in self._cancelled_downloads
+            if cancelled:
                 raise PodcastDownloadCancelled
+            with self.database.connect() as conn:
+                still_present = conn.execute(
+                    "SELECT 1 FROM podcast_episodes WHERE id = ?", (episode_id,)
+                ).fetchone()
+            if still_present is None:
+                temp_path.unlink(missing_ok=True)
+                return False
             temp_path.replace(dest_path)
             with self.database.connect(write=True) as conn:
                 conn.execute(
@@ -1696,11 +1795,24 @@ class PodcastManager:
                     (str(dest_path), episode_id),
                 )
                 self.resources.downloaded(conn, episode_id)
-            self._failed_downloads.pop(episode_id, None)
+            with self._queue_lock:
+                self._failed_downloads.pop(episode_id, None)
             logger.info("Successfully downloaded episode %s to %s", episode_id, dest_path)
             return True
         except PodcastDownloadCancelled:
             temp_path.unlink(missing_ok=True)
+            return False
+        except _PodcastDownloadStopped:
+            temp_path.unlink(missing_ok=True)
+            try:
+                with self.database.connect(write=True) as conn:
+                    conn.execute(
+                        "UPDATE podcast_episodes SET download_status = 'queued' "
+                        "WHERE id = ? AND download_status = 'downloading'",
+                        (episode_id,),
+                    )
+            except Exception:
+                logger.debug("Best-effort status restore skipped on stop for %s", episode_id)
             return False
         except PodcastPayloadTooLarge:
             self._record_failed(episode_id, row, "播客音频超过大小限制", temp_path)
@@ -1777,15 +1889,16 @@ class PodcastManager:
         except Exception:
             # Best-effort database status update on download failure
             pass
-        self._failed_downloads[episode_id] = {
-            "episode_id": episode_id,
-            "podcast_id": row["podcast_id"] if row else "",
-            "episode_title": row["title"] if row else "单集",
-            "podcast_title": row["podcast_title"] if row else "播客",
-            "status": "failed",
-            "error": error_msg,
-            "failed_at": datetime.now(UTC).isoformat(),
-        }
+        with self._queue_lock:
+            self._failed_downloads[episode_id] = {
+                "episode_id": episode_id,
+                "podcast_id": row["podcast_id"] if row else "",
+                "episode_title": row["title"] if row else "单集",
+                "podcast_title": row["podcast_title"] if row else "播客",
+                "status": "failed",
+                "error": error_msg,
+                "failed_at": datetime.now(UTC).isoformat(),
+            }
 
     def get_podcast_disk_usage(self, podcast_id: str) -> dict[str, Any]:
         with self.database.connect() as conn:
@@ -2023,15 +2136,20 @@ class PodcastManager:
         return sum(1 for candidate in candidates if self.queue_download_episode(candidate))
 
     def get_download_queue_info(self) -> dict[str, Any]:
+        with self._queue_lock:
+            downloading = [dict(v) for v in self._active_downloads.values()]
+            queued = [dict(v) for v in self._queued_episodes.values()]
+            recent_completed = [dict(v) for v in self._recent_completed]
+            failed = [dict(v) for v in self._failed_downloads.values()]
         return {
-            "active_count": len(self._active_downloads),
-            "queued_count": len(self._queued_episodes),
-            "failed_count": len(self._failed_downloads),
-            "total_pending": len(self._active_downloads) + len(self._queued_episodes),
-            "downloading": list(self._active_downloads.values()),
-            "queued": list(self._queued_episodes.values()),
-            "recent_completed": list(self._recent_completed),
-            "failed": list(self._failed_downloads.values()),
+            "active_count": len(downloading),
+            "queued_count": len(queued),
+            "failed_count": len(failed),
+            "total_pending": len(downloading) + len(queued),
+            "downloading": downloading,
+            "queued": queued,
+            "recent_completed": recent_completed,
+            "failed": failed,
         }
 
     def get_user_download_queue_info(self, user_id: str) -> dict[str, Any]:
@@ -2061,10 +2179,16 @@ class PodcastManager:
         def sanitize(item: dict[str, Any]) -> dict[str, Any]:
             return {k: v for k, v in item.items() if k not in {"local_path", "storage_path"}}
 
-        downloading = [sanitize(v) for v in self._active_downloads.values() if matches(v)]
-        queued = [sanitize(v) for v in self._queued_episodes.values() if matches(v)]
-        recent_completed = [sanitize(v) for v in self._recent_completed if matches(v)]
-        failed = [sanitize(v) for v in self._failed_downloads.values() if matches(v)]
+        with self._queue_lock:
+            active_vals = [dict(v) for v in self._active_downloads.values()]
+            queued_vals = [dict(v) for v in self._queued_episodes.values()]
+            completed_vals = [dict(v) for v in self._recent_completed]
+            failed_vals = [dict(v) for v in self._failed_downloads.values()]
+
+        downloading = [sanitize(v) for v in active_vals if matches(v)]
+        queued = [sanitize(v) for v in queued_vals if matches(v)]
+        recent_completed = [sanitize(v) for v in completed_vals if matches(v)]
+        failed = [sanitize(v) for v in failed_vals if matches(v)]
         return {
             "active_count": len(downloading),
             "queued_count": len(queued),
@@ -2078,15 +2202,17 @@ class PodcastManager:
 
     def retry_all_failed(self) -> int:
         retried = 0
-        failed_ids = list(self._failed_downloads.keys())
-        for ep_id in failed_ids:
-            self._failed_downloads.pop(ep_id, None)
-            if self.queue_download_episode(ep_id):
-                retried += 1
+        with self._queue_lock:
+            failed_ids = list(self._failed_downloads.keys())
+            for ep_id in failed_ids:
+                self._failed_downloads.pop(ep_id, None)
+                if self._queue_download_episode(ep_id):
+                    retried += 1
         return retried
 
     def clear_recent_completed(self) -> None:
-        self._recent_completed.clear()
+        with self._queue_lock:
+            self._recent_completed.clear()
 
     def stream_remote_audio(
         self,
@@ -2388,17 +2514,22 @@ class PodcastManager:
                 ).fetchall()
             ]
 
-        for row in episode_rows:
-            self._cancelled_downloads.add(row["id"])
-            self._queued_episodes.pop(row["id"], None)
+        with self._queue_lock:
+            for row in episode_rows:
+                self._cancelled_downloads.add(row["id"])
+                self._queued_episodes.pop(row["id"], None)
+                self._failed_downloads.pop(row["id"], None)
 
         with self.database.connect(write=True) as conn:
+            conn.execute("DELETE FROM podcast_queue_prefs WHERE podcast_id = ?", (podcast_id,))
+            conn.execute("DELETE FROM podcast_inbox_baseline WHERE podcast_id = ?", (podcast_id,))
             deleted = conn.execute("DELETE FROM podcasts WHERE id = ?", (podcast_id,)).rowcount
 
         self._delete_local_paths(
             [row["local_path"] for row in episode_rows], protected=protected_paths
         )
-        if not any(row["id"] in self._active_downloads for row in episode_rows):
+        active = self.active_episode_ids()
+        if not any(row["id"] in active for row in episode_rows):
             shutil.rmtree(self._podcast_dir(podcast_id), ignore_errors=True)
         return deleted > 0
 

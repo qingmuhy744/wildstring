@@ -691,6 +691,9 @@ class Database:
                 from wildstring.podcast_queue_schema import migrate_v52
 
                 migrate_v52(connection)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
+            )
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:
