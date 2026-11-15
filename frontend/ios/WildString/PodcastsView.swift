@@ -119,6 +119,15 @@ struct PodcastsView: View {
             message = ErrorText.message(for: error)
         }
     }
+
+    private func playPendingQueue() {
+        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
+        Task {
+            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
+                playback.playPodcastEpisode(item, line: .queue)
+            }
+        }
+    }
 }
 
 @MainActor
@@ -377,15 +386,6 @@ private struct PodcastDetailView: View {
     private func toggleFavorite(_ episode: PodcastEpisode) async {
         await favorites.toggle(episode.id, isPodcast: true)
         await load()
-    }
-
-    private func playPendingQueue() {
-        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
-        Task {
-            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item, line: .queue)
-            }
-        }
     }
 
     private func load() async {

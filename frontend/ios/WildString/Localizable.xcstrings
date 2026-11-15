@@ -9810,6 +9810,23 @@
         }
       }
     },
+    "podcasts.playPendingQueueCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play Queue (%d)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放待播 (%d)"
+          }
+        }
+      }
+    },
     "podcasts.queueReadFailedAuth": {
       "extractionState": "manual",
       "localizations": {
