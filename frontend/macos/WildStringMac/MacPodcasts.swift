@@ -27,23 +27,20 @@ struct MacPodcastsView: View {
 
     var body: some View {
         GeometryReader { geo in
-            if geo.size.width >= 780 {
+            if geo.size.width >= 760 {
                 HStack(spacing: 0) {
-                    showList.frame(width: 260)
+                    showList().frame(width: 260)
                     Divider()
                     detailPane.frame(maxWidth: .infinity)
                 }
             } else {
-                detailPane
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        HStack {
-                            Button { choosingShow = true } label: {
-                                Label(L10n("macPodcasts.selectShow"), systemImage: "list.bullet")
-                            }
-                            Spacer()
-                            Text(L10n("macPodcasts.showCount", shows.count)).font(.caption).foregroundStyle(.secondary)
-                        }.padding(14).background(.bar)
-                    }
+                VStack(spacing: 0) {
+                    narrowShowBar
+                    Rectangle().fill(MacTheme.border).frame(height: 1)
+                    detailPane
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .background(MacTheme.canvas)
             }
         }
         .navigationTitle(L10n("macPodcasts.title"))
@@ -52,7 +49,11 @@ struct MacPodcastsView: View {
                 MacToolbarTextButton(title: L10n("macPodcasts.explore"), systemImage: "safari") { exploring = true }
             }
             QuietToolbarItem {
-                MacToolbarIconButton(systemImage: "arrow.clockwise", help: L10n("macPodcasts.refreshShows"), isDisabled: loadingShows) { Task { await loadShows() } }
+                MacToolbarIconButton(
+                    systemImage: "arrow.clockwise",
+                    help: L10n("macPodcasts.refreshShows"),
+                    isDisabled: loadingShows || loadingDetail
+                ) { Task { await loadShows() } }
             }
         }
         .task {
@@ -62,6 +63,21 @@ struct MacPodcastsView: View {
         .task(id: showingQueue) {
             if showingQueue { await playback.podcastCloud?.refreshQueue() }
         }
+        .onChange(of: playback.currentItem?.trackID) { _, newTrackID in
+            guard let id = selectedShowID,
+                  let newTrackID,
+                  newTrackID.hasPrefix("podcast_ep_"),
+                  detail?.episodes.contains(where: { "podcast_ep_\($0.id)" == newTrackID }) == true
+            else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled, selectedShowID == id else { return }
+                await open(id, showSpinner: false)
+                if let refreshedShows = try? await client.podcasts(followed: true), !Task.isCancelled {
+                    shows = refreshedShows
+                }
+            }
+        }
         .sheet(isPresented: $exploring) {
             MacPodcastExplore(client: client) { id in
                 selectedShowID = id
@@ -69,11 +85,8 @@ struct MacPodcastsView: View {
             }
         }
         .sheet(isPresented: $choosingShow) {
-            VStack(spacing: 0) {
-                HStack { Spacer(); Button(L10n("macPodcasts.close")) { choosingShow = false } }
-                    .padding(12)
-                showList
-            }.frame(width: 360, height: 520)
+            showList { choosingShow = false }
+                .frame(width: 360, height: 520)
         }
         .confirmationDialog(L10n("macPodcasts.resumePrompt"), isPresented: Binding(
             get: { resume != nil },
@@ -81,7 +94,7 @@ struct MacPodcastsView: View {
         ), titleVisibility: .visible) {
             Button(L10n("macPodcasts.resume")) {
                 if let episode = resume, let detail {
-                    start(episode, in: detail.episodes, at: Double(episode.positionSeconds))
+                    start(episode, in: detail.episodes, at: nil)
                 }
                 resume = nil
             }
@@ -99,16 +112,85 @@ struct MacPodcastsView: View {
         }
     }
 
-    private var showList: some View {
+    private var narrowShowBar: some View {
+        let pendingCount = cloud?.unifiedPendingEpisodes.count ?? 0
+        return HStack(spacing: 10) {
+            Button { choosingShow = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MacTheme.accentDeep)
+                    Text(detail?.podcast.title ?? L10n("macPodcasts.selectShow"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(MacTheme.ink)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(MacTheme.muted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(MacTheme.panel, in: Capsule())
+                .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+
+            Button { showingQueue.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(L10n("macPodcasts.upNext"))
+                        .font(.system(size: 12, weight: showingQueue ? .semibold : .medium))
+                    if pendingCount > 0 {
+                        Text("\(pendingCount)")
+                            .font(MacTheme.mono(10))
+                            .foregroundStyle(showingQueue ? MacTheme.accentDeep : MacTheme.muted)
+                    }
+                }
+                .foregroundStyle(showingQueue ? MacTheme.accentDeep : MacTheme.ink)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    showingQueue ? MacTheme.accent.opacity(0.14) : MacTheme.panel,
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        showingQueue ? MacTheme.accentDeep.opacity(0.35) : MacTheme.border,
+                        lineWidth: 1
+                    )
+                )
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+            Text(L10n("macPodcasts.showCount", shows.count))
+                .font(MacTheme.caption.monospacedDigit())
+                .foregroundStyle(MacTheme.muted)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(MacTheme.canvas)
+    }
+
+    private func showList(onClose: (() -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(L10n("macPodcasts.mySubscriptions"))
                     .font(MacTheme.micro)
                     .foregroundStyle(MacTheme.muted)
                 Spacer()
-                if loadingShows {
-                    ProgressView()
-                        .controlSize(.small)
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.muted)
+                            .frame(width: 24, height: 24)
+                            .background(MacTheme.panel, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n("macPodcasts.close"))
                 }
             }
             .padding(.horizontal, 16)
@@ -179,7 +261,10 @@ struct MacPodcastsView: View {
                     .padding(.bottom, 8)
             }
 
-            if shows.isEmpty, !loadingShows {
+            if shows.isEmpty && loadingShows {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if shows.isEmpty, !loadingShows {
                 ContentUnavailableView(
                     L10n("macPodcasts.noSubscriptions"),
                     systemImage: "antenna.radiowaves.left.and.right",
@@ -229,41 +314,12 @@ struct MacPodcastsView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     podcastHeader(detail, unplayedCount: unplayedCount)
                     Rectangle().fill(MacTheme.border).frame(height: 1)
-                    HStack(spacing: 12) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(L10n("macPodcasts.episodes"))
-                                .font(MacTheme.section(15))
-                                .foregroundStyle(MacTheme.ink)
-                            Text("\(detail.episodes.count)")
-                                .font(MacTheme.mono(12))
-                                .foregroundStyle(MacTheme.muted)
-                        }
-                        HStack(spacing: 6) {
-                            filterPill(L10n("macPodcasts.filterAll"), id: "all")
-                            filterPill(L10n("macPodcasts.filterUnplayed", unplayedCount), id: "unplayed")
-                            filterPill(L10n("macPodcasts.filterCompleted", completedCount), id: "completed")
-                            filterPill(L10n("macPodcasts.filterFavorite", favoriteCount), id: "favorite")
-                        }
-                        .padding(.leading, 6)
-
-                        Spacer()
-
-                        Menu {
-                            Button(L10n("macPodcasts.newestFirst")) { newestFirst = true }
-                            Button(L10n("macPodcasts.oldestFirst")) { newestFirst = false }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(newestFirst ? L10n("macPodcasts.newestFirst") : L10n("macPodcasts.oldestFirst"))
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
-                            .font(MacTheme.caption)
-                            .foregroundStyle(MacTheme.muted)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                    }
+                    episodeFilterBar(
+                        total: detail.episodes.count,
+                        unplayed: unplayedCount,
+                        completed: completedCount,
+                        favorite: favoriteCount
+                    )
                     if visibleEpisodes.isEmpty {
                         ContentUnavailableView(
                             episodeFilter == "completed" ? L10n("macPodcasts.noCompletedEpisodes") : (episodeFilter == "unplayed" ? L10n("macPodcasts.allEpisodesPlayed") : (episodeFilter == "favorite" ? L10n("macPodcasts.noFavoriteEpisodes") : L10n("macPodcasts.noEpisodes"))),
@@ -288,6 +344,7 @@ struct MacPodcastsView: View {
                                         showTitle: detail.podcast.title,
                                         current: playback.currentItem?.trackID == "podcast_ep_\(episode.id)",
                                         playing: playback.isPlaying,
+                                        buffering: playback.isBuffering,
                                         isQueued: cloud?.isQueued(episodeID: episode.id) ?? false,
                                         isFavorite: isFavorite(episode),
                                         action: {
@@ -360,6 +417,55 @@ struct MacPodcastsView: View {
         .buttonStyle(.plain)
     }
 
+    private func episodeFilterBar(total: Int, unplayed: Int, completed: Int, favorite: Int) -> some View {
+        let countTitle = HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(L10n("macPodcasts.episodes"))
+                .font(MacTheme.section(15))
+                .foregroundStyle(MacTheme.ink)
+            Text("\(total)")
+                .font(MacTheme.mono(12))
+                .foregroundStyle(MacTheme.muted)
+        }
+        let pills = HStack(spacing: 6) {
+            filterPill(L10n("macPodcasts.filterAll"), id: "all")
+            filterPill(L10n("macPodcasts.filterUnplayed", unplayed), id: "unplayed")
+            filterPill(L10n("macPodcasts.filterCompleted", completed), id: "completed")
+            filterPill(L10n("macPodcasts.filterFavorite", favorite), id: "favorite")
+        }
+        let sortMenu = Menu {
+            Button(L10n("macPodcasts.newestFirst")) { newestFirst = true }
+            Button(L10n("macPodcasts.oldestFirst")) { newestFirst = false }
+        } label: {
+            HStack(spacing: 4) {
+                Text(newestFirst ? L10n("macPodcasts.newestFirst") : L10n("macPodcasts.oldestFirst"))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                countTitle
+                pills.padding(.leading, 6)
+                Spacer(minLength: 12)
+                sortMenu
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    countTitle
+                    Spacer(minLength: 12)
+                    sortMenu
+                }
+                pills
+            }
+        }
+    }
+
     private func podcastHeader(_ detail: PodcastDetail, unplayedCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 18) {
@@ -383,13 +489,38 @@ struct MacPodcastsView: View {
 
                     HStack(spacing: 10) {
                         if let next = detail.episodes.first(where: canResume) ?? detail.episodes.first(where: { !isCompleted($0) }) ?? detail.episodes.first {
-                            Button { choose(next, in: detail.episodes) } label: {
-                                Label(canResume(next) ? L10n("macPodcasts.resumeListening") : L10n("macPodcasts.playLatest"), systemImage: "play.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(MacTheme.onAccent)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(MacTheme.accent, in: Capsule())
+                            let isCurrentNext = playback.currentItem?.trackID == "podcast_ep_\(next.id)"
+                            let ctaLabel: String = if isCurrentNext {
+                                if playback.isBuffering {
+                                    L10n("macPlayer.buffering")
+                                } else if playback.isPlaying {
+                                    L10n("macPlayer.pause")
+                                } else {
+                                    canResume(next) ? L10n("macPodcasts.resumeListening") : L10n("macPodcasts.playLatest")
+                                }
+                            } else {
+                                canResume(next) ? L10n("macPodcasts.resumeListening") : L10n("macPodcasts.playLatest")
+                            }
+                            Button {
+                                if isCurrentNext {
+                                    playback.togglePlayPause()
+                                } else {
+                                    start(next, in: detail.episodes, at: nil)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if isCurrentNext && playback.isBuffering {
+                                        MacOnAccentProgress(side: 12)
+                                    } else {
+                                        Image(systemName: (isCurrentNext && playback.isPlaying) ? "pause.fill" : "play.fill")
+                                    }
+                                    Text(ctaLabel)
+                                }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(MacTheme.onAccent)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(MacTheme.accent, in: Capsule())
                             }
                             .buttonStyle(.plain)
                         }
@@ -523,9 +654,13 @@ struct MacPodcastsView: View {
         loadingShows = true
         do {
             let loaded = try await client.podcasts(followed: true)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                loadingShows = false
+                return
+            }
             shows = loaded
             message = nil
+            loadingShows = false
             if let selectedShowID, loaded.contains(where: { $0.id == selectedShowID }) {
                 await open(selectedShowID)
             } else if let first = loaded.first {
@@ -535,17 +670,17 @@ struct MacPodcastsView: View {
                 detail = nil
             }
         } catch {
+            loadingShows = false
             shows = []
             message = MacErrorText.message(for: error)
         }
-        loadingShows = false
     }
 
-    private func open(_ id: String) async {
+    private func open(_ id: String, showSpinner: Bool = true) async {
         selectedShowID = id
         descriptionExpanded = false
-        loadingDetail = true
-        defer { if selectedShowID == id { loadingDetail = false } }
+        if showSpinner { loadingDetail = true }
+        defer { if showSpinner, selectedShowID == id { loadingDetail = false } }
         do {
             let loaded = try await client.podcast(id: id)
             guard selectedShowID == id, !Task.isCancelled else { return }
@@ -571,7 +706,7 @@ struct MacPodcastsView: View {
         if canResume(episode) {
             resume = episode
         } else {
-            start(episode, in: episodes, at: 0)
+            start(episode, in: episodes, at: nil)
         }
     }
 
@@ -581,18 +716,21 @@ struct MacPodcastsView: View {
         return position > 15 && (episode.durationSeconds == 0 || remaining > 30)
     }
 
-    private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double) {
+    private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double?) {
         guard episodes.contains(where: { $0.id == episode.id }) else { return }
         let show = detail?.podcast
         let artist = (show?.author.isEmpty == false) ? (show?.author ?? L10n("macPodcasts.defaultArtist")) : L10n("macPodcasts.defaultArtist")
         // 从节目里点播，按这一档的顺序续播，不改云端待播。
         applyContinuation(episodes, show: show)
+        let done = isCompleted(episode)
         let item = PlaybackService.Item(
             trackID: "podcast_ep_\(episode.id)",
             title: episode.title,
             artist: artist,
             album: show?.title,
-            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1"
+            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1",
+            resumePositionSeconds: done ? 0 : Double(max(0, episode.positionSeconds)),
+            durationSeconds: Double(max(0, episode.durationSeconds))
         )
         playback.playPodcastEpisode(item, position: position)
     }
@@ -600,13 +738,16 @@ struct MacPodcastsView: View {
     private func applyContinuation(_ episodes: [PodcastEpisode], show: PodcastSummary?) {
         let artist = (show?.author.isEmpty == false) ? (show?.author ?? L10n("macPodcasts.defaultArtist")) : L10n("macPodcasts.defaultArtist")
         let refs: [PodcastContinuation.Episode] = episodes.enumerated().map { index, episode in
-            PodcastContinuation.Episode(
+            let done = isCompleted(episode)
+            return PodcastContinuation.Episode(
                 id: episode.id,
                 title: episode.title,
                 artist: artist,
                 album: show?.title,
                 chronologicalIndex: episodes.count - 1 - index,
-                isCompleted: isCompleted(episode)
+                isCompleted: done,
+                resumePositionSeconds: done ? 0 : Double(max(0, episode.positionSeconds)),
+                durationSeconds: Double(max(0, episode.durationSeconds))
             )
         }
         let preference = playback.podcastCloud?.showPreference(show?.id ?? "").continuation
@@ -637,7 +778,7 @@ struct MacPodcastsView: View {
         let target = !isCompleted(episode)
         do {
             try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
-            await open(episode.podcastId)
+            await open(episode.podcastId, showSpinner: false)
         } catch {
             detailMessage = L10n("macPodcasts.markCompletedFailed", MacErrorText.message(for: error))
         }
@@ -646,11 +787,11 @@ struct MacPodcastsView: View {
     private func toggleEpisodeFavorite(_ episode: PodcastEpisode) async {
         if let fav = favorites {
             await fav.toggle(episode.id, isPodcast: true)
-            await open(episode.podcastId)
+            await open(episode.podcastId, showSpinner: false)
         } else {
             do {
                 try await client.favoritePodcastEpisode(episodeID: episode.id, loved: !isFavorite(episode))
-                await open(episode.podcastId)
+                await open(episode.podcastId, showSpinner: false)
             } catch {
                 detailMessage = L10n("macPodcasts.favoriteFailed", MacErrorText.message(for: error))
             }
@@ -696,8 +837,10 @@ private struct MacPodcastShowRow: View {
                         .foregroundStyle(MacTheme.muted)
                         .lineLimit(1)
                     Text(show.unplayedEpisodes > 0 ? L10n("macPodcasts.showEpisodesWithUnplayed", show.totalEpisodes, show.unplayedEpisodes) : L10n("macPodcasts.showEpisodesTotal", show.totalEpisodes))
-                        .font(.system(size: 11))
+                        .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(MacTheme.faint)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 Spacer(minLength: 4)
                 if show.followed {
@@ -723,6 +866,7 @@ struct MacPodcastEpisodeRow: View {
     var showTitle: String? = nil
     var current: Bool = false
     var playing: Bool = false
+    var buffering: Bool = false
     var isQueued: Bool = false
     var isFavorite: Bool = false
     var action: () -> Void = {}
@@ -835,7 +979,7 @@ struct MacPodcastEpisodeRow: View {
     @ViewBuilder
     private var inlineQueueButton: some View {
         if current {
-            Text(L10n("macPodcasts.nowPlaying"))
+            Text(buffering ? L10n("macPlayer.buffering") : (playing ? L10n("macPodcasts.nowPlaying") : L10n("macPodcasts.paused")))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(MacTheme.accentDeep)
                 .padding(.horizontal, 8)
@@ -878,10 +1022,16 @@ struct MacPodcastEpisodeRow: View {
     @ViewBuilder
     private var leadingControl: some View {
         if current {
-            Image(systemName: playing ? "waveform" : "pause.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(MacTheme.accentDeep)
-                .frame(width: 32, height: 32)
+            if buffering {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 32, height: 32)
+            } else {
+                Image(systemName: playing ? "waveform" : "pause.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .frame(width: 32, height: 32)
+            }
         } else {
             Circle()
                 .fill(MacTheme.panel)
@@ -906,7 +1056,7 @@ struct MacPodcastEpisodeRow: View {
             if current {
                 Text("· \(macPodcastDurationMinutes(episode.durationSeconds)) ·")
                     .foregroundStyle(MacTheme.muted)
-                Text(playing ? L10n("macPodcasts.nowPlaying") : L10n("macPodcasts.paused"))
+                Text(buffering ? L10n("macPlayer.buffering") : (playing ? L10n("macPodcasts.nowPlaying") : L10n("macPodcasts.paused")))
                     .foregroundStyle(MacTheme.accentDeep)
                     .fontWeight(.medium)
             } else if completed {
@@ -966,12 +1116,26 @@ func cleanPodcastEpisodeTitle(_ raw: String, showTitle: String? = nil) -> String
     return text.isEmpty ? raw : text
 }
 
+private final class MacPodcastDateParserCache: @unchecked Sendable {
+    static let shared = MacPodcastDateParserCache()
+    private let lock = NSLock()
+    private let iso = ISO8601DateFormatter()
+    private let rfc2822: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        return formatter
+    }()
+
+    func parse(_ value: String) -> Date? {
+        lock.withLock {
+            iso.date(from: value) ?? rfc2822.date(from: value)
+        }
+    }
+}
+
 func macPodcastParsedDate(_ value: String) -> Date? {
-    let iso = ISO8601DateFormatter()
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
-    return iso.date(from: value) ?? formatter.date(from: value)
+    MacPodcastDateParserCache.shared.parse(value)
 }
 
 func macPodcastShortDate(_ value: String) -> String {

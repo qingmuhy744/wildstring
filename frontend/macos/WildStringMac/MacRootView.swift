@@ -382,7 +382,7 @@ private struct MacShellView: View {
                 .environment(\.navigateToTrackCollection) { navigationPath.append($0) }
                 .onChange(of: session.page) { _, _ in navigationPath = NavigationPath() }
                 .onChange(of: session.selectedLibraryID) { _, _ in navigationPath = NavigationPath() }
-                if session.showLyrics || session.showQueue {
+                if session.showLyrics && playback.currentItem?.trackID.hasPrefix("podcast_ep_") != true {
                     MacPlayerInspector(session: session, client: client, playback: playback)
                         .frame(width: 336)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -390,9 +390,37 @@ private struct MacShellView: View {
                         .padding(12)
                 }
             }
+            .overlay {
+                if session.showQueue && !session.showFullscreen {
+                    GeometryReader { overlayGeo in
+                        ZStack(alignment: .bottomTrailing) {
+                            Color.black.opacity(0.001)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    session.showQueue = false
+                                }
+                            MacFloatingQueuePanel(
+                                client: client,
+                                playback: playback,
+                                width: min(360, max(300, overlayGeo.size.width - 32)),
+                                height: min(520, max(280, overlayGeo.size.height - 24)),
+                                onClose: { session.showQueue = false }
+                            )
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 10)
+                        }
+                        .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
+                    }
+                }
+            }
             MacTransportBar(session: session, client: client, playback: playback)
         }
         .background(MacTheme.canvas)
+        .onExitCommand {
+            if !session.showFullscreen && session.showQueue {
+                session.showQueue = false
+            }
+        }
         .allowsHitTesting(!session.showFullscreen)
         .accessibilityHidden(session.showFullscreen)
         .toolbar(session.showFullscreen ? .hidden : .visible, for: .windowToolbar)

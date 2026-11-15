@@ -292,7 +292,8 @@ public final class PodcastCloudQueue {
             artist: KitL10n("kit.podcast.defaultArtist"),
             album: nil,
             streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1",
-            resumePositionSeconds: completed ? 0 : Double(max(0, episode.positionSeconds))
+            resumePositionSeconds: completed ? 0 : Double(max(0, episode.positionSeconds)),
+            durationSeconds: Double(max(0, episode.durationSeconds))
         )
     }
 
@@ -374,14 +375,19 @@ public final class PodcastCloudQueue {
         let show = detail.podcast
         let artist = show.author.isEmpty ? KitL10n("kit.podcast.defaultArtist") : show.author
         let refs = detail.episodes.enumerated().map { index, ep in
-            PodcastContinuation.Episode(
+            let done = ep.completed || (
+                ep.positionSeconds > 0 && ep.durationSeconds > 0
+                    && ep.positionSeconds >= ep.durationSeconds
+            )
+            return PodcastContinuation.Episode(
                 id: ep.id,
                 title: ep.title,
                 artist: artist,
                 album: show.title,
                 chronologicalIndex: detail.episodes.count - 1 - index,
-                isCompleted: ep.positionSeconds > 0 && ep.durationSeconds > 0
-                    && ep.positionSeconds >= ep.durationSeconds
+                isCompleted: done,
+                resumePositionSeconds: done ? 0 : Double(max(0, ep.positionSeconds)),
+                durationSeconds: Double(max(0, ep.durationSeconds))
             )
         }
         let preference = showPreference(show.id).continuation

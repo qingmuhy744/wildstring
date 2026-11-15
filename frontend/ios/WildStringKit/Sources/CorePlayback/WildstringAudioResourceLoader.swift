@@ -319,10 +319,15 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     /// Warms the connection and caches the leading bytes before the player asks,
     /// cutting the startup round trips (sniff, first range) to cache hits.
     public func prefetch(path: String, bytes: Int64 = 512 * 1024) {
-        prefetchTask?.cancel()
+        let previous = lock.withLock {
+            let prev = prefetchTask
+            prefetchTask = nil
+            return prev
+        }
+        previous?.cancel()
         let fetcher = self.fetcher
         let cache = self.cache
-        prefetchTask = Task {
+        let task = Task {
             guard let chunk = try? await fetcher.fetch(path: path, offset: 0, length: bytes),
                 !Task.isCancelled
             else { return }
@@ -333,6 +338,30 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                 totalLength: chunk.totalLength,
                 contentType: chunk.contentType
             )
+        }
+        lock.withLock {
+            prefetchTask = task
+        }
+    }
+
+    /// Cancels in-flight prefetch and active byte-range requests (e.g. on track switch)
+    /// so stale downloads stop competing for bandwidth immediately.
+    public func cancelPendingRequests() {
+        let (prefetch, activeGates, activeTasks) = lock.withLock {
+            let currentPrefetch = prefetchTask
+            prefetchTask = nil
+            let gatesCopy = Array(gates.values)
+            let tasksCopy = Array(tasks.values)
+            gates.removeAll()
+            tasks.removeAll()
+            return (currentPrefetch, gatesCopy, tasksCopy)
+        }
+        prefetch?.cancel()
+        for gate in activeGates {
+            gate.cancel()
+        }
+        for task in activeTasks {
+            task.cancel()
         }
     }
 
@@ -346,8 +375,9 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
 
     /// Serves a large range with successive bounded window requests instead of
     /// one open-ended stream: every window is a buffered `URLSession.data` call
-    /// (no per-byte awaits), cancellation lands between windows, and the small
-    /// first window keeps startup byte latency low on slow links.
+    /// (no per-byte awaits), cancellation lands between windows, the small first
+    /// window keeps startup latency low, and steady-state 1 MB chunks limit
+    /// round-trip overhead on high-latency links.
     private func serveStream(
         _ loadingRequest: Unchecked<AVAssetResourceLoadingRequest>,
         path: String,
@@ -356,13 +386,21 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         gate: RequestGate
     ) async throws {
         let firstWindow: Int64 = 64 * 1024
-        let window: Int64 = 256 * 1024
+        let secondWindow: Int64 = 256 * 1024
+        let steadyWindow: Int64 = 1024 * 1024
         var sent: Int64 = 0
         var deliveredInfo = false
         while sent < length {
             guard !gate.isCancelled, !Task.isCancelled else { return }
             let remaining = length - sent
-            let size = sent == 0 ? min(firstWindow, remaining) : min(window, remaining)
+            let window: Int64 = if sent == 0 {
+                firstWindow
+            } else if sent < firstWindow + secondWindow {
+                secondWindow
+            } else {
+                steadyWindow
+            }
+            let size = min(window, remaining)
             let chunk = try await fetcher.fetch(path: path, offset: start + sent, length: size)
             if !deliveredInfo {
                 deliveredInfo = true

@@ -125,10 +125,22 @@ struct MacTransportBar: View {
                             if isPodcast { playback.seek(to: max(0, playback.currentTime - 15)) } else { playback.previous() }
                         }
                         Button { playback.togglePlayPause() } label: {
-                            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(MacTheme.onAccent)
-                                .frame(width: 38, height: 38).background(MacTheme.accent, in: Circle())
-                        }.buttonStyle(.plain).help(playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")).disabled(playback.currentItem == nil)
+                            Group {
+                                if playback.isBuffering {
+                                    MacOnAccentProgress(side: 16)
+                                } else {
+                                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(MacTheme.onAccent)
+                                }
+                            }
+                            .frame(width: 38, height: 38)
+                            .background(MacTheme.accent, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")))
+                        .accessibilityLabel(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")))
+                        .disabled(playback.currentItem == nil)
                         transportButton(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? L10n("macPlayer.forward30s") : L10n("macPlayer.nextTrack")) {
                             if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
                         }
@@ -292,6 +304,31 @@ struct MacVolumeSlider: View {
     }
 }
 
+struct MacFloatingQueuePanel: View {
+    let client: WildstringClient
+    let playback: PlaybackService
+    let width: CGFloat
+    let height: CGFloat
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            MacQueueView(client: client, playback: playback, showsHeader: true, onClose: onClose)
+                .padding(18)
+        }
+        .frame(width: width, height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(MacTheme.panel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(MacTheme.border, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.20), radius: 22, y: 10)
+    }
+}
+
 struct MacPlayerInspector: View {
     let session: MacSession
     let client: WildstringClient
@@ -301,70 +338,31 @@ struct MacPlayerInspector: View {
     @State private var lyricTrackID: String?
     @State private var lyricPhase: LyricPhase = .ready
     @State private var lyricAttempt = 0
-    @State private var focus: InspectorFocus = .lyrics
-
-    private enum InspectorFocus: Hashable {
-        case lyrics
-        case queue
-    }
-
-    private var showingQueue: Bool {
-        session.showQueue && (!session.showLyrics || focus == .queue)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                Image(systemName: showingQueue ? "list.number" : "quote.bubble")
+                Image(systemName: "quote.bubble")
                     .foregroundStyle(MacTheme.accentDeep)
                     .frame(width: 32, height: 32)
                     .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
-                Text(showingQueue ? L10n("macPlayer.queue") : L10n("macPlayer.lyrics"))
+                Text(L10n("macPlayer.lyrics"))
                     .font(MacTheme.display(19)).foregroundStyle(MacTheme.ink)
-                if showingQueue {
-                    Text(
-                        playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true
-                            ? L10n("macPlayer.queueEpisodesCount", playback.playbackItems.count)
-                            : L10n("macPlayer.queueItemsCount", playback.playbackItems.count)
-                    )
-                    .font(MacTheme.micro)
-                    .foregroundStyle(MacTheme.muted)
-                }
                 Spacer()
                 Button {
                     session.showLyrics = false
-                    session.showQueue = false
                 } label: {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MacTheme.muted).frame(width: 26, height: 26)
                         .background(MacTheme.canvas, in: Circle())
                 }.buttonStyle(.plain).help(L10n("macPlayer.closeSidebar")).accessibilityLabel(L10n("macPlayer.closeSidebar"))
             }
-            if session.showLyrics && session.showQueue {
-                Picker(L10n("macPlayer.viewing"), selection: $focus) {
-                    Text(L10n("macPlayer.lyrics")).tag(InspectorFocus.lyrics)
-                    Text(L10n("macPlayer.queueTab")).tag(InspectorFocus.queue)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            if session.showLyrics && (!session.showQueue || focus == .lyrics) {
-                lyrics
-            }
-            if session.showQueue && (!session.showLyrics || focus == .queue) {
-                queue
-            }
+            lyrics
         }
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(MacTheme.panel)
         .task(id: "\(playback.currentItem?.trackID ?? "")-\(lyricAttempt)") { await loadLyrics() }
-        .onChange(of: session.showLyrics) { _, showing in
-            if showing { focus = .lyrics }
-        }
-        .onChange(of: session.showQueue) { _, showing in
-            if showing { focus = .queue }
-        }
     }
 
     @ViewBuilder
@@ -397,10 +395,6 @@ struct MacPlayerInspector: View {
                 )
             }
         }
-    }
-
-    private var queue: some View {
-        MacQueueView(client: client, playback: playback, showsHeader: false)
     }
 
     private func loadLyrics() async {

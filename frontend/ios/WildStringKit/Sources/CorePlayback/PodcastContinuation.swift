@@ -20,6 +20,8 @@ public enum PodcastContinuation {
         public var album: String?
         public var chronologicalIndex: Int
         public var isCompleted: Bool
+        public var resumePositionSeconds: Double
+        public var durationSeconds: Double
 
         public init(
             id: String,
@@ -27,7 +29,9 @@ public enum PodcastContinuation {
             artist: String? = nil,
             album: String? = nil,
             chronologicalIndex: Int,
-            isCompleted: Bool = false
+            isCompleted: Bool = false,
+            resumePositionSeconds: Double = 0,
+            durationSeconds: Double = 0
         ) {
             self.id = id
             self.title = title
@@ -35,6 +39,8 @@ public enum PodcastContinuation {
             self.album = album
             self.chronologicalIndex = chronologicalIndex
             self.isCompleted = isCompleted
+            self.resumePositionSeconds = max(0, resumePositionSeconds)
+            self.durationSeconds = max(0, durationSeconds)
         }
     }
 

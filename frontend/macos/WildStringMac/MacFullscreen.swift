@@ -132,7 +132,7 @@ struct MacFullscreenPlayer: View {
 
     private func stage(_ item: PlaybackService.Item) -> some View {
         GeometryReader { geo in
-            let centered = !showLyrics && !showQueue && !isPodcast
+            let centered = !showLyrics && !isPodcast
             let side = min(centered ? 500 : 400,
                            min(geo.size.width * (centered ? 0.5 : 0.33), max(200, geo.size.height - 150)))
             HStack(alignment: .center, spacing: 52) {
@@ -253,23 +253,13 @@ struct MacFullscreenPlayer: View {
     }
 
     private func queuePanel(width: CGFloat, height: CGFloat) -> some View {
-        let panelHeight = max(320, min(520, height - 280))
-        return VStack(spacing: 0) {
-            MacQueueView(client: client, playback: playback, showsHeader: true, onClose: {
-                showQueue = false
-            })
-            .padding(18)
-        }
-        .frame(width: width, height: panelHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(MacTheme.panel)
+        MacFloatingQueuePanel(
+            client: client,
+            playback: playback,
+            width: width,
+            height: max(320, min(520, height - 280)),
+            onClose: { showQueue = false }
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(MacTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
     }
 
     private var controls: some View {
@@ -293,11 +283,20 @@ struct MacFullscreenPlayer: View {
                         if isPodcast { playback.seek(to: max(0, playback.currentTime - 15)) } else { playback.previous() }
                     }
                     Button { playback.togglePlayPause() } label: {
-                        Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(MacTheme.onAccent).frame(width: 56, height: 56)
-                            .background(MacTheme.accent, in: Circle())
-                    }.buttonStyle(.plain).help(playback.isPlaying ? L10n("macFullscreen.pause") : L10n("macFullscreen.play"))
+                        Group {
+                            if playback.isBuffering {
+                                MacOnAccentProgress(side: 16)
+                            } else {
+                                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(MacTheme.onAccent)
+                            }
+                        }
+                        .frame(width: 56, height: 56)
+                        .background(MacTheme.accent, in: Circle())
+                    }.buttonStyle(.plain)
+                        .help(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macFullscreen.pause") : L10n("macFullscreen.play")))
+                        .accessibilityLabel(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macFullscreen.pause") : L10n("macFullscreen.play")))
                         .disabled(playback.currentItem == nil)
                     control(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? L10n("macFullscreen.forward30s") : L10n("macFullscreen.nextTrack")) {
                         if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }

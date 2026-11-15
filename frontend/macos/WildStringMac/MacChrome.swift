@@ -511,3 +511,37 @@ struct MacCatalogCard<Destination: Hashable>: View {
         .buttonStyle(.plain)
     }
 }
+
+struct MacOnAccentProgress: View {
+    var side: CGFloat = 16
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        // Accent fills invert luminance relative to the page theme: terracotta in light mode
+        // takes light spokes (.darkAqua), peach in dark mode takes dark spokes (.aqua).
+        Spinner(side: side, useLightSpokes: colorScheme == .light)
+            .frame(width: side, height: side)
+    }
+
+    private struct Spinner: NSViewRepresentable {
+        let side: CGFloat
+        let useLightSpokes: Bool
+
+        func makeNSView(context: Context) -> NSProgressIndicator {
+            let indicator = NSProgressIndicator()
+            indicator.style = .spinning
+            indicator.controlSize = side <= 13 ? .mini : .small
+            indicator.isDisplayedWhenStopped = true
+            indicator.usesThreadedAnimation = true
+            indicator.appearance = NSAppearance(named: useLightSpokes ? .darkAqua : .aqua)
+            indicator.startAnimation(nil)
+            return indicator
+        }
+
+        func updateNSView(_ indicator: NSProgressIndicator, context: Context) {
+            indicator.controlSize = side <= 13 ? .mini : .small
+            indicator.appearance = NSAppearance(named: useLightSpokes ? .darkAqua : .aqua)
+            indicator.startAnimation(nil)
+        }
+    }
+}

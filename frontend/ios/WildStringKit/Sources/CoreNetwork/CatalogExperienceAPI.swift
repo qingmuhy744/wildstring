@@ -162,6 +162,18 @@ public struct PodcastProgressSnapshot: Decodable, Equatable, Sendable {
     public let durationSeconds: Int?
     public let completed: Bool?
 
+    public init(
+        version: Int,
+        positionSeconds: Int,
+        durationSeconds: Int? = nil,
+        completed: Bool? = nil
+    ) {
+        self.version = version
+        self.positionSeconds = positionSeconds
+        self.durationSeconds = durationSeconds
+        self.completed = completed
+    }
+
     enum CodingKeys: String, CodingKey {
         case version, completed
         case positionSeconds = "position_seconds"

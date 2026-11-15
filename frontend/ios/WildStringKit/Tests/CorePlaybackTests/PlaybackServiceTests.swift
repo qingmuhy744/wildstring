@@ -821,4 +821,365 @@ struct PlaybackServiceTests {
         await cloud.retrySync()
         #expect(cloud.items.map(\.episodeId) == ["ep2", "ep1"])
     }
+
+    @Test func showAutoContinueResumesRemoteProgressInsteadOfRestartingFromZero() async throws {
+        defer { PodcastResumeProtocol.reset() }
+        PodcastResumeProtocol.respond { request in
+            let url = try #require(request.url)
+            if url.path == "/api/v1/podcasts/queue" {
+                return (200, Data(#"{"version":1,"device_id":"mac-1","notice":"","items":[]}"#.utf8))
+            }
+            if url.path.hasPrefix("/api/v1/podcasts/episodes/") {
+                let id = String(url.path.dropFirst("/api/v1/podcasts/episodes/".count))
+                return (200, Data(#"{"id":"\#(id)","podcast_id":"show-a","title":"\#(id)"}"#.utf8))
+            }
+            return (404, Data())
+        }
+
+        let client = WildstringClient(
+            server: try ServerAddress(input: "resume-show.example.invalid"),
+            store: InMemorySessionStore(),
+            configuration: PodcastResumeProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "mac-1")
+        await cloud.refreshQueue()
+
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+
+        final class WriteRecorder: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(episodeID: String, write: PodcastProgressWrite)] = []
+            func append(_ episodeID: String, _ write: PodcastProgressWrite) {
+                lock.withLock { entries.append((episodeID, write)) }
+            }
+            func snapshot() -> [(episodeID: String, write: PodcastProgressWrite)] {
+                lock.withLock { entries }
+            }
+        }
+        let recorder = WriteRecorder()
+        service.loadPodcastProgress = { episodeID in
+            switch episodeID {
+            case "ep-41":
+                return PodcastProgressSnapshot(version: 7, positionSeconds: 10, durationSeconds: 1800, completed: false)
+            case "ep-40":
+                return PodcastProgressSnapshot(version: 3, positionSeconds: 1350, durationSeconds: 2400, completed: false)
+            default:
+                return nil
+            }
+        }
+        service.submitPodcastProgress = { episodeID, write in
+            recorder.append(episodeID, write)
+            return .ok
+        }
+
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: [
+                PodcastContinuation.Episode(
+                    id: "ep-41",
+                    title: "Episode 41",
+                    artist: "Host",
+                    album: "Show A",
+                    chronologicalIndex: 1,
+                    isCompleted: false,
+                    resumePositionSeconds: 0,
+                    durationSeconds: 1800
+                ),
+                PodcastContinuation.Episode(
+                    id: "ep-40",
+                    title: "Episode 40",
+                    artist: "Host",
+                    album: "Show A",
+                    chronologicalIndex: 0,
+                    isCompleted: false,
+                    resumePositionSeconds: 0,
+                    durationSeconds: 2400
+                ),
+            ],
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+
+        let item41 = PlaybackService.Item(
+            trackID: "podcast_ep_ep-41",
+            title: "Episode 41",
+            artist: "Host",
+            album: "Show A",
+            streamPath: "api/v1/podcasts/episodes/ep-41/stream?proxy=1&cache=1",
+            resumePositionSeconds: 0,
+            durationSeconds: 1800
+        )
+        service.playPodcastEpisode(item41, position: 0, line: .show)
+        await service.waitForPodcastTasks()
+
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-40")
+        #expect(service.currentTime == 1350)
+        #expect(service.duration == 2400)
+        let writes = recorder.snapshot().filter { $0.episodeID == "ep-40" }
+        #expect(writes.contains {
+            $0.write.event == "play" && $0.write.positionSeconds == 1350 && $0.write.baseVersion == 3
+        })
+        #expect(!writes.contains { $0.write.positionSeconds == 0 })
+    }
+
+    @Test func showAutoContinueSkipsEpisodeCompletedRemotely() async throws {
+        defer { PodcastResumeProtocol.reset() }
+        PodcastResumeProtocol.respond { request in
+            let url = try #require(request.url)
+            if url.path == "/api/v1/podcasts/queue" {
+                return (200, Data(#"{"version":1,"device_id":"mac-1","notice":"","items":[]}"#.utf8))
+            }
+            if url.path.hasPrefix("/api/v1/podcasts/episodes/") {
+                let id = String(url.path.dropFirst("/api/v1/podcasts/episodes/".count))
+                return (200, Data(#"{"id":"\#(id)","podcast_id":"show-a","title":"\#(id)"}"#.utf8))
+            }
+            return (404, Data())
+        }
+
+        let client = WildstringClient(
+            server: try ServerAddress(input: "resume-skip.example.invalid"),
+            store: InMemorySessionStore(),
+            configuration: PodcastResumeProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "mac-1")
+        await cloud.refreshQueue()
+
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+
+        service.loadPodcastProgress = { episodeID in
+            switch episodeID {
+            case "ep-42":
+                return PodcastProgressSnapshot(version: 1, positionSeconds: 0, durationSeconds: 1000, completed: false)
+            case "ep-41":
+                return PodcastProgressSnapshot(version: 5, positionSeconds: 1200, durationSeconds: 1200, completed: true)
+            case "ep-40":
+                return PodcastProgressSnapshot(version: 2, positionSeconds: 480, durationSeconds: 2000, completed: false)
+            default:
+                return nil
+            }
+        }
+        service.submitPodcastProgress = { _, _ in .ok }
+
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: [
+                PodcastContinuation.Episode(id: "ep-42", title: "Episode 42", chronologicalIndex: 2, isCompleted: false, durationSeconds: 1000),
+                PodcastContinuation.Episode(id: "ep-41", title: "Episode 41", chronologicalIndex: 1, isCompleted: false, durationSeconds: 1200),
+                PodcastContinuation.Episode(id: "ep-40", title: "Episode 40", chronologicalIndex: 0, isCompleted: false, resumePositionSeconds: 0, durationSeconds: 2000),
+            ],
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+
+        let item42 = PlaybackService.Item(
+            trackID: "podcast_ep_ep-42",
+            title: "Episode 42",
+            artist: "Host",
+            streamPath: "api/v1/podcasts/episodes/ep-42/stream",
+            durationSeconds: 1000
+        )
+        service.playPodcastEpisode(item42, position: 0, line: .show)
+        await service.waitForPodcastTasks()
+
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-40")
+        #expect(service.currentTime == 480)
+        #expect(service.duration == 2000)
+    }
+
+    @Test func cloudQueueStepResumesRemoteProgress() async throws {
+        defer { PodcastResumeProtocol.reset() }
+        final class QueueServer: @unchecked Sendable {
+            let lock = NSLock()
+            var version = 1
+            var items: [[String: String]] = [
+                ["episode_id": "ep-a", "origin": "manual"],
+                ["episode_id": "ep-b", "origin": "manual"],
+            ]
+        }
+        let state = QueueServer()
+        PodcastResumeProtocol.respond { request in
+            let url = try #require(request.url)
+            if url.path == "/api/v1/podcasts/queue" {
+                if request.httpMethod == "PUT",
+                   let body = StubURLProtocol.bodyData(of: request),
+                   let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                   let incoming = payload["items"] as? [[String: String]]
+                {
+                    state.lock.withLock {
+                        state.version += 1
+                        state.items = incoming
+                    }
+                }
+                let data = try state.lock.withLock {
+                    try JSONSerialization.data(withJSONObject: [
+                        "version": state.version,
+                        "device_id": "mac-1",
+                        "notice": "",
+                        "items": state.items,
+                    ])
+                }
+                return (200, data)
+            }
+            if url.path.hasPrefix("/api/v1/podcasts/episodes/") {
+                let id = String(url.path.dropFirst("/api/v1/podcasts/episodes/".count))
+                return (200, Data(#"{"id":"\#(id)","podcast_id":"show-a","title":"\#(id)","duration_seconds":1800}"#.utf8))
+            }
+            return (404, Data())
+        }
+
+        let client = WildstringClient(
+            server: try ServerAddress(input: "resume-queue.example.invalid"),
+            store: InMemorySessionStore(),
+            configuration: PodcastResumeProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "mac-1")
+        await cloud.refreshQueue()
+
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+
+        final class WriteRecorder: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(episodeID: String, write: PodcastProgressWrite)] = []
+            func append(_ episodeID: String, _ write: PodcastProgressWrite) {
+                lock.withLock { entries.append((episodeID, write)) }
+            }
+            func snapshot() -> [(episodeID: String, write: PodcastProgressWrite)] {
+                lock.withLock { entries }
+            }
+        }
+        let recorder = WriteRecorder()
+        service.loadPodcastProgress = { episodeID in
+            switch episodeID {
+            case "ep-a":
+                return PodcastProgressSnapshot(version: 1, positionSeconds: 0, durationSeconds: 1000, completed: false)
+            case "ep-b":
+                return PodcastProgressSnapshot(version: 4, positionSeconds: 725, durationSeconds: 1800, completed: false)
+            default:
+                return nil
+            }
+        }
+        service.submitPodcastProgress = { episodeID, write in
+            recorder.append(episodeID, write)
+            return .ok
+        }
+
+        let itemA = try #require(await cloud.playbackItem(for: "ep-a"))
+        service.playPodcastEpisode(itemA, line: .queue)
+        await service.waitForPodcastTasks()
+
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-b")
+        #expect(service.currentTime == 725)
+        let writes = recorder.snapshot().filter { $0.episodeID == "ep-b" }
+        #expect(writes.contains {
+            $0.write.event == "play" && $0.write.positionSeconds == 725 && $0.write.baseVersion == 4
+        })
+    }
+
+    @Test func explicitRestartFromZeroOverridesRemoteProgress() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+
+        final class WriteRecorder: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(episodeID: String, write: PodcastProgressWrite)] = []
+            func append(_ episodeID: String, _ write: PodcastProgressWrite) {
+                lock.withLock { entries.append((episodeID, write)) }
+            }
+            func snapshot() -> [(episodeID: String, write: PodcastProgressWrite)] {
+                lock.withLock { entries }
+            }
+        }
+        let recorder = WriteRecorder()
+        service.loadPodcastProgress = { _ in
+            PodcastProgressSnapshot(version: 3, positionSeconds: 1350, durationSeconds: 2400, completed: false)
+        }
+        service.submitPodcastProgress = { episodeID, write in
+            recorder.append(episodeID, write)
+            return .ok
+        }
+
+        let item40 = PlaybackService.Item(
+            trackID: "podcast_ep_ep-40",
+            title: "Episode 40",
+            artist: "Host",
+            streamPath: "api/v1/podcasts/episodes/ep-40/stream",
+            resumePositionSeconds: 1350,
+            durationSeconds: 2400
+        )
+        service.playPodcastEpisode(item40, position: 0, line: .show)
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-40")
+        #expect(service.currentTime == 0)
+        let writes = recorder.snapshot().filter { $0.episodeID == "ep-40" }
+        #expect(writes.contains {
+            $0.write.event == "play" && $0.write.positionSeconds == 0 && $0.write.baseVersion == 3
+        })
+    }
+}
+
+private final class PodcastResumeProtocol: URLProtocol {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var handler: (@Sendable (URLRequest) throws -> (Int, Data))?
+
+    static func configuration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PodcastResumeProtocol.self]
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        return configuration
+    }
+
+    static func respond(_ body: @escaping @Sendable (URLRequest) throws -> (Int, Data)) {
+        lock.withLock { handler = body }
+    }
+
+    static func reset() {
+        lock.withLock { handler = nil }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url, let current = Self.lock.withLock({ Self.handler }) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        do {
+            let (status, body) = try current(request)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: status,
+                httpVersion: "HTTP/1.1",
+                headerFields: [
+                    "Content-Type": "application/json",
+                    "Content-Length": "\(body.count)",
+                ]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            if !body.isEmpty {
+                client?.urlProtocol(self, didLoad: body)
+            }
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
