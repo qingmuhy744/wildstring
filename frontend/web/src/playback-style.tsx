@@ -246,7 +246,6 @@ export function PlaybackVisual({
               source={track.cover_url}
               onImage={onImage}
             />
-            <span className="record-spindle" aria-hidden="true" />
           </span>
           <span className="record-sheen" aria-hidden="true" />
           <span className="tonearm" aria-hidden="true">

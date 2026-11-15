@@ -1,6 +1,6 @@
 # 产品范围
 
-更新日期：2026-11-13。本文只保留定位、能力边界与后置清单；各批次的实现与验证记录见 [范围变更记录](scope-history.md)，各版本发布说明见 `docs/releases/`。
+更新日期：2026-11-15。本文只保留定位、能力边界与后置清单；各批次的实现与验证记录见 [范围变更记录](scope-history.md)，各版本发布说明见 `docs/releases/`。
 
 ## 当前状态
 
@@ -37,7 +37,7 @@
 
 ## AI 边界
 
-- 下一轮按 [AI 助手、MCP、诊断与通知开发计划](../archive/agent-mcp-observability-notifications-plan.md) 分阶段推进：暂不实施 SIWC，保留用户配置的 AI API，统一网络与日志，开放 MCP 和受控巡检。结果默认保存为站内通知，由 Web／Android 上线或回到前台后拉取；Telegram 为可选外部渠道。0.4.0 分支已增加首版实现；该计划的验收项与真实上线状态仍以发布记录分别核对。
+- 已按 [AI 助手、MCP、诊断与通知开发计划](../archive/agent-mcp-observability-notifications-plan.md) 交付：保留用户配置的 AI API，统一网络与日志，开放 MCP 和受控巡检；结果默认保存为站内通知，由 Web／Android 上线或回到前台后拉取，Telegram 为可选外部渠道；暂不实施 SIWC。该计划保留开工时的验收清单，真实上线状态以发布记录和 [Agent 运行说明](../architecture/agent-platform.md) 为准。
 - 受控工具先提供搜索曲库、读取曲目、生成歌单草案和保存歌单；共用普通业务服务和权限。
 - 从元数据与结构化搜索开始，根据真实查询效果再补文本向量检索。
 - 听感、音色和音频相似性需要音频分析证据，不由模型猜测补成事实。

@@ -154,15 +154,6 @@ private struct PodcastDetailView: View {
                         Button(detail.podcast.followed ? L10n("podcasts.unfollow") : L10n("podcasts.follow")) {
                             Task { await toggleFollow(detail.podcast) }
                         }
-                        let pendingQueueCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
-                        if pendingQueueCount > 0 {
-                            Button {
-                                playPendingQueue()
-                            } label: {
-                                Label(L10n("podcasts.playPendingQueueCount", pendingQueueCount), systemImage: "play.fill")
-                                    .fontWeight(.semibold)
-                            }
-                        }
                     }
                 }
                 Section {
@@ -395,15 +386,6 @@ private struct PodcastDetailView: View {
     private func toggleFavorite(_ episode: PodcastEpisode) async {
         await favorites.toggle(episode.id, isPodcast: true)
         await load()
-    }
-
-    private func playPendingQueue() {
-        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
-        Task {
-            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
-                playback.playPodcastEpisode(item, line: .queue)
-            }
-        }
     }
 
     private func load() async {

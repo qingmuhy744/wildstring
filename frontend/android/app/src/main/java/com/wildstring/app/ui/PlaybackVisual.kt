@@ -142,7 +142,6 @@ internal val playbackStyles: List<Pair<String, String>>
                         }
                         Cover(vm, track.coverId, track.title,
                             Modifier.align(Alignment.Center).fillMaxSize(.44f).clip(CircleShape))
-                        Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
                     // Fixed room light: two point-symmetric soft wedges (DESIGN.md §6.7), never rotated with the platter.
                     Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {

@@ -30,8 +30,7 @@
 }
 .cassette-case,
 .tonearm,
-.record-sheen,
-.record-spindle {
+.record-sheen {
   display: none;
   pointer-events: none;
 }
@@ -79,13 +78,6 @@
     0 0 0 2px rgb(10 13 8 / 65%),
     0 0 0 3px rgb(220 226 205 / 10%);
   font-size: 32px;
-}
-.visual-vinyl .record-spindle {
-  display: block;
-  position: absolute;
-  inset: 48.7%;
-  border-radius: 50%;
-  background: #1a1714;
 }
 .visual-vinyl .record-sheen {
   display: block;
