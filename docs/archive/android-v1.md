@@ -1,5 +1,7 @@
 # Android 第一版
 
+> 历史记录：已被后续实现取代，仅保留当时的方案与验收过程。现行状态见 [范围变更记录](../product/scope-history.md)、[产品范围](../product/scope.md) 与 `docs/releases/`。
+
 日期：2026-10-15。状态：原生首版工程与 0.1.0 固定签名发布流程已实现；本地编译、单元测试、Lint、ARM64 模拟器登录/播放/手机及平板歌词测试，以及 R8 正式包签名、安装和连接页检查已通过。GitHub 正式 APK 的可下载状态以对应 Release 工作流结果为准。
 
 技术方向已由用户指定为 Kotlin、Jetpack Compose、Media3、Room、Retrofit/OkHttp 与 Hilt。本文中的首版边界是本轮提出的方案，可继续调整。技术约束见 [Android 技术决策](../decisions/0003-native-android.md)，交互草图见 [Android 原型](../design/android-v1.html)。

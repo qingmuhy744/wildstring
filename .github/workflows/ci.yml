@@ -145,6 +145,7 @@ jobs:
         if: needs.changes.outputs.web == 'true'
         run: make test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web
       - name: Upload browser visual evidence
+        id: visual
         if: always() && needs.changes.outputs.web == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -155,6 +156,20 @@ jobs:
             artifacts/*-verification/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Link the screenshots in the job summary
+        if: always() && needs.changes.outputs.web == 'true' && steps.visual.outputs.artifact-url != ''
+        env:
+          ARTIFACT_URL: ${{ steps.visual.outputs.artifact-url }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          count=$(find artifacts -name '*.png' | wc -l | tr -d ' ')
+          {
+            echo "### Browser screenshots"
+            echo
+            echo "${count} screenshots (desktop and mobile, light and dark) for visual review: [browser-visual-evidence](${ARTIFACT_URL})"
+            echo
+            echo "Download: \`gh run download ${RUN_ID} -n browser-visual-evidence -D <empty-dir>\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   container:
     # Runs only when the backend, scripts or deploy inputs changed. History shows the suite

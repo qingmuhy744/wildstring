@@ -6,7 +6,7 @@ workflows therefore keep each required job and skip only its expensive steps whe
 says its inputs are untouched. Anything unknown counts as touching everything, so a new
 top-level directory is tested until it is classified here.
 
-Usage: ci_changed_areas.py BASE HEAD     # prints `backend=true|false` and `web=true|false`
+Usage: ci_changed_areas.py BASE HEAD     # prints `backend=`, `web=` and `android=true|false`
 Pushes to main, tags, manual runs and release reuse never call this and run everything.
 """
 
@@ -31,6 +31,7 @@ INERT = (
     ".github/workflows/codeql.yml",
     ".github/workflows/dependency-review.yml",
     ".github/workflows/dependency-submission.yml",
+    ".github/pull_request_template.md",
     "CHANGELOG.md",
     "DESIGN.md",
     "AGENTS.md",
@@ -65,6 +66,20 @@ WEB = (
     ".github/workflows/ci.yml",
 )
 
+# What the Android job builds and tests: the Gradle project, the audio fixtures packed into
+# instrumented tests, the packaging script, and what the emulator and release runs reuse.
+ANDROID = (
+    "frontend/android/",
+    "tests/fixtures/audio/",
+    "backend/",
+    "scripts/package_android.py",
+    "scripts/serve_web_tests.py",
+    "scripts/smoke_android_release.py",
+    "Makefile",
+    ".github/workflows/android.yml",
+    ".github/workflows/release.yml",
+)
+
 
 def changed_files(base: str, head: str) -> list[str]:
     result = subprocess.run(  # nosec B603 B607
@@ -89,6 +104,16 @@ def touches(files: list[str], prefixes: tuple[str, ...]) -> bool:
     return False
 
 
+def touches_android(files: list[str]) -> bool:
+    # `frontend/android/` is inert for the other areas, so Android checks its own inputs first.
+    for name in files:
+        if name.startswith(ANDROID):
+            return True
+        if not name.startswith(INERT + BACKEND + WEB):
+            return True
+    return False
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
@@ -101,7 +126,12 @@ def main(argv: list[str]) -> int:
         files = ["?unknown"]
     backend = touches(files, BACKEND)
     web = touches(files, WEB)
-    for line in (f"backend={str(backend).lower()}", f"web={str(web).lower()}"):
+    android = touches_android(files)
+    for line in (
+        f"backend={str(backend).lower()}",
+        f"web={str(web).lower()}",
+        f"android={str(android).lower()}",
+    ):
         print(line)
     print(f"{len(files)} changed files", file=sys.stderr)
     return 0

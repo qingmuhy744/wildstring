@@ -1,5 +1,7 @@
 # AI 助手、MCP、诊断与通知开发计划
 
+> 历史记录：已被后续实现取代，仅保留当时的方案与验收过程。现行状态见 [范围变更记录](../product/scope-history.md)、[产品范围](../product/scope.md) 与 `docs/releases/`。
+
 更新日期：2026-10-17。
 
 状态：**用户已确认合并到 0.4.0，首版实现进入联合验收**。本文件保留开工时的阶段计划及验收清单，未逐项勾选不用于推断线上状态。当前代码、已执行验证与仍需真实账号／设备核对的边界见 [运行说明](../architecture/agent-platform.md) 与 [0.4.0 发布说明](../releases/v0.4.0.md)。
@@ -24,7 +26,7 @@
 - **Codex＋MCP**：外部 Agent 负责推理，WildString 负责权限、查询、草案和执行。普通查询、提交确定性任务、生成结构化草案不额外调用 WildString 模型。
 - **内置 AI API**：WildString 使用用户选定的连接完成推理，调用同一套受控工具；需要模型推理的后台任务持续使用该连接，不能借用未连接的 Codex 会话。
 
-本轮不增加自动标签写回、自动移动文件、任意 Shell／SQL 工具、跨设备远程播放控制、在线歌词聚合或 Telegram 对话指令。导入源保持只读，现有托管副本与数据库覆盖规则继续生效。见 [产品范围](scope.md)、[元数据整理](../architecture/metadata-repair.md) 和 [账号与访问](../../contracts/users-and-access.md)。
+本轮不增加自动标签写回、自动移动文件、任意 Shell／SQL 工具、跨设备远程播放控制、在线歌词聚合或 Telegram 对话指令。导入源保持只读，现有托管副本与数据库覆盖规则继续生效。见 [产品范围](../product/scope.md)、[元数据整理](../architecture/metadata-repair.md) 和 [账号与访问](../../contracts/users-and-access.md)。
 
 ## 2. 当前基础与缺口
 

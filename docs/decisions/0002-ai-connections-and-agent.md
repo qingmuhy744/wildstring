@@ -1,6 +1,6 @@
 # AI 服务、内置 Agent 与 MCP
 
-日期：2026-10-15；开发范围更新：2026-10-17。状态：AI 连接设置、自然语言找歌与歌单候选已实现；0.4.0 分支增加受控助手、MCP、巡检、通用通知和日志诊断；实现及验证边界见 [运行说明](../architecture/agent-platform.md) 与 [0.4.0 发布说明](../releases/v0.4.0.md)。当前实施顺序及阶段验收以 [完整开发计划](../product/agent-mcp-observability-notifications-plan.md) 为准。
+日期：2026-10-15；开发范围更新：2026-10-17。状态：AI 连接设置、自然语言找歌与歌单候选已实现；0.4.0 分支增加受控助手、MCP、巡检、通用通知和日志诊断；实现及验证边界见 [运行说明](../architecture/agent-platform.md) 与 [0.4.0 发布说明](../releases/v0.4.0.md)。当前实施顺序及阶段验收以 [完整开发计划](../archive/agent-mcp-observability-notifications-plan.md) 为准。
 
 已确认暂不接入 SIWC，继续使用用户配置的 AI API；优先补统一网络、日志与公共工具，开放 Codex 可调用的 MCP，再扩展持久巡检和内置 AI。默认结果通知为服务端站内收件箱，Web／Android 在上线、回前台或恢复联网时拉取；Telegram 为主动启用的首个外部渠道。
 

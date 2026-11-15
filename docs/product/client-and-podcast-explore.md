@@ -75,7 +75,7 @@ Web 单集详情改用原生对话框，标题、节目、日期、时长与正�
 
 - Android：`make android-test android-check android-assemble` 通过；Pixel 10 Pro / API 37 的设置分类、容量持久化、语言切换、滚动和账号偏好共 7 项通过。中英文截图与日志在 `artifacts/android-settings-verification/`。此处为聚焦回归，未重跑全部安卓设备用例。
 - Web：构建与类型检查通过，桌面／手机歌词手势及双语歌词共 8 项通过。
-- Web 探索页改为页面内浏览后，`make test-podcast-web` 的 76 项再次通过；检查 1360、820、393、320 宽度下的深浅主题、搜索框与筛选间距、预览及返回焦点。截图在 `artifacts/podcast-explore-*.png`。导航与设置的后续整理建议见 [Web 导航与设置核对](web-navigation-and-settings-audit.md)，尚未实施整体重组。
+- Web 探索页改为页面内浏览后，`make test-podcast-web` 的 76 项再次通过；检查 1360、820、393、320 宽度下的深浅主题、搜索框与筛选间距、预览及返回焦点。截图在 `artifacts/podcast-explore-*.png`。导航与设置的后续整理建议见 [Web 导航与设置核对](../archive/web-navigation-and-settings-audit.md)，尚未实施整体重组。
 - Swift：`make ios-test` 的 61 项播放与 90 项网络测试通过。新增原生 `AVPlayer` 回归覆盖暂停下前后跳转、时间回调和快速连续跳转；同一用例修复前失败、修复后通过。真实原音频的数值对照在 `artifacts/client-explore-verification/native-seek-probe.log`；没有进行真人听感验收。
 - Mac：加入首页后 `make macos-test` 共 16 项通过，覆盖最近添加与历史分别取数、推荐不可用时仍可浏览曲库、打开首页不改变队列与暂停进度。首页原生渲染已检查宽屏浅色和窄屏深色，截图在 `artifacts/client-explore-verification/wildstring-mac-home*.png`。
 

@@ -237,6 +237,15 @@ class PodcastQueueDetailLayoutTest {
                 for (mode in listOf("light", "dark")) {
                     appearance(vm, mode)
                     compose.onNodeWithTag("podcast-episodes").performScrollToIndex(0)
+                    val playBounds = compose.onNodeWithTag("podcast-primary-play").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    val followBounds = compose.onNodeWithTag("podcast-follow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    assertTrue("primary play and follow pills sit side by side on one row: play=$playBounds follow=$followBounds",
+                        kotlin.math.abs(playBounds.center.y - followBounds.center.y) <= 2f && playBounds.right < followBounds.left)
+                    val episodesTop = compose.onNodeWithTag("podcast-episodes").fetchSemanticsNode().boundsInRoot.top
+                    val overflowBounds = compose.onNodeWithTag("podcast-more-actions").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    assertTrue("overflow action sits in the top bar above the episode list: overflow=$overflowBounds episodesTop=$episodesTop",
+                        overflowBounds.bottom <= episodesTop + 1f)
+                    capture("show-header-$width-$mode")
                     val anchor = compose.onNodeWithTag("podcast-more-actions")
                     anchor.performClick()
                     val menu = compose.onNodeWithTag("podcast-show-actions-menu").assertIsDisplayed().fetchSemanticsNode()

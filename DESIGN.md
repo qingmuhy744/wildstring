@@ -227,7 +227,7 @@ Acceptance for any change to a transition: record the animated edges per frame a
   - Header action buttons:
     - Unified `待播列表` button opening the pending queue sheet/dialog (the ordered queue only, with `▶ 播放全部` and item-level play/remove controls). The per-show `新集自动待播` rule has no row of its own: it lives in the `已关注 ⌄` menu on the show page (a `新集待播` header with the three choices `自动加到队尾`, `自动加到最前`, `仅关注`, current one checked, then `自动下载` and a red `取消关注`), and the button shows the active rule as `已关注 · 队尾` (the quiet default `仅关注` adds no suffix). The rules tab remains the central management entry; redundant auto-limit spinbox/stepper stays out of the primary UI.
     - No global queue playback in the show page: the pending queue is shared by every show, so its `播放` action lives only on the radio home `待播列表` banner (shown when the queue is non-empty). The show page carries only actions for the current show.
-  - Primary coral pill button (`▶ 继续收听` or `▶ 播放最新一集`) paired with a circular `32×32` `⋯` button housing `分享节目` and destructive `取消订阅`.
+  - Primary coral pill button (`▶ 继续收听` or `▶ 播放最新一集`) paired on the same row with the `已关注 ⌄` (or `关注节目`) pill; on Phone the primary pill takes the remaining row width, and on Pad both pills group compactly from the leading edge. Desktop pairs the row with a circular `32×32` `⋯` button housing `分享节目` and destructive `取消订阅`; Android places `⋮` (`分享节目` / `取消关注`) at the trailing end of the show detail top bar so it stays reachable while scrolling.
   - Collapsible 2-line show description with `展开简介` link.
 - **Episode Filter, Sort & Grouping**:
   - Filter pills: `全部`, `未听完`, and `已收藏` (solid dark pill when active; when `已收藏` is selected, only favorited episodes are shown).

@@ -6,7 +6,7 @@
 
 0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 首版使用官方 Python SDK 2.3.0 的 stdio 传输；0.5.7 起增加同一 SDK 的 Streamable HTTP，见下文。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。
 
-接口与字段见 [Agent 平台契约](../../contracts/agent-platform.md)，产品计划见 [完整开发计划](../product/agent-mcp-observability-notifications-plan.md)。文档中的计划验收与本版实际记录分别查看；正式版本、自动化和真实设备验证见 [0.4.0 发布说明](../releases/v0.4.0.md)。
+接口与字段见 [Agent 平台契约](../../contracts/agent-platform.md)，产品计划见 [完整开发计划](../archive/agent-mcp-observability-notifications-plan.md)。文档中的计划验收与本版实际记录分别查看；正式版本、自动化和真实设备验证见 [0.4.0 发布说明](../releases/v0.4.0.md)。
 
 ## 使用入口
 
