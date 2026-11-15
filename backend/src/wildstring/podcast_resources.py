@@ -194,6 +194,9 @@ class PodcastResources:
             if path is None:
                 return None
             lease = self.acquire(db, identity)
+        if not path.is_file():
+            self.release_lease(lease)
+            return None
         suffix = Path(filename or path.name).suffix.lower()
         # Minimal container images may have no system MIME database.
         media_type = {
@@ -206,16 +209,20 @@ class PodcastResources:
             ".wav": "audio/wav",
             ".webm": "audio/webm",
         }.get(suffix, "application/octet-stream" if filename else "audio/mpeg")
-        return FileResponse(
-            path,
-            media_type=media_type,
-            filename=filename,
-            background=BackgroundTask(self.release_lease, lease),
-            headers={
-                "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "sandbox; default-src 'none'",
-            },
-        )
+        try:
+            return FileResponse(
+                path,
+                media_type=media_type,
+                filename=filename,
+                background=BackgroundTask(self.release_lease, lease),
+                headers={
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "sandbox; default-src 'none'",
+                },
+            )
+        except Exception:
+            self.release_lease(lease)
+            raise
 
     def synchronize(self, db):
         stamp = time.time()
@@ -261,6 +268,11 @@ class PodcastResources:
         with self.database.connect(write=True) as db:
             self.synchronize(db)
             rows = self.rows(db)
+        active_ids = (
+            self.manager.active_episode_ids()
+            if hasattr(self.manager, "active_episode_ids")
+            else set(getattr(self.manager, "_active_downloads", {}))
+        )
         items, total_bytes = [], 0
         for row in rows:
             path = self.manager._safe_local_path(row.pop("local_path"))
@@ -272,7 +284,7 @@ class PodcastResources:
             row.update(
                 size_bytes=size,
                 protected=bool(row["protected"]),
-                active=bool(row.pop("leased")) or row["id"] in self.manager._active_downloads,
+                active=bool(row.pop("leased")) or row["id"] in active_ids,
             )
             items.append(row)
         return {
@@ -327,14 +339,21 @@ class PodcastResources:
                 aliases = self.rows(db, list({r["local_path"] for r in previous} | {str(path)}))
                 if not aliases:
                     continue
+                in_flight = (
+                    self.manager.active_or_queued_episode_ids()
+                    if hasattr(self.manager, "active_or_queued_episode_ids")
+                    else (
+                        set(getattr(self.manager, "_active_downloads", {}))
+                        | set(getattr(self.manager, "_queued_episodes", {}))
+                    )
+                )
                 if any(
                     r["reference_count"]
                     or r.get("favorite_count", 0)
                     or r["protected"]
                     or r["leased"]
                     or r["download_status"] in {"queued", "downloading"}
-                    or r["id"] in self.manager._active_downloads
-                    or r["id"] in self.manager._queued_episodes
+                    or r["id"] in in_flight
                     for r in aliases
                 ):
                     continue

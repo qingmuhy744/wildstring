@@ -184,8 +184,11 @@ class PodcastAutoDownloads:
             removed = previous - {row["id"] for row in rows}
             for identity in removed:
                 db.execute(
-                    "UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?) WHERE episode_id=? AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)",
-                    (time.time(), identity, identity),
+                    """UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?)
+                    WHERE episode_id=?
+                      AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)
+                      AND NOT EXISTS(SELECT 1 FROM podcast_episode_favorites WHERE episode_id=?)""",
+                    (time.time(), identity, identity, identity),
                 )
         return sum(bool(self.manager.queue_download_episode(identity)) for identity in candidates)
 

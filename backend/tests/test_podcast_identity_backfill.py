@@ -642,3 +642,71 @@ def test_settings_switch_the_startup_backfill(settings, monkeypatch, tmp_path):
     with search_support.TestClient(create_app(enabled)):
         pass
     assert scheduled == [5]
+
+
+def test_merge_migrates_queue_baseline_prefs_and_episode_ids(
+    settings, authenticated_client, itunes, feeds
+):
+    import json
+
+    with authenticated_client(settings) as client:
+        user, _ = seed_duplicates(settings, settings.podcasts_dir)
+        run_backfill(client)
+        with connect(settings) as db:
+            db.execute(
+                "INSERT INTO podcast_inbox_baseline(user_id, podcast_id, completed_at) "
+                "VALUES (?, 'etw', '2026-01-01T00:00:00Z')",
+                (user,),
+            )
+            db.execute(
+                "INSERT INTO podcast_queue_prefs"
+                "(user_id, podcast_id, action, auto_limit, episode_order, skip_completed, auto_continue) "
+                "VALUES (?, 'etw', 'queue_next', 5, 'desc', 1, 1)",
+                (user,),
+            )
+            db.execute(
+                "INSERT INTO podcast_queue_state(user_id, items_json, version, device_id, updated_at, notice) "
+                "VALUES (?, ?, 1, 'web', '2026-01-01T00:00:00Z', '')",
+                (
+                    user,
+                    json.dumps(
+                        [
+                            {"episode_id": "etw-1", "origin": "manual", "added_at": "2026-01-01"},
+                            {"episode_id": "etw-2", "origin": "rule", "added_at": "2026-01-02"},
+                            {"episode_id": "fs-2", "origin": "manual", "added_at": "2026-01-03"},
+                        ]
+                    ),
+                ),
+            )
+            db.commit()
+
+        merged = client.post(
+            f"{API}/merge", headers=HEADERS, json={"podcast_ids": ["fireside", "etw"]}
+        )
+        assert merged.status_code == 200, merged.text
+        with connect(settings) as db:
+            assert (
+                db.execute(
+                    "SELECT podcast_id FROM podcast_inbox_baseline WHERE user_id=?", (user,)
+                ).fetchone()[0]
+                == "fireside"
+            )
+            assert (
+                db.execute(
+                    "SELECT action FROM podcast_queue_prefs WHERE user_id=? AND podcast_id='fireside'",
+                    (user,),
+                ).fetchone()[0]
+                == "queue_next"
+            )
+            assert (
+                db.execute(
+                    "SELECT COUNT(*) FROM podcast_queue_prefs WHERE podcast_id='etw'"
+                ).fetchone()[0]
+                == 0
+            )
+            qitems = json.loads(
+                db.execute(
+                    "SELECT items_json FROM podcast_queue_state WHERE user_id=?", (user,)
+                ).fetchone()[0]
+            )
+            assert [item["episode_id"] for item in qitems] == ["fs-1", "fs-2"]

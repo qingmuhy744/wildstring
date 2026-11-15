@@ -79,7 +79,9 @@ def _ordered_episode_ids(connection, episode_ids: list[str], *, newest_first: bo
         number = 0
         if row is not None and row["episode_number"] is not None:
             number = int(row["episode_number"])
-        return (_published_stamp(row["pub_date"] if row else ""), number, order[episode_id])
+        # RSS feeds list newest items first (lower position = newer), so negate position
+        # to keep the ascending sort oldest-first when pub_date and episode_number tie.
+        return (_published_stamp(row["pub_date"] if row else ""), number, -order[episode_id])
 
     ordered = sorted(episode_ids, key=key)
     if newest_first:
@@ -278,7 +280,7 @@ class PreferencesUpdate(BaseModel):
     auto_limit: int = Field(default=3, ge=0, le=100)
     # Account-wide playback default. Show rows may override auto_continue.
     auto_continue: bool = True
-    shows: dict[str, ShowPreference] = Field(default_factory=dict)
+    shows: dict[str, ShowPreference] = Field(default_factory=dict, max_length=2000)
 
 
 def _write_pref(connection, user_id, podcast_id, preference) -> None:
@@ -367,9 +369,13 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
             # Legacy entries carry no timestamp; keep them ahead of newly joined ones.
             fallback = updated_at or _now()
             clean = []
+            seen_episodes: set[str] = set()
             for item in body.items:
+                if item.episode_id in seen_episodes:
+                    continue
                 if _episode_podcast(connection, user["id"], item.episode_id) is None:
                     raise HTTPException(422, "episode_unavailable")
+                seen_episodes.add(item.episode_id)
                 clean.append(
                     {
                         "episode_id": item.episode_id,
@@ -388,6 +394,7 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
     @router.put("/queue/preferences", dependencies=[Depends(auth.require_client)])
     def put_preferences(body: PreferencesUpdate, user: Annotated[dict, Depends(session)]):
         with database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             valid_shows: list[tuple[str, ShowPreference]] = []
             for podcast_id, preference in body.shows.items():
                 if not podcast_id:
