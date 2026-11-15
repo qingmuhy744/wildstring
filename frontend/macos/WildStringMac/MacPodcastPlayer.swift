@@ -114,11 +114,18 @@ struct MacPodcastPlayer: View {
                     Image(systemName: "gobackward.15").font(.title2)
                 }.help(L10n("macPodcastPlayer.skipBackward15")).accessibilityLabel(L10n("macPodcastPlayer.skipBackward15"))
                 Button { playback.togglePlayPause() } label: {
-                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2).foregroundStyle(MacTheme.onAccent).frame(width: 54, height: 54)
-                        .background(MacTheme.accentDeep, in: Circle())
-                }.help(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
-                    .accessibilityLabel(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
+                    Group {
+                        if playback.isBuffering {
+                            MacOnAccentProgress(side: 16)
+                        } else {
+                            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.title2).foregroundStyle(MacTheme.onAccent)
+                        }
+                    }
+                    .frame(width: 54, height: 54)
+                    .background(MacTheme.accentDeep, in: Circle())
+                }.help(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
+                    .accessibilityLabel(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
                 Button { playback.seek(to: playback.currentTime + 30) } label: {
                     Image(systemName: "goforward.30").font(.title2)
                 }.help(L10n("macPodcastPlayer.skipForward30")).accessibilityLabel(L10n("macPodcastPlayer.skipForward30"))
@@ -400,14 +407,19 @@ struct MacPodcastPlayer: View {
             show = detail.podcast
             let artist = detail.podcast.author.isEmpty ? L10n("macPodcastPlayer.defaultArtist") : detail.podcast.author
             let refs = detail.episodes.enumerated().map { index, ep in
-                PodcastContinuation.Episode(
+                let done = ep.completed || (
+                    ep.positionSeconds > 0 && ep.durationSeconds > 0
+                        && ep.positionSeconds >= ep.durationSeconds
+                )
+                return PodcastContinuation.Episode(
                     id: ep.id,
                     title: ep.title,
                     artist: artist,
                     album: detail.podcast.title,
                     chronologicalIndex: detail.episodes.count - 1 - index,
-                    isCompleted: ep.positionSeconds > 0 && ep.durationSeconds > 0
-                        && ep.positionSeconds >= ep.durationSeconds
+                    isCompleted: done,
+                    resumePositionSeconds: done ? 0 : Double(max(0, ep.positionSeconds)),
+                    durationSeconds: Double(max(0, ep.durationSeconds))
                 )
             }
             let pref = cloud?.showPreference(detail.podcast.id).continuation

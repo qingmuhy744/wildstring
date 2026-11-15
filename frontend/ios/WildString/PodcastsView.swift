@@ -12,7 +12,8 @@ extension PodcastEpisode {
             album: nil,
             hasCover: false,
             streamPath: "api/v1/podcasts/episodes/\(id)/stream?proxy=1&cache=1",
-            resumePositionSeconds: isDone ? 0 : Double(max(0, positionSeconds))
+            resumePositionSeconds: isDone ? 0 : Double(max(0, positionSeconds)),
+            durationSeconds: Double(max(0, durationSeconds))
         )
     }
 }
@@ -323,12 +324,17 @@ private struct PodcastDetailView: View {
 
     private func applyContinuation(_ episodes: [PodcastEpisode], show: PodcastSummary?) {
         let refs: [PodcastContinuation.Episode] = episodes.enumerated().map { index, episode in
-            PodcastContinuation.Episode(
+            let done = episode.completed || (
+                episode.positionSeconds > 0 && episode.durationSeconds > 0
+                    && episode.positionSeconds >= episode.durationSeconds
+            )
+            return PodcastContinuation.Episode(
                 id: episode.id,
                 title: episode.title,
                 chronologicalIndex: episodes.count - 1 - index,
-                isCompleted: episode.positionSeconds > 0 && episode.durationSeconds > 0
-                    && episode.positionSeconds >= episode.durationSeconds
+                isCompleted: done,
+                resumePositionSeconds: done ? 0 : Double(max(0, episode.positionSeconds)),
+                durationSeconds: Double(max(0, episode.durationSeconds))
             )
         }
         let preference = playback.podcastCloud?.showPreference(show?.id ?? "").continuation

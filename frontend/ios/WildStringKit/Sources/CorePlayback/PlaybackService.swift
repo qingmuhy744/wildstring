@@ -53,9 +53,10 @@ public final class PlaybackService {
         public var streamPath: String
         public var unavailableReason: String?
         public var resumePositionSeconds: Double
+        public var durationSeconds: Double
 
         private enum CodingKeys: String, CodingKey {
-            case id, trackID, title, artist, album, hasCover, streamPath, unavailableReason, resumePositionSeconds
+            case id, trackID, title, artist, album, hasCover, streamPath, unavailableReason, resumePositionSeconds, durationSeconds
         }
 
         public init(
@@ -67,7 +68,8 @@ public final class PlaybackService {
             hasCover: Bool = false,
             streamPath: String,
             unavailableReason: String? = nil,
-            resumePositionSeconds: Double = 0
+            resumePositionSeconds: Double = 0,
+            durationSeconds: Double = 0
         ) {
             self.id = id
             self.trackID = trackID
@@ -78,6 +80,7 @@ public final class PlaybackService {
             self.streamPath = streamPath
             self.unavailableReason = unavailableReason
             self.resumePositionSeconds = resumePositionSeconds
+            self.durationSeconds = durationSeconds
         }
 
         public init(from decoder: Decoder) throws {
@@ -91,6 +94,7 @@ public final class PlaybackService {
             streamPath = try container.decode(String.self, forKey: .streamPath)
             unavailableReason = try container.decodeIfPresent(String.self, forKey: .unavailableReason)
             resumePositionSeconds = try container.decodeIfPresent(Double.self, forKey: .resumePositionSeconds) ?? 0
+            durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds) ?? 0
         }
     }
 
@@ -141,6 +145,8 @@ public final class PlaybackService {
     @ObservationIgnored private var transcodeBaseSeconds: Double = 0
     @ObservationIgnored private var durationOverrideSeconds: Double?
     @ObservationIgnored private var currentIsTranscode = false
+    @ObservationIgnored private var currentItemIsPodcast = false
+    @ObservationIgnored private var currentItemIsLocalFile = false
     @ObservationIgnored private var sleepTask: Task<Void, Never>?
     @ObservationIgnored private var didStreamFallback = false
     @ObservationIgnored var intendedPlaying = false
@@ -155,9 +161,14 @@ public final class PlaybackService {
     @ObservationIgnored public var submitListening: (@Sendable (ListeningReport) async -> Bool)?
     @ObservationIgnored private var podcast = PodcastBookmark()
     @ObservationIgnored private var podcastBoot: Task<Void, Never>?
+    @ObservationIgnored private var podcastWriteTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored public var podcastDeviceID = ""
+    /// Reads the full remote bookmark snapshot (version, position, duration, completed) before a new episode session.
+    @ObservationIgnored public var loadPodcastProgress: (@Sendable (String) async -> PodcastProgressSnapshot?)?
     /// Reads the bookmark version before a new episode session. Nil means the read failed.
     @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
+    @ObservationIgnored private var preloadedPodcastProgress: (episodeID: String, snapshot: PodcastProgressSnapshot)?
+    @ObservationIgnored private var podcastExplicitStartPosition = false
     @ObservationIgnored public var submitPodcastProgress:
         (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
     public private(set) var podcastProgressMessage: String?
@@ -235,7 +246,7 @@ public final class PlaybackService {
         queue = PlaybackQueue(items: persisted.items, currentIndex: persisted.currentIndex)
         podcastOverrideItem = nil
         currentTime = persisted.position
-        duration = 0
+        duration = currentItem.map { max(0, $0.durationSeconds) } ?? 0
         isPlaying = false
         updateSystemNowPlaying()
     }
@@ -246,7 +257,7 @@ public final class PlaybackService {
         queue = snapshot
         podcastOverrideItem = nil
         currentTime = max(0, position)
-        duration = 0
+        duration = currentItem.map { max(0, $0.durationSeconds) } ?? 0
         isPlaying = false
         persistQueueAndProgress()
         updateSystemNowPlaying()
@@ -258,6 +269,8 @@ public final class PlaybackService {
         guard items.indices.contains(index) else { return }
         let turn = invalidatePodcastAdvance()
         podcastOverrideItem = nil
+        podcastExplicitStartPosition = true
+        preloadedPodcastProgress = nil
         if let reason = items[index].unavailableReason {
             errorMessage = KitL10n("kit.playback.trackUnavailableRetry", items[index].title, reason)
             return
@@ -297,6 +310,8 @@ public final class PlaybackService {
         line: PodcastPlaybackLine = .show
     ) {
         podcastLine = line
+        podcastExplicitStartPosition = (position != nil)
+        preloadedPodcastProgress = nil
         startPodcastEpisode(item, position: position ?? item.resumePositionSeconds)
     }
 
@@ -363,14 +378,27 @@ public final class PlaybackService {
     /// adjacent show episode stays a local override.
     public func skipPodcastEpisode(_ direction: PodcastContinuation.Skip) {
         if beginContextStep(direction) { return }
-        invalidatePodcastAdvance()
+        let turn = invalidatePodcastAdvance()
         guard let currentID = currentItem?.trackID, currentID.hasPrefix("podcast_ep_"),
               let next = podcastAdjacentItem(
                   currentID: currentID, direction: direction, requireAutoContinue: false
               )
         else { return }
+        podcastExplicitStartPosition = false
+        preloadedPodcastProgress = nil
+        if loadPodcastProgress != nil {
+            let resumePlaying = intendedPlaying
+            podcastAdvanceTask?.cancel()
+            podcastAdvanceTask = Task { @MainActor in
+                let resolved = await self.resolvePodcastTransitionItem(next)
+                guard turn == self.podcastTurn else { return }
+                self.podcastOverrideItem = resolved.item
+                self.startCurrent(autoplay: resumePlaying, startAt: resolved.startAt)
+            }
+            return
+        }
         podcastOverrideItem = next
-        startCurrent(autoplay: intendedPlaying, startAt: 0)
+        startCurrent(autoplay: intendedPlaying, startAt: next.resumePositionSeconds)
     }
 
     /// Read-only preview of what auto-continuation will play once the manual
@@ -419,7 +447,9 @@ public final class PlaybackService {
             title: episode.title,
             artist: episode.artist,
             album: episode.album,
-            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1"
+            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1",
+            resumePositionSeconds: episode.isCompleted ? 0 : episode.resumePositionSeconds,
+            durationSeconds: episode.durationSeconds
         )
     }
 
@@ -583,11 +613,14 @@ public final class PlaybackService {
             let item = player.currentItem, item.status == .readyToPlay
         else { return }
         seekInFlight = true
-        // Preserve millisecond lyric boundaries, and wait for completion before
-        // issuing the latest requested position or restarting playback.
+        // Preserve millisecond lyric boundaries for music and local files, while allowing
+        // coarse byte-offset seeking on remote podcasts so long MP3s don't scan from byte 0.
+        let tolerance: CMTime = (currentItemIsPodcast && !currentItemIsLocalFile)
+            ? CMTime(seconds: 0.5, preferredTimescale: 600)
+            : .zero
         player.seek(
             to: CMTime(value: Self.milliseconds(target), timescale: 1000),
-            toleranceBefore: .zero, toleranceAfter: .zero,
+            toleranceBefore: tolerance, toleranceAfter: tolerance,
             completionHandler: seekCompletion(
                 CallbackRef(value: item), target: target, box: PlaybackServiceBox(self)
             )
@@ -643,9 +676,12 @@ public final class PlaybackService {
         intendedPlaying = false
         pendingSeek = nil
         seekInFlight = false
+        resourceLoader.cancelPendingRequests()
         player.replaceCurrentItem(with: nil)
         queue = PlaybackQueue()
         podcastOverrideItem = nil
+        preloadedPodcastProgress = nil
+        podcastExplicitStartPosition = false
         currentTime = 0
         duration = 0
         isPlaying = false
@@ -654,6 +690,8 @@ public final class PlaybackService {
         transcodeBaseSeconds = 0
         durationOverrideSeconds = nil
         currentIsTranscode = false
+        currentItemIsPodcast = false
+        currentItemIsLocalFile = false
         currentOutputLabel = nil
         clearSystemNowPlaying()
         _ = listening.begin(
@@ -744,9 +782,12 @@ public final class PlaybackService {
         intendedPlaying = false
         pendingSeek = nil
         seekInFlight = false
+        preloadedPodcastProgress = nil
+        podcastExplicitStartPosition = false
+        resourceLoader.cancelPendingRequests()
         player.replaceCurrentItem(with: nil)
         currentTime = max(0, position)
-        duration = 0
+        duration = currentItem.map { max(0, $0.durationSeconds) } ?? 0
         isPlaying = false
         isBuffering = false
         didFinishQueue = false
@@ -828,6 +869,7 @@ public final class PlaybackService {
         pendingSeek = nil
         seekInFlight = false
         player.pause()
+        resourceLoader.cancelPendingRequests()
         guard let item = currentItem else {
             adoptMedia(autoplay: false, startAt: 0)
             player.replaceCurrentItem(with: nil)
@@ -861,7 +903,9 @@ public final class PlaybackService {
             }
             return
         }
-        prefetchLeadingBytes(of: item)
+        if startAt <= 0 {
+            prefetchLeadingBytes(of: item)
+        }
         buildAsset(
             url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
             isTranscode: false,
@@ -899,7 +943,9 @@ public final class PlaybackService {
                     startAt: 0
                 )
             } else {
-                prefetchLeadingBytes(of: item)
+                if startAt <= 0 {
+                    prefetchLeadingBytes(of: item)
+                }
                 buildAsset(
                     url: WildstringAudioResourceLoader.assetURL(
                         server: server,
@@ -919,7 +965,9 @@ public final class PlaybackService {
             guard !Task.isCancelled, currentItem?.id == item.id else { return }
             assetLoadTask = nil
             errorMessage = KitL10n("kit.playback.transcodeFallback")
-            prefetchLeadingBytes(of: item)
+            if startAt <= 0 {
+                prefetchLeadingBytes(of: item)
+            }
             buildAsset(
                 url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
                 isTranscode: false,
@@ -941,12 +989,17 @@ public final class PlaybackService {
         autoplay: Bool,
         startAt: Double
     ) {
-        let options = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        let isPodcast = Self.podcastEpisodeID(currentItem?.trackID ?? "") != nil
+        currentItemIsPodcast = isPodcast
+        currentItemIsLocalFile = url.isFileURL
+        // Precise timing forces AVURLAsset to scan every CBR MP3 frame from byte 0 before
+        // seeking/playing. Keep it on for music and local files, and off for remote podcasts.
+        let options = [AVURLAssetPreferPreciseDurationAndTimingKey: !isPodcast || url.isFileURL]
         let asset = AVURLAsset(url: url, options: options)
         if !url.isFileURL {
             asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.callbackQueue)
         }
-        let playerItem = AVPlayerItem(asset: asset)
+        let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable"])
         playerItem.audioTimePitchAlgorithm = .timeDomain
         player.pause()
         pendingSeek = !isTranscode && startAt > 0 ? startAt : nil
@@ -960,7 +1013,8 @@ public final class PlaybackService {
         self.currentOutputLabel = outputLabel
         intendedPlaying = autoplay
         currentTime = isTranscode ? transcodeBaseSeconds : startAt
-        duration = durationOverride ?? 0
+        let hintedDuration = currentItem.map { max(0, $0.durationSeconds) } ?? 0
+        duration = durationOverride ?? hintedDuration
         bufferedTime = 0
         errorMessage = nil
         isPlaying = false
@@ -1022,7 +1076,8 @@ public final class PlaybackService {
 
     fileprivate func itemDurationChanged() {
         guard durationOverrideSeconds == nil || durationOverrideSeconds == 0 else { return }
-        let itemDuration = player.currentItem?.duration.seconds ?? 0
+        guard let item = player.currentItem, item.status == .readyToPlay else { return }
+        let itemDuration = item.duration.seconds
         if itemDuration.isFinite, itemDuration > 0, itemDuration != duration {
             duration = itemDuration
             updateSystemNowPlaying()
@@ -1156,15 +1211,18 @@ public final class PlaybackService {
         if let endedTrackID, let episodeID = Self.podcastEpisodeID(endedTrackID), podcastCloud != nil {
             let turn = invalidatePodcastAdvance()
             let cloud = podcastCloud
+            podcastAdvanceTask?.cancel()
             podcastAdvanceTask = Task { @MainActor in
                 await self.advanceCloudPodcast(episodeID: episodeID, endedTrackID: endedTrackID, turn: turn, cloud: cloud)
             }
             return
         }
         if endedIsPodcast {
+            podcastExplicitStartPosition = false
+            preloadedPodcastProgress = nil
             // A non-empty manual podcast queue always wins, ignoring music shuffle/repeat.
-            if podcastOverrideItem == nil, advanceSequentialPodcastInLocalQueue() != nil {
-                startCurrent(autoplay: true, startAt: 0)
+            if podcastOverrideItem == nil, let next = advanceSequentialPodcastInLocalQueue() {
+                startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
                 persistProgress()
                 return
             }
@@ -1173,7 +1231,7 @@ public final class PlaybackService {
                    currentID: endedTrackID, direction: .next, requireAutoContinue: true
                ) {
                 podcastOverrideItem = next
-                startCurrent(autoplay: true, startAt: 0)
+                startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
                 return
             }
             stopAtEndOfPodcast()
@@ -1205,6 +1263,7 @@ public final class PlaybackService {
         }
         let turn = invalidatePodcastAdvance()
         let cloud = podcastCloud
+        podcastAdvanceTask?.cancel()
         podcastAdvanceTask = Task { @MainActor in
             await self.performContextStep(
                 episodeID: episodeID,
@@ -1264,7 +1323,11 @@ public final class PlaybackService {
                 return
             }
             guard turn == podcastTurn else { return }
-            startPodcastEpisode(item, position: 0, autoplay: intendedPlaying)
+            podcastExplicitStartPosition = false
+            preloadedPodcastProgress = nil
+            let resolved = await resolvePodcastTransitionItem(item)
+            guard turn == podcastTurn else { return }
+            startPodcastEpisode(resolved.item, position: resolved.startAt, autoplay: intendedPlaying)
             return
         }
         let following = await cloud.episodeFinished(episodeID)
@@ -1280,7 +1343,11 @@ public final class PlaybackService {
             return
         }
         guard turn == podcastTurn else { return }
-        startPodcastEpisode(item, position: 0, autoplay: automatic || intendedPlaying)
+        podcastExplicitStartPosition = false
+        preloadedPodcastProgress = nil
+        let resolved = await resolvePodcastTransitionItem(item)
+        guard turn == podcastTurn else { return }
+        startPodcastEpisode(resolved.item, position: resolved.startAt, autoplay: automatic || intendedPlaying)
     }
 
     private func stepShow(
@@ -1321,12 +1388,37 @@ public final class PlaybackService {
             }
         }
         guard turn == podcastTurn else { return }
-        let trackID = "podcast_ep_\(episodeID)"
-        guard let adjacent = podcastAdjacentItem(
-            currentID: trackID,
-            direction: direction,
-            requireAutoContinue: automatic
-        ) else {
+        podcastExplicitStartPosition = false
+        preloadedPodcastProgress = nil
+        var cursorTrackID = "podcast_ep_\(episodeID)"
+        var selected: Item?
+        var selectedStartAt: Double = 0
+        let maxHops = max(1, podcastEpisodes.count)
+        for _ in 0..<maxHops {
+            guard let candidate = podcastAdjacentItem(
+                currentID: cursorTrackID,
+                direction: direction,
+                requireAutoContinue: automatic
+            ) else {
+                break
+            }
+            let resolved = await resolvePodcastTransitionItem(candidate)
+            guard turn == podcastTurn else { return }
+            if automatic, direction == .next, podcastPreference.skipCompleted, resolved.completedRemotely,
+               let candidateID = Self.podcastEpisodeID(candidate.trackID)
+            {
+                if let index = podcastEpisodes.firstIndex(where: { $0.id == candidateID }) {
+                    podcastEpisodes[index].isCompleted = true
+                }
+                preloadedPodcastProgress = nil
+                cursorTrackID = candidate.trackID
+                continue
+            }
+            selected = resolved.item
+            selectedStartAt = resolved.startAt
+            break
+        }
+        guard let adjacent = selected else {
             if automatic { stopAtEndOfPodcast() }
             return
         }
@@ -1335,13 +1427,45 @@ public final class PlaybackService {
             guard turn == podcastTurn else { return }
         }
         podcastOverrideItem = adjacent
-        startCurrent(autoplay: automatic || intendedPlaying, startAt: 0)
+        startCurrent(autoplay: automatic || intendedPlaying, startAt: selectedStartAt)
+    }
+
+    private func resolvePodcastTransitionItem(_ item: Item) async -> (
+        item: Item, startAt: Double, completedRemotely: Bool
+    ) {
+        guard let episodeID = Self.podcastEpisodeID(item.trackID),
+              let loadProgress = loadPodcastProgress,
+              let snapshot = await loadProgress(episodeID)
+        else {
+            return (item, max(0, item.resumePositionSeconds), false)
+        }
+        let done = Self.isPodcastSnapshotCompleted(snapshot)
+        var updated = item
+        if let durationSeconds = snapshot.durationSeconds, durationSeconds > 0 {
+            updated.durationSeconds = Double(durationSeconds)
+        }
+        let resume = done ? 0 : Double(max(0, snapshot.positionSeconds))
+        updated.resumePositionSeconds = resume
+        preloadedPodcastProgress = (episodeID: episodeID, snapshot: snapshot)
+        return (updated, resume, done)
+    }
+
+    private static func isPodcastSnapshotCompleted(_ snapshot: PodcastProgressSnapshot) -> Bool {
+        snapshot.completed == true || (
+            snapshot.positionSeconds > 0
+                && (snapshot.durationSeconds ?? 0) > 0
+                && snapshot.positionSeconds >= (snapshot.durationSeconds ?? 0)
+        )
     }
 
     func waitForPodcastTasks() async {
         await podcastContinuationTask?.value
         await podcastAdvanceTask?.value
         await podcastContinuationTask?.value
+        await podcastBoot?.value
+        while let writeTask = podcastWriteTasks.values.first {
+            await writeTask.value
+        }
     }
 
     private func stopAtEndOfPodcast() {
@@ -1413,10 +1537,35 @@ public final class PlaybackService {
     }
 
     private func bootPodcast(_ episode: String) async {
-        guard let load = loadPodcastBaseVersion else { return }
-        guard let version = await load(episode) else { return }
+        let snapshot: PodcastProgressSnapshot?
+        if let cached = preloadedPodcastProgress, cached.episodeID == episode {
+            preloadedPodcastProgress = nil
+            snapshot = cached.snapshot
+        } else if let loadProgress = loadPodcastProgress {
+            snapshot = await loadProgress(episode)
+        } else if let load = loadPodcastBaseVersion, let version = await load(episode) {
+            snapshot = PodcastProgressSnapshot(
+                version: version,
+                positionSeconds: Int(currentTime.rounded()),
+                durationSeconds: duration > 0 ? Int(duration.rounded()) : nil,
+                completed: false
+            )
+        } else {
+            snapshot = nil
+        }
+        guard let snapshot else { return }
         if Task.isCancelled || currentItem?.trackID != "podcast_ep_\(episode)" { return }
-        podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: version)
+        if let remoteDuration = snapshot.durationSeconds, remoteDuration > 0, duration <= 0 {
+            duration = Double(remoteDuration)
+        }
+        if !podcastExplicitStartPosition, loadPodcastProgress != nil {
+            let remoteCompleted = Self.isPodcastSnapshotCompleted(snapshot)
+            let remoteResume = remoteCompleted ? 0 : Double(max(0, snapshot.positionSeconds))
+            if abs(currentTime - remoteResume) >= 2 {
+                seek(to: remoteResume)
+            }
+        }
+        podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: snapshot.version)
         checkpointPodcast(event: "play", force: true)
     }
 
@@ -1440,11 +1589,21 @@ public final class PlaybackService {
         ) else { return }
         let episode = podcast.episodeId
         guard let submit = submitPodcastProgress else { return }
-        Task { @MainActor in
+        let writeID = UUID()
+        podcastWriteTasks[writeID] = Task { @MainActor [weak self] in
+            defer { self?.podcastWriteTasks.removeValue(forKey: writeID) }
             let result = await submit(episode, write)
+            guard let self else { return }
             if result == .conflict {
-                guard let load = self.loadPodcastBaseVersion,
-                      let version = await load(episode),
+                let latestVersion: Int?
+                if let loadProgress = self.loadPodcastProgress {
+                    latestVersion = await loadProgress(episode)?.version
+                } else if let load = self.loadPodcastBaseVersion {
+                    latestVersion = await load(episode)
+                } else {
+                    latestVersion = nil
+                }
+                guard let version = latestVersion,
                       self.currentItem?.trackID == "podcast_ep_\(episode)"
                 else { return }
                 self.podcast.begin(episodeId: episode, deviceId: self.podcastDeviceID, baseVersion: version)
