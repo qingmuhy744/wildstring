@@ -169,6 +169,7 @@ public final class PlaybackService {
     @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
     @ObservationIgnored private var preloadedPodcastProgress: (episodeID: String, snapshot: PodcastProgressSnapshot)?
     @ObservationIgnored private var podcastExplicitStartPosition = false
+    @ObservationIgnored private var podcastSeekRevision = 0
     @ObservationIgnored public var submitPodcastProgress:
         (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
     public private(set) var podcastProgressMessage: String?
@@ -583,7 +584,14 @@ public final class PlaybackService {
     }
 
     public func seek(to seconds: Double) {
+        performSeek(to: seconds, isUserInitiated: true)
+    }
+
+    private func performSeek(to seconds: Double, isUserInitiated: Bool) {
         guard currentItem != nil else { return }
+        if isUserInitiated {
+            podcastSeekRevision &+= 1
+        }
         let upper = duration > 0 ? duration : seconds
         let target = min(max(0, seconds), upper)
         if currentIsTranscode || assetLoadTask != nil {
@@ -1531,12 +1539,13 @@ public final class PlaybackService {
         podcastProgressMessage = nil
         guard let identifier, ListeningTracker.isPodcast(identifier) else { return }
         let episode = String(identifier.dropFirst("podcast_ep_".count))
+        let initialSeekRevision = podcastSeekRevision
         podcastBoot = Task { [weak self] in
-            await self?.bootPodcast(episode)
+            await self?.bootPodcast(episode, initialSeekRevision: initialSeekRevision)
         }
     }
 
-    private func bootPodcast(_ episode: String) async {
+    private func bootPodcast(_ episode: String, initialSeekRevision: Int) async {
         let snapshot: PodcastProgressSnapshot?
         if let cached = preloadedPodcastProgress, cached.episodeID == episode {
             preloadedPodcastProgress = nil
@@ -1558,15 +1567,24 @@ public final class PlaybackService {
         if let remoteDuration = snapshot.durationSeconds, remoteDuration > 0, duration <= 0 {
             duration = Double(remoteDuration)
         }
-        if !podcastExplicitStartPosition, loadPodcastProgress != nil {
+        let userSoughtDuringBoot = podcastSeekRevision != initialSeekRevision
+        if !podcastExplicitStartPosition, !userSoughtDuringBoot, loadPodcastProgress != nil {
             let remoteCompleted = Self.isPodcastSnapshotCompleted(snapshot)
             let remoteResume = remoteCompleted ? 0 : Double(max(0, snapshot.positionSeconds))
             if abs(currentTime - remoteResume) >= 2 {
-                seek(to: remoteResume)
+                performSeek(to: remoteResume, isUserInitiated: false)
             }
         }
         podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: snapshot.version)
-        checkpointPodcast(event: "play", force: true)
+        let bootEvent: String
+        if !intendedPlaying && !isPlaying {
+            bootEvent = "pause"
+        } else if userSoughtDuringBoot {
+            bootEvent = "seek"
+        } else {
+            bootEvent = "play"
+        }
+        checkpointPodcast(event: bootEvent, force: true)
     }
 
     private func checkpointListening(state: String) {
