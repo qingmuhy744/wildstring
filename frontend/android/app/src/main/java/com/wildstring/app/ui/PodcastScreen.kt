@@ -148,7 +148,7 @@ fun PodcastChannelPage(
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 760.dp
             Row(Modifier.fillMaxSize().testTag(if (split) "podcast-two-pane" else "podcast-single-pane")) {
                 if (split || (selectedPodcast == null && selectedPublisher == null)) {
                     Box(if (split) Modifier.width(260.dp).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {
@@ -215,8 +215,6 @@ fun PodcastChannelPage(
                                             vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                                         },
                                         onRemoveQueuedEpisode = vm::removePodcastQueueEpisode,
-                                        totalPendingCount = pendingCount,
-                                        onPlayPendingQueue = { vm.playPodcastPendingQueue() },
                                         isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } },
                                         isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
                                         isEpisodeFavorite = { epId -> epId in favoriteIds },
@@ -410,13 +408,16 @@ private fun PodcastUnifiedQueueBanner(
                             }
                         }
                     }
-                    Text(
-                        if (pendingCount > 0) stringResource(R.string.pod_scr_pending_summary, pendingCount) else stringResource(R.string.pod_scr_pending_empty_prompt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // The badge already carries the count; only the empty queue needs a next-step hint.
+                    if (pendingCount == 0) {
+                        Text(
+                            stringResource(R.string.pod_scr_pending_empty_prompt),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 if (pendingCount > 0) {
                     FilledTonalButton(
@@ -425,7 +426,9 @@ private fun PodcastUnifiedQueueBanner(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-banner-play-all")
                     ) {
-                        Text(stringResource(R.string.pod_scr_play_btn), fontSize = 12.sp)
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.pod_scr_play_btn), fontSize = 13.sp, maxLines = 1, softWrap = false)
                     }
                 } else {
                     OutlinedButton(
@@ -900,6 +903,7 @@ private fun PodcastListView(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PodcastCardItem(
     vm: MusicViewModel,
@@ -955,8 +959,9 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                // Wraps under the count when the pane is narrow instead of clipping "N left".
+                FlowRow(
+                    itemVerticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(top = 2.dp),
                 ) {
@@ -964,13 +969,14 @@ private fun PodcastCardItem(
                         text = stringResource(R.string.pod_scr_episodes_count, podcast.totalEpisodes),
                         style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, softWrap = false,
                     )
                     if (podcast.unplayedEpisodes > 0) {
                         Text(
                             text = stringResource(R.string.pod_scr_unplayed_count, podcast.unplayedEpisodes),
                             style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 1, softWrap = false,
                         )
                     }
                 }
@@ -1066,8 +1072,6 @@ private fun PodcastDetailView(
     onPlayEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
     onRemoveQueuedEpisode: (String) -> Unit = {},
-    totalPendingCount: Int = 0,
-    onPlayPendingQueue: () -> Unit = {},
     isEpisodeQueued: (String) -> Boolean = { false },
     isEpisodeActive: (String) -> Boolean = { false },
     isEpisodeFavorite: (String) -> Boolean = { false },
@@ -1206,7 +1210,8 @@ private fun PodcastDetailView(
                                 onClick = { onPlayEpisode(target) },
                                 shape = RoundedCornerShape(999.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp),
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                // Full width on Phone; on Pad the 760dp reading column would stretch it into a banner.
+                                modifier = (if (LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad) Modifier.widthIn(min = 240.dp, max = 360.dp) else Modifier.fillMaxWidth()).heightIn(min = 48.dp),
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
@@ -1215,26 +1220,12 @@ private fun PodcastDetailView(
                             Spacer(Modifier.height(8.dp))
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (totalPendingCount > 0) {
-                                FilledTonalButton(
-                                    onClick = onPlayPendingQueue,
-                                    shape = RoundedCornerShape(999.dp),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp).testTag("podcast-detail-play-queue"),
-                                ) {
-                                    Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
-                                }
-                            }
                             if (!podcast.followed) {
                                 FilledTonalButton(
                                     onClick = onFollow,
                                     shape = RoundedCornerShape(999.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = (if (nextPlayable != null || totalPendingCount > 0) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
+                                    modifier = (if (nextPlayable != null) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
                                 ) {
                                     Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
@@ -1243,7 +1234,7 @@ private fun PodcastDetailView(
                                 onChange = onShowPreference, onRetry = onRetryPreference,
                                 onAutoDownload = onAutoDownload, onUnfollow = onFollow,
                                 modifier = Modifier.weight(1f),
-                                fillWidth = nextPlayable == null && totalPendingCount <= 0,
+                                fillWidth = nextPlayable == null,
                             )
                             Box {
                                 IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {

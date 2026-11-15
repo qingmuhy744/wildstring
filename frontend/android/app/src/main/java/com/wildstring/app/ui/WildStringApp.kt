@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -603,6 +604,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val rail = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val compact = safeHeight < 600.dp
         val floatingQueue = expanded && state.current != null && wide && !compact
+        // From 1100dp the queue docks beside the player (a right sidebar, as in Spotify); 840-1099dp keep the overlay.
+        val dockedQueue = floatingQueue && safeWidth >= 1100.dp
         var wasWide by rememberSaveable { mutableStateOf(wide) }
         var wasLandscapeWindow by rememberSaveable { mutableStateOf(landscapeWindow) }
         var previousStyle by rememberSaveable { mutableStateOf(preferences.playbackStyle) }
@@ -809,7 +812,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
                 label = "player-overlay",
             ) {
-                Box(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize()) {
+                  Box(Modifier.weight(1f).fillMaxHeight()) {
                     // The offset outlives the dismiss so the exit slide continues from the finger.
                     DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
                     PlayerScreen(vm, state, wide, landscape, landscapeWindow, rail, lyrics, queue, rotation,
@@ -822,23 +826,31 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onArtist = ::openTrackArtist,
                         onAdd = { actions = state.current }, onSleep = { sleepDialog = true },
                         onOpenShow = ::openPlayingShowFromPlayer)
+                  }
+                  if (dockedQueue && queue) Surface(
+                      Modifier.safeDrawingPadding().padding(top = 12.dp, end = 16.dp, bottom = 16.dp).width(360.dp).fillMaxHeight()
+                          .testTag("player-queue-docked"),
+                      shape = RoundedCornerShape(16.dp),
+                      color = MaterialTheme.colorScheme.surfaceContainerLow,
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                  ) { QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false }) }
                 }
             }
         }
-        if (floatingQueue && queue) {
+        if (floatingQueue && queue && !dockedQueue) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .2f))
                 .pointerInput(Unit) { detectTapGestures { queue = false } }
                 .safeDrawingPadding()) {
                 Surface(
                     Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp)
-                        .width(360.dp).heightIn(max = 520.dp).fillMaxHeight()
+                        .width(360.dp).heightIn(max = 520.dp)
                         .testTag("player-queue-popup")
                         .pointerInput(Unit) { detectTapGestures {} },
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    QueuePanel(vm, state, Modifier.fillMaxSize(), onClose = { queue = false })
+                    QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false })
                 }
             }
         }
@@ -1544,34 +1556,64 @@ private fun PlaybackHeader(vm: MusicViewModel, state: MusicState, onAlbum: () ->
         }
         Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                if (track.artists.isEmpty()) {
-                    Text(stringResource(R.string.unknown_artist), color = Muted, fontSize = 13.sp)
-                } else {
-                    track.artists.forEachIndexed { index, name ->
-                        if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable(role = Role.Button) { onArtist(name) }
-                                .padding(vertical = 2.dp)
-                                .testTag("player-artist-$name"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Layout(
+                modifier = Modifier.weight(1f, fill = false),
+                content = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (track.artists.isEmpty()) {
+                            Text(stringResource(R.string.unknown_artist), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            track.artists.forEachIndexed { index, name ->
+                                if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp, maxLines = 1)
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable(role = Role.Button) { onArtist(name) }
+                                        .padding(vertical = 2.dp)
+                                        .testTag("player-artist-$name"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                     }
+                    Text(" · ", color = Muted, fontSize = 13.sp, maxLines = 1)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(role = Role.Button) { onAlbum() }
+                            .padding(vertical = 2.dp)
+                            .testTag("player-album"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(track.album ?: stringResource(R.string.unknown_album), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
-                Text(" · ", color = Muted, fontSize = 13.sp)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable(role = Role.Button) { onAlbum() }
-                        .padding(vertical = 2.dp)
-                        .testTag("player-album"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(track.album ?: stringResource(R.string.unknown_album), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ) { measurables, constraints ->
+                val childConstraints = constraints.copy(minWidth = 0)
+                val sep = measurables[1].measure(childConstraints)
+                val (artistsMax, albumMax) = if (!constraints.hasBoundedWidth) {
+                    constraints.maxWidth to constraints.maxWidth
+                } else {
+                    val contentMax = (constraints.maxWidth - sep.width).coerceAtLeast(0)
+                    val artistsIntrinsic = measurables[0].maxIntrinsicWidth(constraints.maxHeight)
+                    val albumIntrinsic = measurables[2].maxIntrinsicWidth(constraints.maxHeight)
+                    if (artistsIntrinsic + albumIntrinsic <= contentMax) {
+                        artistsIntrinsic.coerceAtMost(contentMax) to albumIntrinsic.coerceAtMost(contentMax)
+                    } else {
+                        val albumTarget = minOf(albumIntrinsic, maxOf((contentMax * 2) / 5, contentMax - artistsIntrinsic))
+                        (contentMax - albumTarget).coerceAtLeast(0) to albumTarget.coerceAtLeast(0)
+                    }
+                }
+                val artists = measurables[0].measure(childConstraints.copy(maxWidth = artistsMax))
+                val album = measurables[2].measure(childConstraints.copy(maxWidth = albumMax))
+                val width = (artists.width + sep.width + album.width).coerceIn(constraints.minWidth, constraints.maxWidth)
+                val height = maxOf(artists.height, sep.height, album.height).coerceIn(constraints.minHeight, constraints.maxHeight)
+                layout(width, height) {
+                    artists.placeRelative(0, (height - artists.height) / 2)
+                    sep.placeRelative(artists.width, (height - sep.height) / 2)
+                    album.placeRelative(artists.width + sep.width, (height - album.height) / 2)
                 }
             }
             if (showQuality && state.playbackQuality.isNotBlank()) {

@@ -110,7 +110,7 @@ import kotlinx.coroutines.launch
         }
         Surface(Modifier.fillMaxSize().testTag("podcast-explore")) {
             BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp)) {
-                val wide = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+                val wide = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 760.dp
                 BackHandler(selected != null && !wide) { selected = null }
                 LaunchedEffect(wide, page, isRssUrl) {
                     if (wide && !isRssUrl && selected == null) selected = page?.results?.firstOrNull()

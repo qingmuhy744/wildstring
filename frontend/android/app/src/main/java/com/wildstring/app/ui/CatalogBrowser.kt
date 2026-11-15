@@ -70,16 +70,17 @@ import kotlin.math.roundToInt
             }
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val pad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
-        val trackColumns = pad && maxWidth >= 720.dp
+        val trackColumns = pad && maxWidth >= 760.dp
         val cardGrid = pad && state.kind in listOf("artists", "playlists")
         val gutter = if (indexed) 30.dp else 0.dp
         // One grid and one absolute item index in every mode retain the viewport on resize.
         LazyVerticalGrid(
             columns = when { albumGrid -> GridCells.Adaptive(140.dp); cardGrid -> GridCells.Adaptive(260.dp); else -> GridCells.Fixed(1) },
             state = grid,
-            modifier = Modifier.fillMaxSize().padding(end = gutter).testTag(if (albumGrid) "album-grid" else "catalog-list"),
+            // Same 1180dp reading width as the Web shell, so ultra-wide windows do not stretch rows apart.
+            modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(end = gutter).testTag(if (albumGrid) "album-grid" else "catalog-list"),
             horizontalArrangement = Arrangement.spacedBy(if (albumGrid || cardGrid) 16.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(if (albumGrid) 16.dp else if (cardGrid) 8.dp else 0.dp),
             contentPadding = if (albumGrid || cardGrid) PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp) else PaddingValues(bottom = 12.dp),

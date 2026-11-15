@@ -201,21 +201,16 @@ class PodcastQueueDetailLayoutTest {
             appearance(vm, "dark")
             capture("phone-detail-after-queue-dark")
 
-            val queueAction = compose.onNodeWithTag("podcast-detail-play-queue").fetchSemanticsNode().boundsInRoot
+            // The queue is shared by every show, so its play action lives on the radio home banner, not in a show page.
+            assertTrue("show detail must not offer playback of the global queue", compose.onAllNodesWithTag("podcast-detail-play-queue").fetchSemanticsNodes().isEmpty())
             val followMenu = compose.onNodeWithTag("podcast-follow-menu").fetchSemanticsNode().boundsInRoot
             val queuedChip = compose.onAllNodesWithText(uiString(R.string.podcast_queue_added)).onFirst().fetchSemanticsNode().boundsInRoot
             val screen = compose.onRoot().fetchSemanticsNode().boundsInRoot
-            assertTrue("queue action must stay inside the phone width", queueAction.right <= screen.right + 0.5f)
-            assertTrue("queue action must not be squeezed to nothing", queueAction.width > 60f)
-            assertTrue("queue action must not overlap the follow rule", queueAction.right <= followMenu.left + 0.5f)
             assertTrue("queued chip must stay inside the phone width", queuedChip.right <= screen.right + 0.5f)
             assertTrue("queued chip keeps a standard action height", queuedChip.height <= 48.5f)
 
             compose.onAllNodesWithText(uiString(R.string.podcast_queue_added)).onFirst().performClick()
             compose.waitUntil(30_000) { vm.podcastCloud.value.queue.isEmpty() }
-            compose.waitUntil(30_000) {
-                compose.onAllNodesWithTag("podcast-detail-play-queue").fetchSemanticsNodes().isEmpty()
-            }
             compose.onAllNodesWithText(uiString(R.string.podcast_queue_add)).onFirst().assertIsDisplayed()
         } finally {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
