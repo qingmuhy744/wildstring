@@ -275,12 +275,16 @@ class PadLayoutTest {
             capture("pad-landscape-podcast-light")
             appearance(vm, "dark")
             capture("pad-landscape-podcast-dark")
-            window(800, 1200)
+            // 840dp window = 760dp content beside the 80dp rail: the first width that splits.
+            window(840, 1200)
             compose.onNodeWithTag("podcast-two-pane").assertIsDisplayed()
             capture("pad-portrait-podcast-dark")
             appearance(vm, "light")
             capture("pad-portrait-podcast-light")
             appearance(vm, "dark")
+            window(800, 1200)
+            compose.onNodeWithTag("podcast-single-pane").assertIsDisplayed()
+            capture("pad-medium-podcast-dark")
             window(700, 1000)
             compose.onNodeWithTag("navigation-rail").assertIsDisplayed()
             compose.onNodeWithTag("podcast-single-pane").assertIsDisplayed()
@@ -318,7 +322,7 @@ class PadLayoutTest {
             capture("pad-landscape-chat-dark")
             appearance(vm, "light")
             capture("pad-landscape-chat-light")
-            window(800, 1200)
+            window(840, 1200)
             compose.onNodeWithTag("agent-two-pane").assertIsDisplayed()
             compose.onNodeWithTag("agent-chat-input").assertTextContains("旋转后保留的草稿")
             capture("pad-portrait-chat-light")
@@ -377,6 +381,58 @@ class PadLayoutTest {
             capture("podcast-settings-tablet-light")
             appearance(vm, "dark")
             capture("podcast-settings-tablet-dark")
+        } finally {
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+            window(390, 844)
+        } }
+    }
+
+    /** Mini player in the Pad shell, then the full player with the queue docked (>=1100dp) or floating (840-1099dp). */
+    @Test fun padMiniPlayerAndQueueDockingFollowWindowWidth() {
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        Fixture().use { fixture -> try {
+            compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto") }
+            window(390, 844)
+            val serverUrl = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(serverUrl, "pad", "synthetic-password", true) }
+            compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
+            compose.onNodeWithTag("nav-library").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-tracks").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("catalog-tracks").performClick()
+            compose.waitUntil(15_000) { vm.state.value.tracks.size == 40 }
+            compose.runOnIdle { vm.play(vm.state.value.tracks.take(3), 0) }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() }
+            for ((width, height, name) in listOf(Triple(1200, 800, "landscape"), Triple(800, 1200, "portrait"))) {
+                window(width, height)
+                compose.onNodeWithTag("navigation-rail").assertIsDisplayed()
+                compose.onNodeWithTag("mini-player").assertIsDisplayed()
+                capture("pad-$name-miniplayer-light")
+                appearance(vm, "dark")
+                capture("pad-$name-miniplayer-dark")
+                appearance(vm, "light")
+            }
+            for ((width, height, docked) in listOf(Triple(1200, 800, true), Triple(900, 1200, false))) {
+                window(width, height)
+                compose.onNodeWithTag("mini-player-open").performClick()
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
+                if (docked) {
+                    compose.onNodeWithTag("player-queue-docked").assertIsDisplayed()
+                    compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
+                } else {
+                    compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
+                    compose.onNodeWithTag("player-queue-docked").assertDoesNotExist()
+                }
+                capture("pad-player-queue-${if (docked) "docked" else "floating"}-light")
+                appearance(vm, "dark")
+                capture("pad-player-queue-${if (docked) "docked" else "floating"}-dark")
+                appearance(vm, "light")
+                androidx.test.espresso.Espresso.pressBack()
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isEmpty() }
+                androidx.test.espresso.Espresso.pressBack()
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isEmpty() }
+            }
         } finally {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
             window(390, 844)

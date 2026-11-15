@@ -148,7 +148,7 @@ fun PodcastChannelPage(
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 720.dp
+            val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 760.dp
             Row(Modifier.fillMaxSize().testTag(if (split) "podcast-two-pane" else "podcast-single-pane")) {
                 if (split || (selectedPodcast == null && selectedPublisher == null)) {
                     Box(if (split) Modifier.width(260.dp).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight()) {

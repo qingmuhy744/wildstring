@@ -25,7 +25,7 @@ import com.wildstring.app.data.Track
     val feedback = LocalTactileFeedback.current
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
         val pad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
-        val columns = pad && maxWidth >= 720.dp
+        val columns = pad && maxWidth >= 760.dp
         LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "discovery-header") { header() }
             item {

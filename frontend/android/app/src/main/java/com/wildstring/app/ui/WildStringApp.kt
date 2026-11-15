@@ -603,6 +603,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val rail = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val compact = safeHeight < 600.dp
         val floatingQueue = expanded && state.current != null && wide && !compact
+        // From 1100dp the queue docks beside the player (a right sidebar, as in Spotify); 840-1099dp keep the overlay.
+        val dockedQueue = floatingQueue && safeWidth >= 1100.dp
         var wasWide by rememberSaveable { mutableStateOf(wide) }
         var wasLandscapeWindow by rememberSaveable { mutableStateOf(landscapeWindow) }
         var previousStyle by rememberSaveable { mutableStateOf(preferences.playbackStyle) }
@@ -809,7 +811,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
                 label = "player-overlay",
             ) {
-                Box(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize()) {
+                  Box(Modifier.weight(1f).fillMaxHeight()) {
                     // The offset outlives the dismiss so the exit slide continues from the finger.
                     DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
                     PlayerScreen(vm, state, wide, landscape, landscapeWindow, rail, lyrics, queue, rotation,
@@ -822,10 +825,18 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onArtist = ::openTrackArtist,
                         onAdd = { actions = state.current }, onSleep = { sleepDialog = true },
                         onOpenShow = ::openPlayingShowFromPlayer)
+                  }
+                  if (dockedQueue && queue) Surface(
+                      Modifier.safeDrawingPadding().padding(top = 12.dp, end = 16.dp, bottom = 16.dp).width(360.dp).fillMaxHeight()
+                          .testTag("player-queue-docked"),
+                      shape = RoundedCornerShape(16.dp),
+                      color = MaterialTheme.colorScheme.surfaceContainerLow,
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                  ) { QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false }) }
                 }
             }
         }
-        if (floatingQueue && queue) {
+        if (floatingQueue && queue && !dockedQueue) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .2f))
                 .pointerInput(Unit) { detectTapGestures { queue = false } }
                 .safeDrawingPadding()) {
