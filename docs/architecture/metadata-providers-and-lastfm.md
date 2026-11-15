@@ -1,6 +1,8 @@
+状态：已交付于 v0.2.2（基础接入）与 v0.3.0（AcoustID）；本文保留来源调研与历史验证记录。当前能力见 [来源契约](../../contracts/metadata-providers.md) 和 [ZIP 插件](source-plugins.md)，下表的“待接入”不是现行插件清单。
+
 # MusicBrainz 与 Last.fm 接入设计
 
-日期：2026-10-16。状态：**MusicBrainz、Last.fm 与配套 CAA 接入范围及 P1–P3 行为均已由用户确认；已进入 0.2.2 实现，具体已实现与未验证边界见文末。**
+日期：2026-10-16。状态：**MusicBrainz、Last.fm 与配套 CAA 接入范围及 P1–P3 行为均已由用户确认；基础批次已纳入 0.2.2，具体已实现与未验证边界见文末。**
 
 与[自动整理方案](../product/metadata-automation.md)、[标签映射](metadata-field-mapping.md)共用字段语义。服务端统一接入，客户端只对接野弦 API；本机已完成 Last.fm 只读资料查询，真实用户授权与收听外发仍待验证；实现情况见文末。
 

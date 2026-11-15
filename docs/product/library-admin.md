@@ -1,6 +1,6 @@
 # 曲库管理与设置
 
-状态：以下为首批管理设计的历史边界。当前 0.8.0 分支已支持多库、个人授权和每库独立存储；目录配置、迁移与共享音频管理集中在网页，Android 只保留消费及授权后的轻量修改。当前契约见[存储与共享资源](../../contracts/storage-and-podcast-resources.md)，验证状态见 [0.8.0 更新说明](../releases/v0.8.0.md)。更新日期：2026-10-25。
+状态：已被 [曲库管理接口](../../contracts/library-management.md) 与 [存储与共享资源](../../contracts/storage-and-podcast-resources.md) 取代（首批管理边界记录，0.8.0 更新见 [0.8.0 更新说明](../releases/v0.8.0.md)）。
 
 ## 目标与入口
 

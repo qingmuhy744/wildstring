@@ -1,6 +1,6 @@
 # 曲库管理接口
 
-已实现首批管理页，SQLite schema v11。所有 `/api/v1/manage` 接口要求管理员会话，写请求和模型测试还要求 `X-Wildstring-Client: web|android|ios|macos`。共用当前 Python 服务，不增加独立任务服务。
+首批管理页在 schema 11 引入；当前 schema 以 `backend/src/wildstring/database.py` 为准。`/api/v1/manage` 要求 `library:inspect`，写操作另按各接口校验权限，写请求和模型测试还要求 `X-Wildstring-Client: web|android|ios|macos`。共用当前 Python 服务，不增加独立任务服务。
 
 ## 概览与设置
 
@@ -31,7 +31,18 @@
 
 文件观测值与人工覆盖分别保存；事务中更新 `tracks` 的生效字段、搜索文本和专辑 ID，因此歌曲、艺人、专辑、收藏与普通/规则歌单查询共用生效值。重扫更新观测值再应用覆盖，保留曲目 ID、收藏/歌单引用和收听记录。变更艺人/专辑名称可能改变其派生聚合 ID，不改变歌曲 ID。
 
-首批预览和保存只更新数据库；编辑当前歌曲仅刷新播放器显示，不重新设置音频源。导入源原件始终只读，托管副本允许后续显式写回与重整，但本版本未实现这两种操作。已增加独立保存的歌词编辑与网页逐行打点，见 [歌词编辑接口](lyrics-editing.md)。批量、封面编辑与元数据自动匹配待后续交付。
+首批预览和保存只更新数据库；编辑当前歌曲仅刷新播放器显示，不重新设置音频源。导入源原件始终只读；托管副本已支持显式单曲重组织，音频内嵌标签写回仍未实现。已增加独立保存的歌词编辑与网页逐行打点，见 [歌词编辑接口](lyrics-editing.md)。批量数据库编辑、专辑封面上传与来源候选已实现，见下节及 [元数据来源](metadata-providers.md)。
+
+## 批量、封面与文件重组织
+
+以下路径均位于 `/api/v1/manage`，写入需 `metadata:write` 与客户端标识：
+
+- `PUT /metadata/folders`、`PUT /metadata/albums`：按文件夹或专辑批量更新元数据；字段与版本由输入模型校验。
+- `POST /albums/{album_id}/cover`：上传专辑封面，支持 `save_sidecar`；`DELETE` 同路径移除覆盖封面。它不等于向音频内嵌标签写图。
+- `GET /tracks/{track_id}/file-info`：读取当前与建议文件路径。
+- `POST /tracks/{track_id}/reorganize-file`：显式重组织单曲托管文件，在扫描锁下移动音频及同名附属文件，保留曲目 ID 并更新路径映射；路径不变时返回 `already_organized`。
+
+单曲重组织不具备持久批量任务、备份补偿或断点恢复保证；这些仍是 [后续设计目标](../docs/architecture/metadata-repair.md)。
 
 ## 模型连接
 

@@ -16,7 +16,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 
 显示名称「野弦 / WildString」，debug 显示「野弦 Dev」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.dev`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.4.1 为 13，0.5.0 为 14，0.5.1 为 15，0.5.2 为 16，0.5.3 为 17，0.5.4 为 18，0.5.5 为 19，0.5.6 为 20，0.5.7 为 21，0.5.8 为 22，0.5.9 为 23，0.5.10 为 24，0.5.11 为 25，0.5.12 为 26，0.5.13 为 27，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，0.8.0 为 36，0.8.1 为 37，0.8.2 为 38，0.8.3 为 39，0.8.4 为 40，0.8.5 为 41，0.8.6 为 42，0.8.7 为 43，0.8.8 为 44，0.8.9 为 45，0.8.10 为 46，0.8.11 为 47，0.8.12 为 48，0.8.13 为 49，0.8.14 为 50，0.8.15 为 51，0.8.16 为 52，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
-同时更新 Python、Web、Android 版本及对应锁文件：
+同时更新 Python、Web、Android 版本及对应锁文件（iOS／macOS 同步更新各自 `project.yml` 的 `MARKETING_VERSION`／`CURRENT_PROJECT_VERSION`，Apple 构建号与 Android `versionCode` 不要求相等）：
 
 | 标签 | Python | Web / Android versionName |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 | `v0.1.0-rc.1` | `0.1.0rc1` | `0.1.0-rc.1` |
 | `v0.1.0-dev.1` | `0.1.0.dev1` | `0.1.0-dev.1` |
 
-`python3 scripts/package_release.py --tag v0.3.0 --check-only` 检查当前三个端版本一致；正式发布时将参数替换为实际标签。
+`python3 scripts/package_release.py --tag v0.8.16 --check-only` 检查当前后端、Web 与 Android `versionName` 一致（iOS／macOS 的 `project.yml` 未由该脚本自动检查，发版前需单独核对）；正式发布时将参数替换为实际标签。
 
 正式签名使用仓库 Actions secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_SIGNING_CERT_SHA256`。密钥仅在签名步骤写入 runner 临时目录，权限 0600，步骤退出立即删除；校验证书指纹后才上传 APK。Gradle 的常规依赖缓存不包含私钥。
 
@@ -78,9 +78,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 
 ## 功能批次与更新记录
 
-从 0.1.0 后的改进批次开始，在根目录 [CHANGELOG.md](../CHANGELOG.md) 的「未发布」记录用户可见变化，并单列实现 / 验证状态。完成有意义的一批功能后，先与用户核对内容、验证结果和仍有的限制，由用户确定版本号，再更新三个端版本及 Android versionCode、准备对应发布说明、构建并更新 App。不要因为功能代码完成就自行发布或预占版本号。
-
-本批用户已确认 Android＋Web（排除上传）与每日推荐，版本为 0.3.0，完成验证后发布；不启用 PR 自动合并。
+从 0.1.0 后的改进批次开始，在根目录 [CHANGELOG.md](../CHANGELOG.md) 的「未发布」记录用户可见变化，并单列实现 / 验证状态。完成有意义的一批功能后，先与用户核对内容、验证结果和仍有的限制，由用户确定版本号，再更新各端版本及构建号、准备对应发布说明、构建并更新 App。不要因为功能代码完成就自行发布或预占版本号；不启用 PR 自动合并。
 
 ## 发布顺序
 
@@ -107,7 +105,7 @@ Release 正文记录容器 manifest 摘要。首次推送后需要核对 GHCR �
 
 ## 下载与验证
 
-用户从 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载 APK，无需解压 Actions artifact。Android 8.0 起可安装；真实服务器需要系统信任的 HTTPS。后续同一包名、同一发布密钥并递增 versionCode 后可覆盖升级。
+用户从 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载 APK，无需解压 Actions artifact。Android 8.0 起可安装；默认使用系统信任的 HTTPS；客户端可逐线路显式允许 HTTP，但服务器 `https_only` 策略仍会拒绝 HTTP API／MCP 请求，见 [连接契约](../contracts/server-connections.md)。后续同一包名、同一发布密钥并递增 versionCode 后可覆盖升级。
 
 开发测试包仍从 **Actions → Android APK → Artifacts → wildstring-android-debug** 下载并解压。它的临时签名可能随运行变化，不能代替正式发布签名。
 

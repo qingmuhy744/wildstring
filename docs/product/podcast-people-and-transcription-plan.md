@@ -1,7 +1,9 @@
+状态：进行中（未排期，roadmap 后续能力；尚未在 WildString 主仓库实现）。
+
 # 播客人物识别、声纹归档与异地逐字稿转写方案
 
 更新日期：2026-11-07
-状态：**进行中（未排期）**，roadmap 中的后续能力；尚未在 WildString 主仓库实现。音频转写与声纹原型已在本地 `MOSS-Transcribe-Diarize/runs/podcast-pipeline/` 完成《声东击西》#406、#407 实测验证。
+实现边界：下文 API、表结构和直连音频策略均为提案，不是现有能力（当前 Android 音频路由见 [0.8.12 说明](../releases/v0.8.12.md)）。音频转写与声纹原型已在本地 `MOSS-Transcribe-Diarize/runs/podcast-pipeline/` 完成《声东击西》#406、#407 实测验证。
 
 ---
 
