@@ -42,9 +42,12 @@ class ServerSettings:
     def __init__(self, database, settings):
         self.database, self.settings = database, settings
 
-    def read(self):
-        with self.database.connect() as connection:
+    def read(self, *, connection: sqlite3.Connection | None = None):
+        if connection is not None:
             row = connection.execute("SELECT * FROM server_settings WHERE id=1").fetchone()
+        else:
+            with self.database.connect(scoped=False) as db:
+                row = db.execute("SELECT * FROM server_settings WHERE id=1").fetchone()
         values = {"instance_id": row["instance_id"], "sources": {}}
         for key, default in (("name", "野弦"), ("connection_policy", "legacy")):
             environment = getattr(self.settings, "server_name" if key == "name" else key)

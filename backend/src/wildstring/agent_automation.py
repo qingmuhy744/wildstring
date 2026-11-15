@@ -62,21 +62,34 @@ class Automation:
                 raise HTTPException(422, "ai_connection_required")
             configuration = self.connection_for(actor, body.connection_id, background=not manual_ai)
             parameters["_manual_ai_authorized"] = manual_ai
+        repository = self.repository_for(actor)
         identities = body.track_ids
         if identities is None:
             identities = [
-                track["id"]
-                for track in self.repository_for(actor).tracks(limit=body.max_tracks)["items"]
+                track["id"] for track in repository.tracks(limit=body.max_tracks)["items"]
             ]
         if len(identities) > body.max_tracks or len(identities) != len(set(identities)):
             raise HTTPException(422, "inspection_limit")
-        for identity in identities:
-            if not isinstance(identity, str) or not self.repository_for(actor).track(identity):
+        if any(not isinstance(identity, str) for identity in identities):
+            raise HTTPException(404, "track_not_found")
+        versions: dict[str, int] = {}
+        if identities:
+            library_id = repository.library_id()
+            if library_id is None:
+                raise HTTPException(404, "track_not_found")
+            with repository.database.connect() as connection:
+                rows = connection.execute(
+                    "SELECT t.id, m.version FROM tracks t "
+                    "JOIN track_metadata m ON m.track_id = t.id "
+                    "WHERE t.library_id = ? AND library_visible(t.library_id) "
+                    "AND t.id IN (SELECT value FROM json_each(?))",
+                    (library_id, encoded(identities)),
+                ).fetchall()
+            versions = {row["id"]: row["version"] for row in rows}
+            if len(versions) != len(identities):
                 raise HTTPException(404, "track_not_found")
         parameters["track_ids"] = identities
-        parameters["metadata_versions"] = {
-            identity: self.get_track(actor, identity)["metadata_version"] for identity in identities
-        }
+        parameters["metadata_versions"] = {identity: versions[identity] for identity in identities}
         from wildstring.diagnostics import trace_id as current_trace
 
         identity, trace_id = uuid4().hex, current_trace()

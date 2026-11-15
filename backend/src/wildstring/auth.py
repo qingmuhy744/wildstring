@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import secrets
+import sqlite3
 import time
 from typing import Literal
 from uuid import uuid4
@@ -124,7 +125,7 @@ class Auth:
         self.database, self.settings = database, settings
 
     def configured(self) -> bool:
-        with self.database.connect() as connection:
+        with self.database.connect(scoped=False) as connection:
             return (
                 connection.execute(
                     "SELECT 1 FROM users WHERE profile='owner' AND enabled=1 AND password_hash IS NOT NULL"
@@ -145,41 +146,55 @@ class Auth:
                 connection.execute("DELETE FROM sessions WHERE user_id='admin'")
                 connection.execute("DELETE FROM login_attempts")
 
-    def session_cookie(self, request: Request) -> str:
+    def session_cookie(
+        self, request: Request, *, connection: sqlite3.Connection | None = None
+    ) -> str:
         policy = getattr(request.state, "connection_policy", None)
         if policy is None:
             from wildstring.server_settings import ServerSettings
 
-            policy = ServerSettings(self.database, self.settings).read()["connection_policy"]
+            policy = ServerSettings(self.database, self.settings).read(connection=connection)[
+                "connection_policy"
+            ]
         if policy == "legacy":
             return COOKIE
         return HTTPS_COOKIE if request.url.scheme == "https" else HTTP_COOKIE
 
-    def session_token(self, request: Request) -> str:
-        token = request.cookies.get(self.session_cookie(request), "")
+    def session_token(
+        self, request: Request, *, connection: sqlite3.Connection | None = None
+    ) -> str:
+        token = request.cookies.get(self.session_cookie(request, connection=connection), "")
         # HTTPS legacy cookies may survive selecting a modern policy. HTTP legacy
         # sessions are revoked by that transition and cannot be reactivated.
         if not token and request.url.scheme == "https":
             token = request.cookies.get(COOKIE, "")
         return token
 
-    def require_session(self, request: Request) -> dict:
+    def _lookup_session_row(self, connection: sqlite3.Connection, request: Request, token: str):
+        return connection.execute(
+            "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
+            "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL "
+            "AND (s.transport=? OR (s.transport='' AND ?))",
+            (
+                token_hash(token),
+                int(time.time()),
+                request.url.scheme,
+                self.session_cookie(request, connection=connection) == COOKIE,
+            ),
+        ).fetchone()
+
+    def _require_session_with_connection(
+        self, request: Request, connection: sqlite3.Connection | None = None
+    ) -> dict:
         if getattr(request.state, "user", None) is None:
-            token = self.session_token(request)
+            token = self.session_token(request, connection=connection)
             if not token or len(token) > 128:
                 raise HTTPException(401, "authentication_required")
-            with self.database.connect() as connection:
-                row = connection.execute(
-                    "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
-                    "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL "
-                    "AND (s.transport=? OR (s.transport='' AND ?))",
-                    (
-                        token_hash(token),
-                        int(time.time()),
-                        request.url.scheme,
-                        self.session_cookie(request) == COOKIE,
-                    ),
-                ).fetchone()
+            if connection is not None:
+                row = self._lookup_session_row(connection, request, token)
+            else:
+                with self.database.connect(scoped=False) as db:
+                    row = self._lookup_session_row(db, request, token)
             if row is None:
                 raise HTTPException(401, "authentication_required")
             request.state.user = public_user(row)
@@ -189,6 +204,9 @@ class Auth:
         if expected is not None and expected != request.state.user["id"]:
             raise HTTPException(401, "account_session_changed")
         return request.state.user
+
+    def require_session(self, request: Request) -> dict:
+        return self._require_session_with_connection(request)
 
     def authenticated(self, request: Request) -> bool:
         try:
