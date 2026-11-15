@@ -7,7 +7,7 @@
   "dependencies": {
     "@wildstring/native-rsa": "1.0.0",
     "@wildstring/no-pac": "1.0.0",
-    "axios": "^1.21.0",
+    "axios": "^1.21.1",
     "crypto-js": "^4.2.0",
     "tunnel": "^0.0.6"
   }
