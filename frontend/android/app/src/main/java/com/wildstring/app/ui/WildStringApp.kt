@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -1555,34 +1556,64 @@ private fun PlaybackHeader(vm: MusicViewModel, state: MusicState, onAlbum: () ->
         }
         Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                if (track.artists.isEmpty()) {
-                    Text(stringResource(R.string.unknown_artist), color = Muted, fontSize = 13.sp)
-                } else {
-                    track.artists.forEachIndexed { index, name ->
-                        if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable(role = Role.Button) { onArtist(name) }
-                                .padding(vertical = 2.dp)
-                                .testTag("player-artist-$name"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Layout(
+                modifier = Modifier.weight(1f, fill = false),
+                content = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (track.artists.isEmpty()) {
+                            Text(stringResource(R.string.unknown_artist), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            track.artists.forEachIndexed { index, name ->
+                                if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp, maxLines = 1)
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable(role = Role.Button) { onArtist(name) }
+                                        .padding(vertical = 2.dp)
+                                        .testTag("player-artist-$name"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                     }
+                    Text(" · ", color = Muted, fontSize = 13.sp, maxLines = 1)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(role = Role.Button) { onAlbum() }
+                            .padding(vertical = 2.dp)
+                            .testTag("player-album"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(track.album ?: stringResource(R.string.unknown_album), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
-                Text(" · ", color = Muted, fontSize = 13.sp)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable(role = Role.Button) { onAlbum() }
-                        .padding(vertical = 2.dp)
-                        .testTag("player-album"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(track.album ?: stringResource(R.string.unknown_album), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ) { measurables, constraints ->
+                val childConstraints = constraints.copy(minWidth = 0)
+                val sep = measurables[1].measure(childConstraints)
+                val (artistsMax, albumMax) = if (!constraints.hasBoundedWidth) {
+                    constraints.maxWidth to constraints.maxWidth
+                } else {
+                    val contentMax = (constraints.maxWidth - sep.width).coerceAtLeast(0)
+                    val artistsIntrinsic = measurables[0].maxIntrinsicWidth(constraints.maxHeight)
+                    val albumIntrinsic = measurables[2].maxIntrinsicWidth(constraints.maxHeight)
+                    if (artistsIntrinsic + albumIntrinsic <= contentMax) {
+                        artistsIntrinsic.coerceAtMost(contentMax) to albumIntrinsic.coerceAtMost(contentMax)
+                    } else {
+                        val albumTarget = minOf(albumIntrinsic, maxOf((contentMax * 2) / 5, contentMax - artistsIntrinsic))
+                        (contentMax - albumTarget).coerceAtLeast(0) to albumTarget.coerceAtLeast(0)
+                    }
+                }
+                val artists = measurables[0].measure(childConstraints.copy(maxWidth = artistsMax))
+                val album = measurables[2].measure(childConstraints.copy(maxWidth = albumMax))
+                val width = (artists.width + sep.width + album.width).coerceIn(constraints.minWidth, constraints.maxWidth)
+                val height = maxOf(artists.height, sep.height, album.height).coerceIn(constraints.minHeight, constraints.maxHeight)
+                layout(width, height) {
+                    artists.placeRelative(0, (height - artists.height) / 2)
+                    sep.placeRelative(artists.width, (height - sep.height) / 2)
+                    album.placeRelative(artists.width + sep.width, (height - album.height) / 2)
                 }
             }
             if (showQuality && state.playbackQuality.isNotBlank()) {

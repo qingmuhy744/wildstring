@@ -415,11 +415,18 @@ class PadLayoutTest {
                 window(width, height)
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitForIdle()
+                val playerAlbumBounds = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
+                val playerQualityBounds = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
+                assertTrue("Album subtitle ($playerAlbumBounds) overflowed into quality badge ($playerQualityBounds) at ${width}x$height", playerAlbumBounds.right < playerQualityBounds.left)
                 compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
                 if (docked) {
                     compose.onNodeWithTag("player-queue-docked").assertIsDisplayed()
                     compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
+                    val dockedAlbumBounds = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
+                    val dockedQualityBounds = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
+                    assertTrue("Docked album subtitle ($dockedAlbumBounds) overflowed into quality badge ($dockedQualityBounds)", dockedAlbumBounds.right < dockedQualityBounds.left)
                 } else {
                     compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
                     compose.onNodeWithTag("player-queue-docked").assertDoesNotExist()
@@ -433,6 +440,17 @@ class PadLayoutTest {
                 androidx.test.espresso.Espresso.pressBack()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isEmpty() }
             }
+            window(390, 844)
+            compose.onNodeWithTag("mini-player-open").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitForIdle()
+            val phoneAlbumBounds = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
+            val phoneQualityBounds = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
+            assertTrue("Phone album subtitle ($phoneAlbumBounds) overflowed into quality badge ($phoneQualityBounds)", phoneAlbumBounds.right < phoneQualityBounds.left)
+            capture("pad-phone-player-light")
+            appearance(vm, "dark")
+            capture("pad-phone-player-dark")
+            appearance(vm, "light")
         } finally {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
             window(390, 844)
