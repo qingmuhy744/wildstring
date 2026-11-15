@@ -1,6 +1,9 @@
 package com.wildstring.app
 
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
+import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -105,7 +108,24 @@ class PodcastTabTransitionTest {
         addAll(MotionAssertions.landsAndStays("reading area", frames.map { it.time }, frames.map { it.bottom }, frames.map { it.changedPixels }))
     }
 
-    private fun withPlayer(animations: Boolean, body: () -> Unit) {
+    private fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(
+            InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command),
+        ).use { it.readBytes().toString(Charsets.UTF_8) }
+
+    private fun withPlayer(animations: Boolean, systemScale: String = "1.0", body: () -> Unit) {
+        val resolver = compose.activity.contentResolver
+        val originalScale = runCatching {
+            Settings.Global.getString(resolver, Settings.Global.ANIMATOR_DURATION_SCALE)
+        }.getOrNull()?.takeIf { it.isNotBlank() && it != "null" } ?: "1.0"
+        val targetScale = systemScale.toFloat()
+        val targetEnabled = targetScale > 0f
+        shell("settings put global animator_duration_scale $systemScale")
+        compose.waitUntil(5_000) {
+            abs(Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, -1f) - targetScale) < 0.01f &&
+                ValueAnimator.areAnimatorsEnabled() == targetEnabled
+        }
+        compose.waitForIdle()
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val episode = PodcastEpisode(
             "transition-episode", "transition-show", "transition-guid", "把时间留给声音：一次长途旅行的记录",
@@ -152,6 +172,9 @@ class PodcastTabTransitionTest {
             } finally {
                 compose.mainClock.autoAdvance = true
                 compose.runOnIdle { vm.settings.interfaceAnimations(true); vm.repository.session.invalidate() }
+                shell("settings put global animator_duration_scale $originalScale")
+                val restoreEnabled = (originalScale.toFloatOrNull() ?: 1f) > 0f
+                compose.waitUntil(5_000) { ValueAnimator.areAnimatorsEnabled() == restoreEnabled }
             }
         }
     }
@@ -193,6 +216,16 @@ class PodcastTabTransitionTest {
         val final = frames.last()
         val intermediate = frames.drop(3).filter { abs(it.bottom - final.bottom) > 1f || abs(it.top - final.top) > 1f }
         assertTrue("With animations off the layout must land at once\n" + table(frames), intermediate.isEmpty())
+    }
+
+    @Test fun switchingWithSystemReducedMotionLandsImmediately() = withPlayer(animations = true, systemScale = "0.0") {
+        compose.onNodeWithTag("podcast-cover-tab").performClick()
+        compose.onNodeWithTag("podcast-controls-full").assertIsDisplayed()
+        compose.waitForIdle()
+        val frames = switchTo("podcast-article-tab", 12)
+        val final = frames.last()
+        val intermediate = frames.drop(3).filter { abs(it.bottom - final.bottom) > 1f || abs(it.top - final.top) > 1f }
+        assertTrue("With system reduced motion the layout must land at once\n" + table(frames), intermediate.isEmpty())
     }
 
     @Test fun wideWindowShowsCoverArticleAndFullControlsTogether() = withPlayer(animations = true) {
