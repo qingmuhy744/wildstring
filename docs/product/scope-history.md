@@ -2,6 +2,8 @@
 
 按批次记录各版本的实现与验证边界，新条目放最前。当前产品范围见 [scope.md](scope.md)；此处内容是历史，不代表当前状态，当前数据库 schema 以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准。
 
+0.8.17 发布：macOS 与 iOS 修复播客跨设备续播（避免本地缓存或连播覆盖远端进度、起播拉取进度期间保留用户手动拖动）、加速远程播客 Range 拖动并改用右下悬浮队列与 `isBuffering` 加载态；Android 统一 Pad 760dp／1100dp 布局与播放器封面/文章 240ms 连续过渡，合并节目页单行操作并清理发现页 AI 徽章与副标题裁剪，Last.fm 失败改为纯净错误重试；四端同步去掉黑胶中心点与节目页全局「播放待播 (N)」；后端加固转码／后台写锁／无作用域只读连接复用、请求与解析边界、专辑／投递索引与多库整理修复；曲目封面／播客封面／目录封面／头像在鉴权后启用强 `ETag` 与 `Cache-Control: private, no-cache`（`304` 重验证），`file-info` 补齐 `absolute_path` 且宿主机物理路径仅对 `owner` 返回。Android versionCode 53，Apple 构建号 52，数据库 schema 仍为 52。0.8.12 及更早客户端仍不能对接本版服务器。实现与验证边界见 [0.8.17 发布说明](../releases/v0.8.17.md)。
+
 0.8.16 发布：Android 连接页与服务器线路对话框改进键盘弹出时的可见性，单条线路支持只读测试；Android 发现页入口与本地设计令牌、按钮层级、播客剧集状态、加载骨架及触控目标对齐设计规范。正式版增加可配置的 Homebrew Tap cask 自动更新。Android versionCode 52，Apple 构建号 51，数据库 schema 仍为 52。0.8.12 及更早客户端仍不能对接本版服务器。实现与验证边界见 [0.8.16 发布说明](../releases/v0.8.16.md)。
 
 0.8.15 发布：修复 Android 下滑收起全屏播放器时 Compose 1.12 的 `onReuse is only expected on attached node` 闪退（曲库／设置留在原位，播放器改为覆盖层；关闭可暂停预加载作为兜底）。打磨平板探索页加载态（保留区域名、骨架屏、右栏标题对齐），「已关注」按钮固定最小宽度，播放器节目名可进入节目页，顶栏补上单集收藏红心；待播横幅去掉「点击查看」。GitHub Release 增加 R8 mapping 以便还原崩溃堆栈。Android versionCode 51，Apple 构建号 50，数据库 schema 仍为 52。0.8.12 及更早客户端仍不能对接本版服务器。实现与验证边界见 [0.8.15 发布说明](../releases/v0.8.15.md)。

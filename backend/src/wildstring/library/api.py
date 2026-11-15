@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from wildstring.auth import Auth
+from wildstring.http_cache import private_image_response
 from wildstring.library.assets import TrackAssets
 from wildstring.library.browsing import BrowseKind
 from wildstring.library.repository import LibraryRepository
@@ -266,19 +267,15 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         return repository.imports(limit, global_history=user["profile"] == "owner")
 
     @router.get("/tracks/{track_id}/cover")
-    def cover(track_id: str, size: Annotated[int, Query(ge=64, le=768)] = 320):
+    def cover(track_id: str, request: Request, size: Annotated[int, Query(ge=64, le=768)] = 320):
         result = assets.cover(track_id, size)
         if result is None:
             raise HTTPException(404, "cover_not_found")
         data, source = result
-        return Response(
+        return private_image_response(
+            request,
             data,
-            media_type="image/jpeg",
-            headers={
-                "Cache-Control": "private, no-store",
-                "X-Content-Type-Options": "nosniff",
-                "X-Wildstring-Cover-Source": source,
-            },
+            extra_headers={"X-Wildstring-Cover-Source": source},
         )
 
     @router.get(
@@ -386,10 +383,16 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         return result
 
     @router.get("/tracks/{track_id}/file-info")
-    def track_file_info(track_id: str, current: Annotated[LibraryRepository, Depends(scoped)]):
+    def track_file_info(
+        track_id: str,
+        current: Annotated[LibraryRepository, Depends(scoped)],
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
         from wildstring.library.file_reorganizer import get_track_file_info
 
-        return get_track_file_info(current, track_id)
+        return get_track_file_info(
+            current, track_id, include_host_paths=(user["profile"] == "owner")
+        )
 
     @router.get(
         "/scans",

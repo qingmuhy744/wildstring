@@ -21,7 +21,7 @@ SIDECAR_SUFFIXES = {
 }
 
 
-def get_track_file_info(repository, track_id: str):
+def get_track_file_info(repository, track_id: str, *, include_host_paths: bool = False):
     with repository.database.connect() as connection:
         row = connection.execute(
             """SELECT t.id, t.path, t.title, t.artists, t.album, t.album_artists,
@@ -72,10 +72,11 @@ def get_track_file_info(repository, track_id: str):
         "track_id": track_id,
         "title": row["title"],
         "path": current_path,
-        "source_path": source_path,
+        "source_path": source_path if include_host_paths else None,
         "source_filename": source_filename,
-        "library_root": str(root),
-        "full_path": str(full_path),
+        "library_root": str(root) if include_host_paths else None,
+        "full_path": str(full_path) if include_host_paths else None,
+        "absolute_path": str(full_path) if include_host_paths else None,
         "file_exists": file_exists,
         "size_bytes": row["size_bytes"],
         "format": row["format"],

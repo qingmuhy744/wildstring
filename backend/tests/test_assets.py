@@ -81,14 +81,36 @@ def test_embedded_cover_is_a_bounded_jpeg_without_music_writes(
         response = client.get(endpoint + "/cover?size=96")
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/jpeg"
+        assert response.headers["cache-control"] == "private, no-cache"
+        assert response.headers["vary"] == "Cookie, Authorization, X-Wildstring-Library"
+        assert response.headers["x-content-type-options"] == "nosniff"
         assert response.headers["x-wildstring-cover-source"] == "embedded"
+        etag = response.headers["etag"]
+        assert etag == f'"{hashlib.sha256(response.content).hexdigest()}"'
         with Image.open(io.BytesIO(response.content)) as thumbnail:
             assert max(thumbnail.size) == 96
             r, g, b = thumbnail.getpixel((0, 0))
             assert r > 200 and g < 30 and b < 30
         assert client.get(endpoint + "/cover?size=96").content == response.content
+        for header_value in (etag, f"W/{etag}", f'"stale-tag", {etag}', "*"):
+            not_modified = client.get(
+                endpoint + "/cover?size=96", headers={"If-None-Match": header_value}
+            )
+            assert not_modified.status_code == 304
+            assert not_modified.content == b""
+            assert not_modified.headers["cache-control"] == "private, no-cache"
+            assert not_modified.headers["etag"] == etag
+            assert not_modified.headers["vary"] == "Cookie, Authorization, X-Wildstring-Library"
+        stale = client.get(endpoint + "/cover?size=96", headers={"If-None-Match": '"outdated"'})
+        assert stale.status_code == 200
+        assert stale.content == response.content
         assert len(list((settings.data_dir / "covers").glob("*.jpg"))) == 1
         assert client.get(endpoint + "/cover?size=9999").status_code == 422
+        # Unauthenticated clients must still be rejected even with the valid ETag.
+        client.cookies.clear()
+        denied = client.get(endpoint + "/cover?size=96", headers={"If-None-Match": etag})
+        assert denied.status_code == 401
+        assert denied.headers["cache-control"] == "private, no-store"
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
 
 
@@ -102,8 +124,13 @@ def test_directory_cover_case_priority_corruption_and_refresh(settings, authenti
     with authenticated_client(settings) as client:
         first = client.get(endpoint + "/cover")
         assert first.headers["x-wildstring-cover-source"] == "directory"
+        assert first.headers["cache-control"] == "private, no-cache"
+        first_etag = first.headers["etag"]
         cover.write_bytes(image("green"))
-        assert client.get(endpoint + "/cover").content != first.content
+        refreshed = client.get(endpoint + "/cover", headers={"If-None-Match": first_etag})
+        assert refreshed.status_code == 200
+        assert refreshed.content != first.content
+        assert refreshed.headers["etag"] != first_etag
         # Song-specific art takes precedence over shared directory art.
         path.with_suffix(".webp").write_bytes(image("yellow"))
         specific = client.get(endpoint + "/cover").content
