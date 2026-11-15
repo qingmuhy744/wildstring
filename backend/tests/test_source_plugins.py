@@ -300,7 +300,8 @@ def test_upgrade_cannot_replace_different_identity(settings, authenticated_clien
         assert replacement.json()["enabled"] is False
         packages_dir = settings.data_dir / "providers" / "source-plugins"
         assert len(list(packages_dir.iterdir())) == 1
-        assert client.delete(BASE + "/fixture-source?version=2", headers=HEADERS).status_code == 200
+        deleted = client.delete(BASE + "/fixture-source?version=2", headers=HEADERS)
+        assert deleted.status_code == 200
         assert list(packages_dir.iterdir()) == []
 
 
