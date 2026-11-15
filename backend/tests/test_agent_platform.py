@@ -1078,3 +1078,67 @@ def test_draft_worklist_prioritizes_pending_and_history_uses_last_handled_time(a
     history = client.get(BASE + "/drafts?status=applied").json()["items"]
     assert [item["id"] for item in history] == [recent_record["id"], old_record["id"]]
     assert client.get(BASE + "/drafts?status=pending").json()["total"] == 1
+
+
+def test_submit_task_batches_metadata_versions_and_skips_lyrics_probe(settings, agent, monkeypatch):
+    from wildstring.agent_models import Inspection
+    from wildstring.library.assets import TrackAssets
+
+    client, service = agent
+    tracks = [music(settings, f"batch-{i}.flac", ["批量艺人"], ["批量专辑"]) for i in range(4)]
+    assert len(tracks) == 4
+    scan_library(settings)
+    actor = service.current_actor("admin")
+    track_ids = [item["id"] for item in service.repository_for(actor).tracks(limit=10)["items"]]
+    assert len(track_ids) >= 4
+
+    def fail_lyrics(self, identity):
+        raise AssertionError("submit_task must not probe lyrics files on disk")
+
+    monkeypatch.setattr(TrackAssets, "lyrics", fail_lyrics)
+
+    connect_calls = []
+    original_connect = Database.connect
+
+    def tracked_connect(self, *, write=False, create=False, scoped=True):
+        connect_calls.append(write)
+        return original_connect(self, write=write, create=create, scoped=scoped)
+
+    monkeypatch.setattr(Database, "connect", tracked_connect)
+    task = service.submit_task(actor, Inspection(track_ids=track_ids))
+    assert task["parameters"]["track_ids"] == track_ids
+    assert len(task["parameters"]["metadata_versions"]) == len(track_ids)
+    # Batch query uses constant connections regardless of track count (1 batch read + 1 insert + 1 task read + library_id reads <= 5).
+    assert len(connect_calls) <= 5
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        service.submit_task(actor, Inspection(track_ids=[track_ids[0], track_ids[0]]))
+    assert duplicate_error.value.status_code == 422
+    assert duplicate_error.value.detail == "inspection_limit"
+
+    with pytest.raises(HTTPException) as missing_error:
+        service.submit_task(actor, Inspection(track_ids=[track_ids[0], "missing-track-id"]))
+    assert missing_error.value.status_code == 404
+    assert missing_error.value.detail == "track_not_found"
+
+
+def test_agent_deliveries_due_index_used_by_planner(settings):
+    database = Database(settings.data_dir)
+    database.initialize()
+    with database.connect(scoped=False) as connection:
+        indexes = {
+            row["name"]
+            for row in connection.execute("PRAGMA index_list(agent_deliveries)").fetchall()
+        }
+        assert "agent_deliveries_due" in indexes
+        plan = " ".join(
+            row["detail"]
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN "
+                "SELECT d.id FROM agent_deliveries d "
+                "WHERE d.status IN ('queued','retry_wait') AND d.next_attempt_at<=? "
+                "ORDER BY d.next_attempt_at, d.rowid LIMIT 1",
+                ("2099-01-01T00:00:00Z",),
+            ).fetchall()
+        )
+        assert "USING INDEX agent_deliveries_due" in plan

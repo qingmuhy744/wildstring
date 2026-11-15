@@ -353,7 +353,11 @@ class Database:
         self.user_id = user_id
 
     @contextmanager
-    def connect(self, *, write: bool = False, create: bool = False) -> Iterator[sqlite3.Connection]:
+    def connect(
+        self, *, write: bool = False, create: bool = False, scoped: bool = True
+    ) -> Iterator[sqlite3.Connection]:
+        if not scoped and (write or create):
+            raise ValueError("scoped=False requires a read-only connection")
         mode = "rwc" if create else "rw" if write else "ro"
         connection = sqlite3.connect(
             f"{self.path.as_uri()}?mode={mode}",
@@ -361,18 +365,20 @@ class Database:
             timeout=10,
         )
         connection.row_factory = sqlite3.Row
-        connection.create_function("active_user", 0, lambda: self.user_id)
-        connection.create_function("active_library", 0, lambda: None)
-        connection.create_function("library_visible", 1, lambda identity: 1)
-        connection.create_function(
-            "library_selected", 2, lambda identity, fallback: int(identity == fallback)
-        )
+        if scoped:
+            connection.create_function("active_user", 0, lambda: self.user_id)
+            connection.create_function("active_library", 0, lambda: None)
+            connection.create_function("library_visible", 1, lambda identity: 1)
+            connection.create_function(
+                "library_selected", 2, lambda identity, fallback: int(identity == fallback)
+            )
         try:
             connection.execute("PRAGMA foreign_keys = ON")
-            from wildstring.library.scope import configure_scope
+            if scoped:
+                from wildstring.library.scope import configure_scope
 
-            if connection.execute("PRAGMA user_version").fetchone()[0] >= 36:
-                configure_scope(connection, self.user_id)
+                if connection.execute("PRAGMA user_version").fetchone()[0] >= 36:
+                    configure_scope(connection, self.user_id)
             if not write:
                 connection.execute("BEGIN")
             yield connection
@@ -694,10 +700,14 @@ class Database:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
             )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS agent_deliveries_due "
+                "ON agent_deliveries(status, next_attempt_at)"
+            )
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:
-        with self.connect() as connection:
+        with self.connect(scoped=False) as connection:
             if connection.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
                 return False
             connection.execute("SELECT id FROM tracks LIMIT 0")

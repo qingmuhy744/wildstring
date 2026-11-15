@@ -54,7 +54,7 @@ class SiteAccess:
         self.database = database
 
     def read(self):
-        with self.database.connect() as connection:
+        with self.database.connect(scoped=False) as connection:
             row = connection.execute("SELECT * FROM site_access WHERE id=1").fetchone()
         return {
             "enabled": bool(row["enabled"]),

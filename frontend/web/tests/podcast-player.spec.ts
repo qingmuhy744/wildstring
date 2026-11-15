@@ -294,7 +294,12 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
   await row(2)
     .getByRole('button', { name: /更多操作/ })
     .click();
+  const insertedNext = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
   await menu.getByRole('menuitem', { name: '下一集播放', exact: true }).click();
+  expect((await insertedNext).ok()).toBeTruthy();
   await expect(menu).toHaveCount(0);
   expect((await audio(page)).paused).toBe(true);
   expect((await audio(page)).source).toContain('/episodes/radio-6/stream');

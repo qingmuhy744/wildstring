@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS agent_deliveries (
  next_attempt_at TEXT NOT NULL, lease_until TEXT, error_code TEXT, message_id TEXT,
  trace_id TEXT NOT NULL, UNIQUE(event_id,target_id)
 );
+CREATE INDEX IF NOT EXISTS agent_deliveries_due ON agent_deliveries(status,next_attempt_at);
 CREATE TABLE IF NOT EXISTS agent_tasks (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), auth_version INTEGER NOT NULL,
  credential_id TEXT, status TEXT NOT NULL DEFAULT 'queued', stage TEXT NOT NULL DEFAULT 'queued',

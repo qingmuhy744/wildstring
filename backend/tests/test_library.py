@@ -101,10 +101,10 @@ def test_unchanged_scan_batches_writes_without_losing_seen_tracks(settings, monk
     writes = []
     connect = Database.connect
 
-    def counted(self, *, write=False, create=False):
+    def counted(self, *, write=False, create=False, **kwargs):
         if write:
             writes.append(True)
-        return connect(self, write=write, create=create)
+        return connect(self, write=write, create=create, **kwargs)
 
     monkeypatch.setattr(Database, "connect", counted)
     report = scan_library(settings)
