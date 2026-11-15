@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -118,6 +118,8 @@ class Management:
         self.next_discovery = 0
         self.next_recommendation = 0
         self.discovery_due = {}
+        self._recommendation_lock = Lock()
+        self.recommendation_thread: Thread | None = None
         self.recommendation_inflight: set[tuple[str, str]] = set()
 
     @property
@@ -145,6 +147,10 @@ class Management:
         self.stopping.set()
         if self.thread is not None:
             self.thread.join(timeout=5)
+        with self._recommendation_lock:
+            rec_thread = self.recommendation_thread
+        if rec_thread is not None:
+            rec_thread.join(timeout=5)
 
     def preferences(self):
         with self.database.connect() as connection:
@@ -982,7 +988,7 @@ class Management:
                                 logger.warning("Automatic import source is unavailable; will retry")
                         if time.monotonic() >= self.next_recommendation:
                             self.next_recommendation = time.monotonic() + 30
-                            self.generate_scheduled_recommendations()
+                            self._trigger_scheduled_recommendations()
                         self.stopping.wait(0.5)
                 finally:
                     self.worker_lock.release(force=True)
@@ -1030,6 +1036,19 @@ class Management:
                 # A source may be removed or its library disabled after taking the snapshot.
                 self.discovery_due.pop(key, None)
 
+    def _trigger_scheduled_recommendations(self):
+        with self._recommendation_lock:
+            if self.stopping.is_set():
+                return
+            if self.recommendation_thread is not None and self.recommendation_thread.is_alive():
+                return
+            self.recommendation_thread = Thread(
+                target=self.generate_scheduled_recommendations,
+                name="wildstring-recommendations",
+                daemon=True,
+            )
+            self.recommendation_thread.start()
+
     def generate_scheduled_recommendations(self):
         """Generate each account's opted-in daily list after its local clock time."""
         platform = getattr(self, "platform", None)
@@ -1046,18 +1065,23 @@ class Management:
                 WHERE p.daily_enabled=1 AND u.enabled=1""",
             ).fetchall()
         for row in rows:
+            if self.stopping.is_set():
+                break
             identity = (row["user_id"], row["library_id"])
-            if identity in self.recommendation_inflight or clock < row["daily_time"]:
+            if clock < row["daily_time"]:
                 continue
-            with self.database.connect() as connection:
-                cached = connection.execute(
-                    "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
-                    (row["user_id"], row["library_id"]),
-                ).fetchone()
-            if cached and cached["day"] == day:
-                continue
-            self.recommendation_inflight.add(identity)
+            with self._recommendation_lock:
+                if identity in self.recommendation_inflight:
+                    continue
+                self.recommendation_inflight.add(identity)
             try:
+                with self.database.connect() as connection:
+                    cached = connection.execute(
+                        "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
+                        (row["user_id"], row["library_id"]),
+                    ).fetchone()
+                if cached and cached["day"] == day:
+                    continue
                 from wildstring.library.scope import library_context, require_current_library
 
                 with library_context(row["user_id"], row["library_id"]):
@@ -1067,7 +1091,8 @@ class Management:
             except Exception:
                 logger.exception("Scheduled daily recommendation failed for account %s", identity)
             finally:
-                self.recommendation_inflight.discard(identity)
+                with self._recommendation_lock:
+                    self.recommendation_inflight.discard(identity)
 
     def check_storage(self):
         info = self.settings.data_dir.stat()

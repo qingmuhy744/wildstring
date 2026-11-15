@@ -321,3 +321,57 @@ def test_permissions_pagination_library_scope_and_schema15_upgrade(settings, aut
     with database.connect() as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT count(*) FROM provider_jobs").fetchone()[0] == 1
+
+
+def test_failed_provider_job_promotes_pending_refresh_intent_and_diagnostics_uses_wal(
+    settings, authenticated_client
+):
+    from wildstring.providers import ProviderError
+
+    seed(settings)
+    with authenticated_client(settings) as client:
+        with client.app.state.diagnostics.connect() as diag_conn:
+            assert diag_conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+        service, track = setup_service(client)
+        now = time.time()
+        with service.database.connect(write=True) as connection:
+            connection.execute(
+                "UPDATE track_metadata SET version=2 WHERE track_id=?",
+                (track["id"],),
+            )
+            connection.execute(
+                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) "
+                "VALUES ('job-v1', ?, 1, 'queued', ?, ?, 'missing', 0)",
+                (track["id"], now, now),
+            )
+            connection.execute(
+                "INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,created_at,updated_at) "
+                "VALUES (?, 2, 'all', 1, ?, ?)",
+                (track["id"], now, now),
+            )
+
+        def fail_suggestions(*_, **__):
+            raise ProviderError("provider_unavailable")
+
+        service.suggestions = fail_suggestions
+        assert service.step() is True
+
+        with service.database.connect() as connection:
+            remaining_intents = connection.execute(
+                "SELECT count(*) FROM provider_refresh_intents WHERE track_id=?",
+                (track["id"],),
+            ).fetchone()[0]
+            promoted = connection.execute(
+                "SELECT metadata_version,status,refresh_mode,force FROM provider_jobs "
+                "WHERE track_id=? AND id!='job-v1'",
+                (track["id"],),
+            ).fetchone()
+        assert remaining_intents == 0
+        assert promoted is not None
+        assert (
+            promoted["metadata_version"],
+            promoted["status"],
+            promoted["refresh_mode"],
+            promoted["force"],
+        ) == (2, "queued", "all", 1)
