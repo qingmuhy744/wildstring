@@ -298,3 +298,50 @@ def test_upgrade_cannot_replace_different_identity(settings, authenticated_clien
         assert replacement.json()["version"] == imported["version"] + 1
         assert replacement.json()["plugin_version"] == "1.1.0"
         assert replacement.json()["enabled"] is False
+        packages_dir = settings.data_dir / "providers" / "source-plugins"
+        assert len(list(packages_dir.iterdir())) == 1
+        assert client.delete(BASE + "/fixture-source?version=2", headers=HEADERS).status_code == 200
+        assert list(packages_dir.iterdir()) == []
+
+
+def test_zip_rejects_unsupported_compression_and_rate_closes_connections(tmp_path):
+    import sqlite3
+    from zipfile import ZIP_BZIP2
+
+    from wildstring.database import Database
+    from wildstring.plugin_rate import cooldown, permit
+
+    buf = io.BytesIO()
+    with ZipFile(buf, "w", compression=ZIP_BZIP2) as archive:
+        archive.writestr("manifest.json", json.dumps(MANIFEST))
+        archive.writestr("adapter.py", ADAPTER)
+    with pytest.raises(HTTPException) as exc:
+        inspect_package(buf.getvalue())
+    assert exc.value.detail == "source_plugin_invalid_zip"
+
+    db = Database(tmp_path)
+    db.initialize()
+    rate_cfg = {
+        "database": str(db.path),
+        "plugin_id": "fixture-source",
+        "interval_seconds": 0.01,
+        "batch_id": None,
+    }
+    closed = 0
+    real_connect = sqlite3.connect
+
+    class TrackedConnection(sqlite3.Connection):
+        def close(self):
+            nonlocal closed
+            closed += 1
+            super().close()
+
+    def tracked_connect(*args, **kwargs):
+        kwargs["factory"] = TrackedConnection
+        return real_connect(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sqlite3, "connect", tracked_connect)
+        assert permit(rate_cfg) == 0
+        cooldown(rate_cfg, 1)
+    assert closed == 2

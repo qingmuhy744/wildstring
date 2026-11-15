@@ -1,6 +1,7 @@
 """Source-plugin orchestration keeps permissions and matching in WildString."""
 
 import json
+import shutil
 import time
 from difflib import SequenceMatcher
 from urllib.parse import urlsplit
@@ -586,6 +587,7 @@ class MusicSources:
         def uninstall(identity: str, version: int = Query(ge=1), user=admin):
             self.settings(identity)
             plugin = self.plugins[identity]
+            remove_package_dir = False
             with self.database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute(
@@ -596,8 +598,19 @@ class MusicSources:
                     raise HTTPException(409, "source_plugin_version_conflict")
                 if row[0]:
                     raise HTTPException(409, "source_plugin_disable_first")
+                pkg = db.execute(
+                    "SELECT sha256 FROM source_plugin_packages WHERE plugin_id=?", (identity,)
+                ).fetchone()
                 db.execute("DELETE FROM source_plugin_packages WHERE plugin_id=?", (identity,))
                 db.execute("DELETE FROM source_plugin_settings WHERE plugin_id=?", (identity,))
+                if pkg:
+                    still_used = db.execute(
+                        "SELECT 1 FROM source_plugin_packages WHERE sha256=? LIMIT 1", (pkg[0],)
+                    ).fetchone()
+                    remove_package_dir = still_used is None
+            if remove_package_dir:
+                shutil.rmtree(plugin.path, ignore_errors=True)
+            shutil.rmtree(self.providers.directory / "plugin-state" / identity, ignore_errors=True)
             secret_updates = {
                 f"source:{identity}:{field['key']}": None
                 for field in plugin.manifest.settings

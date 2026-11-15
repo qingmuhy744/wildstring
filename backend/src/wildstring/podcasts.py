@@ -13,7 +13,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -23,6 +23,8 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
+from defusedxml import ElementTree as SafeET
+from defusedxml.common import DefusedXmlException
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from filelock import FileLock, Timeout
@@ -186,6 +188,32 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
             self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
+def _guard_proxied_target(full_url: str, allow_fake_ip: bool = False) -> None:
+    """Reject local/private DNS targets before forwarding a request to an HTTP proxy."""
+    validate_remote_url(full_url)
+    parsed = urlsplit(full_url)
+    host = (parsed.hostname or "").rstrip(".").lower()
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    try:
+        values = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        # Proxy-only environments without local internet DNS may still forward
+        # multi-label public domain names validated by validate_remote_url().
+        return
+    for _, _, _, _, sockaddr in values:
+        raw = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if not address.is_global:
+            if is_fake_ip(address):
+                if not allow_fake_ip:
+                    raise PodcastURLRejected("remote_url_fake_ip")
+            else:
+                raise PodcastURLRejected("remote_url_private_host")
+
+
 class SafeHTTPHandler(urllib.request.HTTPHandler):
     def __init__(self, trusted_proxy_endpoints, allow_fake_ip=False):
         super().__init__()
@@ -193,6 +221,8 @@ class SafeHTTPHandler(urllib.request.HTTPHandler):
         self.allow_fake_ip = allow_fake_ip
 
     def http_open(self, req):
+        if self.trusted_proxy_endpoints:
+            _guard_proxied_target(req.full_url, self.allow_fake_ip)
         return self.do_open(
             lambda host, **kwargs: SafeHTTPConnection(
                 host,
@@ -211,6 +241,8 @@ class SafeHTTPSHandler(urllib.request.HTTPSHandler):
         self.allow_fake_ip = allow_fake_ip
 
     def https_open(self, req):
+        if self.trusted_proxy_endpoints:
+            _guard_proxied_target(req.full_url, self.allow_fake_ip)
         return self.do_open(
             lambda host, **kwargs: SafeHTTPSConnection(
                 host,
@@ -257,6 +289,8 @@ def validate_remote_url(value: str) -> str:
     except ValueError:
         address = None
     if address is not None and not address.is_global:
+        raise PodcastURLRejected("remote_url_private_host")
+    if address is None and "." not in hostname:
         raise PodcastURLRejected("remote_url_private_host")
     return raw
 
@@ -585,8 +619,8 @@ def fetch_and_parse_feed(
 def parse_feed_document(data: bytes, feed_url: str) -> dict[str, Any]:
     """Parse RSS or Atom bytes into the subscription shape shared by add and preview."""
     try:
-        root = ET.fromstring(data)  # nosec B314
-    except Exception as e:
+        root = SafeET.fromstring(data, forbid_entities=True, forbid_external=True)
+    except (ET.ParseError, DefusedXmlException, ValueError) as e:
         logger.error("Failed to parse podcast XML host=%s: %s", urlsplit(feed_url).hostname, e)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

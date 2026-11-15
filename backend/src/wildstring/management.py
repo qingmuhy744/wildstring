@@ -18,6 +18,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from wildstring import get_app_version
 from wildstring.album_release_locks import ReleaseLockInput
@@ -1367,9 +1368,17 @@ def management_router(service, auth):
         file: Annotated[UploadFile, File()],
         save_sidecar: Annotated[bool, Form()] = True,
     ):
-        content = await file.read()
-        return service.update_album_cover(
-            album_id, content, filename=file.filename or "cover.jpg", save_sidecar=save_sidecar
+        buffer = bytearray()
+        while chunk := await file.read(64 * 1024):
+            if len(buffer) + len(chunk) > MAX_COVER_BYTES:
+                raise HTTPException(413, "cover_too_large")
+            buffer.extend(chunk)
+        return await run_in_threadpool(
+            service.update_album_cover,
+            album_id,
+            bytes(buffer),
+            filename=file.filename or "cover.jpg",
+            save_sidecar=save_sidecar,
         )
 
     @router.delete(
