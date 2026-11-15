@@ -1,7 +1,7 @@
 # 播客人物识别、声纹归档与异地逐字稿转写方案
 
 更新日期：2026-11-07
-状态：**设计方案草案（尚未在 WildString 主仓库实现）**。音频转写与声纹原型已在本地 `MOSS-Transcribe-Diarize/runs/podcast-pipeline/` 完成《声东击西》#406、#407 实测验证。
+状态：**进行中（未排期）**，roadmap 中的后续能力；尚未在 WildString 主仓库实现。音频转写与声纹原型已在本地 `MOSS-Transcribe-Diarize/runs/podcast-pipeline/` 完成《声东击西》#406、#407 实测验证。
 
 ---
 

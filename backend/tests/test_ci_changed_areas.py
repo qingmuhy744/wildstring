@@ -32,6 +32,7 @@ def decide(*files: str) -> tuple[bool, bool]:
         ("frontend/apple-shared/ServerRoutesEditor.swift", "README.md", "README.en.md"),
         ("docs/releases/v0.8.16.md", "contracts/podcast-queue.md", "DESIGN.md"),
         (".github/workflows/android.yml",),
+        (".github/pull_request_template.md",),
     ],
 )
 def test_native_and_documentation_changes_skip_backend_and_web(files):
@@ -79,6 +80,47 @@ def test_no_changes_skip_everything():
     assert decide() == (False, False)
 
 
+def android(*files: str) -> bool:
+    return areas.touches_android(list(files))
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        ("docs/releases/v0.8.16.md", "contracts/podcast-queue.md", "DESIGN.md", "AGENTS.md"),
+        ("frontend/web/src/App.tsx", "frontend/web/tests/podcast-player.spec.ts"),
+        ("frontend/ios/WildString/PodcastsView.swift", "frontend/apple-shared/x.swift"),
+        ("scripts/check_i18n_keys.py", ".github/workflows/ci.yml", ".pre-commit-config.yaml"),
+        (".github/workflows/macos.yml", ".github/pull_request_template.md"),
+    ],
+)
+def test_changes_outside_android_inputs_skip_the_android_build(files):
+    assert android(*files) is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "frontend/android/app/src/main/java/com/wildstring/app/ui/PlaybackVisual.kt",
+        "frontend/android/gradle/libs.versions.toml",
+        "tests/fixtures/audio/sample.mp3",
+        "scripts/package_android.py",
+        "backend/src/wildstring/main.py",
+        "Makefile",
+        ".github/workflows/android.yml",
+        ".github/workflows/release.yml",
+        "newdir/thing.py",
+    ],
+)
+def test_android_inputs_and_unknown_paths_build_android(path):
+    assert android(path) is True
+
+
+def test_a_docs_and_android_change_builds_android():
+    assert android("docs/a.md", "frontend/android/a.kt") is True
+    assert android() is False
+
+
 def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     def broken(*args, **kwargs):
         raise subprocess.CalledProcessError(128, "git")
@@ -86,7 +128,7 @@ def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     monkeypatch.setattr(areas.subprocess, "run", broken)
     assert areas.main(["ci_changed_areas.py", "base", "head"]) == 0
     output = capsys.readouterr().out.split()
-    assert output == ["backend=true", "web=true"]
+    assert output == ["backend=true", "web=true", "android=true"]
 
 
 @pytest.mark.skipif(
@@ -119,7 +161,7 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=false", "web=false"]
+    assert out == ["backend=false", "web=false", "android=true"]
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend/x.py").write_text("x\n")
     git("add", "-A")
@@ -131,4 +173,4 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=true", "web=true"]
+    assert out == ["backend=true", "web=true", "android=true"]

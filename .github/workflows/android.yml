@@ -80,19 +80,41 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
           persist-credentials: false
+      # `apk` is a required check, so a pull request that does not touch Android inputs keeps
+      # the job and skips only its build steps; a skipped job would stay pending forever.
+      # Every other trigger (push, schedule, release reuse, manual runs) builds.
+      - id: areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "android=true" | tee -a "$GITHUB_OUTPUT"
+          fi
+      - name: Skip the Android build
+        if: steps.areas.outputs.android != 'true'
+        run: echo "No Android, fixture, packaging or shared-input changes; the build is skipped."
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.areas.outputs.android == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        if: steps.areas.outputs.android == 'true'
       - name: Install fixed Android SDK components
+        if: steps.areas.outputs.android == 'true'
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           cmdline-tools-version: "15859902"
           packages: "platform-tools platforms;android-37.0 build-tools;36.1.0"
           log-accepted-android-sdk-licenses: false
       - name: Check, test and package APK
+        if: steps.areas.outputs.android == 'true'
         run: make android-ci
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: ${{ env.RUN_EMULATOR == 'true' }}
@@ -176,6 +198,7 @@ jobs:
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}
         run: bash scripts/ci_synthetic_api.sh stop
       - name: Upload installable debug APK
+        if: steps.areas.outputs.android == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wildstring-android-debug

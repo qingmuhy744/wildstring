@@ -1,5 +1,7 @@
 # 播放器设计核对（2026-11-07）
 
+> 历史记录：已被后续实现取代，仅保留当时的方案与验收过程。现行状态见 [范围变更记录](../product/scope-history.md)、[产品范围](../product/scope.md) 与 `docs/releases/`。
+
 以 `DESIGN.md` 和 `docs/product/scope.md` 为准。用户提供的 `vinyl-player-redesign.kui.fig` 缩略图仅作为视觉参考：它强调平静底色、唱片、封面与主播放按钮；不是实现指令。
 
 ## 本次范围

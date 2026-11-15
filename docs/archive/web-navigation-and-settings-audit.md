@@ -1,8 +1,10 @@
 # Web 导航与设置核对
 
+> 历史记录：已被后续实现取代，仅保留当时的方案与验收过程。现行状态见 [范围变更记录](../product/scope-history.md)、[产品范围](../product/scope.md) 与 `docs/releases/`。
+
 日期：2026-11-01。分支：`feat/podcast-explore`。
 
-状态：已实现导航与设置重组，并完成本地构建、检查与相关浏览器回归，纳入 0.8.3 发布准备。最终远程检查、发布和部署分别核验。播客探索页的布局改进单独记录在[客户端与播客探索改进](client-and-podcast-explore.md)。
+状态：已实现导航与设置重组，并完成本地构建、检查与相关浏览器回归，纳入 0.8.3 发布准备。最终远程检查、发布和部署分别核验。播客探索页的布局改进单独记录在[客户端与播客探索改进](../product/client-and-podcast-explore.md)。
 
 ## 现在如何开启播客自动清理
 
@@ -64,4 +66,4 @@
 
 本地截图：`artifacts/settings-home-light-desktop.png`、`settings-home-dark-desktop.png`、`settings-home-light-mobile.png`、`settings-management-desktop.png`、`settings-cleanup-desktop.png` 与 `settings-cleanup-mobile.png`。
 
-0.8.3 发布前重新执行默认 Web 回归：304 项通过、114 项因专用夹具未启用而跳过，包含最终设置导航、主题、个人偏好与播放连续性。专用夹具回归及后续复测见[客户端与播客探索改进](client-and-podcast-explore.md)。
+0.8.3 发布前重新执行默认 Web 回归：304 项通过、114 项因专用夹具未启用而跳过，包含最终设置导航、主题、个人偏好与播放连续性。专用夹具回归及后续复测见[客户端与播客探索改进](../product/client-and-podcast-explore.md)。
