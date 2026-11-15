@@ -6,9 +6,10 @@ import urllib.request
 from tempfile import NamedTemporaryFile
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from wildstring.http_cache import private_image_response
 from wildstring.library.assets import MAX_PIXELS
 from wildstring.podcast_access import require_programme
 from wildstring.podcasts import (
@@ -57,7 +58,7 @@ def fetch(manager, source):
     return cached
 
 
-def cover(manager, user_id, podcast_id):
+def cover(manager, user_id, podcast_id, request: Request | None = None):
     with manager.database.connect() as db:
         require_programme(db, user_id, podcast_id)
         source = db.execute("SELECT cover_url FROM podcasts WHERE id=?", (podcast_id,)).fetchone()[
@@ -84,15 +85,11 @@ def cover(manager, user_id, podcast_id):
         finally:
             if temporary is not None and os.path.exists(temporary):
                 os.unlink(temporary)
-    return image_response(cached)
+    return image_response(cached, request=request)
 
 
-def image_response(data):
-    return Response(
-        data,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
-    )
+def image_response(data, request: Request | None = None):
+    return private_image_response(request, data)
 
 
 def artwork_router(manager, auth) -> APIRouter:
@@ -100,7 +97,11 @@ def artwork_router(manager, auth) -> APIRouter:
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
 
     @router.get("/{podcast_id}/cover")
-    def get_podcast_cover(podcast_id: str, user: Annotated[dict, Depends(auth.require_session)]):
-        return cover(manager, user["id"], podcast_id)
+    def get_podcast_cover(
+        podcast_id: str,
+        request: Request,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return cover(manager, user["id"], podcast_id, request=request)
 
     return router

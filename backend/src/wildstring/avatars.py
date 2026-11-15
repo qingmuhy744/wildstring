@@ -6,9 +6,10 @@ import os
 from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
+
+from wildstring.http_cache import private_image_response
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 25_000_000
@@ -64,15 +65,11 @@ def router(auth):
         return info(user)
 
     @routes.get("")
-    def picture(user=session):
+    def picture(request: Request, user=session):
         target = path(user)
         if not target.is_file():
             raise HTTPException(404, "avatar_not_found")
-        return FileResponse(
-            target,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
-        )
+        return private_image_response(request, target.read_bytes())
 
     @routes.post("", dependencies=[Depends(auth.require_client)])
     async def upload(request: Request, response: Response, user=session):

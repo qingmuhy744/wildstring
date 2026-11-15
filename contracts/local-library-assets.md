@@ -21,7 +21,7 @@
 2. 同目录、音频同名的 `.jpg` / `.jpeg` / `.png` / `.webp`。
 3. 同目录 `cover` → `folder` → `front`，每个名称按 JPG、JPEG、PNG、WebP 顺序尝试。文件名匹配不区分大小写，不向上级目录搜索。
 
-只接受 Pillow 可解码的 JPEG、PNG、WebP。单张原图上限 8 MiB、2000 万像素；损坏或过大的图片跳过。纠正 EXIF 朝向并缩小，缩略图按原图内容哈希去重，缓存于运行目录 `covers/`，不改音频或源图。文件接口使用 `private, no-store` 并先认证；外置图片改动后刷新曲库即可重新加载。
+只接受 Pillow 可解码的 JPEG、PNG、WebP。单张原图上限 8 MiB、2000 万像素；损坏或过大的图片跳过。纠正 EXIF 朝向并缩小，缩略图按原图内容哈希去重，缓存于运行目录 `covers/`，不改音频或源图。封面接口在先完成会话与曲库授权后返回 `Cache-Control: private, no-cache`、强内容 SHA-256 `ETag`、`Vary: Cookie, Authorization, X-Wildstring-Library` 与 `nosniff`，支持 `If-None-Match` 条件请求返回 `304 Not Modified`；外置图片改动或曲库重扫后可刷新验证。其余音频串流（`/stream`）与歌词接口（`/lyrics`）继续返回 `private, no-store` 并先认证。
 
 格式读取参考 [Mutagen FLAC](https://mutagen.readthedocs.io/en/latest/api/flac.html)、[ID3](https://mutagen.readthedocs.io/en/latest/api/id3_frames.html) 和 [Pillow](https://pillow.readthedocs.io/en/stable/reference/Image.html)。
 

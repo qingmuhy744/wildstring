@@ -39,7 +39,7 @@
 
 - `PUT /metadata/folders`、`PUT /metadata/albums`：按文件夹或专辑批量更新元数据；字段与版本由输入模型校验。
 - `POST /albums/{album_id}/cover`：上传专辑封面，支持 `save_sidecar`；`DELETE` 同路径移除覆盖封面。它不等于向音频内嵌标签写图。
-- `GET /tracks/{track_id}/file-info`：读取当前与建议文件路径。
+- `GET /tracks/{track_id}/file-info`（以及面向普通有权限曲库访客的 `GET /api/v1/tracks/{track_id}/file-info`）：读取源文件名（`source_filename`）、当前托管库相对路径（`path`）、建议路径（`suggested_path`）、对齐状态（`in_sync`、`file_exists`）及格式大小信息；宿主机物理路径字段（`absolute_path`、`full_path`、`library_root`、`source_path`）仅对 `owner` 返回真实值，其余角色（`librarian`、`editor`、`listener`）统一返回 `null`。
 - `POST /tracks/{track_id}/reorganize-file`：显式重组织单曲托管文件，在扫描锁下移动音频及同名附属文件，保留曲目 ID 并更新路径映射；路径不变时返回 `already_organized`。
 
 单曲重组织不具备持久批量任务、备份补偿或断点恢复保证；这些仍是 [后续设计目标](../docs/architecture/metadata-repair.md)。

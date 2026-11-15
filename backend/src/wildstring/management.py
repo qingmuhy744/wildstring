@@ -1494,10 +1494,17 @@ def management_router(service, auth):
         return editor.save(track_id, body, user_id=user["id"])
 
     @router.get("/tracks/{track_id}/file-info")
-    def track_file_info(track_id: str):
+    def track_file_info(
+        track_id: str,
+        user: Annotated[dict, Depends(auth.require_permission("library:inspect"))],
+    ):
         from wildstring.library.file_reorganizer import get_track_file_info
 
-        return get_track_file_info(service.repository, track_id)
+        return get_track_file_info(
+            service.repository,
+            track_id,
+            include_host_paths=(user["profile"] == "owner"),
+        )
 
     @router.post(
         "/tracks/{track_id}/reorganize-file",

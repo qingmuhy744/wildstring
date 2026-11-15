@@ -143,12 +143,19 @@ class HostAllowlist:
 
         async def private_send(message):
             if message["type"] == "http.response.start" and scope["path"].startswith("/api/v1/"):
+                raw_headers = list(message.get("headers", []))
+                cache_control = b"private, no-store"
+                for key, value in raw_headers:
+                    if (
+                        key.lower() == b"cache-control"
+                        and value.strip().lower() == b"private, no-cache"
+                    ):
+                        cache_control = b"private, no-cache"
+                        break
                 message = dict(message)
                 message["headers"] = [
-                    (key, value)
-                    for key, value in message.get("headers", [])
-                    if key.lower() != b"cache-control"
-                ] + [(b"cache-control", b"private, no-store")]
+                    (key, value) for key, value in raw_headers if key.lower() != b"cache-control"
+                ] + [(b"cache-control", cache_control)]
             await send(message)
 
         await self.app(scope, receive, private_send)

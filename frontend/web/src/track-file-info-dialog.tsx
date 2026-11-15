@@ -10,7 +10,9 @@ interface TrackFileInfo {
   path: string;
   source_path?: string | null;
   source_filename?: string;
-  absolute_path: string;
+  absolute_path?: string | null;
+  full_path?: string | null;
+  library_root?: string | null;
   suggested_path: string;
   in_sync: boolean;
   file_exists: boolean;
@@ -216,23 +218,27 @@ export function TrackFileInfoDialog({
               </div>
             </div>
 
-            <div className="file-info-section">
-              <div className="section-label-row">
-                <span className="section-title">{t('trackFileInfoDialog.serverAbsolutePath')}</span>
-                <button
-                  type="button"
-                  className="text-copy-button"
-                  onClick={() => copyText(info.absolute_path, 'abs')}
-                >
-                  {copiedKey === 'abs'
-                    ? t('trackFileInfoDialog.copied')
-                    : t('trackFileInfoDialog.copy')}
-                </button>
+            {info.absolute_path && (
+              <div className="file-info-section">
+                <div className="section-label-row">
+                  <span className="section-title">
+                    {t('trackFileInfoDialog.serverAbsolutePath')}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-copy-button"
+                    onClick={() => copyText(info.absolute_path!, 'abs')}
+                  >
+                    {copiedKey === 'abs'
+                      ? t('trackFileInfoDialog.copied')
+                      : t('trackFileInfoDialog.copy')}
+                  </button>
+                </div>
+                <div className="path-display-box">
+                  <code>{info.absolute_path}</code>
+                </div>
               </div>
-              <div className="path-display-box">
-                <code>{info.absolute_path}</code>
-              </div>
-            </div>
+            )}
 
             {!info.in_sync && (
               <div className="file-info-desync-box">

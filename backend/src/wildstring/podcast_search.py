@@ -22,7 +22,7 @@ from typing import Annotated, Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring import podcast_artwork
@@ -395,7 +395,7 @@ class PodcastSearch:
                 self.cache.popitem(last=False)
         self._remember(items)
 
-    def directory_cover(self, key: str):
+    def directory_cover(self, key: str, request: Request | None = None):
         with self.lock:
             source = self.artwork_sources.get(key)
             if source is None or source[0] <= self.clock():
@@ -405,14 +405,14 @@ class PodcastSearch:
             hit = self.artwork_images.get(key)
             if hit is not None and hit[0] > self.clock():
                 self.artwork_images.move_to_end(key)
-                return podcast_artwork.image_response(hit[1])
+                return podcast_artwork.image_response(hit[1], request=request)
         data = podcast_artwork.fetch(self.manager, source[1])
         with self.lock:
             self.artwork_images[key] = (self.clock() + CHART_TTL_SECONDS, data)
             self.artwork_images.move_to_end(key)
             while len(self.artwork_images) > 64:
                 self.artwork_images.popitem(last=False)
-        return podcast_artwork.image_response(data)
+        return podcast_artwork.image_response(data, request=request)
 
     # Upstream ---------------------------------------------------------------------------
     def _region(self, region: str, term: str, limit: int) -> list[dict[str, Any]]:
@@ -776,9 +776,10 @@ class PodcastSearch:
         @router.get("/directory-cover/{key}")
         def directory_cover(
             key: str,
+            request: Request,
             user: Annotated[dict, Depends(auth.require_session)],
         ):
-            return self.directory_cover(key)
+            return self.directory_cover(key, request=request)
 
         @router.post("/preview", dependencies=[Depends(auth.require_client)])
         def preview_feed(

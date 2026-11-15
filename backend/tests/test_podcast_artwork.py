@@ -43,8 +43,14 @@ def test_cover_fetches_with_server_policy_then_uses_local_cache(artwork, monkeyp
     first = client.get(PATH)
     assert first.status_code == 200
     assert first.headers["content-type"] == "image/jpeg"
-    assert first.headers["cache-control"] == "private, no-store"
+    assert first.headers["cache-control"] == "private, no-cache"
+    assert first.headers["vary"] == "Cookie, Authorization, X-Wildstring-Library"
     assert first.headers["x-content-type-options"] == "nosniff"
+    etag = first.headers["etag"]
+    not_modified = client.get(PATH, headers={"If-None-Match": etag})
+    assert not_modified.status_code == 304
+    assert not_modified.content == b""
+    assert not_modified.headers["cache-control"] == "private, no-cache"
     with Image.open(io.BytesIO(first.content)) as image:
         assert image.format == "JPEG" and image.size == (64, 64)
     assert client.get(PATH).status_code == 200
@@ -114,6 +120,7 @@ def test_cover_requires_session_and_catalogue_access(artwork, monkeypatch):
     assert account.status_code == 201
     client.cookies.clear()
     assert client.get(PATH).status_code == 401
+    assert client.get(PATH, headers={"If-None-Match": "*"}).status_code == 401
     assert (
         client.post(
             "/api/v1/auth/login",
@@ -123,6 +130,7 @@ def test_cover_requires_session_and_catalogue_access(artwork, monkeypatch):
         == 200
     )
     assert client.get(PATH).status_code == 404
+    assert client.get(PATH, headers={"If-None-Match": "*"}).status_code == 404
     with manager.database.connect(write=True) as db:
         db.execute(
             "INSERT INTO podcast_user_catalog(user_id,podcast_id) VALUES (?, 'artwork-fixture')",
@@ -172,8 +180,14 @@ def test_directory_artwork_caches_without_adding_or_following(directory_artwork)
     first = client.get(path)
     assert first.status_code == 200
     assert first.headers["content-type"] == "image/jpeg"
-    assert first.headers["cache-control"] == "private, no-store"
+    assert first.headers["cache-control"] == "private, no-cache"
+    assert first.headers["vary"] == "Cookie, Authorization, X-Wildstring-Library"
     assert first.headers["x-content-type-options"] == "nosniff"
+    etag = first.headers["etag"]
+    not_modified = client.get(path, headers={"If-None-Match": etag})
+    assert not_modified.status_code == 304
+    assert not_modified.content == b""
+    assert not_modified.headers["cache-control"] == "private, no-cache"
     assert client.get(path).content == first.content
     factory.assert_called_once_with(
         "custom", "http://proxy.example.test:8080", manager.allow_fake_ip
@@ -188,11 +202,16 @@ def test_directory_artwork_caches_without_adding_or_following(directory_artwork)
 
 def test_directory_artwork_unknown_key_and_session(directory_artwork):
     client, _manager, path, factory = directory_artwork
+    first = client.get(path)
+    assert first.status_code == 200
+    etag = first.headers["etag"]
     assert client.get("/api/v1/podcasts/directory-cover/unknown").status_code == 404
     assert client.get("/api/v1/podcasts/directory-cover/https:evil").status_code == 404
     client.cookies.clear()
-    assert client.get(path).status_code == 401
-    factory.assert_not_called()
+    denied = client.get(path, headers={"If-None-Match": etag})
+    assert denied.status_code == 401
+    assert denied.headers["cache-control"] == "private, no-store"
+    assert factory.call_count == 1
 
 
 def test_directory_artwork_expiry_and_refresh(directory_artwork):

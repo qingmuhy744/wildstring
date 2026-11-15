@@ -68,3 +68,99 @@ test('歌曲菜单打开文件属性与路径弹窗，展示相对与物理路�
   await dialog.locator('.file-info-footer button').click();
   await expect(dialog).toBeHidden();
 });
+
+test('真实接口下所有者可见服务器物理路径，普通听众隐藏宿主机路径', async ({ page }, info) => {
+  if (info.project.name === 'mobile') {
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+  await login(page);
+
+  const tracks = (await (await page.request.get('/api/v1/tracks')).json()).items;
+  const track = tracks[0];
+  const libraries = await (await page.request.get('/api/v1/libraries')).json();
+  const headers = { 'X-Wildstring-Client': 'web' };
+
+  const ownerInfoRes = await page.request.get(`/api/v1/tracks/${track.id}/file-info`);
+  expect(ownerInfoRes.ok()).toBe(true);
+  const ownerInfo = await ownerInfoRes.json();
+  expect(ownerInfo.absolute_path).toBeTruthy();
+  expect(ownerInfo.absolute_path).toBe(ownerInfo.full_path);
+
+  const openFileInfoDialog = async () => {
+    const trackRow = page
+      .locator('.track-row, .track-item')
+      .filter({ hasText: track.title })
+      .first();
+    await trackRow.getByLabel(`歌曲操作 ${track.title}`).click();
+    await page.getByRole('button', { name: '文件属性与路径' }).click();
+    const dialog = page.locator('.track-file-info-dialog');
+    await expect(dialog).toBeVisible();
+    return dialog;
+  };
+
+  // Owner sees relative path and host absolute physical path.
+  const ownerDialog = await openFileInfoDialog();
+  await expect(ownerDialog).toContainText('托管曲库相对路径');
+  await expect(ownerDialog).toContainText(ownerInfo.path);
+  await expect(ownerDialog).toContainText('服务器绝对物理路径');
+  await expect(ownerDialog).toContainText(ownerInfo.absolute_path);
+
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+    }, theme);
+    await page.screenshot({
+      path: `../../artifacts/file-info-owner-${info.project.name}-${theme}.png`,
+    });
+  }
+  await ownerDialog.locator('.file-info-footer button').click();
+  await expect(ownerDialog).toBeHidden();
+
+  // Create a granted listener account and switch session.
+  const username = `fi-${info.project.name}-${Date.now().toString(36)}`;
+  const password = 'listener-file-info-password';
+  const created = await page.request.post('/api/v1/manage/users', {
+    headers,
+    data: {
+      username,
+      password,
+      profile: 'listener',
+      library_ids: libraries.map((library: { id: string }) => library.id),
+    },
+  });
+  expect(created.status()).toBe(201);
+  await page.request.post('/api/v1/auth/logout', { headers });
+  const signedIn = await page.request.post('/api/v1/auth/login', {
+    headers,
+    data: { username, password },
+  });
+  expect(signedIn.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole('table', { name: '歌曲列表' }).getByRole('row')).toHaveCount(3);
+
+  const listenerInfoRes = await page.request.get(`/api/v1/tracks/${track.id}/file-info`);
+  expect(listenerInfoRes.ok()).toBe(true);
+  const listenerInfo = await listenerInfoRes.json();
+  expect(listenerInfo.absolute_path).toBeNull();
+  expect(listenerInfo.full_path).toBeNull();
+  expect(listenerInfo.library_root).toBeNull();
+  expect(listenerInfo.source_path).toBeNull();
+  expect(listenerInfo.path).toBe(ownerInfo.path);
+
+  const listenerDialog = await openFileInfoDialog();
+  await expect(listenerDialog).toContainText('托管曲库相对路径');
+  await expect(listenerDialog).toContainText(ownerInfo.path);
+  await expect(listenerDialog.getByText('服务器绝对物理路径')).toHaveCount(0);
+  await expect(listenerDialog).not.toContainText(ownerInfo.absolute_path);
+
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+    }, theme);
+    await page.screenshot({
+      path: `../../artifacts/file-info-listener-${info.project.name}-${theme}.png`,
+    });
+  }
+  await listenerDialog.locator('.file-info-footer button').click();
+  await expect(listenerDialog).toBeHidden();
+});

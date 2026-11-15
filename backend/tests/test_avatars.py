@@ -26,11 +26,18 @@ def test_avatar_normalizes_and_removes_image_metadata(settings, authenticated_cl
         assert client.post(BASE, content=picture(format=format)).status_code == 403
         result = client.post(BASE, headers=CLIENT, content=picture(format=format))
         assert result.status_code == 200, result.text
-        assert len(result.json()["version"]) == 64
+        version = result.json()["version"]
+        assert len(version) == 64
         response = client.get(BASE)
         assert response.headers["content-type"] == "image/jpeg"
-        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["cache-control"] == "private, no-cache"
+        assert response.headers["etag"] == f'"{version}"'
+        assert response.headers["vary"] == "Cookie, Authorization, X-Wildstring-Library"
         assert response.headers["x-content-type-options"] == "nosniff"
+        not_modified = client.get(BASE, headers={"If-None-Match": response.headers["etag"]})
+        assert not_modified.status_code == 304
+        assert not_modified.content == b""
+        assert not_modified.headers["cache-control"] == "private, no-cache"
         with Image.open(io.BytesIO(response.content)) as decoded:
             assert decoded.size == (256, 256)
             assert not decoded.getexif()
@@ -97,7 +104,11 @@ def test_avatar_persists_and_isolated_users_cannot_read_or_remove_each_others_pi
         reset = client.delete(BASE, headers=CLIENT)
         assert reset.status_code == 204
         assert client.get(BASE).status_code == 404
+        owner_etag = f'"{first["version"]}"'
+        assert client.get(BASE, headers={"If-None-Match": owner_etag}).status_code == 404
         client.post("/api/v1/auth/logout", headers=CLIENT)
         assert client.get(BASE + "/info").status_code == 401
-        assert client.get(BASE).status_code == 401
+        denied = client.get(BASE, headers={"If-None-Match": owner_etag})
+        assert denied.status_code == 401
+        assert denied.headers["cache-control"] == "private, no-store"
         assert client.post(BASE, headers=CLIENT, content=picture()).status_code == 401
