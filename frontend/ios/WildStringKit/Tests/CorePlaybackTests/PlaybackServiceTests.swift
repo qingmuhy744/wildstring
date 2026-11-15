@@ -1129,6 +1129,95 @@ struct PlaybackServiceTests {
             $0.write.event == "play" && $0.write.positionSeconds == 0 && $0.write.baseVersion == 3
         })
     }
+
+    @Test func playPodcastEpisodeWithoutExplicitPositionRecoversNewerRemoteProgressOverStaleCache() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+
+        final class WriteRecorder: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(episodeID: String, write: PodcastProgressWrite)] = []
+            func append(_ episodeID: String, _ write: PodcastProgressWrite) {
+                lock.withLock { entries.append((episodeID, write)) }
+            }
+            func snapshot() -> [(episodeID: String, write: PodcastProgressWrite)] {
+                lock.withLock { entries }
+            }
+        }
+        let recorder = WriteRecorder()
+        service.loadPodcastProgress = { _ in
+            PodcastProgressSnapshot(version: 5, positionSeconds: 1350, durationSeconds: 2400, completed: false)
+        }
+        service.submitPodcastProgress = { episodeID, write in
+            recorder.append(episodeID, write)
+            return .ok
+        }
+
+        let item40 = PlaybackService.Item(
+            trackID: "podcast_ep_ep-40",
+            title: "Episode 40",
+            artist: "Host",
+            streamPath: "api/v1/podcasts/episodes/ep-40/stream",
+            resumePositionSeconds: 100,
+            durationSeconds: 2400
+        )
+        service.playPodcastEpisode(item40, line: .show)
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-40")
+        #expect(service.currentTime == 1350)
+        let writes = recorder.snapshot().filter { $0.episodeID == "ep-40" }
+        #expect(writes.contains {
+            $0.write.event == "play" && $0.write.positionSeconds == 1350 && $0.write.baseVersion == 5
+        })
+        #expect(!writes.contains { $0.write.positionSeconds == 100 })
+    }
+
+    @Test func delayedRemotePodcastProgressDoesNotOverwriteUserSeekDuringBoot() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+
+        final class WriteRecorder: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(episodeID: String, write: PodcastProgressWrite)] = []
+            func append(_ episodeID: String, _ write: PodcastProgressWrite) {
+                lock.withLock { entries.append((episodeID, write)) }
+            }
+            func snapshot() -> [(episodeID: String, write: PodcastProgressWrite)] {
+                lock.withLock { entries }
+            }
+        }
+        let recorder = WriteRecorder()
+        service.loadPodcastProgress = { _ in
+            try? await Task.sleep(for: .milliseconds(100))
+            return PodcastProgressSnapshot(version: 4, positionSeconds: 300, durationSeconds: 2400, completed: false)
+        }
+        service.submitPodcastProgress = { episodeID, write in
+            recorder.append(episodeID, write)
+            return .ok
+        }
+
+        let item40 = PlaybackService.Item(
+            trackID: "podcast_ep_ep-40",
+            title: "Episode 40",
+            artist: "Host",
+            streamPath: "api/v1/podcasts/episodes/ep-40/stream",
+            resumePositionSeconds: 100,
+            durationSeconds: 2400
+        )
+        service.playPodcastEpisode(item40, line: .show)
+        try await Task.sleep(for: .milliseconds(20))
+        service.seek(to: 900)
+        await service.waitForPodcastTasks()
+
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-40")
+        #expect(service.currentTime == 900)
+        let writes = recorder.snapshot().filter { $0.episodeID == "ep-40" }
+        #expect(writes.contains {
+            $0.write.event == "seek" && $0.write.positionSeconds == 900 && $0.write.baseVersion == 4
+        })
+        #expect(!writes.contains { $0.write.positionSeconds == 300 })
+    }
 }
 
 private final class PodcastResumeProtocol: URLProtocol {

@@ -276,7 +276,7 @@ private struct PodcastDetailView: View {
         ) {
             Button(L10n("podcasts.resume")) {
                 if let episode = resumeEpisode, let detail {
-                    start(episode, in: detail.episodes, at: Double(episode.positionSeconds))
+                    start(episode, in: detail.episodes, at: nil)
                 }
                 resumeEpisode = nil
             }
@@ -309,12 +309,11 @@ private struct PodcastDetailView: View {
         if episode.positionSeconds > 15, episode.durationSeconds == 0 || remaining > 30 {
             resumeEpisode = episode
         } else {
-            let startPos = isCompleted(episode) ? 0 : Double(max(0, episode.positionSeconds))
-            start(episode, in: episodes, at: startPos)
+            start(episode, in: episodes, at: nil)
         }
     }
 
-    private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double) {
+    private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double? = nil) {
         guard episodes.contains(where: { $0.id == episode.id }) else { return }
         Haptics.tap()
         // 从节目里点播，按这一档的顺序续播，不改云端待播。
