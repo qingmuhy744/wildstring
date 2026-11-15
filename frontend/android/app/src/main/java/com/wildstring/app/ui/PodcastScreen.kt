@@ -43,10 +43,6 @@ import com.wildstring.app.R
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -715,28 +711,6 @@ private fun PodcastStatusCard(message: String, onAction: () -> Unit, action: Str
 }
 
 
-/** Widest follow-button label in the current locale, including padding and the menu chevron. */
-@Composable
-private fun podcastFollowButtonMinWidth(): androidx.compose.ui.unit.Dp {
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val style = TextStyle(fontSize = 13.sp)
-    val followed = stringResource(R.string.pod_exp_followed)
-    val labels = listOf(
-        stringResource(R.string.pod_scr_follow_show),
-        followed,
-        followed + " · " + stringResource(R.string.podcast_action_queue_last_short),
-        followed + " · " + stringResource(R.string.podcast_action_queue_next_short),
-        followed + " · " + stringResource(R.string.podcast_action_ignore_short),
-    )
-    val textMax = labels.maxOf { label ->
-        with(density) {
-            measurer.measure(AnnotatedString(label), style = style, softWrap = false, maxLines = 1).size.width.toDp()
-        }
-    }
-    return textMax + 12.dp + 6.dp + 18.dp
-}
-
 /** Follow state plus everything that only matters once a show is followed: new-episode rule, auto download, unfollow. */
 @Composable
 internal fun PodcastFollowedMenu(
@@ -760,9 +734,9 @@ internal fun PodcastFollowedMenu(
     Box(modifier) {
         OutlinedButton(
             onClick = { open = true },
-            shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
-            modifier = Modifier.heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
+            shape = RoundedCornerShape(999.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 12.dp),
+            modifier = Modifier.heightIn(min = 48.dp).then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).testTag("podcast-follow-menu"),
         ) {
             // The current rule rides on the button; "仅关注" is the quiet default and adds nothing.
             Text(
@@ -770,6 +744,7 @@ internal fun PodcastFollowedMenu(
                 fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
+            Spacer(Modifier.width(2.dp))
             Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
         }
         DropdownMenu(open, { open = false }, Modifier.testTag("podcast-follow-options")) {
@@ -1114,6 +1089,10 @@ private fun PodcastDetailView(
         list.sortedWith(if (sortDescending) comparator.reversed() else comparator)
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val shareTitle = stringResource(R.string.pod_scr_share_show)
+    var headerActionsExpanded by rememberSaveable(podcast.id) { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier
@@ -1132,6 +1111,29 @@ private fun PodcastDetailView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            Box {
+                IconButton(
+                    onClick = { headerActionsExpanded = true },
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions"),
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.pod_scr_more_options))
+                }
+                DropdownMenu(
+                    expanded = headerActionsExpanded,
+                    onDismissRequest = { headerActionsExpanded = false },
+                    modifier = Modifier.testTag("podcast-show-actions-menu"),
+                ) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
+                        headerActionsExpanded = false
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
+                        context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
+                    }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
+                    if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
+                        headerActionsExpanded = false
+                        onFollow()
+                    }, leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
+                }
+            }
         }
 
         PodcastRefreshBox(loading, onRefresh, "podcast-detail-refresh", stringResource(R.string.pod_scr_refresh_episodes)) {
@@ -1196,65 +1198,58 @@ private fun PodcastDetailView(
 
                         Spacer(Modifier.height(14.dp))
 
-                        // Header action: full-width primary continue/latest CTA, then a compact secondary row (queue, follow, overflow).
+                        // Header actions: primary continue/latest pill paired on one row with the follow/rule pill.
                         val nextPlayable = detail?.episodes.orEmpty().asSequence()
                             .filter { !it.completed }
                             .maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
                             ?: detail?.episodes.orEmpty().maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
                         val nextResumable = (nextPlayable?.positionSeconds ?: 0) > 0
-                        val context = androidx.compose.ui.platform.LocalContext.current
-                        val shareTitle = stringResource(R.string.pod_scr_share_show)
-                        var headerActionsExpanded by rememberSaveable { mutableStateOf(false) }
-                        nextPlayable?.let { target ->
-                            Button(
-                                onClick = { onPlayEpisode(target) },
-                                shape = RoundedCornerShape(999.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp),
-                                // Full width on Phone; on Pad the 760dp reading column would stretch it into a banner.
-                                modifier = (if (LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad) Modifier.widthIn(min = 240.dp, max = 360.dp) else Modifier.fillMaxWidth()).heightIn(min = 48.dp),
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(if (nextResumable) R.string.pod_scr_continue_listening else R.string.pod_scr_play_latest), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                        val isPad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(if (isPad) 10.dp else 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            nextPlayable?.let { target ->
+                                Button(
+                                    onClick = { onPlayEpisode(target) },
+                                    shape = RoundedCornerShape(999.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    modifier = (if (isPad) Modifier.widthIn(min = 200.dp, max = 280.dp) else Modifier.weight(1f))
+                                        .heightIn(min = 48.dp)
+                                        .testTag("podcast-primary-play"),
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        stringResource(if (nextResumable) R.string.pod_scr_continue_listening else R.string.pod_scr_play_latest),
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
-                            Spacer(Modifier.height(8.dp))
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (!podcast.followed) {
                                 FilledTonalButton(
                                     onClick = onFollow,
                                     shape = RoundedCornerShape(999.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = (if (nextPlayable != null) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp).widthIn(min = podcastFollowButtonMinWidth()),
+                                    contentPadding = PaddingValues(horizontal = 18.dp),
+                                    modifier = (if (nextPlayable != null || isPad) Modifier else Modifier.weight(1f)).heightIn(min = 48.dp),
                                 ) {
                                     Text(stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
-                            } else PodcastFollowedMenu(
-                                preference = showPreference, loading = preferenceLoading, error = preferenceError,
-                                onChange = onShowPreference, onRetry = onRetryPreference,
-                                onAutoDownload = onAutoDownload, onUnfollow = onFollow,
-                                modifier = Modifier.weight(1f),
-                                fillWidth = nextPlayable == null,
-                            )
-                            Box {
-                                IconButton(onClick = { headerActionsExpanded = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("podcast-more-actions")) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.pod_scr_more_options))
-                                }
-                                DropdownMenu(
-                                    expanded = headerActionsExpanded,
-                                    onDismissRequest = { headerActionsExpanded = false },
-                                    modifier = Modifier.testTag("podcast-show-actions-menu"),
-                                ) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_share_show)) }, onClick = {
-                                        headerActionsExpanded = false
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, podcast.title + " · " + podcast.feedUrl)
-                                        context.startActivity(android.content.Intent.createChooser(intent, shareTitle))
-                                    }, leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) })
-                                    if (podcast.followed) DropdownMenuItem(text = { Text(stringResource(R.string.pod_scr_unfollow_show), color = MaterialTheme.colorScheme.error) }, onClick = {
-                                        headerActionsExpanded = false
-                                        onFollow()
-                                    }, leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
-                                }
+                            } else {
+                                PodcastFollowedMenu(
+                                    preference = showPreference,
+                                    loading = preferenceLoading,
+                                    error = preferenceError,
+                                    onChange = onShowPreference,
+                                    onRetry = onRetryPreference,
+                                    onAutoDownload = onAutoDownload,
+                                    onUnfollow = onFollow,
+                                    fillWidth = nextPlayable == null && !isPad,
+                                )
                             }
                         }
 
