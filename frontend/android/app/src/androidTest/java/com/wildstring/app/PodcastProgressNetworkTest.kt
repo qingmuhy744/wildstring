@@ -83,6 +83,7 @@ class PodcastProgressNetworkTest {
                     val version = if (mode.get() == "restart") 5 else 3
                     return json(state(version, "remote", "previous", position = 120, completed = completed.get()))
                 }
+                puts.incrementAndGet()
                 val body = request.body.readUtf8()
                 writes.add(body)
                 val update = JsonParser.parseString(body).asJsonObject
@@ -110,13 +111,16 @@ class PodcastProgressNetworkTest {
             progress.setPromptHosted(true)
             progress.mode("ask")
             withTimeout(5000) { progress.mode.first { it == "ask" } }
+            val getsBeforeAsk = gets.get()
+            val putsBeforeAsk = puts.get()
             val result = async { progress.prepare("episode", "Episode", 3_600_000) }
             withTimeout(5000) { progress.prompt.first { it != null } }
             val offered = progress.prompt.value
             assertNotNull(offered)
             assertEquals(120_000L, offered!!.remoteMs)
-            assertEquals(2, gets.get())
-            assertEquals(1, puts.get())
+            // The prompt is offered without any write; the answering branch decides what is claimed.
+            assertEquals(getsBeforeAsk + 1, gets.get())
+            assertEquals(putsBeforeAsk, puts.get())
             progress.answer(false)
             assertEquals(PodcastPreparation.Play(0), result.await())
             assertEquals(2, puts.get())
