@@ -39,6 +39,27 @@ def name_order(value: str) -> tuple[str, str]:
     return group, f"{BROWSE_KEYS.index(group):02d}:{romanized}:{normalized}"
 
 
+def album_label(album: str | None) -> str:
+    """Match the album list title: blank album names display as 未命名专辑."""
+    return album if album else "未命名专辑"
+
+
+def track_browse_keys(
+    title: str, album: str | None, artists: list[str], album_artists: list[str]
+) -> dict[str, str | None]:
+    """Sort and letter keys stored on a track so list queries do not call Python per row."""
+    title_group, title_sort = name_order(title or "")
+    album_group, album_sort = name_order(album_label(album))
+    return {
+        "title_group": title_group,
+        "title_sort": title_sort,
+        "album_group": album_group,
+        "album_sort": album_sort,
+        "album_artist_sort": name_order(album_artists[0])[1] if album_artists else None,
+        "track_artist_sort": name_order(artists[0] if artists else "")[1],
+    }
+
+
 def configure_browse_queries(connection: sqlite3.Connection) -> None:
     connection.create_function(
         "browse_group", 1, lambda value: name_order(value)[0], deterministic=True

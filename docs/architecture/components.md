@@ -8,7 +8,7 @@
 | --- | --- |
 | `backend/src/wildstring/config.py` & `server_settings.py` | 环境配置、目录与端口校验、服务器名称与 HTTP/HTTPS 连接安全策略（支持数据库覆盖） |
 | `backend/src/wildstring/main.py` | FastAPI 工厂、健康检查、诊断中间件、Streamable HTTP MCP 挂载与可选 Web 静态托管 |
-| `backend/src/wildstring/database.py` | SQLite 演进式迁移（当前 `SCHEMA_VERSION = 48`）、WAL、独立读写连接、按请求绑定 `active_user` 与就绪检查 |
+| `backend/src/wildstring/database.py` | SQLite 演进式迁移（当前 `SCHEMA_VERSION = 53`）、WAL、独立读写连接、按请求绑定 `active_user` 与就绪检查 |
 | `backend/src/wildstring/auth.py` & `permissions.py` | 四角色多用户体系（`owner` / `admin` / `editor` / `listener`）、scrypt 密码、持久可撤销会话、按用户音乐库授权与登录限流防护 |
 | `backend/src/wildstring/library/` | 多音乐库与只读导入源管理、托管副本复制整理、WAV/CUE 分轨转 FLAC、增量扫描、专辑/艺人/曲目查询、封面继承、双语/逐字歌词、个人歌单/收藏/统计、Range 原音串流与按需 AAC 实时转码 |
 | `backend/src/wildstring/podcasts.py` & `podcast_*.py` | 播客 RSS 订阅、Apple Podcasts 多区并行目录搜索、OPML 导入导出、热门探索、按用户关注与收听进度、后台音频下载与零引用资源保留期清理 |
