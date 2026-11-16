@@ -182,6 +182,12 @@ struct NowPlayingView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    if let message = playback.podcastProgressMessage {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                        if playback.podcastCanUseLocalProgress {
+                            Button(L10n("podcast.useLocalProgress")) { playback.useLocalPodcastProgress() }
+                        }
+                    }
                     if let message = playback.errorMessage {
                         Text(message)
                             .font(.caption2)

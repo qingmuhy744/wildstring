@@ -38,6 +38,7 @@ public struct PodcastProgressWrite: Equatable, Sendable, Encodable {
     public var positionSeconds: Int
     public var durationSeconds: Int
     public var event: String
+    public var intent: String?
 
     public init(
         sessionId: String,
@@ -46,7 +47,8 @@ public struct PodcastProgressWrite: Equatable, Sendable, Encodable {
         sequence: Int,
         positionSeconds: Int,
         durationSeconds: Int,
-        event: String
+        event: String,
+        intent: String? = nil
     ) {
         self.sessionId = sessionId
         self.deviceId = deviceId
@@ -55,6 +57,7 @@ public struct PodcastProgressWrite: Equatable, Sendable, Encodable {
         self.positionSeconds = positionSeconds
         self.durationSeconds = durationSeconds
         self.event = event
+        self.intent = intent
     }
 
     enum CodingKeys: String, CodingKey {
@@ -64,6 +67,6 @@ public struct PodcastProgressWrite: Equatable, Sendable, Encodable {
         case sequence
         case positionSeconds = "position_seconds"
         case durationSeconds = "duration_seconds"
-        case event
+        case event, intent
     }
 }

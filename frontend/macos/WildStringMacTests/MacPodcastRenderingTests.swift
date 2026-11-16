@@ -97,8 +97,8 @@ extension MacAssistantTests {
     }
 
     @Test func podcastEpisodeRowsKeepProgressAlignedAndHighlightTheWholeRow() throws {
-        func episode(id: String, position: Int) throws -> PodcastEpisode {
-            let json = #"{"id":""# + id + #"","podcast_id":"show","title":"单集【王局拍案播客】","duration_seconds":3600,"position_seconds":"# + "\(position)" + "}"
+        func episode(id: String, position: Int, completed: Bool = false) throws -> PodcastEpisode {
+            let json = #"{"id":""# + id + #"","podcast_id":"show","title":"单集【王局拍案播客】","duration_seconds":3600,"position_seconds":"# + "\(position)" + ",\"completed\":\(completed)}"
             return try JSONDecoder().decode(PodcastEpisode.self, from: Data(json.utf8))
         }
         func render(
@@ -134,7 +134,7 @@ extension MacAssistantTests {
 
         #expect(cleanPodcastEpisodeTitle("责任全在美方【王局拍案播客】", showTitle: "王志安的播客") == "责任全在美方")
 
-        let completed = try episode(id: "completed", position: 3600)
+        let completed = try episode(id: "completed", position: 3600, completed: true)
         let partial = try episode(id: "partial", position: 3599)
         let selected = try episode(id: "selected", position: 1800)
         for scheme in [ColorScheme.light, .dark] {
@@ -159,6 +159,73 @@ extension MacAssistantTests {
                 #expect(trailing.redComponent - trailing.greenComponent > 0.015)
                 #expect(trailing.greenComponent - trailing.blueComponent > 0.005)
             }
+        }
+    }
+
+    @Test func renderPodcastResumeSurfacesWithIsolatedSession() async throws {
+        let suite = "wildstring.resume-visual.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let address = try ServerAddress(input: "resume-visual.example.invalid")
+        let sessions = InMemorySessionStore()
+        try sessions.saveSession(StoredSession(cookies: [
+            StoredCookie(name: "session", value: "fixture", domain: address.url.host!, path: "/", isSecure: true)
+        ]), origin: address.origin)
+        MacServers.upsert(MacSavedServer(address: address.description, username: "fixture", lastUsedAt: .now,
+                                        allowInsecureHTTP: false), defaults: defaults)
+        StubURLProtocol.respond { request in
+            switch request.url!.path {
+            case "/api/v1/auth/status":
+                return .json(body: #"{"configured":true,"authenticated":true,"user":{"id":"u1","username":"fixture","profile":"listener","version":1,"enabled":true}}"#)
+            case "/api/v1/podcasts/resume-mode": return .json(body: #"{"resume_mode":"auto"}"#)
+            case "/api/v1/favorites/ids": return .json(body: #"{"ids":[]}"#)
+            default: return .json(body: #"{"items":[],"total":0,"limit":100,"offset":0}"#)
+            }
+        }
+        let session = MacSession(store: sessions, queueStore: InMemoryQueueStore(), defaults: defaults,
+                                 configuration: StubURLProtocol.configuration())
+        await session.restore()
+        let playback = try #require(session.playback)
+        let client = try #require(session.client)
+        defer { session.sync?.stop(); session.connection?.stop(); playback.shutdown() }
+        playback.loadPodcastProgress = { _ in
+            PodcastProgressSnapshot(version: 1, positionSeconds: 180, durationSeconds: 3600, completed: false)
+        }
+        playback.submitPodcastProgress = { _, _ in
+            .conflictCurrent(PodcastProgressSnapshot(version: 2, positionSeconds: 900, durationSeconds: 3600,
+                                                     completed: false, deviceId: "fixture-other"))
+        }
+        let episode = PodcastEpisode(id: "fixture", podcastId: "show", title: "合成播客单集", durationSeconds: 3600, positionSeconds: 180)
+        let item = PlaybackService.Item(trackID: "podcast_ep_fixture", title: episode.title, artist: "合成节目",
+                                        streamPath: "api/v1/podcasts/episodes/fixture/stream", durationSeconds: 3600)
+        playback.playPodcastEpisode(item)
+        for _ in 0..<30 where playback.podcastProgressMessage == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(playback.podcastProgressMessage != nil)
+        func capture<V: View>(_ view: V, name: String, size: NSSize, scheme: ColorScheme) throws {
+            let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height)
+                .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme))
+            host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            host.frame = NSRect(origin: .zero, size: size)
+            let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            window.appearance = host.appearance
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            try data.write(to: URL(fileURLWithPath: "/tmp/wildstring-resume-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+        }
+        let previousAppearance = NSApp.appearance
+        defer { NSApp.appearance = previousAppearance }
+        for scheme in [ColorScheme.light, .dark] {
+            NSApp.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            try capture(MacSettingsView(session: session), name: "settings", size: NSSize(width: 1100, height: 850), scheme: scheme)
+            try capture(MacPodcastPlayer(session: session, client: client, playback: playback), name: "player", size: NSSize(width: 900, height: 850), scheme: scheme)
+            try capture(MacPodcastEpisodeRow(episode: episode).background(MacTheme.canvas), name: "row", size: NSSize(width: 900, height: 90), scheme: scheme)
         }
     }
 

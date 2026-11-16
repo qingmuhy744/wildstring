@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import CorePlayback
 
@@ -62,6 +63,16 @@ struct ListeningTrackerTests {
 
 @Suite("Podcast bookmark")
 struct PodcastBookmarkTests {
+    @Test func restoredSessionResetsMonotonicThrottleAndKeepsSequence() throws {
+        var bookmark = PodcastBookmark()
+        bookmark.begin(episodeId: "ep", deviceId: "phone", baseVersion: 4)
+        let first = bookmark.next(positionSeconds: 10, durationSeconds: 100, event: "progress", nowMs: 9_000_000, force: true)
+        var restored = try JSONDecoder().decode(PodcastBookmark.self, from: JSONEncoder().encode(bookmark))
+        let next = restored.next(positionSeconds: 20, durationSeconds: 100, event: "progress", nowMs: 10_001, force: false)
+        #expect(next?.sessionId == first?.sessionId)
+        #expect(next?.sequence == 2)
+    }
+
     @Test func sequenceIncreasesAndConflictStopsUploads() {
         var bookmark = PodcastBookmark()
         bookmark.begin(episodeId: "ep", deviceId: "phone", baseVersion: 4)

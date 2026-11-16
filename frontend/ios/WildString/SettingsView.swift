@@ -109,6 +109,17 @@ struct SettingsView: View {
                 Toggle("settings.haptics", isOn: $hapticsEnabled)
             }
             Section("settings.playback") {
+                if let cloud = playback.podcastCloud {
+                    Picker(L10n("podcast.resumeMode"), selection: Binding(
+                        get: { cloud.resumeMode },
+                        set: { value in Task { await cloud.setResumeMode(value) } }
+                    )) {
+                        Text(L10n("podcast.resumeMode.auto")).tag("auto")
+                        Text(L10n("podcast.resumeMode.ask")).tag("ask")
+                        Text(L10n("podcast.resumeMode.restart")).tag("restart")
+                    }
+                    if let message = cloud.resumeModeError { Text(message).font(.caption).foregroundStyle(.secondary) }
+                }
                 Picker("settings.quality", selection: $playbackQuality) {
                     Text("settings.quality.original").tag("original")
                     Text("AAC 128 kbps").tag("128")
@@ -210,6 +221,7 @@ struct SettingsView: View {
             playback.setFragmentCacheLimit(Int64(limitMB) * 1_048_576)
             playback.preferredBitrateKbps = Int(playbackQuality)
             await refresh()
+            await playback.podcastCloud?.refreshResumeMode()
             await offline.refresh()
         }
         .onChange(of: offline.items) { _, _ in

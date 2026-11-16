@@ -404,9 +404,12 @@ final class ConnectionModel {
         playback.submitPodcastProgress = { [weak client] episodeID, write in
             guard let client else { return .failed }
             do {
-                try await client.savePodcastProgress(episodeId: episodeID, write: write)
-                return .ok
+                let snapshot = try await client.savePodcastProgress(episodeId: episodeID, write: write)
+                return snapshot.completed == true ? .completed : .ok
             } catch let error as APIError where error.statusCode == 409 {
+                if let conflict = try? JSONDecoder().decode(PodcastProgressConflict.self, from: error.body) {
+                    return .conflictCurrent(conflict.detail.current)
+                }
                 return .conflict
             } catch {
                 return .failed

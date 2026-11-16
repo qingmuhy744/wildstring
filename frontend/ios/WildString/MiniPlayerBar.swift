@@ -114,6 +114,17 @@ struct MiniPlayerInset: ViewModifier {
                         .frame(maxWidth: .infinity)
                         .background(.bar)
                     }
+                    if let message = playback.podcastProgressMessage {
+                        HStack {
+                            Text(message).font(.caption).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            if playback.podcastCanUseLocalProgress {
+                                Button(L10n("podcast.useLocalProgress")) { playback.useLocalPodcastProgress() }
+                                    .fixedSize()
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 6).background(.bar)
+                    }
                     MiniPlayerBar(client: client, playback: playback, onExpand: { showPlayer = true })
                 }
             }
