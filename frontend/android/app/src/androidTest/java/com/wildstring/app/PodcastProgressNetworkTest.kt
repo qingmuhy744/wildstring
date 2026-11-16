@@ -65,11 +65,12 @@ class PodcastProgressNetworkTest {
         }
     }
 
-    @Test fun completedReadDoesNotWriteAndAskModeOffersChoice() = PodcastRoutingFixture().use { fixture ->
+    @Test fun completedEpisodeSkipsOnlyForAutomaticPlayAndAskModeOffersChoice() = PodcastRoutingFixture().use { fixture ->
         val completed = AtomicBoolean(true)
         val mode = java.util.concurrent.atomic.AtomicReference("auto")
         val puts = AtomicInteger()
         val gets = AtomicInteger()
+        val writes = CopyOnWriteArrayList<String>()
         fixture.server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 if (request.path == "/api/v1/podcasts/resume-mode") {
@@ -77,26 +78,62 @@ class PodcastProgressNetworkTest {
                     return json("{\"resume_mode\":\"${mode.get()}\"}")
                 }
                 if (request.path != "/api/v1/podcasts/episodes/episode/progress") return MockResponse().setResponseCode(404)
-                if (request.method == "GET") { gets.incrementAndGet(); return json(state(3, "remote", "previous", position = 120, completed = completed.get())) }
+                if (request.method == "GET") {
+                    gets.incrementAndGet()
+                    val version = if (mode.get() == "restart") 5 else 3
+                    return json(state(version, "remote", "previous", position = 120, completed = completed.get()))
+                }
                 puts.incrementAndGet()
-                val update = JsonParser.parseString(request.body.readUtf8()).asJsonObject
+                val body = request.body.readUtf8()
+                writes.add(body)
+                val update = JsonParser.parseString(body).asJsonObject
                 return json(state(4, update.get("device_id").asString, update.get("session_id").asString, position = update.get("position_seconds").asLong))
             }
         }
         val progress = PodcastProgress(fixture.context, fixture.repository)
         runBlocking {
-            assertEquals(PodcastPreparation.Completed, progress.prepare("episode", "Episode", 3_600_000))
+            // Automatic continuation of a server-completed episode: skip it without opening a session.
+            assertEquals(PodcastPreparation.Completed, progress.prepare("episode", "Episode", 3_600_000, automatic = true))
             assertEquals(0, puts.get())
+            assertEquals(1, gets.get())
+            assertFalse(progress.owns("episode"))
+            // A user starting that same episode replays it from the start and claims a restart session.
+            assertEquals(PodcastPreparation.Play(0), progress.prepare("episode", "Episode", 3_600_000))
+            assertEquals(1, puts.get())
+            val restart = JsonParser.parseString(writes.single()).asJsonObject
+            assertEquals("restart", restart.get("intent").asString)
+            assertEquals(0L, restart.get("position_seconds").asLong)
+            assertEquals("play", restart.get("event").asString)
+            assertTrue(progress.owns("episode"))
+            assertFalse(progress.conflict.value)
+            // Ask mode still offers the choice, and "from the start" writes another restart claim.
             completed.set(false)
+            progress.setPromptHosted(true)
             progress.mode("ask")
             withTimeout(5000) { progress.mode.first { it == "ask" } }
+            val getsBeforeAsk = gets.get()
+            val putsBeforeAsk = puts.get()
             val result = async { progress.prepare("episode", "Episode", 3_600_000) }
             withTimeout(5000) { progress.prompt.first { it != null } }
-            assertEquals(0, puts.get())
+            val offered = progress.prompt.value
+            assertNotNull(offered)
+            assertEquals(120_000L, offered!!.remoteMs)
+            // The prompt is offered without any write; the answering branch decides what is claimed.
+            assertEquals(getsBeforeAsk + 1, gets.get())
+            assertEquals(putsBeforeAsk, puts.get())
             progress.answer(false)
             assertEquals(PodcastPreparation.Play(0), result.await())
-            assertEquals(1, puts.get())
-            assertTrue(gets.get() >= 2)
+            assertEquals(2, puts.get())
+            assertEquals("restart", JsonParser.parseString(writes.last()).asJsonObject.get("intent").asString)
+            assertEquals(0L, JsonParser.parseString(writes.last()).asJsonObject.get("position_seconds").asLong)
+            assertTrue(gets.get() >= 3)
+            // Restart mode on an unfinished episode is the same rule without a completed flag.
+            progress.mode("restart")
+            withTimeout(5000) { progress.mode.first { it == "restart" } }
+            assertEquals(PodcastPreparation.Play(0), progress.prepare("episode", "Episode", 3_600_000))
+            assertEquals(3, puts.get())
+            assertEquals("restart", JsonParser.parseString(writes.last()).asJsonObject.get("intent").asString)
+            assertFalse(progress.conflict.value)
         }
     }
 
