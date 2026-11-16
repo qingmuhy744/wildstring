@@ -35,7 +35,7 @@ CLI 输出 JSON。模块退出码：0 完成、1 根目录失败、2 完成但�
 
 API 默认 `127.0.0.1:18780`，React 默认 `127.0.0.1:18781`。开发配置开放 `/docs`，容器生产配置关闭开发文档。开发代理读取 `.env` 中的 API 端口；模型密钥不要放在 `VITE_` 变量中。
 
-`make setup` 创建 `.env`、`runtime/`、默认 `music/`，安装锁定依赖和 pre-commit hook，保留已有配置。音乐目录可在 `.env` 更改，不移动原文件。
+`make setup` 创建 `.env`、`runtime/`、默认 `music/`，安装锁定依赖和 pre-commit hook（含 `commit-msg`，拒绝提交说明最后一段的 `Co-Authored-By:`），保留已有配置。已克隆的仓库改完钩子配置后要再跑一次 `make setup`。音乐目录可在 `.env` 更改，不移动原文件。
 
 工具缓存默认位于忽略的 `.cache/`。运行 Git hook 前先完成一次 `make setup`。
 
