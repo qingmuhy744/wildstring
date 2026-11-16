@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 数据库 schema 52（`SCHEMA_VERSION`），最近发布 0.8.17（[发布说明](../releases/v0.8.17.md)）。**0.8.12 及更早的客户端与 0.8.13 及更新的服务器不兼容**（`/podcasts/inbox` 已在 0.8.13 移除），须使用 0.8.13 或更新的客户端。schema 52 起每个用户只有一份有序待播列表：原稍后听按加入时间接到队尾后删除，新集动作是 `ignore` / `queue_last` / `queue_next`，从节目点播放顺着节目，从待播点播放顺着列表。见[播客待播列表](../../contracts/podcast-queue.md)。
+- 数据库 schema 53（`SCHEMA_VERSION`），最近发布 0.8.17（[发布说明](../releases/v0.8.17.md)）。schema 53 起曲库拼音排序键写在曲目和人物上，浏览不再在查询里逐行计算。**0.8.12 及更早的客户端与 0.8.13 及更新的服务器不兼容**（`/podcasts/inbox` 已在 0.8.13 移除），须使用 0.8.13 或更新的客户端。schema 52 起每个用户只有一份有序待播列表：原稍后听按加入时间接到队尾后删除，新集动作是 `ignore` / `queue_last` / `queue_next`，从节目点播放顺着节目，从待播点播放顺着列表。见[播客待播列表](../../contracts/podcast-queue.md)。
 - 各版本交付内容见 [CHANGELOG](../../CHANGELOG.md) 与 `docs/releases/`；实现状态以对应契约、发布说明和 [范围变更记录](scope-history.md) 为准；文档中的计划不代表已实现。
 
 ## 定位

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wildstring.library.albums import album_key
+from wildstring.library.browsing import name_order, track_browse_keys
 from wildstring.library.metadata import normalize
 from wildstring.library.tag_fields import DETAIL_DEFAULTS, ROLE_FIELDS, valid_date
 
@@ -26,6 +27,16 @@ def apply_effective(connection, track_id):
     fields["album_id"] = album_key(
         row["library_id"], row["path"], fields["album"], fields["album_artists"]
     )
+    track_columns = {column[1] for column in connection.execute("PRAGMA table_info(tracks)")}
+    if "title_sort" in track_columns:
+        fields.update(
+            track_browse_keys(
+                fields["title"],
+                fields.get("album") or "",
+                fields["artists"],
+                fields["album_artists"],
+            )
+        )
     if row["old_album_id"] and row["old_album_id"] != fields["album_id"]:
         from wildstring.album_release_locks import transfer
 
@@ -47,20 +58,27 @@ def apply_effective(connection, track_id):
     from wildstring.library.artists import artist_key
 
     connection.execute("DELETE FROM track_credits WHERE track_id=?", (track_id,))
+    people_columns = {column[1] for column in connection.execute("PRAGMA table_info(people)")}
+    people_have_sort = "name_sort" in people_columns
     for role, key in {"artist": "artists", "album_artist": "album_artists", **ROLE_FIELDS}.items():
         for position, person in enumerate(fields[key]):
-            connection.execute(
-                "INSERT OR IGNORE INTO people(id,library_id,name,normalized) VALUES (?,?,?,?)",
-                (
-                    artist_key(row["library_id"], person),
-                    row["library_id"],
-                    person,
-                    normalize(person),
-                ),
-            )
+            identity_key = artist_key(row["library_id"], person)
+            normalized = normalize(person)
+            if people_have_sort:
+                group, sort_key = name_order(person)
+                connection.execute(
+                    """INSERT OR IGNORE INTO people
+                    (id,library_id,name,normalized,name_sort,name_group) VALUES (?,?,?,?,?,?)""",
+                    (identity_key, row["library_id"], person, normalized, sort_key, group),
+                )
+            else:
+                connection.execute(
+                    "INSERT OR IGNORE INTO people(id,library_id,name,normalized) VALUES (?,?,?,?)",
+                    (identity_key, row["library_id"], person, normalized),
+                )
             identity = connection.execute(
                 "SELECT id FROM people WHERE library_id=? AND normalized=?",
-                (row["library_id"], normalize(person)),
+                (row["library_id"], normalized),
             ).fetchone()[0]
             connection.execute(
                 "INSERT OR IGNORE INTO track_credits(track_id,person_id,role,position,credited_name) VALUES (?,?,?,?,?)",
@@ -70,13 +88,25 @@ def apply_effective(connection, track_id):
     for key in ("artists", "album_artists"):
         fields[key] = json.dumps(fields[key], ensure_ascii=False)
     fields["id"] = track_id
-    connection.execute(
-        """UPDATE tracks SET title=:title, title_source=:title_source,
-        artists=:artists, album=:album, album_artists=:album_artists,
-        track_number=:track_number, disc_number=:disc_number, album_id=:album_id,
-        search_text=:search_text,extra=:extra WHERE id=:id""",
-        fields,
-    )
+    if "title_sort" in track_columns:
+        connection.execute(
+            """UPDATE tracks SET title=:title, title_source=:title_source,
+            artists=:artists, album=:album, album_artists=:album_artists,
+            track_number=:track_number, disc_number=:disc_number, album_id=:album_id,
+            search_text=:search_text, extra=:extra, title_sort=:title_sort,
+            title_group=:title_group, album_sort=:album_sort, album_group=:album_group,
+            album_artist_sort=:album_artist_sort, track_artist_sort=:track_artist_sort
+            WHERE id=:id""",
+            fields,
+        )
+    else:
+        connection.execute(
+            """UPDATE tracks SET title=:title, title_source=:title_source,
+            artists=:artists, album=:album, album_artists=:album_artists,
+            track_number=:track_number, disc_number=:disc_number, album_id=:album_id,
+            search_text=:search_text,extra=:extra WHERE id=:id""",
+            fields,
+        )
 
 
 def observe(connection, track_id, metadata):

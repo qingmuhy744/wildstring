@@ -21,8 +21,8 @@ def track_order(sort: str, order: str | None, *, album: bool) -> str:
     # track_number / name, leaving the existing wire contract unchanged.
     key = "track_number" if sort == "title" and album else sort
     columns = {
-        "title": "browse_sort(title)",
-        "name": "browse_sort(title)",
+        "title": "title_sort",
+        "name": "title_sort",
         "track_number": "COALESCE(disc_number, 1)",
         "added_at": "added_at",
         "duration_ms": "duration_ms",
@@ -36,12 +36,12 @@ def track_order(sort: str, order: str | None, *, album: bool) -> str:
     primary = columns[key] + " " + direction + " NULLS LAST, "
     if key == "track_number":
         primary += "track_number " + direction + " NULLS LAST, "
-    return primary + "browse_sort(title), id"
+    return primary + "title_sort, id"
 
 
 def album_order(sort: str, order: str | None) -> str:
     column = {
-        "title": "browse_sort(title)",
+        "title": "album_sort",
         "artist": "sort_artist",
         "added_at": "added_at",
         "release_date": "release_date",
@@ -49,4 +49,4 @@ def album_order(sort: str, order: str | None) -> str:
     direction = {"asc": "ASC", "desc": "DESC"}[
         order or ("desc" if sort in ("added_at", "release_date") else "asc")
     ]
-    return column + " " + direction + " NULLS LAST, browse_sort(title), id"
+    return column + " " + direction + " NULLS LAST, album_sort, id"
