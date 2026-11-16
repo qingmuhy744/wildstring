@@ -140,6 +140,107 @@ def test_unsent_first_checkpoint_cannot_reclaim_after_another_device(episode_cli
     assert response.status_code == 409
 
 
+def test_stopping_inside_the_tail_marks_the_episode_listened(episode_client):
+    client, episode, _ = episode_client
+    write(client, episode)
+    # One hour: 5% is 180s, so the cap is 2 minutes. The second before that stays unplayed.
+    before_tail = write(client, episode, sequence=2, position_seconds=3479, event="pause").json()
+    assert before_tail["completed"] is False
+    while_playing = write(
+        client, episode, sequence=3, position_seconds=3500, event="progress"
+    ).json()
+    assert while_playing["completed"] is False
+    seek_into_tail = write(client, episode, sequence=4, position_seconds=3500, event="seek").json()
+    assert seek_into_tail["completed"] is False
+    paused = write(client, episode, sequence=5, position_seconds=3480, event="pause").json()
+    assert paused["completed"] is True and paused["position_seconds"] == 3480
+    # Continuing past the bookmark clears the flag until playback stops in the tail again.
+    resumed = write(client, episode, sequence=6, position_seconds=3490, event="progress").json()
+    assert resumed["completed"] is False
+    stopped = write(client, episode, sequence=7, position_seconds=3500, event="stop").json()
+    assert stopped["completed"] is True
+
+
+def test_completion_tail_caps_long_episodes_and_spares_short_ones(episode_client):
+    client, episode, _ = episode_client
+    write(client, episode, duration_seconds=10800, position_seconds=0)
+    # Three hours: 5% is 9 minutes, so only the last 2 minutes count.
+    early = write(
+        client,
+        episode,
+        sequence=2,
+        duration_seconds=10800,
+        position_seconds=10500,
+        event="pause",
+    ).json()
+    assert early["completed"] is False
+    capped = write(
+        client,
+        episode,
+        sequence=3,
+        duration_seconds=10800,
+        position_seconds=10680,
+        event="ended",
+    ).json()
+    assert capped["completed"] is True
+
+    replay = write(
+        client,
+        episode,
+        session_id="session-device-a-2",
+        base_version=capped["version"],
+        duration_seconds=600,
+        position_seconds=0,
+        event="play",
+    ).json()
+    assert replay["completed"] is False
+    # Ten minutes: the floor is 30 seconds, which is 95%.
+    almost = write(
+        client,
+        episode,
+        session_id="session-device-a-2",
+        base_version=capped["version"],
+        sequence=2,
+        duration_seconds=600,
+        position_seconds=569,
+        event="pause",
+    ).json()
+    assert almost["completed"] is False
+    ten_minutes = write(
+        client,
+        episode,
+        session_id="session-device-a-2",
+        base_version=capped["version"],
+        sequence=3,
+        duration_seconds=600,
+        position_seconds=570,
+        event="pause",
+    ).json()
+    assert ten_minutes["completed"] is True
+
+    short = write(
+        client,
+        episode,
+        session_id="session-device-a-3",
+        base_version=ten_minutes["version"],
+        duration_seconds=20,
+        position_seconds=19,
+        event="pause",
+    ).json()
+    assert short["completed"] is False
+    finished = write(
+        client,
+        episode,
+        session_id="session-device-a-3",
+        base_version=ten_minutes["version"],
+        sequence=2,
+        duration_seconds=20,
+        position_seconds=20,
+        event="ended",
+    ).json()
+    assert finished["completed"] is True
+
+
 def test_only_current_ended_event_can_complete_without_collecting_shared_audio(
     episode_client, settings
 ):
