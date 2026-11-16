@@ -57,6 +57,13 @@ data class EpisodeCheckpoint(
         if (sent.sessionId != update.sessionId) this else copy(remote = value, dirty = update.sequence > sent.sequence)
 }
 data class EpisodeProgressPrompt(val title: String, val remoteMs: Long, val localMs: Long, val conflict: Boolean)
+
+/**
+ * A problem the podcast page itself must report, e.g. a failed sync. Informational messages
+ * ("已听完") and busy states stay in the player. [id] identifies one occurrence so a repeated
+ * identical problem still restarts the page notice instead of being deduplicated on equal text.
+ */
+data class PodcastPageNotice(val id: Long, val message: String)
 sealed interface PodcastPreparation {
     data class Play(val positionMs: Long) : PodcastPreparation
     data object Completed : PodcastPreparation
@@ -93,6 +100,9 @@ class PodcastProgress @Inject constructor(
     private var answer: CompletableDeferred<Boolean?>? = null
     private val mutableMessage = MutableStateFlow<String?>(null)
     val message = mutableMessage.asStateFlow()
+    private val mutablePageNotice = MutableStateFlow<PodcastPageNotice?>(null)
+    val pageNotice = mutablePageNotice.asStateFlow()
+    private var pageNoticeRevision = 0L
     private val mutableMode = MutableStateFlow(modeForOwner())
     val mode = mutableMode.asStateFlow()
     private val mutablePositions = MutableStateFlow<Map<String, EpisodeProgress>>(emptyMap())
@@ -101,7 +111,7 @@ class PodcastProgress @Inject constructor(
         scope.launch { repository.session.profiles.collect { owner ->
             yield()
             if (owner != repository.session.cacheScope()) return@collect
-            leave(); automaticNextId = null; answer?.complete(null); mutablePrompt.value = null; mutableMessage.value = null
+            leave(); automaticNextId = null; answer?.complete(null); mutablePrompt.value = null; mutableMessage.value = null; mutablePageNotice.value = null
             mutablePositions.value = emptyMap()
             mutableMode.value = modeForOwner()
             refreshMode()
@@ -135,7 +145,7 @@ class PodcastProgress @Inject constructor(
                     mutableMode.value = saved
                 }
             } catch (error: CancellationException) { throw error }
-            catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
+            catch (_: Exception) { pageProblem(R.string.pod_prog_sync_failed_check_network) }
         }
     }
     fun answer(useRemote: Boolean?) { answer?.complete(useRemote) }
@@ -225,13 +235,20 @@ class PodcastProgress @Inject constructor(
                 }
                 if (!activeConflicted && (force || android.os.SystemClock.elapsedRealtime() - (lastSent["${session.first}:$id"] ?: 0) >= 10_000)) flush(session.first, id)
             } catch (error: CancellationException) { throw error }
-            catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
+            catch (_: Exception) { pageProblem(R.string.pod_prog_sync_failed_check_network) }
         }
     }
     fun clearMessage() { mutableMessage.value = null }
     fun completed() { mutableMessage.value = AppLanguage.string(R.string.podcast_already_completed) }
-    fun syncProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
+    fun syncProblem() = pageProblem(R.string.pod_prog_sync_failed_check_network)
     fun playbackProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_load_failed_retry) }
+
+    /** A failure the page must surface itself; informational messages stay in [message] only. */
+    private fun pageProblem(resource: Int) {
+        mutableMessage.value = AppLanguage.string(resource)
+        mutablePageNotice.value = PodcastPageNotice(++pageNoticeRevision, AppLanguage.string(resource))
+    }
+    fun clearPageNotice() { mutablePageNotice.value = null }
     fun retry() { scope.launch { flushAll(throttle = true) } }
     private suspend fun flushAll(throttle: Boolean = false) {
         val owner = repository.session.cacheScope() ?: return
@@ -259,8 +276,9 @@ class PodcastProgress @Inject constructor(
                     save(owner, id, latest.acknowledged(pending.update, remote))
                     if (latest.update.sessionId == pending.update.sessionId) mutablePositions.value = mutablePositions.value + (id to remote)
                 }
-                // A successful write answers any earlier "sync failed" notice.
+                // A successful write answers any earlier "sync failed" notice, on the page as well.
                 mutableMessage.value = null
+                mutablePageNotice.value = null
             } catch (error: CancellationException) { throw error }
             catch (error: HttpException) {
                 if (owner != repository.session.cacheScope()) return@withLock
@@ -302,7 +320,7 @@ class PodcastProgress @Inject constructor(
                             }
                         }
                     } else markConflict(owner, id, pending.update.sessionId, current)
-                } else if (error.code() == 422) mutableMessage.value = AppLanguage.string(R.string.pod_prog_server_update_required)
+                } else if (error.code() == 422) pageProblem(R.string.pod_prog_server_update_required)
             } catch (_: IOException) { /* Persisted outbox is retried; never turn a retry into a new claim. */ }
         }
     }

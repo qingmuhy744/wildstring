@@ -71,7 +71,7 @@ class PodcastResumeUiTest {
                         if (update.get("base_version") != remote.get("version") && update.get("session_id") != remote.get("session_id")) {
                             return json("""{"detail":{"current":${current.get()}}}""", 409)
                         }
-                        update.addProperty("episode_id", episode.id); update.addProperty("version", remote.get("version").asInt + 1); update.addProperty("completed", false)
+                        update.addProperty("episode_id", episode.id); update.addProperty("version", remote.get("version").asInt + 1); update.addProperty("completed", update.get("event")?.asString == "ended")
                         current.set(update.toString())
                         return json(current.get())
                     }
@@ -130,6 +130,38 @@ class PodcastResumeUiTest {
                 capture("podcast-resume-takeover-$suffix")
                 compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
                 assertEquals("ask", mode.get())
+                // Back on the show page with the player closed: a completed episode's menu offers
+                // "mark unplayed", and a progress notice is reported as the page's snackbar.
+                compose.runOnIdle { vm.openPodcast(show.id) }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-episode-actions-${episode.id}").fetchSemanticsNodes().isNotEmpty() }
+                compose.runOnIdle { vm.markPodcastEpisodeCompleted(episode.id, true) }
+                compose.waitUntil(10_000) { JsonParser.parseString(current.get()).asJsonObject.get("completed").asBoolean }
+                compose.onNodeWithTag("podcast-episode-actions-${episode.id}").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.podcast_mark_unplayed)).fetchSemanticsNodes().isNotEmpty() }
+                capture("podcast-resume-menu-completed-$suffix")
+                compose.onNodeWithText(uiString(R.string.podcast_mark_unplayed)).performClick()
+                compose.waitUntil(10_000) { !JsonParser.parseString(current.get()).asJsonObject.get("completed").asBoolean }
+                // The row's own "已听完" badge must be gone first, so the page has no reason to show it.
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.podcast_already_completed)).fetchSemanticsNodes().isEmpty() }
+                compose.runOnIdle { vm.podcastProgress.completed() }
+                // "已听完" is informational: the page must stay quiet, the player still reports inline.
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("podcast-page-notice").assertCountEquals(0)
+                compose.onAllNodesWithText(uiString(R.string.podcast_already_completed)).assertCountEquals(0)
+                capture("podcast-resume-show-quiet-$suffix")
+                // Sync failures are actionable, so they float above the mini player instead.
+                val syncFailed = uiString(R.string.pod_prog_sync_failed_check_network)
+                compose.runOnIdle { vm.podcastProgress.syncProblem() }
+                // The notice auto-dismisses after 2.8s; hold the test clock while it is captured.
+                compose.mainClock.autoAdvance = false
+                try {
+                    compose.mainClock.advanceTimeBy(100)
+                    compose.onNodeWithTag("podcast-page-notice").assertIsDisplayed()
+                    compose.onNodeWithText(syncFailed).assertIsDisplayed()
+                    capture("podcast-resume-show-notice-$suffix")
+                    compose.mainClock.advanceTimeBy(3_000)
+                    compose.onAllNodesWithTag("podcast-page-notice").assertCountEquals(0)
+                } finally { compose.mainClock.autoAdvance = true }
             }
             compose.runOnIdle { vm.controller?.pause(); vm.controller?.clearMediaItems() }
         }

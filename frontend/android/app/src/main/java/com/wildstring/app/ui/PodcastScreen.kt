@@ -81,7 +81,6 @@ private fun podcastDescription(raw: String): String =
 fun PodcastChannelPage(
     vm: MusicViewModel,
     modifier: Modifier = Modifier,
-    playerOpen: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsStateWithLifecycle()
@@ -142,11 +141,7 @@ fun PodcastChannelPage(
     LaunchedEffect(browser.message) {
         browser.message?.let { statusMessage = it; vm.podcastBrowser.clearMessage() }
     }
-    val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
-    // The full player already shows progress notices inline; the show page only reports them when it is in front.
-    LaunchedEffect(progressMessage, playerOpen) {
-        if (!playerOpen) progressMessage?.let { statusMessage = it; vm.podcastProgress.clearMessage() }
-    }
+    val pageNotice by vm.podcastProgress.pageNotice.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -338,6 +333,33 @@ fun PodcastChannelPage(
             )
         }
 
+        // Only actionable progress problems reach the page; "已听完" stays in the player because the
+        // row already carries that badge. The notice floats above the mini player, never over a row.
+        pageNotice?.let { notice ->
+            LaunchedEffect(notice.id) {
+                kotlinx.coroutines.delay(2800)
+                if (vm.podcastProgress.pageNotice.value?.id == notice.id) vm.podcastProgress.clearPageNotice()
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp, start = 16.dp, end = 16.dp)
+                    .widthIn(max = 360.dp)
+                    .testTag("podcast-page-notice"),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Text(
+                    notice.message,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         statusMessage?.let { msg ->
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(2800)
@@ -346,7 +368,7 @@ fun PodcastChannelPage(
             Snackbar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 76.dp, start = 16.dp, end = 16.dp),
+                    .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
             ) {
                 Text(msg)
             }
@@ -1466,6 +1488,7 @@ private fun EpisodeRowItem(
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.podcast_resume_restart)) },
+                            leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
                             onClick = { showMenu = false; feedback(TactileKind.Tap); onRestart() })
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.podcast_play_next)) },
