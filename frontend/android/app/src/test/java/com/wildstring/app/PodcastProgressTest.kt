@@ -17,6 +17,25 @@ class PodcastProgressTest {
         assertEquals("resume", restored.update.intent)
         assertEquals("pause", restored.update.event)
     }
+    @Test fun onlyAutomaticContinuationSkipsCompletedEpisodes() {
+        assertFalse(podcastSkipsCompleted(completed = true, automatic = true, explicitRestart = true))
+        assertTrue(podcastSkipsCompleted(completed = true, automatic = true))
+        assertFalse(podcastSkipsCompleted(completed = true, automatic = false))
+        assertFalse(podcastSkipsCompleted(completed = false, automatic = true))
+    }
+    @Test fun userStartedCompletedEpisodeRestartsFromTheBeginning() {
+        assertTrue(podcastShouldRestart(true, automatic = false, explicitRestart = false, requestedMs = null, mode = "auto"))
+        assertTrue(podcastShouldRestart(true, automatic = false, explicitRestart = false, requestedMs = 90_000, mode = "ask"))
+        assertFalse(podcastShouldRestart(false, automatic = false, explicitRestart = false, requestedMs = null, mode = "auto"))
+        assertFalse(podcastShouldRestart(false, automatic = false, explicitRestart = false, requestedMs = 90_000, mode = "restart"))
+        assertTrue(podcastShouldRestart(false, automatic = false, explicitRestart = false, requestedMs = null, mode = "restart"))
+        assertTrue(podcastShouldRestart(false, automatic = true, explicitRestart = true, requestedMs = null, mode = "auto"))
+    }
+    @Test fun automaticNextMarkerOnlyMatchesItsOwnEpisode() {
+        assertTrue(podcastAutomaticNextMatches("next", "next"))
+        assertFalse(podcastAutomaticNextMatches("next", "other"))
+        assertFalse(podcastAutomaticNextMatches(null, "next"))
+    }
     @Test fun rewindIsANewEventAndKeepsTheCapturedRevision() {
         val value = checkpoint().checkpoint(300_000, 3600_000, "seek")
         assertEquals(300L, value.update.positionSeconds)

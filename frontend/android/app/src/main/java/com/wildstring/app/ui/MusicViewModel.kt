@@ -136,7 +136,7 @@ class MusicViewModel @Inject constructor(
         { tracks, index, position, autoplay -> play(tracks, index, autoplay = autoplay, positionMs = position, preserveQueue = false) },
         { owner -> requireOwner(owner) },
         { podcastProgress.positions.value },
-        { podcastProgress.prepareNextAutomatically() },
+        { episodeId -> podcastProgress.prepareNextAutomatically(episodeId) },
     )
     val podcastCloud = podcastQueues.state
 
@@ -597,7 +597,7 @@ class MusicViewModel @Inject constructor(
             val id = podcastEpisodeId(c.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) ?: return@launch
             localPlaybackEpoch++
             if (offset > 0 && c.hasNextMediaItem()) {
-                if (automatic) podcastProgress.prepareNextAutomatically()
+                if (automatic) podcastProgress.prepareNextAutomatically(podcastEpisodeId(c.getMediaItemAt(c.nextMediaItemIndex).mediaMetadata.extras?.getString("track_id")))
                 c.seekToNextMediaItem()
                 if (automatic) c.play()
                 return@launch
@@ -612,7 +612,7 @@ class MusicViewModel @Inject constructor(
             requireOwner(owner)
             val target = podcastManualNeighbor(episode, detail, podcastQueues.preferenceFor(episode.podcastId), offset, podcastProgress.positions.value) ?: run { if (offset > 0 && podcastProgress.positions.value[id]?.completed == true) notify(AppLanguage.string(R.string.podcast_already_completed)); return@launch }
             if (offset > 0 && podcastProgress.positions.value[id]?.completed != true) podcastQueues.onEpisodeFinished(id, advanceLocally = false)
-            if (automatic) podcastProgress.prepareNextAutomatically()
+            if (automatic) podcastProgress.prepareNextAutomatically(target.id)
             podcastQueues.playEpisode(target, detail.podcast, null)
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { notify(friendlyError(error)) }

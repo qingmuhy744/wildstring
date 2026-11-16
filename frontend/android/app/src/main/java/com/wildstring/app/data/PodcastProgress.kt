@@ -28,6 +28,17 @@ fun podcastResumeNeedsPreparation(progressEntry: String?, mediaId: String?, owns
 fun podcastShouldAskPosition(mode: String, requestedMs: Long?, automatic: Boolean, restart: Boolean, positionMs: Long, hosted: Boolean): Boolean =
     requestedMs == null && !automatic && !restart && mode == "ask" && positionMs > 0 && hosted
 
+/** Only automatic continuation skips a completed episode; a user who picks it explicitly replays it from the start. */
+fun podcastSkipsCompleted(completed: Boolean, automatic: Boolean, explicitRestart: Boolean = false): Boolean =
+    completed && automatic && !explicitRestart
+
+/** Restart clears the completed flag, so it also applies when the user starts a completed episode. */
+fun podcastShouldRestart(completed: Boolean, automatic: Boolean, explicitRestart: Boolean, requestedMs: Long?, mode: String): Boolean =
+    explicitRestart || (requestedMs == null && !automatic && mode == "restart") || (completed && !automatic)
+
+/** The automatic-next marker belongs to one target episode and is single use, so it cannot colour a later user play. */
+fun podcastAutomaticNextMatches(pendingId: String?, id: String): Boolean = pendingId != null && pendingId == id
+
 data class EpisodeCheckpoint(
     val remote: EpisodeProgress, val update: PodcastProgressUpdate,
     val dirty: Boolean = true, val conflict: Boolean = false,
@@ -68,9 +79,11 @@ class PodcastProgress @Inject constructor(
     private val mutableConflict = MutableStateFlow(false)
     val conflict = mutableConflict.asStateFlow()
     private var modeRevision = 0
-    private var automaticNext = false
-    fun prepareNextAutomatically() { automaticNext = true }
-    fun consumeAutomaticNext(): Boolean = automaticNext.also { automaticNext = false }
+    private var automaticNextId: String? = null
+    fun prepareNextAutomatically(episodeId: String?) { automaticNextId = episodeId }
+    /** Single use: any preparation clears the marker, and only the episode it was set for honors it. */
+    fun consumeAutomaticNext(episodeId: String): Boolean =
+        podcastAutomaticNextMatches(automaticNextId, episodeId).also { automaticNextId = null }
     private val mutableQueueChanges = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val queueChanges = mutableQueueChanges.asSharedFlow()
     fun queueChanged() { mutableQueueChanges.tryEmit(Unit) }
@@ -88,7 +101,7 @@ class PodcastProgress @Inject constructor(
         scope.launch { repository.session.profiles.collect { owner ->
             yield()
             if (owner != repository.session.cacheScope()) return@collect
-            leave(); answer?.complete(null); mutablePrompt.value = null; mutableMessage.value = null
+            leave(); automaticNextId = null; answer?.complete(null); mutablePrompt.value = null; mutableMessage.value = null
             mutablePositions.value = emptyMap()
             mutableMode.value = modeForOwner()
             refreshMode()
@@ -175,8 +188,8 @@ class PodcastProgress @Inject constructor(
             catch (error: IOException) { online = false; local?.remote ?: EpisodeProgress(id) }
         ownerValid(owner)
         mutablePositions.value = mutablePositions.value + (id to remote)
-        val restart = explicitRestart || (requestedMs == null && !automatic && mode.value == "restart")
-        if (remote.completed && !restart) return PodcastPreparation.Completed
+        if (podcastSkipsCompleted(remote.completed, automatic, explicitRestart)) return PodcastPreparation.Completed
+        val restart = podcastShouldRestart(remote.completed, automatic, explicitRestart, requestedMs, mode.value)
         val conflict = local?.conflictsWith(remote) == true
         val remoteMs = remote.positionSeconds * 1000L
         var position = requestedMs ?: if (online) remoteMs
@@ -215,6 +228,7 @@ class PodcastProgress @Inject constructor(
             catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
         }
     }
+    fun clearMessage() { mutableMessage.value = null }
     fun completed() { mutableMessage.value = AppLanguage.string(R.string.podcast_already_completed) }
     fun syncProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
     fun playbackProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_load_failed_retry) }

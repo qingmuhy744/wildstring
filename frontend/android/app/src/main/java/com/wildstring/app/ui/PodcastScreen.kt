@@ -81,6 +81,7 @@ private fun podcastDescription(raw: String): String =
 fun PodcastChannelPage(
     vm: MusicViewModel,
     modifier: Modifier = Modifier,
+    playerOpen: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsStateWithLifecycle()
@@ -140,6 +141,11 @@ fun PodcastChannelPage(
     LaunchedEffect(owner, selectedId, selectedId in browser.loadedDetails) { selectedId?.let(vm.podcastBrowser::ensureDetail) }
     LaunchedEffect(browser.message) {
         browser.message?.let { statusMessage = it; vm.podcastBrowser.clearMessage() }
+    }
+    val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
+    // The full player already shows progress notices inline; the show page only reports them when it is in front.
+    LaunchedEffect(progressMessage, playerOpen) {
+        if (!playerOpen) progressMessage?.let { statusMessage = it; vm.podcastProgress.clearMessage() }
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {

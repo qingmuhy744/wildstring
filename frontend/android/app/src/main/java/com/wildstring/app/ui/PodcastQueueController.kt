@@ -72,7 +72,7 @@ class PodcastQueueController(
     private val play: (tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean) -> Unit,
     private val requireOwner: (String?) -> Unit,
     private val positions: () -> Map<String, EpisodeProgress>,
-    private val beforeAutomatic: () -> Unit = {},
+    private val beforeAutomatic: (episodeId: String) -> Unit = {},
 ) {
     private val mutex = Mutex()
     private val mutable = MutableStateFlow(PodcastCloudState())
@@ -389,7 +389,7 @@ class PodcastQueueController(
         val next = plan.episode ?: return
         check(podcastQueueAutoContinue(next.id) == listOf(next.id))
         requireOwner(owner)
-        beforeAutomatic()
+        beforeAutomatic(next.id)
         playShowNow(next, detail.podcast, null)
     }
 

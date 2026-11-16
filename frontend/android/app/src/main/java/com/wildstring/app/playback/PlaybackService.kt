@@ -120,7 +120,7 @@ class PlaybackService : MediaSessionService() {
             var completed = false
             var completedAutoplay = false
             try {
-                val automaticNext = podcastProgress.consumeAutomaticNext()
+                val automaticNext = podcastProgress.consumeAutomaticNext(id)
                 val preparation = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic || automaticNext, fallback, explicitRestart = explicitIntent && explicit == 0L) ?: return@launch
                 if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
                 if (preparation == PodcastPreparation.Completed) {
