@@ -1173,10 +1173,10 @@ struct PlaybackServiceTests {
         #expect(!writes.contains { $0.write.positionSeconds == 100 })
     }
 
-    @Test func completedRemoteEpisodeMovesToNextWithoutWritingIt() async throws {
+    @Test func userStartedCompletedEpisodeRestartsFromZeroWithRestartIntent() async throws {
         actor Recorder {
-            var ids: [String] = []
-            func add(_ id: String) { ids.append(id) }
+            var writes: [(String, PodcastProgressWrite)] = []
+            func add(_ id: String, _ write: PodcastProgressWrite) { writes.append((id, write)) }
         }
         let recorder = Recorder()
         let service = try makeService(store: InMemoryQueueStore())
@@ -1185,7 +1185,7 @@ struct PlaybackServiceTests {
             id == "done" ? PodcastProgressSnapshot(version: 2, positionSeconds: 600, durationSeconds: 600, completed: true)
                 : PodcastProgressSnapshot(version: 3, positionSeconds: 90, durationSeconds: 1000, completed: false)
         }
-        service.submitPodcastProgress = { id, _ in await recorder.add(id); return .ok }
+        service.submitPodcastProgress = { id, write in await recorder.add(id, write); return .ok }
         service.configurePodcastContinuation(episodes: [
             .init(id: "done", title: "Done", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
             .init(id: "next", title: "Next", chronologicalIndex: 0, isCompleted: false, durationSeconds: 1000)
@@ -1193,9 +1193,133 @@ struct PlaybackServiceTests {
         service.playPodcastEpisode(.init(trackID: "podcast_ep_done", title: "Done", artist: "Host",
                                          streamPath: "api/v1/podcasts/episodes/done/stream", durationSeconds: 600))
         await service.waitForPodcastTasks()
+        #expect(service.currentItem?.trackID == "podcast_ep_done")
+        #expect(service.currentTime == 0)
+        let writes = await recorder.writes.filter { $0.0 == "done" }.map(\.1)
+        #expect(writes.contains { $0.event == "play" && $0.positionSeconds == 0 && $0.intent == "restart" && $0.baseVersion == 2 })
+        #expect(!writes.contains { $0.intent == "resume" })
+    }
+
+    @Test func automaticContinuationSkipsServerCompletedEpisode() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.loadPodcastProgress = { id in
+            .init(version: 2, positionSeconds: id == "done" ? 600 : 90, durationSeconds: 1000, completed: id == "done")
+        }
+        service.submitPodcastProgress = { _, _ in .ok }
+        service.configurePodcastContinuation(episodes: [
+            .init(id: "first", title: "First", chronologicalIndex: 2, isCompleted: false, durationSeconds: 600),
+            .init(id: "done", title: "Done", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
+            .init(id: "next", title: "Next", chronologicalIndex: 0, isCompleted: false, durationSeconds: 1000)
+        ], preference: .init(order: .follow, skipCompleted: true, autoContinue: true))
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_first", title: "First", artist: "Host",
+                                         streamPath: "unused", durationSeconds: 600))
+        await service.waitForPodcastTasks()
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
         #expect(service.currentItem?.trackID == "podcast_ep_next")
         #expect(service.currentTime == 90)
-        #expect(!(await recorder.ids).contains("done"))
+    }
+
+    @Test func automaticContinuationStopsWithReasonWhenOnlyCompletedEpisodesRemain() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.loadPodcastProgress = { id in
+            .init(version: 2, positionSeconds: id == "done" ? 600 : 90, durationSeconds: 600, completed: id == "done")
+        }
+        service.submitPodcastProgress = { _, _ in .ok }
+        service.configurePodcastContinuation(episodes: [
+            .init(id: "first", title: "First", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
+            .init(id: "done", title: "Done", chronologicalIndex: 0, isCompleted: false, durationSeconds: 600)
+        ], preference: .init(order: .follow, skipCompleted: true, autoContinue: true))
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_first", title: "First", artist: "Host",
+                                         streamPath: "unused", durationSeconds: 600))
+        await service.waitForPodcastTasks()
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+        #expect(!service.isPlaying)
+        #expect(service.podcastProgressMessage == KitL10n("kit.playback.podcastAlreadyCompleted"))
+    }
+
+    private actor PendingRecorder {
+        var online = false
+        var writes: [PodcastProgressWrite] = []
+        var historicalResult: PodcastSubmitResult = .ok
+        func goOnline(_ result: PodcastSubmitResult) { online = true; historicalResult = result }
+        func submit(_ id: String, _ write: PodcastProgressWrite) -> PodcastSubmitResult {
+            guard online else { return .failed }
+            if id == "pend" { writes.append(write) }
+            return write.sessionId == writes.first?.sessionId && write.event != "play" ? historicalResult : .ok
+        }
+    }
+
+    private func makePendingScenario(historical: PodcastSubmitResult, serverAfterHistorical: PodcastProgressSnapshot,
+                                     defaults: UserDefaults) async throws -> (PlaybackService, PendingRecorder) {
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore())
+        let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        let service = try makeService(store: InMemoryQueueStore())
+        service.podcastCloud = cloud
+        service.podcastDeviceID = "local"
+        let recorder = PendingRecorder()
+        service.submitPodcastProgress = { id, write in await recorder.submit(id, write) }
+        service.loadPodcastProgress = { id in
+            guard await recorder.online, id == "pend" else { return nil }
+            return await recorder.writes.isEmpty
+                ? PodcastProgressSnapshot(version: 5, positionSeconds: 10, durationSeconds: 600, completed: false)
+                : serverAfterHistorical
+        }
+        // Listen offline so the position stays pending, then leave the episode.
+        let pend = PlaybackService.Item(trackID: "podcast_ep_pend", title: "Pend", artist: "Host",
+                                        streamPath: "unused", durationSeconds: 600)
+        service.playPodcastEpisode(pend)
+        await service.waitForPodcastTasks()
+        service.handleTick(seconds: 30)
+        service.pause()
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_other", title: "Other", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        await recorder.goOnline(historical)
+        service.playPodcastEpisode(pend)
+        await service.waitForPodcastTasks()
+        return (service, recorder)
+    }
+
+    @Test func pendingLocalProgressIsSubmittedBeforeNewSessionStartsFromServerState() async throws {
+        let suite = "wildstring.pending-start.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let (service, recorder) = try await makePendingScenario(
+            historical: .ok,
+            serverAfterHistorical: .init(version: 6, positionSeconds: 30, durationSeconds: 600, completed: false),
+            defaults: defaults)
+        defer { service.shutdown() }
+        let writes = await recorder.writes
+        let historical = try #require(writes.first)
+        #expect(historical.positionSeconds == 30)
+        #expect(historical.baseVersion == 0)
+        let play = try #require(writes.first { $0.event == "play" })
+        #expect(play.sessionId != historical.sessionId)
+        #expect(play.baseVersion == 6)
+        #expect(play.positionSeconds == 30)
+        #expect(service.currentTime == 30)
+    }
+
+    @Test func pendingLocalProgressConflictAdoptsServerStateInsteadOfOverwriting() async throws {
+        let suite = "wildstring.pending-conflict.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let other = PodcastProgressSnapshot(version: 9, positionSeconds: 400, durationSeconds: 600,
+                                            completed: false, deviceId: "other-device")
+        let (service, recorder) = try await makePendingScenario(
+            historical: .conflictCurrent(other), serverAfterHistorical: other, defaults: defaults)
+        defer { service.shutdown() }
+        let writes = await recorder.writes
+        let historical = try #require(writes.first)
+        #expect(writes.filter { $0.sessionId == historical.sessionId }.count == 1)
+        let play = try #require(writes.first { $0.event == "play" })
+        #expect(play.baseVersion == 9)
+        #expect(play.positionSeconds == 400)
+        #expect(service.currentTime == 400)
+        #expect(service.podcastProgressMessage == nil)
     }
 
     @Test func askModeUsesFreshProgressBeforePreparingAudio() async throws {
@@ -1317,11 +1441,15 @@ struct PlaybackServiceTests {
             return .init(version: 2, positionSeconds: id == "done" ? 600 : 90,
                          durationSeconds: 1000, completed: id == "done")
         }
+        service.submitPodcastProgress = { _, _ in .ok }
         service.configurePodcastContinuation(episodes: [
+            .init(id: "first", title: "First", chronologicalIndex: 2, isCompleted: false, durationSeconds: 600),
             .init(id: "done", title: "Done", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
             .init(id: "next", title: "Next", chronologicalIndex: 0, isCompleted: false, durationSeconds: 1000)
         ], preference: .init(order: .follow, skipCompleted: true, autoContinue: true))
-        service.playPodcastEpisode(.init(trackID: "podcast_ep_done", title: "Done", artist: "Host", streamPath: "unused"))
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_first", title: "First", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        service.handleItemEnded()
         try await Task.sleep(for: .milliseconds(20))
         service.pause()
         await service.waitForPodcastTasks()

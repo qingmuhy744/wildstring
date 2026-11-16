@@ -511,6 +511,17 @@ struct MacPodcastsView: View {
                                 .background(MacTheme.accent, in: Capsule())
                             }
                             .buttonStyle(.plain)
+                        } else if !detail.episodes.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark")
+                                Text(L10n("macPodcasts.allCompleted"))
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MacTheme.muted)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(MacTheme.panel, in: Capsule())
+                            .accessibilityElement(children: .combine)
                         }
                         if detail.podcast.followed {
                             Menu {

@@ -201,6 +201,10 @@ public final class PlaybackService {
     /// Reads the bookmark version before a new episode session. Nil means the read failed.
     @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
     @ObservationIgnored private var podcastExplicitStartPosition = false
+    /// True only while an automatic transition (episode ended, skipping completed episodes) starts the next
+    /// episode. User-initiated starts leave it false, so a completed episode restarts instead of being skipped.
+    @ObservationIgnored private var podcastAutomaticStart = false
+    @ObservationIgnored private var podcastSkippingCompleted = false
     @ObservationIgnored public var submitPodcastProgress:
         (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
     public private(set) var podcastProgressMessage: String?
@@ -306,6 +310,7 @@ public final class PlaybackService {
         let turn = invalidatePodcastAdvance()
         podcastOverrideItem = nil
         podcastExplicitStartPosition = true
+        podcastAutomaticStart = false
         if let reason = items[index].unavailableReason {
             errorMessage = KitL10n("kit.playback.trackUnavailableRetry", items[index].title, reason)
             return
@@ -352,6 +357,7 @@ public final class PlaybackService {
         activeMediaID = nil // A new explicit selection always starts a fresh session.
         let restart = position != nil || podcastCloud?.resumeMode == "restart"
         podcastExplicitStartPosition = restart
+        podcastAutomaticStart = false
         startPodcastEpisode(item, position: position ?? (restart ? 0 : item.resumePositionSeconds))
     }
 
@@ -417,6 +423,7 @@ public final class PlaybackService {
     /// the current line and does not write auto-continue rows. Without one, the
     /// adjacent show episode stays a local override.
     public func skipPodcastEpisode(_ direction: PodcastContinuation.Skip) {
+        podcastAutomaticStart = false
         if beginContextStep(direction) { return }
         invalidatePodcastAdvance()
         guard let currentID = currentItem?.trackID, currentID.hasPrefix("podcast_ep_"),
@@ -499,6 +506,7 @@ public final class PlaybackService {
                 podcastShouldAsk = podcastCloud?.resumeMode == "ask"
                 podcastExplicitStartPosition = podcastCloud?.resumeMode == "restart"
             }
+            podcastAutomaticStart = false
             startCurrent(autoplay: true, startAt: podcastExplicitStartPosition ? 0 : currentTime)
         } else {
             beginPlayback()
@@ -904,6 +912,8 @@ public final class PlaybackService {
     }
 
     private func startCurrent(autoplay: Bool, startAt: Double, podcastPrepared: Bool = false) {
+        let automaticStart = podcastAutomaticStart
+        podcastAutomaticStart = false
         assetLoadTask?.cancel()
         assetLoadTask = nil
         if !podcastPrepared {
@@ -940,7 +950,8 @@ public final class PlaybackService {
             podcastBoot = Task { [weak self] in
                 let snapshot = await load(episode)
                 self?.finishPodcastBoot(token: token, episode: episode, snapshot: snapshot,
-                                        fallback: startAt, autoplay: autoplay, restart: restart)
+                                        fallback: startAt, autoplay: autoplay, restart: restart,
+                                        automatic: automaticStart)
             }
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(1500))
@@ -1294,6 +1305,7 @@ public final class PlaybackService {
             podcastExplicitStartPosition = false
             // A non-empty manual podcast queue always wins, ignoring music shuffle/repeat.
             if podcastOverrideItem == nil, let next = advanceSequentialPodcastInLocalQueue() {
+                podcastAutomaticStart = true
                 startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
                 persistProgress()
                 return
@@ -1303,6 +1315,7 @@ public final class PlaybackService {
                    currentID: endedTrackID, direction: .next, requireAutoContinue: true
                ) {
                 podcastOverrideItem = next
+                podcastAutomaticStart = true
                 startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
                 return
             }
@@ -1413,6 +1426,7 @@ public final class PlaybackService {
         }
         guard turn == podcastTurn else { return }
         podcastExplicitStartPosition = false
+        podcastAutomaticStart = automatic || podcastSkippingCompleted
         startPodcastEpisode(item, position: max(0, item.resumePositionSeconds), autoplay: automatic || intendedPlaying)
     }
 
@@ -1466,6 +1480,7 @@ public final class PlaybackService {
             guard turn == podcastTurn else { return }
         }
         podcastOverrideItem = adjacent
+        podcastAutomaticStart = automatic || podcastSkippingCompleted
         startCurrent(autoplay: automatic || intendedPlaying, startAt: max(0, adjacent.resumePositionSeconds))
     }
 
@@ -1499,6 +1514,7 @@ public final class PlaybackService {
 
     private func stopAtEndOfPodcast() {
         podcastOverrideItem = nil
+        podcastAutomaticStart = false
         intendedPlaying = false
         isPlaying = false
         didFinishQueue = true
@@ -1564,15 +1580,28 @@ public final class PlaybackService {
 
     private func finishPodcastBoot(
         token: UUID, episode: String, snapshot: PodcastProgressSnapshot?,
-        fallback: Double, autoplay: Bool, restart: Bool
+        fallback: Double, autoplay: Bool, restart explicitRestart: Bool, automatic: Bool = false, settled: Bool = false
     ) {
         guard podcastBootToken == token, currentItem?.trackID == "podcast_ep_\(episode)" else { return }
+        if !settled, let snapshot, pendingHistoricalPodcast(episode) != nil {
+            // Unsynced progress from an earlier session goes through the normal path first; the new session
+            // then starts from the resulting server state. A newer token keeps the 1.5s fallback from racing it.
+            let next = UUID()
+            podcastBootToken = next
+            podcastBoot = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let latest = await self.settleHistoricalPodcast(episode, snapshot: snapshot)
+                self.finishPodcastBoot(token: next, episode: episode, snapshot: latest, fallback: fallback,
+                                       autoplay: autoplay, restart: explicitRestart, automatic: automatic, settled: true)
+            }
+            return
+        }
         podcastBootToken = nil
         let stored = loadStoredPodcast(episode)
         podcastStartedOffline = snapshot == nil
         let completed = snapshot.map(Self.isPodcastSnapshotCompleted) ?? stored?.completed ?? false
         let promptPosition = snapshot?.positionSeconds ?? Int(stored?.position ?? fallback)
-        if podcastShouldAsk, !restart, !completed, promptPosition > 0 {
+        if podcastShouldAsk, !explicitRestart, !completed, promptPosition > 0 {
             podcastShouldAsk = false
             pendingPodcastPrompt = PendingPodcastPrompt(token: token, episode: episode, snapshot: snapshot,
                                                        fallback: fallback, autoplay: autoplay)
@@ -1582,9 +1611,12 @@ public final class PlaybackService {
             return
         }
         podcastShouldAsk = false
+        // Only automatic transitions skip a completed episode; the user choosing one replays it from the start.
+        let skipsCompleted = !explicitRestart && completed && automatic
+        let restart = explicitRestart || (completed && !automatic)
         podcastKnownCompleted = restart ? false : completed
         let shouldPlay = intendedPlaying
-        if !restart && completed {
+        if skipsCompleted {
             if let snapshot, let key = podcastStorageKey(episode) {
                 let record = StoredPodcast(bookmark: stored?.bookmark ?? PodcastBookmark(),
                                            position: Double(snapshot.positionSeconds),
@@ -1596,25 +1628,30 @@ public final class PlaybackService {
             if podcastCloud != nil {
                 let turn = invalidatePodcastAdvance()
                 podcastAdvanceTask = Task { @MainActor in
+                    self.podcastSkippingCompleted = true
                     await self.performContextStep(episodeID: episode, direction: .next, turn: turn,
                                                   cloud: self.podcastCloud, automatic: false)
+                    self.podcastSkippingCompleted = false
                     if self.currentItem?.trackID == "podcast_ep_\(episode)" {
                         self.stopAtEndOfPodcast()
+                        self.podcastProgressMessage = KitL10n("kit.playback.podcastAlreadyCompleted")
                     }
                 }
             } else if let next = podcastAdjacentItem(currentID: "podcast_ep_\(episode)", direction: .next,
                                                      requireAutoContinue: false) {
                 podcastOverrideItem = next
                 podcastExplicitStartPosition = false
+                podcastAutomaticStart = true
                 startCurrent(autoplay: shouldPlay, startAt: next.resumePositionSeconds)
             } else {
                 stopAtEndOfPodcast()
+                podcastProgressMessage = KitL10n("kit.playback.podcastAlreadyCompleted")
             }
             return
         }
         let bootSeek = podcastBootSeek
         podcastBootSeek = nil
-        let position = bootSeek ?? (restart ? max(0, fallback) : snapshot.map { Double(max(0, $0.positionSeconds)) }
+        let position = bootSeek ?? (restart ? (completed && !automatic ? 0 : max(0, fallback)) : snapshot.map { Double(max(0, $0.positionSeconds)) }
             ?? stored?.position ?? max(0, fallback))
         startCurrent(autoplay: shouldPlay, startAt: position, podcastPrepared: true)
         if snapshot == nil, !restart, let restored = restoredPodcast, restored.bookmark.episodeId == episode {
@@ -1632,6 +1669,55 @@ public final class PlaybackService {
         restoredPodcast = nil
         saveStoredPodcast(position: position, completed: false)
         if snapshot != nil { checkpointPodcast(event: bootSeek != nil ? "seek" : (shouldPlay ? "play" : "pause"), force: true) }
+    }
+
+    private func pendingHistoricalPodcast(_ episode: String) -> StoredPodcast? {
+        guard submitPodcastProgress != nil, let stored = loadStoredPodcast(episode), stored.pending != false,
+              stored.bookmark.ready, !stored.bookmark.blocked else { return nil }
+        return stored
+    }
+
+    /// Submits the pending record of an earlier session for the episode about to start, and returns the
+    /// server state the new session should begin from. 409 adopts the server state and drops the record.
+    private func settleHistoricalPodcast(_ episode: String, snapshot: PodcastProgressSnapshot) async -> PodcastProgressSnapshot {
+        guard var stored = pendingHistoricalPodcast(episode), let key = podcastStorageKey(episode),
+              let cloud = podcastCloud, let submit = submitPodcastProgress,
+              let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
+                                               durationSeconds: Int(stored.duration.rounded()),
+                                               event: stored.completed ? "ended" : (stored.pendingEvent ?? "stop"),
+                                               nowMs: Self.monotonicMs(), force: true)
+        else { return snapshot }
+        func save(_ record: StoredPodcast) {
+            if let data = try? JSONEncoder().encode(record) { cloud.defaults.set(data, forKey: key) }
+        }
+        func adopt(_ current: PodcastProgressSnapshot) -> PodcastProgressSnapshot {
+            save(StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
+                               duration: Double(current.durationSeconds ?? 0),
+                               completed: current.completed == true, version: current.version))
+            return current
+        }
+        save(stored)
+        switch await submit(episode, write) {
+        case .ok, .completed:
+            let completed = stored.completed
+            stored.bookmark.clear()
+            stored.pending = false
+            save(stored)
+            if let latest = await loadPodcastProgress?(episode) { return latest }
+            return PodcastProgressSnapshot(version: snapshot.version, positionSeconds: write.positionSeconds,
+                                           durationSeconds: write.durationSeconds,
+                                           completed: completed || snapshot.completed == true,
+                                           deviceId: podcastDeviceID)
+        case .conflictCurrent(let current):
+            return adopt(current)
+        case .conflict:
+            if let current = await loadPodcastProgress?(episode) { return adopt(current) }
+            stored.bookmark.clear()
+            save(stored)
+            return snapshot
+        case .failed:
+            return snapshot
+        }
     }
 
     public func answerPodcastResume(restart: Bool?) {
