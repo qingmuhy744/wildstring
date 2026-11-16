@@ -693,7 +693,7 @@ export function Management({
                     </p>
                   )}
                   {jobs?.items.map((job) => (
-                    <details className="management-job" key={job.id}>
+                    <details className="management-job" data-job-id={job.id} key={job.id}>
                       <summary>
                         <div>
                           <strong>

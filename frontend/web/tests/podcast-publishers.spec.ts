@@ -21,8 +21,16 @@ async function reset(page: Page) {
 }
 
 async function open(page: Page, title: string) {
+  const loaded = page.waitForResponse(
+    (response) =>
+      /\/api\/v1\/podcasts\/[^/?]+$/.test(response.url()) && response.request().method() === 'GET',
+  );
   await page.locator('.podcast-card').filter({ hasText: title }).click();
+  const response = await loaded;
+  expect(response.ok()).toBe(true);
+  await response.finished();
   await expect(page.locator('.podcast-meta-card h3')).toHaveText(title);
+  await expect(page.locator('.podcasts-loading')).toHaveCount(0);
 }
 
 test('手动确认、聚合本服节目、修正与解除归属，保留来源作者', async ({ page }, info) => {

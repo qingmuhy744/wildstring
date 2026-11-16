@@ -132,12 +132,19 @@ test('元数据预览、版本冲突、重扫保留、撤销与当前音频连�
 test('导入任务关闭页面继续处理、持久历史与逐文件错误', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/manage/jobs') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: '导入音乐', exact: true }).click();
+  const response = await submitted;
+  expect(response.ok()).toBe(true);
+  const { id } = await response.json();
   await page.reload();
   await expect(page.getByRole('table')).toBeVisible();
   await manage(page, info.project.name === 'mobile');
   await manageTab(page, '任务记录');
-  const job = page.locator('.management-job').first();
+  const job = page.locator(`.management-job[data-job-id="${id}"]`);
   await expect(job.locator('.job-status')).toHaveText('部分失败');
   await job.locator('summary').click();
   await expect(job).toContainText('broken.flac');
