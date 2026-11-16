@@ -483,3 +483,16 @@ def test_resume_preference_schema52_upgrade_preserves_bookmarks(episode_client, 
     client.put("/api/v1/podcasts/resume-mode", headers=HEADERS, json={"resume_mode": "ask"})
     database.initialize()
     assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "ask"}
+
+
+def test_episode_views_expose_current_account_last_listened_time(episode_client):
+    client, episode, podcast = episode_client
+    assert (
+        client.get(f"/api/v1/podcasts/{podcast}").json()["episodes"][0]["last_listened_at"] is None
+    )
+    saved = write(client, episode, position_seconds=600).json()
+    detail = client.get(f"/api/v1/podcasts/{podcast}").json()["episodes"][0]
+    assert detail["last_listened_at"] == saved["updated_at"]
+    episode_detail = client.get(f"/api/v1/podcasts/episodes/{episode}")
+    assert episode_detail.status_code == 200
+    assert episode_detail.json()["last_listened_at"] == saved["updated_at"]

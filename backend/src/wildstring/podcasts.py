@@ -491,6 +491,7 @@ class PodcastEpisodeResponse(BaseModel):
     season_number: int | None = None
     created_at: str
     position_seconds: int = 0
+    last_listened_at: str | None = None
     completed: bool = False
     local_path: str | None = None
     download_status: str = "none"
@@ -2414,6 +2415,7 @@ class PodcastManager:
                     e.duration_seconds, e.pub_date, e.episode_number, e.season_number, e.created_at,
                     COALESCE(e.local_path, '') AS local_path,
                     COALESCE(e.download_status, 'none') AS download_status,
+                    pr.last_listened_at,
                     COALESCE(pr.position_seconds, 0) AS position_seconds,
                     COALESCE(pr.completed, 0) AS completed
                 FROM podcast_episodes e
@@ -2489,6 +2491,7 @@ class PodcastManager:
                         "season_number": ep["season_number"],
                         "created_at": ep["created_at"],
                         "position_seconds": ep["position_seconds"],
+                        "last_listened_at": ep["last_listened_at"],
                         "completed": bool(ep["completed"]),
                         # Absolute host paths are internal state; stream endpoints resolve them server-side.
                         "local_path": None,
@@ -2549,6 +2552,7 @@ class PodcastManager:
                     e.duration_seconds, e.pub_date, e.episode_number, e.season_number, e.created_at,
                     COALESCE(e.local_path, '') AS local_path,
                     COALESCE(e.download_status, 'none') AS download_status,
+                    pr.last_listened_at,
                     COALESCE(pr.position_seconds, 0) AS position_seconds,
                     COALESCE(pr.completed, 0) AS completed
                 FROM podcast_episodes e
@@ -2580,6 +2584,7 @@ class PodcastManager:
                 "season_number": row["season_number"],
                 "created_at": row["created_at"],
                 "position_seconds": row["position_seconds"],
+                "last_listened_at": row["last_listened_at"],
                 "completed": bool(row["completed"]),
                 "local_path": row["local_path"] if include_local_path else None,
                 "download_status": row["download_status"] or "none",
@@ -2607,6 +2612,7 @@ class PodcastManager:
                     e.duration_seconds, e.pub_date, e.episode_number, e.season_number, e.created_at,
                     COALESCE(e.download_status, 'none') AS download_status,
                     p.title AS podcast_title, p.cover_url, p.author,
+                    pr.last_listened_at,
                     COALESCE(pr.position_seconds, 0) AS position_seconds,
                     COALESCE(pr.completed, 0) AS completed,
                     f.created_at AS favorited_at
@@ -2635,6 +2641,7 @@ class PodcastManager:
                     "season_number": r["season_number"],
                     "created_at": r["created_at"],
                     "position_seconds": r["position_seconds"],
+                    "last_listened_at": r["last_listened_at"],
                     "completed": bool(r["completed"]),
                     "local_path": None,
                     "download_status": r["download_status"] or "none",
