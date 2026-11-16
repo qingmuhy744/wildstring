@@ -1,4 +1,9 @@
-import { episodeId, episodeResumeMode } from './podcast-progress';
+import {
+  episodeId,
+  episodeResumeMode,
+  refreshEpisodeResumeMode,
+  saveEpisodeResumeMode,
+} from './podcast-progress';
 import { HelpLabel } from './desktop-help';
 import { Icon } from './icons';
 import { useEffect, useRef, useState } from 'react';
@@ -43,6 +48,14 @@ export function SyncModeControl({ userId }: { userId: string }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState(() => playbackSyncMode(userId));
   const [podcastMode, setPodcastMode] = useState(() => episodeResumeMode(userId));
+  const [podcastError, setPodcastError] = useState(false);
+  const [podcastSaving, setPodcastSaving] = useState(false);
+  useEffect(() => {
+    const update = () => setPodcastMode(episodeResumeMode(userId));
+    window.addEventListener('wildstring:podcast-resume-mode', update);
+    void refreshEpisodeResumeMode(userId).catch(() => {});
+    return () => window.removeEventListener('wildstring:podcast-resume-mode', update);
+  }, [userId]);
   return (
     <>
       <div className="sync-mode-controls">
@@ -68,10 +81,14 @@ export function SyncModeControl({ userId }: { userId: string }) {
           <select
             aria-label={t('playbackSync.podcastResumeAria')}
             value={podcastMode}
+            disabled={podcastSaving}
             onChange={(event) => {
               const value = event.target.value as typeof podcastMode;
-              setPodcastMode(value);
-              localStorage.setItem(`wildstring:podcast-resume:${userId}`, value);
+              setPodcastSaving(true);
+              setPodcastError(false);
+              void saveEpisodeResumeMode(userId, value)
+                .catch(() => setPodcastError(true))
+                .finally(() => setPodcastSaving(false));
             }}
           >
             <option value="auto">{t('playbackSync.podcastAuto')}</option>
@@ -80,6 +97,7 @@ export function SyncModeControl({ userId }: { userId: string }) {
           </select>
         </label>
       </div>
+      {podcastError && <p role="alert">{t('playbackSync.podcastSaveFailed')}</p>}
       <p className="muted">{t('playbackSync.podcastNote')}</p>
     </>
   );

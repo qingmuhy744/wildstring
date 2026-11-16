@@ -2627,14 +2627,15 @@
     "pausedHint": "其他设备最近暂停 · 载入后保持暂停",
     "podcastAsk": "询问",
     "podcastAuto": "自动继续（默认）",
-    "podcastNote": "播客按单集保存进度；以上选择只影响开始收听的位置，进度始终自动保存。",
+    "podcastNote": "续听方式随账号同步，播客进度按单集保存。",
     "podcastRestart": "从头播放",
     "podcastResume": "播客单集接续",
     "podcastResumeAria": "播客单集接续",
     "progressUpdated": "其他设备的进度已更新，请重新核对后载入。",
     "queueLimitExceeded": "共享队列超过网页 {{limit}} 首上限。",
     "queueProgress": "{{count}} 首队列 · 第 {{index}} 首 · {{time}}",
-    "queueUnavailable": "共享队列已经不可用。"
+    "queueUnavailable": "共享队列已经不可用。",
+    "podcastSaveFailed": "保存失败，请检查网络后重试。"
   },
   "playerPage": {
     "audioDisconnected": "音频连接中断，请点击播放重试。",
@@ -2668,7 +2669,7 @@
     "playerAria": "音乐播放器",
     "podcastAudioDisconnected": "播客音频连接中断，请点击播放重试。",
     "podcastSkipAria": "{{device}}{{dir}}{{seconds}}秒",
-    "podcastUpdatedElsewhere": "另一台设备刚更新了本集，请重新选择接续位置。",
+    "podcastUpdatedElsewhere": "另一台设备更新了这一集的进度。本机进度暂不同步到服务器。",
     "prevEpisode": "上一集",
     "prevTrack": "上一首",
     "progressAria": "播放进度",
@@ -3067,10 +3068,11 @@
     "viewStorage": "查看占用"
   },
   "podcastProgress": {
-    "conflictNotice": "另一台设备更新了本集进度，本机位置已保留，请选择接续位置。",
+    "conflictNotice": "另一台设备更新了这一集的进度。本机进度暂不同步到服务器。",
     "localStorageError": "浏览器无法在本机保存单集进度，请检查存储空间。",
     "serverUpdateNeeded": "服务器需要更新才能同步播客进度；本机进度已保存。",
-    "syncPending": "单集进度暂未同步，已保存在本机。"
+    "syncPending": "单集进度暂未同步，已保存在本机。",
+    "completedElsewhere": "这一集已听完，可以播放下一集。"
   },
   "podcastProgressDialog": {
     "cancelResume": "取消接续",
@@ -3083,7 +3085,8 @@
     "resumeLocal": "继续本机 {{time}}",
     "resumePromptTitle": "继续收听这集？",
     "resumeRemote": "继续 {{time}}",
-    "syncedTo": "已同步至 {{time}}"
+    "syncedTo": "已同步至 {{time}}",
+    "useLocalProgress": "用本机进度"
   },
   "podcastPublishers": {
     "cancel": "取消",

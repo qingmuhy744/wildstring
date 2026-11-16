@@ -179,7 +179,7 @@ interface PodcastsProps {
   queuedEpisodeIds?: string[];
   focusPodcastId?: string | null;
   onFocusHandled?: () => void;
-  onPlayTrack: (track: Track) => void;
+  onPlayTrack: (track: Track, restart?: boolean) => void;
   onQueueTrack: (track: Track, next: boolean) => void;
   onPlayQueue?: () => void;
   onPlayQueuedEpisode?: (episodeId: string) => void;
@@ -483,7 +483,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     }
   };
 
+  const lastDetailFetch = useRef(0);
   const openDetail = async (p: PodcastSummary) => {
+    lastDetailFetch.current = Date.now();
     setSelectedPodcast(p);
     try {
       setDetailLoading(true);
@@ -496,6 +498,29 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setDetailLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!selectedPodcast?.id) return;
+    let active = true;
+    const id = selectedPodcast.id;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastDetailFetch.current < 30000)
+        return;
+      lastDetailFetch.current = Date.now();
+      void api<PodcastDetail>(`/podcasts/${encodeURIComponent(id)}`)
+        .then((detail) => {
+          if (!active) return;
+          setSelectedDetail(detail);
+          setSelectedPodcast(detail.podcast);
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [selectedPodcast?.id]);
 
   async function toggleFollow(podcast: PodcastSummary) {
     if (followBusy) return;
@@ -899,7 +924,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     await openFromSearch(podcastId);
   };
 
-  const playEpisode = (ep: PodcastEpisode, podcast: PodcastSummary) => {
+  const playEpisode = (ep: PodcastEpisode, podcast: PodcastSummary, restart = false) => {
     const trackId = `podcast_ep_${ep.id}`;
     if (podcast.cover_url) {
       rememberPodcastCover(trackId, podcast.cover_url);
@@ -907,7 +932,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     const track = podcastEpisodeToTrack(ep, podcast);
     track.podcast_list_order =
       sortField === 'pub_date' || sortField === 'episode_number' ? sortOrder : 'desc';
-    onPlayTrack(track);
+    onPlayTrack(track, restart);
   };
 
   const queueEpisode = (ep: PodcastEpisode, podcast: PodcastSummary, next: boolean) => {
@@ -1402,6 +1427,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                         label: t('podcasts.playEpisode'),
                         icon: 'play',
                         run: () => playEpisode(ep, selectedPodcast),
+                      },
+                      {
+                        label: t('podcastProgressDialog.playFromStart'),
+                        icon: 'play',
+                        run: () => playEpisode(ep, selectedPodcast, true),
                       },
                       {
                         label: t('podcasts.playNext'),
