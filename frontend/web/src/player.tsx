@@ -614,7 +614,7 @@ export function usePlayer(userId: string) {
       const mode = episodeResumeMode(userId);
       if (
         restartPodcast ||
-        (remote.completed && !automatic) ||
+        (seconds === undefined && remote.completed && !automatic) ||
         (seconds === undefined && mode === 'restart' && !automatic)
       ) {
         position = 0;
@@ -1001,6 +1001,7 @@ export function usePlayer(userId: string) {
       if (
         (id && !podcastProgress.current?.isActive(id)) ||
         audio.current.error ||
+        audio.current.ended ||
         !audio.current.getAttribute('src')
       )
         start(queue, index);
