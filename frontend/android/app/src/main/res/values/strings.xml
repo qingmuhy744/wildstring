@@ -401,6 +401,8 @@
     <string name="remove_named">Remove %1$s</string>
     <string name="smart_playlist_suffix"> · Smart playlist</string>
     <string name="jump_to">Jump to %1$s</string>
+    <string name="alphabet_rail_active">Alphabet index shown</string>
+    <string name="alphabet_rail_idle">Alphabet index idle</string>
     <string name="disc_summary">Disc %1$d, songs: %2$d</string>
     <string name="playback_buffering">Buffering</string>
     <string name="playback_playing">Playing</string>
