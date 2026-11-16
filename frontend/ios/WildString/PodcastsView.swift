@@ -4,7 +4,7 @@ import SwiftUI
 
 extension PodcastEpisode {
     var playbackItem: PlaybackService.Item {
-        let isDone = completed || (positionSeconds > 0 && durationSeconds > 0 && positionSeconds >= durationSeconds)
+        let isDone = completed
         return PlaybackService.Item(
             trackID: "podcast_ep_\(id)",
             title: title,
@@ -138,10 +138,11 @@ private struct PodcastDetailView: View {
     let podcastID: String
 
     @Environment(FavoritesModel.self) private var favorites
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var lastLoaded = Date.distantPast
     @State private var detail: PodcastDetail?
     @State private var message: String?
     @State private var notice: String?
-    @State private var resumeEpisode: PodcastEpisode?
     @State private var episodeFilter = "all"
 
     var body: some View {
@@ -227,6 +228,7 @@ private struct PodcastDetailView: View {
                             .buttonStyle(.plain)
 
                             Menu {
+                                Button(L10n("podcasts.playFromBeginning")) { start(episode, in: detail.episodes, at: 0) }
                                 Button(L10n("podcasts.playNext")) { enqueue(episode, next: true) }
                                 Button(isQueued ? L10n("podcasts.removeFromQueue") : L10n("podcasts.addToQueue")) {
                                     if isQueued {
@@ -266,28 +268,12 @@ private struct PodcastDetailView: View {
             await load()
             await playback.podcastCloud?.refreshPreferences()
         }
-        .confirmationDialog(
-            L10n("podcasts.resumeDialogTitle"),
-            isPresented: Binding(
-                get: { resumeEpisode != nil },
-                set: { if !$0 { resumeEpisode = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(L10n("podcasts.resume")) {
-                if let episode = resumeEpisode, let detail {
-                    start(episode, in: detail.episodes, at: nil)
-                }
-                resumeEpisode = nil
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, Date().timeIntervalSince(lastLoaded) >= 30 {
+                Task { await load() }
             }
-            Button(L10n("podcasts.playFromBeginning")) {
-                if let episode = resumeEpisode, let detail {
-                    start(episode, in: detail.episodes, at: 0)
-                }
-                resumeEpisode = nil
-            }
-            Button(L10n("podcasts.cancel"), role: .cancel) { resumeEpisode = nil }
         }
+
     }
 
     private func progressText(_ episode: PodcastEpisode) -> String {
@@ -305,12 +291,7 @@ private struct PodcastDetailView: View {
     }
 
     private func choose(_ episode: PodcastEpisode, in episodes: [PodcastEpisode]) {
-        let remaining = episode.durationSeconds - episode.positionSeconds
-        if episode.positionSeconds > 15, episode.durationSeconds == 0 || remaining > 30 {
-            resumeEpisode = episode
-        } else {
-            start(episode, in: episodes, at: nil)
-        }
+        start(episode, in: episodes)
     }
 
     private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double? = nil) {
@@ -323,10 +304,7 @@ private struct PodcastDetailView: View {
 
     private func applyContinuation(_ episodes: [PodcastEpisode], show: PodcastSummary?) {
         let refs: [PodcastContinuation.Episode] = episodes.enumerated().map { index, episode in
-            let done = episode.completed || (
-                episode.positionSeconds > 0 && episode.durationSeconds > 0
-                    && episode.positionSeconds >= episode.durationSeconds
-            )
+            let done = episode.completed
             return PodcastContinuation.Episode(
                 id: episode.id,
                 title: episode.title,
@@ -357,8 +335,7 @@ private struct PodcastDetailView: View {
     }
 
     private func isCompleted(_ episode: PodcastEpisode) -> Bool {
-        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0
-            && episode.positionSeconds >= episode.durationSeconds)
+        episode.completed
     }
 
     private func isFavorite(_ episode: PodcastEpisode) -> Bool {
@@ -381,7 +358,7 @@ private struct PodcastDetailView: View {
     private func toggleCompleted(_ episode: PodcastEpisode) async {
         let target = !isCompleted(episode)
         do {
-            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target, deviceID: playback.podcastDeviceID)
             await load()
         } catch {
             message = L10n("podcasts.markCompletedFailed", ErrorText.message(for: error))
@@ -394,6 +371,7 @@ private struct PodcastDetailView: View {
     }
 
     private func load() async {
+        lastLoaded = Date()
         do {
             detail = try await client.podcast(id: podcastID)
             message = nil

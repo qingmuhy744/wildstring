@@ -27,6 +27,7 @@ struct WildStringApp: App {
 @MainActor
 struct RootView: View {
     @State private var model = ConnectionModel()
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appearanceTheme") private var theme = ThemeChoice.system.rawValue
     @AppStorage(InterfaceLanguage.storageKey) private var language = InterfaceLanguage.auto.rawValue
 
@@ -65,10 +66,27 @@ struct RootView: View {
             Self.applyDemoDefaults()
             await model.restore()
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.playback?.podcastCloud?.refreshResumeMode() } }
+        }
+        .confirmationDialog(L10n("podcasts.resumeDialogTitle"), isPresented: Binding(
+            get: { model.playback?.podcastResumePrompt != nil },
+            set: { if !$0 { model.playback?.answerPodcastResume(restart: nil) } }
+        ), titleVisibility: .visible) {
+            Button(L10n("podcasts.resume")) { model.playback?.answerPodcastResume(restart: false) }
+            Button(L10n("podcasts.playFromBeginning")) { model.playback?.answerPodcastResume(restart: true) }
+            Button(L10n("podcasts.cancel"), role: .cancel) { model.playback?.answerPodcastResume(restart: nil) }
+        } message: {
+            if let prompt = model.playback?.podcastResumePrompt {
+                Text(L10n("podcasts.listenedProgress", Self.clock(prompt.position), Self.clock(prompt.duration)))
+            }
+        }
         .environment(model)
         .preferredColorScheme((ThemeChoice(rawValue: theme) ?? .system).colorScheme)
         .environment(\.locale, InterfaceLanguage(preference: language).locale)
     }
+
+    private static func clock(_ seconds: Int) -> String { String(format: "%d:%02d", seconds / 60, seconds % 60) }
 
     private static func applyDemoDefaults() {
         #if DEBUG

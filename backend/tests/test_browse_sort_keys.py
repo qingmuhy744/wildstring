@@ -81,9 +81,8 @@ def test_scan_edit_and_upgrade_keep_the_same_order(settings):
         connection.execute("PRAGMA user_version=52")
 
     database.initialize()
-    assert SCHEMA_VERSION == 53
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 53
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         restored = connection.execute(
             "SELECT title, title_sort, title_group FROM tracks"
         ).fetchone()

@@ -132,6 +132,7 @@ struct MacSettingsView: View {
         .font(MacTheme.body)
         .toggleStyle(.switch)
         .navigationTitle(L10n("macLibrary.settingsNavTitle"))
+        .task { await session.playback?.podcastCloud?.refreshResumeMode() }
         .onChange(of: preferredBitrate) { _, value in
             session.playback?.preferredBitrateKbps = value == 0 ? nil : value
         }
@@ -175,6 +176,18 @@ struct MacSettingsView: View {
 
     private var playbackCard: some View {
         card(L10n("macLibrary.cardPlayback"), symbol: "waveform") {
+            if let cloud = session.playback?.podcastCloud {
+                Picker(L10n("podcast.resumeMode"), selection: Binding(
+                    get: { cloud.resumeMode },
+                    set: { value in Task { await cloud.setResumeMode(value) } }
+                )) {
+                    Text(L10n("podcast.resumeMode.auto")).tag("auto")
+                    Text(L10n("podcast.resumeMode.ask")).tag("ask")
+                    Text(L10n("podcast.resumeMode.restart")).tag("restart")
+                }
+                if let message = cloud.resumeModeError { note(message) }
+                Divider()
+            }
             HStack {
                 Text(L10n("macLibrary.playbackQuality"))
                 Spacer(minLength: 12)

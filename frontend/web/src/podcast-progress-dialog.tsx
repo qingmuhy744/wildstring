@@ -16,9 +16,11 @@ export function PodcastProgressDialog({ player }: { player: Player }) {
     return player.podcastProgressMessage && player.current?.podcast_id ? (
       <aside className="device-resume-notice" role="status">
         <p>{player.podcastProgressMessage}</p>
-        <button onClick={player.reviewPodcastProgress}>
-          {t('podcastProgressDialog.chooseResumePosition')}
-        </button>
+        {player.podcastProgressConflict && (
+          <button onClick={player.takeOverPodcastProgress}>
+            {t('podcastProgressDialog.useLocalProgress')}
+          </button>
+        )}
       </aside>
     ) : null;
   return <ProgressPrompt player={player} prompt={prompt} />;

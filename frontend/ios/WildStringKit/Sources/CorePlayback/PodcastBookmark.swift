@@ -1,30 +1,38 @@
 import CoreNetwork
 import Foundation
 
-public enum PodcastSubmitResult: Sendable {
+public enum PodcastSubmitResult: Equatable, Sendable {
     case ok
+    case completed
     case conflict
+    case conflictCurrent(PodcastProgressSnapshot)
     case failed
 }
 
 /// One listening session for a single episode. Sequence only increases.
 /// A conflict stops further uploads until the user starts the episode again.
-public struct PodcastBookmark: Sendable {
+public struct PodcastBookmark: Codable, Sendable {
     public private(set) var episodeId = ""
     public private(set) var ready = false
     public private(set) var blocked = false
-    private var sessionId = ""
+    public private(set) var sessionId = ""
     private var deviceId = ""
-    private var baseVersion = 0
-    private var sequence = 0
+    public private(set) var baseVersion = 0
+    private var intent = "resume"
+    private(set) var sequence = 0
     private var lastSentAt: Int64 = 0
+
+    private enum CodingKeys: String, CodingKey {
+        case episodeId, ready, blocked, sessionId, deviceId, baseVersion, intent, sequence
+    }
 
     public init() {}
 
-    public mutating func begin(episodeId: String, deviceId: String, baseVersion: Int) {
+    public mutating func begin(episodeId: String, deviceId: String, baseVersion: Int, intent: String = "resume") {
         self.episodeId = episodeId
         self.deviceId = deviceId
         self.baseVersion = baseVersion
+        self.intent = intent
         sessionId = UUID().uuidString
         sequence = 0
         lastSentAt = 0
@@ -63,7 +71,8 @@ public struct PodcastBookmark: Sendable {
             sequence: sequence,
             positionSeconds: position,
             durationSeconds: duration,
-            event: event
+            event: event,
+            intent: intent
         )
     }
 }

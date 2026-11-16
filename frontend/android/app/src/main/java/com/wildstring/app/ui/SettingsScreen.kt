@@ -81,6 +81,7 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
         if (activeSection == SettingsSection.Storage) usage = vm.cacheUsage()
     }
     LaunchedEffect(settingsOwner, activeSection) {
+        vm.podcastProgress.refreshMode()
         if (activeSection != SettingsSection.Podcast) return@LaunchedEffect
         try {
             val loaded = vm.repository.podcastPlaybackSettings()

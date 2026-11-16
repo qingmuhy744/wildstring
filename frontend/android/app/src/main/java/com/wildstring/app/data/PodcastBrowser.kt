@@ -38,11 +38,12 @@ class PodcastBrowser(
     private var listJob: Job? = null
     private val detailJobs = mutableMapOf<String, Job>()
     private val detailRequests = mutableMapOf<String, Long>()
+    private val lastDetailFetch = mutableMapOf<String, Long>()
 
     fun reset() {
         generation++
         listJob?.cancel(); listJob = null
-        detailJobs.values.forEach { it.cancel() }; detailJobs.clear(); detailRequests.clear()
+        detailJobs.values.forEach { it.cancel() }; detailJobs.clear(); detailRequests.clear(); lastDetailFetch.clear()
         mutable.value = PodcastBrowserState(owner = currentOwner())
     }
 
@@ -78,6 +79,9 @@ class PodcastBrowser(
     }
 
     fun ensureDetail(id: String) = loadDetail(id, force = false)
+    fun refreshForeground(id: String) {
+        if (System.nanoTime() / 1_000_000 - (lastDetailFetch[id] ?: Long.MIN_VALUE / 2) >= 30_000) refresh(id, synchronize = false)
+    }
     fun refresh(id: String, synchronize: Boolean = true) = loadDetail(id, force = true, synchronize = synchronize)
 
     private fun loadDetail(id: String, force: Boolean, synchronize: Boolean = false) {
@@ -95,7 +99,7 @@ class PodcastBrowser(
                     if (cached != null && active()) mutable.update { it.copy(details = it.details + (id to cached)) }
                 }
                 val detail = if (synchronize) refreshDetail(id) else fetchDetail(id)
-                if (active()) putDetail(detail)
+                if (active()) { lastDetailFetch[id] = System.nanoTime() / 1_000_000; putDetail(detail) }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (active()) mutable.update { it.copy(message = AppLanguage.string(R.string.pod_brw_episodes_failed, friendlyError(e))) }

@@ -2627,14 +2627,15 @@
     "pausedHint": "Recently paused on another device · Remains paused after loading",
     "podcastAsk": "Ask",
     "podcastAuto": "Auto continue (default)",
-    "podcastNote": "Podcast progress is saved per episode; the above setting only affects where you start listening, progress is always saved automatically.",
+    "podcastNote": "The resume mode syncs with your account. Progress is saved per episode.",
     "podcastRestart": "Restart from beginning",
     "podcastResume": "Podcast episode resume",
     "podcastResumeAria": "Podcast episode resume mode",
     "progressUpdated": "Progress was updated on another device. Please review and reload.",
     "queueLimitExceeded": "Shared queue exceeds the web limit of {{limit}} tracks.",
     "queueProgress": "{{count}} tracks in queue · Track {{index}} · {{time}}",
-    "queueUnavailable": "The shared queue is no longer available."
+    "queueUnavailable": "The shared queue is no longer available.",
+    "podcastSaveFailed": "Could not save. Check your connection and try again."
   },
   "playerPage": {
     "audioDisconnected": "Audio connection was interrupted. Please click play to retry.",
@@ -2668,7 +2669,7 @@
     "playerAria": "Music Player",
     "podcastAudioDisconnected": "Podcast audio connection was interrupted. Please click play to retry.",
     "podcastSkipAria": "{{device}}Skip {{dir}} {{seconds}}s",
-    "podcastUpdatedElsewhere": "This episode was just updated on another device. Please reselect your resume position.",
+    "podcastUpdatedElsewhere": "Another device updated this episode. Your progress is not being synced to the server.",
     "prevEpisode": "Previous episode",
     "prevTrack": "Previous track",
     "progressAria": "Playback progress",
@@ -3067,10 +3068,11 @@
     "viewStorage": "View Usage"
   },
   "podcastProgress": {
-    "conflictNotice": "Another device updated progress for this episode. Local position is kept; please choose where to resume.",
+    "conflictNotice": "Another device updated this episode. Your progress is not being synced to the server.",
     "localStorageError": "Browser cannot save episode progress locally. Please check available storage.",
     "serverUpdateNeeded": "Server needs to be updated to sync podcast progress; local progress has been saved.",
-    "syncPending": "Episode progress not synced yet; saved locally."
+    "syncPending": "Episode progress not synced yet; saved locally.",
+    "completedElsewhere": "This episode is complete. You can play the next episode."
   },
   "podcastProgressDialog": {
     "cancelResume": "Cancel resume",
@@ -3083,7 +3085,8 @@
     "resumeLocal": "Resume local {{time}}",
     "resumePromptTitle": "Continue listening to this episode?",
     "resumeRemote": "Resume {{time}}",
-    "syncedTo": "Synced to {{time}}"
+    "syncedTo": "Synced to {{time}}",
+    "useLocalProgress": "Use this device’s progress"
   },
   "podcastPublishers": {
     "cancel": "Cancel",

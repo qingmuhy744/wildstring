@@ -4,8 +4,10 @@
 
 ## 当前状态
 
-- 数据库 schema 53（`SCHEMA_VERSION`），最近发布 0.8.17（[发布说明](../releases/v0.8.17.md)）。schema 53 起曲库拼音排序键写在曲目和人物上，浏览不再在查询里逐行计算。**0.8.12 及更早的客户端与 0.8.13 及更新的服务器不兼容**（`/podcasts/inbox` 已在 0.8.13 移除），须使用 0.8.13 或更新的客户端。schema 52 起每个用户只有一份有序待播列表：原稍后听按加入时间接到队尾后删除，新集动作是 `ignore` / `queue_last` / `queue_next`，从节目点播放顺着节目，从待播点播放顺着列表。见[播客待播列表](../../contracts/podcast-queue.md)。
+- 数据库 schema 54（`SCHEMA_VERSION`），最近发布 0.8.18（[发布说明](../releases/v0.8.17.md)）。schema 53 起曲库拼音排序键写在曲目和人物上，浏览不再在查询里逐行计算。**0.8.12 及更早的客户端与 0.8.13 及更新的服务器不兼容**（`/podcasts/inbox` 已在 0.8.13 移除），须使用 0.8.13 或更新的客户端。schema 52 起每个用户只有一份有序待播列表：原稍后听按加入时间接到队尾后删除，新集动作是 `ignore` / `queue_last` / `queue_next`，从节目点播放顺着节目，从待播点播放顺着列表。见[播客待播列表](../../contracts/podcast-queue.md)。
 - 各版本交付内容见 [CHANGELOG](../../CHANGELOG.md) 与 `docs/releases/`；实现状态以对应契约、发布说明和 [范围变更记录](scope-history.md) 为准；文档中的计划不代表已实现。
+
+- schema 54 增加账号级播客续听模式端点；四端接入先读后播、会话 `intent`、冲突后停传与显式接管，续听模式按账号同步且不迁移旧本机设置。实现与实际验收范围见[播客跨设备续听方案](../plans/podcast-cross-device-resume.md)，最近发布版本不代表包含这些改动。
 
 ## 定位
 

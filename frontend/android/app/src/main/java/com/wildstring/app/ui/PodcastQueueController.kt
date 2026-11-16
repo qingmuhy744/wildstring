@@ -72,6 +72,7 @@ class PodcastQueueController(
     private val play: (tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean) -> Unit,
     private val requireOwner: (String?) -> Unit,
     private val positions: () -> Map<String, EpisodeProgress>,
+    private val beforeAutomatic: (episodeId: String) -> Unit = {},
 ) {
     private val mutex = Mutex()
     private val mutable = MutableStateFlow(PodcastCloudState())
@@ -85,7 +86,7 @@ class PodcastQueueController(
     private var retry: (suspend () -> Unit)? = null
     private var lastFinishedEpisode: String? = null
     private var lastFinishedAt = 0L
-    private var playbackContext = PodcastPlaybackContext.SHOW
+    private var playbackContext: PodcastPlaybackContext? = null
 
     fun refresh() = scope.launch { refreshNow() }
 
@@ -112,7 +113,8 @@ class PodcastQueueController(
         catch (error: Exception) { mutable.update { it.copy(notice = friendlyError(error)) } }
     }
 
-    fun followsQueue(): Boolean = playbackContext == PodcastPlaybackContext.QUEUE
+    fun followsQueue(): Boolean = playbackContext?.let { it == PodcastPlaybackContext.QUEUE }
+        ?: (player()?.currentMediaItem?.mediaMetadata?.extras?.getBoolean("podcast_queue_context") == true)
 
     fun enqueue(episode: PodcastEpisode, next: Boolean) = scope.launch {
         try { enqueueNow(episode.id, next) }
@@ -125,7 +127,7 @@ class PodcastQueueController(
         val items = rows.map { PodcastQueueItem(episodeId = it.episodeId, origin = "manual", addedAt = it.addedAt) }
         mutable.update { it.copy(queue = items, queueRows = rows.map { row -> row.copy(origin = "manual") }) }
         val saved = mutex.withLock { pushOrKeep(items) }
-        if (saved && playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(items)
+        if (saved && followsQueue()) syncQueuePlayer(items)
     }
 
     fun removeQueued(episodeId: String) = scope.launch {
@@ -137,7 +139,7 @@ class PodcastQueueController(
             pushOrKeep(next)
             snapshot.items
         }
-        if (playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(items)
+        if (followsQueue()) syncQueuePlayer(items)
     }
 
     fun restoreQueued(row: PodcastQueueRow, index: Int) = scope.launch {
@@ -163,7 +165,7 @@ class PodcastQueueController(
                 }
             }
         }
-        if (playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(items)
+        if (followsQueue()) syncQueuePlayer(items)
     }
 
     fun updateShow(podcastId: String, action: String, autoLimit: Int = 3) = scope.launch {
@@ -201,7 +203,7 @@ class PodcastQueueController(
                 diverged = choice == PodcastQueueConflictChoice.KEEP_LOCAL
                 mutable.update { it.copy(queue = decision.items, conflict = if (diverged) conflict else null, syncError = null) }
             }
-            if (choice == PodcastQueueConflictChoice.USE_SERVER && playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(decision.items)
+            if (choice == PodcastQueueConflictChoice.USE_SERVER && followsQueue()) syncQueuePlayer(decision.items)
             publishQueueRows(decision.items)
             return@launch
         }
@@ -211,7 +213,7 @@ class PodcastQueueController(
             diverged = false
             pushOrKeep(decision.items)
         }
-        if (uploaded && playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(decision.items)
+        if (uploaded && followsQueue()) syncQueuePlayer(decision.items)
     }
 
     fun onEpisodeFinished(episodeId: String, advanceLocally: Boolean) {
@@ -240,7 +242,7 @@ class PodcastQueueController(
         diverged = false
         preferences = PodcastQueuePreferences()
         preferencesLoaded = false
-        playbackContext = PodcastPlaybackContext.SHOW
+        playbackContext = null
         retry = null
         mutable.value = PodcastCloudState()
     }
@@ -356,7 +358,7 @@ class PodcastQueueController(
             "limit" -> mutable.update { it.copy(notice = context.getString(R.string.podcast_queue_limit)) }
             "saved" -> {
                 val items = mutex.withLock { snapshot.items }
-                if (playbackContext == PodcastPlaybackContext.QUEUE) syncQueuePlayer(items)
+                if (followsQueue()) syncQueuePlayer(items)
                 mutable.update { it.copy(notice = context.getString(R.string.podcast_added_queue), queueError = null, syncError = null) }
                 publishQueueRows(items)
             }
@@ -366,14 +368,14 @@ class PodcastQueueController(
     private suspend fun finishNow(episodeId: String, advanceLocally: Boolean) {
         val owner = repository.session.cacheScope()
         val wasQueued = mutex.withLock { snapshot.items.any { it.episodeId == episodeId } }
-        if (!advanceLocally && playbackContext == PodcastPlaybackContext.QUEUE) removePlayedMediaItem(episodeId)
+        if (!advanceLocally && followsQueue()) removePlayedMediaItem(episodeId)
         if (wasQueued) {
             mutex.withLock {
                 val next = podcastQueueRemoveEpisode(snapshot.items, episodeId)
                 pushOrKeep(next)
             }
         }
-        if (!advanceLocally || playbackContext == PodcastPlaybackContext.QUEUE) return
+        if (!advanceLocally || followsQueue()) return
         if (!preferencesLoaded) {
             runCatching { repository.podcastQueuePreferences() }.onSuccess {
                 mutex.withLock { applyPreferences(it) }
@@ -387,6 +389,7 @@ class PodcastQueueController(
         val next = plan.episode ?: return
         check(podcastQueueAutoContinue(next.id) == listOf(next.id))
         requireOwner(owner)
+        beforeAutomatic(next.id)
         playShowNow(next, detail.podcast, null)
     }
 
@@ -608,7 +611,7 @@ class PodcastQueueController(
 
     /** Queue context only. Keeps the loaded episode and does not start a stopped player. */
     private suspend fun syncQueuePlayer(items: List<PodcastQueueItem>) {
-        if (playbackContext != PodcastPlaybackContext.QUEUE) return
+        if (!followsQueue()) return
         val current = playingEpisodeId() ?: return
         if (items.none { it.episodeId == current }) return
         val tracks = resolveTracks(items, null)

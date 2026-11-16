@@ -100,6 +100,7 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
     public let pubDate: String
     public let completed: Bool
     public let loved: Bool
+    public let lastListenedAt: String?
 
     public init(
         id: String,
@@ -110,7 +111,8 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         positionSeconds: Int = 0,
         pubDate: String = "",
         completed: Bool = false,
-        loved: Bool = false
+        loved: Bool = false,
+        lastListenedAt: String? = nil
     ) {
         self.id = id
         self.podcastId = podcastId
@@ -121,6 +123,7 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         self.pubDate = pubDate
         self.completed = completed
         self.loved = loved
+        self.lastListenedAt = lastListenedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,6 +136,7 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         positionSeconds = try container.decodeIfPresent(Int.self, forKey: .positionSeconds) ?? 0
         pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate) ?? ""
         completed = try container.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        lastListenedAt = try container.decodeIfPresent(String.self, forKey: .lastListenedAt)
         if let lovedVal = try container.decodeIfPresent(Bool.self, forKey: .loved) {
             loved = lovedVal
         } else if let favVal = try container.decodeIfPresent(Bool.self, forKey: .favorite) {
@@ -148,6 +152,7 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         case durationSeconds = "duration_seconds"
         case positionSeconds = "position_seconds"
         case pubDate = "pub_date"
+        case lastListenedAt = "last_listened_at"
     }
 }
 
@@ -161,27 +166,54 @@ public struct PodcastProgressSnapshot: Decodable, Equatable, Sendable {
     public let positionSeconds: Int
     public let durationSeconds: Int?
     public let completed: Bool?
+    public let deviceId: String?
 
     public init(
         version: Int,
         positionSeconds: Int,
         durationSeconds: Int? = nil,
-        completed: Bool? = nil
+        completed: Bool? = nil,
+        deviceId: String? = nil
     ) {
         self.version = version
         self.positionSeconds = positionSeconds
         self.durationSeconds = durationSeconds
         self.completed = completed
+        self.deviceId = deviceId
     }
 
     enum CodingKeys: String, CodingKey {
         case version, completed
         case positionSeconds = "position_seconds"
         case durationSeconds = "duration_seconds"
+        case deviceId = "device_id"
     }
 }
 
+public struct PodcastProgressConflict: Decodable, Sendable {
+    public struct Detail: Decodable, Sendable { public let current: PodcastProgressSnapshot }
+    public let detail: Detail
+}
+
+public struct PodcastResumeMode: Codable, Equatable, Sendable {
+    public var resumeMode: String
+    public init(resumeMode: String) { self.resumeMode = resumeMode }
+    enum CodingKeys: String, CodingKey { case resumeMode = "resume_mode" }
+}
+
 extension WildstringClient {
+    public func podcastResumeMode() async throws -> PodcastResumeMode {
+        let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/resume-mode"))
+        return try JSONDecoder().decode(PodcastResumeMode.self, from: data)
+    }
+
+    public func savePodcastResumeMode(_ mode: String) async throws -> PodcastResumeMode {
+        let data = try await perform(Request(method: "PUT", path: "api/v1/podcasts/resume-mode",
+                                             body: try JSONEncoder().encode(PodcastResumeMode(resumeMode: mode)),
+                                             contentType: "application/json"))
+        return try JSONDecoder().decode(PodcastResumeMode.self, from: data)
+    }
+
     public func libraries() async throws -> [MusicLibrary] {
         let data = try await perform(Request(method: "GET", path: "api/v1/libraries"))
         return try JSONDecoder().decode([MusicLibrary].self, from: data)
@@ -259,8 +291,9 @@ extension WildstringClient {
         return try JSONDecoder().decode(PodcastProgressSnapshot.self, from: data)
     }
 
-    public func savePodcastProgress(episodeId: String, write: PodcastProgressWrite) async throws {
-        _ = try await perform(
+    @discardableResult
+    public func savePodcastProgress(episodeId: String, write: PodcastProgressWrite) async throws -> PodcastProgressSnapshot {
+        let data = try await perform(
             Request(
                 method: "PUT",
                 path: "api/v1/podcasts/episodes/\(episodeId)/progress",
@@ -268,9 +301,12 @@ extension WildstringClient {
                 contentType: "application/json"
             )
         )
+        return try JSONDecoder().decode(PodcastProgressSnapshot.self, from: data)
     }
 
-    public func markPodcastEpisodeCompleted(episodeID: String, duration: Int = 0, completed: Bool) async throws {
+    /// `deviceID` must be the same id the playback service writes with, so marking the episode the
+    /// player is holding does not look like another device's update on the next heartbeat.
+    public func markPodcastEpisodeCompleted(episodeID: String, duration: Int = 0, completed: Bool, deviceID: String) async throws {
         let current = try? await podcastProgress(episodeId: episodeID)
         let baseVersion = current?.version ?? 0
         let effectiveDuration = max(1, duration > 0 ? duration : (current?.durationSeconds ?? 1))
@@ -279,12 +315,13 @@ extension WildstringClient {
         let session = "manual-" + UUID().uuidString
         let write = PodcastProgressWrite(
             sessionId: session,
-            deviceId: "wildstring-client",
+            deviceId: deviceID,
             baseVersion: baseVersion,
             sequence: 1,
             positionSeconds: position,
             durationSeconds: effectiveDuration,
-            event: event
+            event: event,
+            intent: completed ? "resume" : "restart"
         )
         try await savePodcastProgress(episodeId: episodeID, write: write)
     }

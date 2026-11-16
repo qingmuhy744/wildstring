@@ -136,9 +136,9 @@ class MusicViewModel @Inject constructor(
         { tracks, index, position, autoplay -> play(tracks, index, autoplay = autoplay, positionMs = position, preserveQueue = false) },
         { owner -> requireOwner(owner) },
         { podcastProgress.positions.value },
+        { episodeId -> podcastProgress.prepareNextAutomatically(episodeId) },
     )
     val podcastCloud = podcastQueues.state
-    private var podcastCursor: String? = null
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -148,28 +148,12 @@ class MusicViewModel @Inject constructor(
             }
             refreshPlayer()
         }
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            podcastQueues.refreshAutoPreview()
-            val c = controller ?: return
-            val newId = podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id"))
-            val previousId = podcastCursor
-            podcastCursor = newId
-            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) return
-            if (previousId == null || newId == null || previousId == newId) return
-            val previousIndex = (0 until c.mediaItemCount).firstOrNull { index ->
-                podcastEpisodeId(c.getMediaItemAt(index).mediaMetadata.extras?.getString("track_id")) == previousId
-            } ?: return
-            if (c.currentMediaItemIndex > previousIndex) podcastQueues.onEpisodeFinished(previousId, advanceLocally = false)
-        }
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            // STATE_ENDED only arrives when nothing is queued after the current episode.
-            if (playbackState == Player.STATE_ENDED) onPodcastPlaybackEnded()
-        }
     }
 
     init {
         settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
         viewModelScope.launch { state.map { it.connected to it.account?.id }.distinctUntilChanged().collect { (connected, _) -> if (connected) refreshLibraries() } }
+        viewModelScope.launch { podcastProgress.queueChanges.collect { podcastQueues.refresh() } }
         viewModelScope.launch { repository.libraryAccessChanges.collect { refreshLibraries(recheck = true) } }
         viewModelScope.launch { repository.session.profiles.collect {
             settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
@@ -517,14 +501,6 @@ class MusicViewModel @Inject constructor(
         }
     }
 
-    /** STATE_ENDED: the player queue is empty, so remove the episode and auto-continue only then. */
-    private fun onPodcastPlaybackEnded() {
-        val c = controller ?: return
-        if (c.hasNextMediaItem()) return
-        val episodeId = podcastEpisodeId(c.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) ?: return
-        podcastQueues.onEpisodeFinished(episodeId, advanceLocally = true)
-    }
-
     fun refreshPodcastCloud() = podcastQueues.refresh()
     fun refreshPodcastQueuePreferences() = podcastQueues.refreshPreferences()
     fun refreshPodcastAutoPreview() = podcastQueues.refreshAutoPreview()
@@ -585,8 +561,8 @@ class MusicViewModel @Inject constructor(
 
     fun markPodcastEpisodeCompleted(episodeId: String, completed: Boolean, durationSeconds: Int = 0) = viewModelScope.launch {
         try {
-            val progress = repository.savePodcastProgress(episodeId, completed, durationSeconds)
-            podcastProgress.recordManualProgress(episodeId, progress)
+            val progress = repository.savePodcastProgress(episodeId, completed, durationSeconds, podcastProgress.deviceId())
+            podcastProgress.recordManualProgress(episodeId, progress, completed)
             val episode = repository.cachedPodcastEpisode(episodeId)
             val podcastId = episode?.podcastId
             if (podcastId != null) {
@@ -613,7 +589,7 @@ class MusicViewModel @Inject constructor(
     }
 
     /** Previous / next stay in the context where playback started. */
-    fun skipPodcastEpisode(offset: Int) = viewModelScope.launch {
+    fun skipPodcastEpisode(offset: Int, automatic: Boolean = false) = viewModelScope.launch {
         if (offset == 0) return@launch
         val owner = repository.session.cacheScope()
         try {
@@ -621,7 +597,9 @@ class MusicViewModel @Inject constructor(
             val id = podcastEpisodeId(c.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) ?: return@launch
             localPlaybackEpoch++
             if (offset > 0 && c.hasNextMediaItem()) {
+                if (automatic) podcastProgress.prepareNextAutomatically(podcastEpisodeId(c.getMediaItemAt(c.nextMediaItemIndex).mediaMetadata.extras?.getString("track_id")))
                 c.seekToNextMediaItem()
+                if (automatic) c.play()
                 return@launch
             }
             if (offset < 0 && c.hasPreviousMediaItem()) {
@@ -632,8 +610,9 @@ class MusicViewModel @Inject constructor(
             val episode = repository.cachedPodcastEpisode(id) ?: repository.podcastEpisode(id)
             val detail = repository.cachedPodcastDetail(episode.podcastId) ?: repository.podcastDetail(episode.podcastId)
             requireOwner(owner)
-            val target = podcastManualNeighbor(episode, detail, podcastQueues.preferenceFor(episode.podcastId), offset, podcastProgress.positions.value) ?: return@launch
-            if (offset > 0) podcastQueues.onEpisodeFinished(id, advanceLocally = false)
+            val target = podcastManualNeighbor(episode, detail, podcastQueues.preferenceFor(episode.podcastId), offset, podcastProgress.positions.value) ?: run { if (offset > 0 && podcastProgress.positions.value[id]?.completed == true) notify(AppLanguage.string(R.string.podcast_already_completed)); return@launch }
+            if (offset > 0 && podcastProgress.positions.value[id]?.completed != true) podcastQueues.onEpisodeFinished(id, advanceLocally = false)
+            if (automatic) podcastProgress.prepareNextAutomatically(target.id)
             podcastQueues.playEpisode(target, detail.podcast, null)
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { notify(friendlyError(error)) }
@@ -926,7 +905,11 @@ class MusicViewModel @Inject constructor(
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val startPos = (positionMs ?: target.podcast?.resumePositionMs?.takeIf { it > 0L } ?: 0L).coerceAtLeast(0L)
-        val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { item ->
+        val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { original ->
+            val item = if (track.podcastEpisodeId == null) original else {
+                val extras = android.os.Bundle(original.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", podcastQueues.followsQueue()) }
+                original.buildUpon().setMediaMetadata(original.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+            }
             if (itemIndex == index && track.podcastEpisodeId != null && positionMs != null) {
                 val extras = android.os.Bundle(item.mediaMetadata.extras).apply { putLong("podcast_requested_position", positionMs) }
                 item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()

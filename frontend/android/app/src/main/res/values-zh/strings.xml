@@ -1589,7 +1589,7 @@
     <string name="pod_player_sleep_timer">睡眠定时</string>
     <string name="pod_player_tab_article">文章</string>
     <string name="pod_player_tab_cover">封面</string>
-    <string name="pod_prog_conflict_resolution_notice">另一台设备更新了本集。本机进度已保留，下次播放时请选择接续位置。</string>
+    <string name="pod_prog_conflict_resolution_notice">另一台设备更新了这一集的进度。本机进度暂不同步到服务器。</string>
     <string name="pod_prog_load_failed_retry">暂时无法读取单集进度，请重试。</string>
     <string name="pod_prog_newer_on_other_device">这集在其他设备有更新的进度</string>
     <string name="pod_prog_not_synced">单集进度暂未同步。</string>
@@ -2148,4 +2148,7 @@
     <string name="podcast_gain_title">节目增益</string>
     <string name="podcast_gain_local">仅保存在本机，应用于本节目所有单集。</string>
     <string name="podcast_gain_distortion">若出现失真，请降低增益。</string>
+    <string name="podcast_use_local_progress">用本机进度</string>
+    <string name="podcast_resume_question">从保存的位置继续收听？</string>
+    <string name="podcast_already_completed">已听完</string>
 </resources>

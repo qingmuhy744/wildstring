@@ -9,6 +9,8 @@ struct MacRootView: View {
     @AppStorage(InterfaceLanguage.storageKey) private var language = InterfaceLanguage.auto.rawValue
     @State private var systemDark = MacAppearance.isSystemDark()
 
+    private static func clock(_ seconds: Int) -> String { String(format: "%d:%02d", seconds / 60, seconds % 60) }
+
     var body: some View {
         Group {
             switch session.phase {
@@ -42,6 +44,9 @@ struct MacRootView: View {
             systemDark = MacAppearance.isSystemDark()
             MacAppearance.apply(appearance, systemDark: systemDark)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            Task { await session.playback?.podcastCloud?.refreshResumeMode() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wildstringShowDesktopLyrics)) { _ in
             session.desktopLyrics.toggle(session: session)
         }
@@ -53,6 +58,18 @@ struct MacRootView: View {
         .sheet(isPresented: Bindable(session).showRoutes) {
             if let routes = session.routes {
                 MacServerRoutesSheet(session: session, routes: routes)
+            }
+        }
+        .confirmationDialog(L10n("macPodcasts.resumePrompt"), isPresented: Binding(
+            get: { session.playback?.podcastResumePrompt != nil },
+            set: { if !$0 { session.playback?.answerPodcastResume(restart: nil) } }
+        ), titleVisibility: .visible) {
+            Button(L10n("macPodcasts.resume")) { session.playback?.answerPodcastResume(restart: false) }
+            Button(L10n("macPodcasts.playFromStart")) { session.playback?.answerPodcastResume(restart: true) }
+            Button(L10n("macPodcasts.cancel"), role: .cancel) { session.playback?.answerPodcastResume(restart: nil) }
+        } message: {
+            if let prompt = session.playback?.podcastResumePrompt {
+                Text(L10n("macPodcasts.resumeProgress", Self.clock(prompt.position), Self.clock(prompt.duration)))
             }
         }
         .confirmationDialog(L10n("macRoot.logoutConfirmTitle"), isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {

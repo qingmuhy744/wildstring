@@ -10,8 +10,8 @@ struct MacPodcastsView: View {
     private var cloud: PodcastCloudQueue? { playback.podcastCloud }
 
     @State private var shows: [PodcastSummary] = []
+    @State private var lastDetailLoad = Date.distantPast
     @State private var detail: PodcastDetail?
-    @State private var resume: PodcastEpisode?
     @State private var message: String?
     @State private var detailMessage: String?
     @State private var selectedShowID: String?
@@ -60,6 +60,11 @@ struct MacPodcastsView: View {
             await loadShows()
             await playback.podcastCloud?.refreshPreferences()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            if let id = selectedShowID, Date().timeIntervalSince(lastDetailLoad) >= 30 {
+                Task { await open(id, showSpinner: false) }
+            }
+        }
         .task(id: showingQueue) {
             if showingQueue { await playback.podcastCloud?.refreshQueue() }
         }
@@ -88,28 +93,7 @@ struct MacPodcastsView: View {
             showList { choosingShow = false }
                 .frame(width: 360, height: 520)
         }
-        .confirmationDialog(L10n("macPodcasts.resumePrompt"), isPresented: Binding(
-            get: { resume != nil },
-            set: { if !$0 { resume = nil } }
-        ), titleVisibility: .visible) {
-            Button(L10n("macPodcasts.resume")) {
-                if let episode = resume, let detail {
-                    start(episode, in: detail.episodes, at: nil)
-                }
-                resume = nil
-            }
-            Button(L10n("macPodcasts.playFromStart")) {
-                if let episode = resume, let detail {
-                    start(episode, in: detail.episodes, at: 0)
-                }
-                resume = nil
-            }
-            Button(L10n("macPodcasts.cancel"), role: .cancel) { resume = nil }
-        } message: {
-            if let episode = resume {
-                Text(L10n("macPodcasts.resumeProgress", macPodcastClock(episode.positionSeconds), macPodcastClock(episode.durationSeconds)))
-            }
-        }
+
     }
 
     private var narrowShowBar: some View {
@@ -354,6 +338,7 @@ struct MacPodcastsView: View {
                                                 choose(episode, in: detail.episodes)
                                             }
                                         },
+                                        restart: { start(episode, in: detail.episodes, at: 0) },
                                         next: { enqueue(episode, next: true) },
                                         append: { enqueue(episode, next: false) },
                                         save: {},
@@ -479,16 +464,25 @@ struct MacPodcastsView: View {
                         .font(.callout)
                         .foregroundStyle(MacTheme.muted)
                     HStack(spacing: 0) {
-                        Text(L10n("macPodcasts.totalEpisodesWithDot", detail.episodes.count))
-                            .foregroundStyle(MacTheme.muted)
-                        Text(unplayedCount > 0 ? L10n("macPodcasts.unplayedCount", unplayedCount) : L10n("macPodcasts.allCompleted"))
-                            .foregroundStyle(unplayedCount > 0 ? MacTheme.accentDeep : MacTheme.muted)
-                            .fontWeight(unplayedCount > 0 ? .medium : .regular)
+                        // When everything is played the action row already says so; the stats line only counts.
+                        if unplayedCount > 0 {
+                            Text(L10n("macPodcasts.totalEpisodesWithDot", detail.episodes.count))
+                                .foregroundStyle(MacTheme.muted)
+                            Text(L10n("macPodcasts.unplayedCount", unplayedCount))
+                                .foregroundStyle(MacTheme.accentDeep)
+                                .fontWeight(.medium)
+                        } else {
+                            Text(L10n("macPodcasts.showEpisodesTotal", detail.episodes.count))
+                                .foregroundStyle(MacTheme.muted)
+                        }
                     }
                     .font(MacTheme.caption)
 
                     HStack(spacing: 10) {
-                        if let next = detail.episodes.first(where: canResume) ?? detail.episodes.first(where: { !isCompleted($0) }) ?? detail.episodes.first {
+                        if detail.episodes.contains(where: { !isCompleted($0) }),
+                           let next = detail.episodes.filter({ $0.positionSeconds > 0 && !isCompleted($0) })
+                            .max(by: { ($0.lastListenedAt ?? "") < ($1.lastListenedAt ?? "") })
+                            ?? detail.episodes.first(where: { !isCompleted($0) }) {
                             let isCurrentNext = playback.currentItem?.trackID == "podcast_ep_\(next.id)"
                             let ctaLabel: String = if isCurrentNext {
                                 if playback.isBuffering {
@@ -505,7 +499,7 @@ struct MacPodcastsView: View {
                                 if isCurrentNext {
                                     playback.togglePlayPause()
                                 } else {
-                                    start(next, in: detail.episodes, at: nil)
+                                    choose(next, in: detail.episodes)
                                 }
                             } label: {
                                 HStack(spacing: 6) {
@@ -523,6 +517,18 @@ struct MacPodcastsView: View {
                                 .background(MacTheme.accent, in: Capsule())
                             }
                             .buttonStyle(.plain)
+                        } else if !detail.episodes.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark")
+                                Text(L10n("macPodcasts.allCompleted"))
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MacTheme.muted)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(MacTheme.panel, in: Capsule())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(L10n("macPodcasts.allCompleted"))
                         }
                         if detail.podcast.followed {
                             Menu {
@@ -601,8 +607,7 @@ struct MacPodcastsView: View {
     }
 
     private func isCompleted(_ episode: PodcastEpisode) -> Bool {
-        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
-            episode.positionSeconds >= episode.durationSeconds)
+        episode.completed
     }
 
     private func isFavorite(_ episode: PodcastEpisode) -> Bool {
@@ -677,6 +682,7 @@ struct MacPodcastsView: View {
     }
 
     private func open(_ id: String, showSpinner: Bool = true) async {
+        lastDetailLoad = Date()
         selectedShowID = id
         descriptionExpanded = false
         if showSpinner { loadingDetail = true }
@@ -703,17 +709,11 @@ struct MacPodcastsView: View {
     }
 
     private func choose(_ episode: PodcastEpisode, in episodes: [PodcastEpisode]) {
-        if canResume(episode) {
-            resume = episode
-        } else {
-            start(episode, in: episodes, at: nil)
-        }
+        start(episode, in: episodes, at: nil)
     }
 
     private func canResume(_ episode: PodcastEpisode) -> Bool {
-        let position = max(0, episode.positionSeconds)
-        let remaining = episode.durationSeconds - position
-        return position > 15 && (episode.durationSeconds == 0 || remaining > 30)
+        !episode.completed && episode.positionSeconds > 0
     }
 
     private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double?) {
@@ -777,7 +777,7 @@ struct MacPodcastsView: View {
     private func toggleEpisodeCompleted(_ episode: PodcastEpisode) async {
         let target = !isCompleted(episode)
         do {
-            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target, deviceID: playback.podcastDeviceID)
             await open(episode.podcastId, showSpinner: false)
         } catch {
             detailMessage = L10n("macPodcasts.markCompletedFailed", MacErrorText.message(for: error))
@@ -870,6 +870,7 @@ struct MacPodcastEpisodeRow: View {
     var isQueued: Bool = false
     var isFavorite: Bool = false
     var action: () -> Void = {}
+    var restart: () -> Void = {}
     var next: () -> Void = {}
     var append: () -> Void = {}
     var save: () -> Void = {}
@@ -878,8 +879,7 @@ struct MacPodcastEpisodeRow: View {
     var toggleFavorite: (() -> Void)? = nil
 
     private var completed: Bool {
-        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
-            episode.positionSeconds >= episode.durationSeconds)
+        episode.completed
     }
 
     private var inProgress: Bool {
@@ -936,6 +936,7 @@ struct MacPodcastEpisodeRow: View {
             inlineQueueButton
 
             Menu {
+                Button(L10n("macPodcasts.playFromStart"), action: restart)
                 Button(L10n("macPodcasts.playNext"), action: next)
                 Button(isQueued ? L10n("macPodcasts.removeFromQueue") : L10n("macPodcasts.addToQueue")) {
                     if let toggleQueue {

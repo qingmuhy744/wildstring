@@ -4376,13 +4376,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This episode has newer progress on another device"
+            "value": "Another device updated this episode. This device’s progress is not syncing."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这集在其他设备有更新的进度"
+            "value": "另一台设备更新了这一集的进度。本机进度暂不同步到服务器。"
           }
         }
       }
@@ -28910,6 +28910,137 @@
           "stringUnit": {
             "state": "translated",
             "value": "更新元数据与建议"
+          }
+        }
+      }
+    },
+    "podcast.resumeMode": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Podcast resume mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播客续听模式"
+          }
+        }
+      }
+    },
+    "podcast.resumeMode.auto": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume automatically"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动续听"
+          }
+        }
+      }
+    },
+    "podcast.resumeMode.ask": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask where to resume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "询问接续位置"
+          }
+        }
+      }
+    },
+    "podcast.resumeMode.restart": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start from beginning"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从头播放"
+          }
+        }
+      }
+    },
+    "podcast.useLocalProgress": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use this device’s progress"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用本机进度"
+          }
+        }
+      }
+    },
+    "kit.playback.podcastAlreadyCompleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This episode was completed on another device. You can play the next episode."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一台设备已听完这一集，可以播放下一集。"
+          }
+        }
+      }
+    },
+    "kit.podcast.resumeReadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to load the resume mode. %@ Please try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂时读不到续听模式。%@ 可以重试。"
+          }
+        }
+      }
+    },
+    "kit.podcast.resumeSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save the resume mode. %@ Please try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能保存续听模式。%@ 可以重试。"
           }
         }
       }

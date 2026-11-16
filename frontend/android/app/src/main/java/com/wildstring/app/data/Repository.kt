@@ -385,7 +385,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
             podcastFavoriteIds.value
         }
     }
-    suspend fun savePodcastProgress(episodeId: String, completed: Boolean, durationSeconds: Int = 0): EpisodeProgress {
+    suspend fun savePodcastProgress(episodeId: String, completed: Boolean, durationSeconds: Int = 0, deviceId: String = "wildstring-android"): EpisodeProgress {
         val owner = session.cacheScope(); requireProfile(owner)
         val current = try { api().podcastProgress(episodeId, RequestOwner(owner)) } catch (_: Exception) { null }
         val baseVersion = current?.version ?: 0L
@@ -396,12 +396,13 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val sessionToken = "manual-" + java.util.UUID.randomUUID().toString()
         val write = PodcastProgressUpdate(
             sessionId = sessionToken,
-            deviceId = "wildstring-android",
+            deviceId = deviceId,
             baseVersion = baseVersion,
             sequence = 1,
             positionSeconds = position.toLong(),
             durationSeconds = effectiveDuration.toLong(),
             event = event,
+            intent = if (completed) "resume" else "restart",
         )
         val result = api().updatePodcastProgress(episodeId, write, RequestOwner(owner))
         cachedPodcastEpisode(episodeId)?.let { ep ->

@@ -40,7 +40,7 @@ ANDROID_TEST_BACKEND ?=
 DEV_WEB_HOST ?= 127.0.0.1
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-large-web test-browse-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
+.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-large-web test-browse-web test-transcoding-web web-test-server shots ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -247,6 +247,9 @@ test-transcoding-web: build-web ## Verify real AAC playback and seeking (require
 
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
+
+shots: ## Capture screenshots through scripts/agent_shot.sh
+	bash scripts/agent_shot.sh $(ARGS)
 
 .PHONY: dependency-audit
 dependency-audit: ## Audit complete Web and provider npm lockfiles, including build dependencies

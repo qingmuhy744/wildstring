@@ -141,6 +141,7 @@ fun PodcastChannelPage(
     LaunchedEffect(browser.message) {
         browser.message?.let { statusMessage = it; vm.podcastBrowser.clearMessage() }
     }
+    val pageNotice by vm.podcastProgress.pageNotice.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -207,6 +208,7 @@ fun PodcastChannelPage(
                                         onPlayEpisode = { ep ->
                                             vm.playPodcastEpisode(ep, selectedPodcast)
                                         },
+                                        onRestartEpisode = { ep -> vm.playPodcastEpisode(ep, selectedPodcast, positionMs = 0L) },
                                         onQueueEpisode = { ep, next ->
                                             vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                                         },
@@ -331,6 +333,33 @@ fun PodcastChannelPage(
             )
         }
 
+        // Only actionable progress problems reach the page; "已听完" stays in the player because the
+        // row already carries that badge. The notice floats above the mini player, never over a row.
+        pageNotice?.let { notice ->
+            LaunchedEffect(notice.id) {
+                kotlinx.coroutines.delay(2800)
+                if (vm.podcastProgress.pageNotice.value?.id == notice.id) vm.podcastProgress.clearPageNotice()
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp, start = 16.dp, end = 16.dp)
+                    .widthIn(max = 360.dp)
+                    .testTag("podcast-page-notice"),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Text(
+                    notice.message,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         statusMessage?.let { msg ->
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(2800)
@@ -339,7 +368,7 @@ fun PodcastChannelPage(
             Snackbar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 76.dp, start = 16.dp, end = 16.dp),
+                    .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
             ) {
                 Text(msg)
             }
@@ -1045,6 +1074,7 @@ private fun PodcastDetailView(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onPlayEpisode: (PodcastEpisode) -> Unit,
+    onRestartEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
     onRemoveQueuedEpisode: (String) -> Unit = {},
     isEpisodeQueued: (String) -> Boolean = { false },
@@ -1199,10 +1229,13 @@ private fun PodcastDetailView(
                         Spacer(Modifier.height(14.dp))
 
                         // Header actions: primary continue/latest pill paired on one row with the follow/rule pill.
-                        val nextPlayable = detail?.episodes.orEmpty().asSequence()
-                            .filter { !it.completed }
-                            .maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
-                            ?: detail?.episodes.orEmpty().maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                        val playable = detail?.episodes.orEmpty().map { episode ->
+                            positions[episode.id]?.let { episode.copy(positionSeconds = it.positionSeconds.toInt(), completed = it.completed) } ?: episode
+                        }
+                        val nextPlayable = playable.filter { !it.completed && it.positionSeconds > 0 && it.lastListenedAt != null }
+                            .maxByOrNull { it.lastListenedAt.orEmpty() }
+                            ?: playable.filterNot { it.completed }.maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                            ?: playable.maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
                         val nextResumable = (nextPlayable?.positionSeconds ?: 0) > 0
                         val isPad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
                         Row(
@@ -1350,6 +1383,7 @@ private fun PodcastDetailView(
                             isActive = active,
                             isFavorite = fav,
                             onPlay = { onPlayEpisode(ep) },
+                            onRestart = { onRestartEpisode(ep) },
                             onPlayNext = { onQueueEpisode(ep, true) },
                             onAddToQueue = { onQueueEpisode(ep, false) },
                             onRemoveFromQueue = { onRemoveQueuedEpisode(ep.id) },
@@ -1378,6 +1412,7 @@ private fun EpisodeRowItem(
     isActive: Boolean = false,
     isFavorite: Boolean = false,
     onPlay: () -> Unit,
+    onRestart: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onRemoveFromQueue: () -> Unit = {},
@@ -1452,6 +1487,9 @@ private fun EpisodeRowItem(
                         )
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.podcast_resume_restart)) },
+                            leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
+                            onClick = { showMenu = false; feedback(TactileKind.Tap); onRestart() })
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.podcast_play_next)) },
                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },

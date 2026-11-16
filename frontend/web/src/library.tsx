@@ -1294,8 +1294,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   if (next) return player.playNext(track);
                   return player.enqueue(track);
                 }}
-                onPlayTrack={(track) => {
-                  void player.playPodcastEpisode(track);
+                onPlayTrack={(track, restart) => {
+                  void player.playPodcastEpisode(track, true, restart);
                   setNotice(t('library.playingPodcast', { title: track.title }));
                 }}
                 onPlayQueue={() => {

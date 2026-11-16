@@ -50,6 +50,7 @@ class ProgressWrite(BaseModel):
     position_seconds: int = Field(ge=0, le=31_536_000, strict=True)
     duration_seconds: int = Field(ge=0, le=31_536_000, strict=True)
     event: Literal["play", "progress", "pause", "seek", "stop", "ended"]
+    intent: Literal["resume", "restart"] | None = None
 
 
 class ProgressState(BaseModel):
@@ -106,6 +107,8 @@ def save_progress(manager, user_id, episode_id, body: ProgressWrite):
         completed = finished_at_end or finished_in_tail
         if same_session and current.completed and body.event in ("pause", "stop", "progress"):
             completed = completed or position == current.position_seconds
+        if body.intent == "resume" and current.completed:
+            completed = True
         connection.execute(
             """INSERT INTO podcast_progress
             (user_id,episode_id,position_seconds,duration_seconds,completed,last_listened_at,

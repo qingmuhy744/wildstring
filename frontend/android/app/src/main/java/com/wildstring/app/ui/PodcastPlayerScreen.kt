@@ -42,6 +42,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -73,6 +74,9 @@ internal fun PodcastPlayerScreen(
     onQueue: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {},
 ) {
     val track = state.current ?: return
+    // Height taken by the progress / playback notices under the controls. The cover is sized as if
+    // the notice were absent plus a fixed reserve, so a notice never resizes the cover or rewraps the title.
+    var noticeHeight by remember { mutableStateOf(0.dp) }
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val motionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
@@ -227,11 +231,16 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 }
             }
             val coverPane: @Composable () -> Unit = {
-                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val coverSize = minOf(maxWidth, maxHeight * .64f, 400.dp)
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                    // The block is laid out in the height left when no notice is shown, minus the reserve,
+                    // and pinned to the top: a notice then only eats the reserve below it.
+                    val blockHeight = (maxHeight + noticeHeight - PodcastNoticeReserve).coerceIn(0.dp, maxHeight)
+                    // Leave room under the cover for a three-line title and the show line, so the block never clips.
+                    val coverSize = minOf(maxWidth, blockHeight * .64f, blockHeight - PodcastCoverTextAllowance, 400.dp).coerceAtLeast(0.dp)
                     Column(
                         Modifier
-                            .fillMaxSize()
+                            .fillMaxWidth()
+                            .height(blockHeight)
                             .verticalScroll(rememberScrollState(), overscrollEffect = null)
                             .padding(top = 6.dp, bottom = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -339,6 +348,7 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Box(Modifier.weight(1f).fillMaxWidth()) { coverPane() }
                     PodcastPlayerControls(
                         vm, state, duration, onQueue, compact = false, motionAllowed = motionAllowed,
+                        onNoticeHeight = { noticeHeight = it },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).then(swipeModifier),
                     )
                 }
@@ -347,6 +357,7 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 content(Modifier.weight(1f).fillMaxWidth().then(tabSwipeModifier))
                 PodcastPlayerControls(
                     vm, state, duration, onQueue, compact = article, motionAllowed = motionAllowed,
+                    onNoticeHeight = { noticeHeight = it },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).then(swipeModifier),
                 )
             }
@@ -579,9 +590,15 @@ private fun PodcastPlayerControls(
     compact: Boolean,
     motionAllowed: Boolean,
     modifier: Modifier,
+    onNoticeHeight: (Dp) -> Unit = {},
 ) {
+    val density = LocalDensity.current
     val position by vm.position.collectAsStateWithLifecycle()
     val buffered by vm.buffered.collectAsStateWithLifecycle()
+    val progressConflict by vm.podcastProgress.conflict.collectAsStateWithLifecycle()
+    val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
+    // The inline line repeats the page notice, so opening the player takes it off the page behind.
+    LaunchedEffect(progressMessage) { if (progressMessage != null) vm.podcastProgress.clearPageNotice() }
     val feedback = LocalTactileFeedback.current
     var scrub by remember { mutableStateOf<Float?>(null) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -801,9 +818,20 @@ private fun PodcastPlayerControls(
                 }
                 if (moreShown > 0f) Box(Modifier.presence(moreShown)) { moreButton() }
             }
+            Column(Modifier.fillMaxWidth().onSizeChanged { onNoticeHeight(with(density) { it.height.toDp() }) }) {
+            if (progressConflict || progressMessage != null) {
+                Surface(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("podcast-progress-notice"), shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (progressConflict) stringResource(R.string.pod_prog_conflict_resolution_notice) else progressMessage.orEmpty(),
+                            Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        if (progressConflict) TextButton(tactile(vm.podcastProgress::useLocalProgress)) { Text(stringResource(R.string.podcast_use_local_progress)) }
+                    }
+                }
+            }
             state.playbackError?.let { message ->
                 Surface(
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
                 ) {
@@ -823,9 +851,16 @@ private fun PodcastPlayerControls(
                     }
                 }
             }
+            }
         }
     }
 }
+
+/** Room kept free under the cover block for a notice (12dp gap + a 56dp text-button row, rounded up). */
+private val PodcastNoticeReserve = 80.dp
+
+/** Height of the title (up to three lines), show line, gaps and padding under the cover. */
+private val PodcastCoverTextAllowance = 152.dp
 
 private fun formatPodcastTime(ms: Long): String {
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)

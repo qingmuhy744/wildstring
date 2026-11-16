@@ -274,6 +274,7 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
   const menu = page.getByRole('menu');
   await expect(menu.getByRole('menuitem')).toHaveText([
     '播放单集',
+    '从头播放',
     '下一集播放',
     '加入待播',
     '标为已听完',

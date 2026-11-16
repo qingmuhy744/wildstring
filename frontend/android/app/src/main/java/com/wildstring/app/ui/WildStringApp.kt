@@ -397,11 +397,26 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     val resources = androidx.compose.ui.platform.LocalResources.current
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val libraryLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(libraryLifecycle, state.serverSelection) {
+    LaunchedEffect(libraryLifecycle, state.serverSelection, state.podcastId) {
         libraryLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            vm.refreshLibraries()
-            while (true) { kotlinx.coroutines.delay(30_000); vm.refreshLibraries() }
+            // Ask mode needs a dialog; leaving the foreground releases any blocked preparation.
+            vm.podcastProgress.setPromptHosted(true)
+            try {
+                vm.refreshLibraries()
+                vm.podcastProgress.refreshMode()
+                state.podcastId?.let(vm.podcastBrowser::refreshForeground)
+                while (true) { kotlinx.coroutines.delay(30_000); vm.refreshLibraries() }
+            } finally {
+                vm.podcastProgress.setPromptHosted(false)
+            }
         }
+    }
+    val progressPrompt by vm.podcastProgress.prompt.collectAsStateWithLifecycle()
+    progressPrompt?.let { prompt ->
+        AlertDialog(onDismissRequest = { vm.podcastProgress.answer(null) }, title = { Text(prompt.title) },
+            text = { Text(stringResource(R.string.podcast_resume_question)) },
+            confirmButton = { TextButton({ vm.podcastProgress.answer(true) }) { Text(stringResource(R.string.pod_scr_continue_listening)) } },
+            dismissButton = { TextButton({ vm.podcastProgress.answer(false) }) { Text(stringResource(R.string.podcast_resume_restart)) } })
     }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current

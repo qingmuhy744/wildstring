@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.podcast_progress import ProgressWrite, save_progress
 
 HEADERS = {"X-Wildstring-Client": "web"}
@@ -387,3 +387,118 @@ def test_schema_33_bookmarks_survive_migration(episode_client, settings):
     assert saved["version"] == 0 and saved["session_id"] == ""
     response = write(client, episode, position_seconds=300, event="seek")
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("intent", ["resume", "restart", None])
+def test_completion_intent_persists_across_session_events(episode_client, intent):
+    client, episode, _ = episode_client
+    completed = write(client, episode, position_seconds=3600, event="ended").json()
+    fields = {"intent": intent} if intent else {}
+    # Each write carries intent, including seeks and repeated play events.
+    for sequence, event in enumerate(["play", "progress", "seek", "pause", "stop", "play"], 1):
+        result = write(
+            client,
+            episode,
+            session_id="new-listening-session",
+            base_version=completed["version"],
+            sequence=sequence,
+            position_seconds=(sequence - 1) * 100,
+            event=event,
+            **fields,
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["completed"] is (intent == "resume")
+
+
+@pytest.mark.parametrize("intent", ["resume", "restart"])
+@pytest.mark.parametrize("event,position", [("pause", 3480), ("stop", 3480), ("ended", 3600)])
+def test_intent_still_allows_natural_completion(episode_client, intent, event, position):
+    client, episode, _ = episode_client
+    result = write(client, episode, intent=intent, position_seconds=position, event=event)
+    assert result.status_code == 200
+    assert result.json()["completed"] is True
+
+
+def test_intent_does_not_bypass_version_or_sequence(episode_client):
+    client, episode, _ = episode_client
+    completed = write(client, episode, intent="resume", event="ended", position_seconds=3600).json()
+    duplicate = write(client, episode, intent="restart", position_seconds=0)
+    assert duplicate.json() == completed
+    conflict = write(client, episode, session_id="stale-listening-session", intent="restart")
+    assert conflict.status_code == 409
+    current = conflict.json()["detail"]["current"]
+    assert current == completed
+    assert current["device_id"] == "A"
+    assert current["updated_at"]
+
+
+def test_resume_mode_defaults_validation_and_account_isolation(episode_client):
+    client, _, _ = episode_client
+    url = "/api/v1/podcasts/resume-mode"
+    assert client.get(url).json() == {"resume_mode": "auto"}
+    for mode in ("ask", "restart", "auto", "ask"):
+        result = client.put(url, headers=HEADERS, json={"resume_mode": mode})
+        assert result.status_code == 200, result.text
+        assert client.get(url).json() == {"resume_mode": mode}
+    for body in ({"resume_mode": "invalid"}, {}, {"resume_mode": "auto", "initialize": True}):
+        assert client.put(url, headers=HEADERS, json=body).status_code == 422
+    assert client.get(url).json() == {"resume_mode": "ask"}
+    created = client.post(
+        "/api/v1/manage/users",
+        headers=HEADERS,
+        json={
+            "username": "resume-listener",
+            "password": "test-listener-password-123",
+            "profile": "listener",
+        },
+    )
+    assert created.status_code == 201
+    client.post("/api/v1/auth/logout", headers=HEADERS)
+    assert client.get(url).status_code == 401
+    assert client.put(url, headers=HEADERS, json={"resume_mode": "restart"}).status_code == 401
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            headers=HEADERS,
+            json={"username": "resume-listener", "password": "test-listener-password-123"},
+        ).status_code
+        == 200
+    )
+    assert client.get(url).json() == {"resume_mode": "auto"}
+    assert client.put(url, headers=HEADERS, json={"resume_mode": "restart"}).status_code == 200
+    assert client.get(url).json() == {"resume_mode": "restart"}
+
+
+def test_resume_preference_schema53_upgrade_preserves_bookmarks(episode_client, settings):
+    client, episode, _ = episode_client
+    saved = write(client, episode, position_seconds=600).json()
+    database = Database(settings.data_dir)
+    with database.connect(write=True) as connection:
+        connection.execute("DROP TABLE podcast_resume_prefs")
+        connection.execute("PRAGMA user_version=53")
+    database.initialize()
+    with database.connect() as connection:
+        # A database already at 53 (pinyin browse keys) must still gain the resume table.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 54
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='podcast_resume_prefs'"
+        ).fetchone()
+    assert read(client, episode) == saved
+    assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "auto"}
+    # Re-initialization must preserve a changed preference.
+    client.put("/api/v1/podcasts/resume-mode", headers=HEADERS, json={"resume_mode": "ask"})
+    database.initialize()
+    assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "ask"}
+
+
+def test_episode_views_expose_current_account_last_listened_time(episode_client):
+    client, episode, podcast = episode_client
+    assert (
+        client.get(f"/api/v1/podcasts/{podcast}").json()["episodes"][0]["last_listened_at"] is None
+    )
+    saved = write(client, episode, position_seconds=600).json()
+    detail = client.get(f"/api/v1/podcasts/{podcast}").json()["episodes"][0]
+    assert detail["last_listened_at"] == saved["updated_at"]
+    episode_detail = client.get(f"/api/v1/podcasts/episodes/{episode}")
+    assert episode_detail.status_code == 200
+    assert episode_detail.json()["last_listened_at"] == saved["updated_at"]

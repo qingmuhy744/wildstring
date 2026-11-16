@@ -22,6 +22,7 @@ import {
   PodcastProgressStore,
   episodeId,
   episodeResumeMode,
+  refreshEpisodeResumeMode,
   type PodcastProgressEvent,
 } from './podcast-progress';
 import type { PodcastProgressPrompt } from './podcast-progress-dialog';
@@ -165,16 +166,28 @@ export function usePlayer(userId: string) {
     podcastProgress.current?.checkpoint(id, element.currentTime, element.duration, event, force);
   }
   useEffect(() => {
-    const store = new PodcastProgressStore(userId, (id, problem) => {
-      if (episodeId(podcastTrack.current?.id) === id) setPodcastProgressMessage(problem || '');
+    const store = new PodcastProgressStore(userId, (id, problem, finished) => {
+      if (episodeId(podcastTrack.current?.id) === id) {
+        setPodcastProgressMessage(problem || '');
+        if (finished) audio.current?.pause();
+      }
     });
     podcastProgress.current = store;
     const background = () => checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+    const refreshMode = () => void refreshEpisodeResumeMode(userId).catch(() => {});
     const visibility = () => {
       if (document.visibilityState === 'hidden') background();
-      else void store.flushAll();
+      else {
+        void store.flushAll();
+        refreshMode();
+      }
     };
+    refreshMode();
     const online = () => void store.flushAll();
+    const manual = (event: Event) => {
+      const id = (event as CustomEvent<{ episode_id: string }>).detail.episode_id;
+      store.adoptManualChange(id);
+    };
     let lastCheckpoint = Date.now();
     const timer = setInterval(() => {
       if (audio.current && !audio.current.paused && Date.now() - lastCheckpoint >= 5000) {
@@ -185,6 +198,7 @@ export function usePlayer(userId: string) {
     }, 1000);
     window.addEventListener('pagehide', background);
     window.addEventListener('online', online);
+    window.addEventListener('wildstring:podcast-progress-manual', manual);
     document.addEventListener('visibilitychange', visibility);
     void store.flushAll();
     return () => {
@@ -195,6 +209,7 @@ export function usePlayer(userId: string) {
       clearInterval(timer);
       window.removeEventListener('pagehide', background);
       window.removeEventListener('online', online);
+      window.removeEventListener('wildstring:podcast-progress-manual', manual);
       document.removeEventListener('visibilitychange', visibility);
     };
   }, [userId]);
@@ -539,6 +554,7 @@ export function usePlayer(userId: string) {
     seconds?: number,
     autoplay = true,
     automatic = false,
+    restartPodcast = false,
   ) {
     const element = audio.current;
     const track = tracks[target];
@@ -585,48 +601,42 @@ export function usePlayer(userId: string) {
         checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
       }
       element.pause();
-      const { remote, local, conflict } = await store.inspect(id);
+      const { remote, local, online } = await store.inspect(id);
       if (intent !== podcastIntent.current) return;
       let position =
         seconds ??
-        (local?.dirty && !conflict
-          ? local.position_seconds
-          : remote.completed
-            ? 0
+        (online
+          ? remote.position_seconds
+          : local?.dirty
+            ? local.position_seconds
             : remote.position_seconds);
+      let sessionIntent: 'resume' | 'restart' = 'resume';
       const mode = episodeResumeMode(userId);
-      const localPosition = seconds ?? local?.position_seconds ?? 0;
       if (
-        conflict ||
-        (seconds === undefined && position > 0 && mode === 'ask' && !automatic && !store.owns(id))
+        restartPodcast ||
+        (seconds === undefined && remote.completed && !automatic) ||
+        (seconds === undefined && mode === 'restart' && !automatic)
       ) {
+        position = 0;
+        sessionIntent = 'restart';
+      } else if (seconds === undefined && position > 0 && mode === 'ask' && !automatic) {
         const choice = await askPodcastProgress({
           title: track.title,
-          remote: remote.completed ? 0 : remote.position_seconds,
-          local: conflict ? localPosition : 0,
-          conflict,
+          remote: position,
+          local: 0,
+          conflict: false,
         });
         if (choice === null || intent !== podcastIntent.current) return;
-        position =
-          choice === 'remote'
-            ? remote.completed
-              ? 0
-              : remote.position_seconds
-            : conflict
-              ? localPosition
-              : 0;
-      } else if (seconds === undefined && mode === 'restart') position = 0;
+        if (choice === 'local') {
+          position = 0;
+          sessionIntent = 'restart';
+        }
+      }
       setPodcastProgressMessage('');
-      // Freeze the revision that was inspected; never refresh and silently force a conflict away.
-      if (!(await store.begin(id, remote, position, track.duration_ms / 1000))) {
-        setPodcastProgressMessage(i18n.t('playerPage.podcastUpdatedElsewhere'));
-        return;
-      }
-      if (intent !== podcastIntent.current) {
-        store.leave();
-        return;
-      }
+      await store.begin(id, remote, position, track.duration_ms / 1000, sessionIntent, online);
+      if (intent !== podcastIntent.current) return;
       begin(position);
+      if (store.conflicted(id)) setPodcastProgressMessage(i18n.t('podcastProgress.conflictNotice'));
     })().catch(() => {
       if (intent === podcastIntent.current)
         setError(i18n.t('playerPage.cannotReadPodcastProgress'));
@@ -882,9 +892,9 @@ export function usePlayer(userId: string) {
     }
   }
 
-  async function playPodcastEpisode(track: Track, autoplay = true) {
+  async function playPodcastEpisode(track: Track, autoplay = true, restart = false) {
     podcastLine.current = 'show';
-    start([track], 0, undefined, autoplay);
+    start([track], 0, undefined, autoplay, false, restart);
   }
 
   async function queuePodcast(tracks: Track[], next: boolean) {
@@ -950,7 +960,7 @@ export function usePlayer(userId: string) {
     if (!audio.current || !current || !duration) return;
     const target = Math.max(0, Math.min(value, duration - 0.05));
     const id = episodeId(current.id);
-    if (id && !podcastProgress.current?.owns(id)) {
+    if (id && !podcastProgress.current?.isActive(id)) {
       // A deliberate seek is an intent to listen, even when the restored player is paused.
       start(queue, index, target, !audio.current.paused);
       return;
@@ -987,7 +997,13 @@ export function usePlayer(userId: string) {
       setBuffering(false);
     } else {
       setError('');
-      if (current.podcast_id || audio.current.error || !audio.current.getAttribute('src'))
+      const id = episodeId(current.id);
+      if (
+        (id && !podcastProgress.current?.isActive(id)) ||
+        audio.current.error ||
+        audio.current.ended ||
+        !audio.current.getAttribute('src')
+      )
         start(queue, index);
       else play();
     }
@@ -1137,7 +1153,15 @@ export function usePlayer(userId: string) {
     podcastProgressPrompt,
     podcastProgressMessage,
     answerPodcastProgress: (choice: 'remote' | 'local' | null) => answerProgress.current(choice),
-    reviewPodcastProgress: () => start(queue, index),
+    podcastProgressConflict:
+      !!episodeId(current?.id) && !!podcastProgress.current?.conflicted(episodeId(current?.id)!),
+    takeOverPodcastProgress: () => {
+      const id = episodeId(current?.id);
+      if (id) {
+        checkpointPodcast('progress');
+        void podcastProgress.current?.takeOver(id);
+      }
+    },
     queue,
     index,
     current,

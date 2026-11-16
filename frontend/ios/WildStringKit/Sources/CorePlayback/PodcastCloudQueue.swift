@@ -32,6 +32,8 @@ public final class PodcastCloudQueue {
     public private(set) var conflict: PodcastQueueConflict?
     public private(set) var preferences: PodcastQueuePreferences?
     public private(set) var preferenceError: String?
+    public private(set) var resumeMode = "auto"
+    public private(set) var resumeModeError: String?
     public var notice: String?
     /// Calm copy when the server refused an automatic batch because the queue is full.
     public private(set) var queueFullNotice: String?
@@ -79,7 +81,7 @@ public final class PodcastCloudQueue {
     public let accountKey: String?
 
     private let client: WildstringClient
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private var cachedPreferences: PodcastQueuePreferences?
     var onPreferencesChanged: (@MainActor () -> Void)?
     private var tail: Task<Void, Never>?
@@ -103,6 +105,9 @@ public final class PodcastCloudQueue {
         self.accountKey = (normalizedKey?.isEmpty == false) ? normalizedKey : nil
         self.defaults = defaults
         self.cachedPreferences = Self.loadCachedPreferences(accountKey: self.accountKey, defaults: defaults)
+        if let accountKey = self.accountKey {
+            self.resumeMode = defaults.string(forKey: "wildstring.podcast.resumeMode.\(accountKey)") ?? "auto"
+        }
     }
 
     public var hasResolvedPreferences: Bool {
@@ -142,8 +147,31 @@ public final class PodcastCloudQueue {
     }
 
     public func refresh() async {
+        await refreshResumeMode()
         await refreshPreferences()
         await refreshQueue()
+    }
+
+    public func refreshResumeMode() async {
+        do {
+            let value = try await client.podcastResumeMode().resumeMode
+            resumeMode = value
+            if let accountKey { defaults.set(value, forKey: "wildstring.podcast.resumeMode.\(accountKey)") }
+            resumeModeError = nil
+        } catch {
+            resumeModeError = KitL10n("kit.podcast.resumeReadFailed", Self.explain(error))
+        }
+    }
+
+    public func setResumeMode(_ value: String) async {
+        do {
+            let saved = try await client.savePodcastResumeMode(value).resumeMode
+            resumeMode = saved
+            if let accountKey { defaults.set(saved, forKey: "wildstring.podcast.resumeMode.\(accountKey)") }
+            resumeModeError = nil
+        } catch {
+            resumeModeError = KitL10n("kit.podcast.resumeSaveFailed", Self.explain(error))
+        }
     }
 
     public func refreshQueue() async {
@@ -282,10 +310,7 @@ public final class PodcastCloudQueue {
                 return nil
             }
         }
-        let completed = episode.completed || (
-            episode.positionSeconds > 0 && episode.durationSeconds > 0
-                && episode.positionSeconds >= episode.durationSeconds
-        )
+        let completed = episode.completed
         return PlaybackService.Item(
             trackID: "podcast_ep_\(episode.id)",
             title: episode.title,
@@ -375,10 +400,7 @@ public final class PodcastCloudQueue {
         let show = detail.podcast
         let artist = show.author.isEmpty ? KitL10n("kit.podcast.defaultArtist") : show.author
         let refs = detail.episodes.enumerated().map { index, ep in
-            let done = ep.completed || (
-                ep.positionSeconds > 0 && ep.durationSeconds > 0
-                    && ep.positionSeconds >= ep.durationSeconds
-            )
+            let done = ep.completed
             return PodcastContinuation.Episode(
                 id: ep.id,
                 title: ep.title,

@@ -135,6 +135,17 @@ struct MacPodcastPlayer: View {
                 Spacer(minLength: 8)
             }.buttonStyle(.plain)
             MacSleepMenu(playback: playback, podcast: true)
+            if let message = playback.podcastProgressMessage {
+                HStack {
+                    Text(message).font(.caption).foregroundStyle(MacTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if playback.podcastCanUseLocalProgress {
+                        Button(L10n("podcast.useLocalProgress")) { playback.useLocalPodcastProgress() }
+                            .fixedSize()
+                    }
+                }
+            }
             if let message = actionError ?? playback.errorMessage {
                 Text(message).font(.caption).foregroundStyle(MacTheme.danger).fixedSize(horizontal: false, vertical: true)
             }
@@ -407,10 +418,7 @@ struct MacPodcastPlayer: View {
             show = detail.podcast
             let artist = detail.podcast.author.isEmpty ? L10n("macPodcastPlayer.defaultArtist") : detail.podcast.author
             let refs = detail.episodes.enumerated().map { index, ep in
-                let done = ep.completed || (
-                    ep.positionSeconds > 0 && ep.durationSeconds > 0
-                        && ep.positionSeconds >= ep.durationSeconds
-                )
+                let done = ep.completed
                 return PodcastContinuation.Episode(
                     id: ep.id,
                     title: ep.title,
