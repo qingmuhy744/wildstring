@@ -17,6 +17,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 
+/**
+ * A play request that resumes an already prepared episode only unpauses it. Preparing again would
+ * re-apply the resume mode and could restart the episode or ask for a position the user never left.
+ */
+fun podcastResumeNeedsPreparation(progressEntry: String?, mediaId: String?, ownsProgress: Boolean, ended: Boolean): Boolean =
+    ended || progressEntry == null || mediaId == null || progressEntry != mediaId || !ownsProgress
+
+/** Ask mode requires a visible dialog; without a host the prompt would block playback indefinitely. */
+fun podcastShouldAskPosition(mode: String, requestedMs: Long?, automatic: Boolean, restart: Boolean, positionMs: Long, hosted: Boolean): Boolean =
+    requestedMs == null && !automatic && !restart && mode == "ask" && positionMs > 0 && hosted
+
 data class EpisodeCheckpoint(
     val remote: EpisodeProgress, val update: PodcastProgressUpdate,
     val dirty: Boolean = true, val conflict: Boolean = false,
@@ -65,6 +76,7 @@ class PodcastProgress @Inject constructor(
     fun queueChanged() { mutableQueueChanges.tryEmit(Unit) }
     private val mutablePrompt = MutableStateFlow<EpisodeProgressPrompt?>(null)
     val prompt = mutablePrompt.asStateFlow()
+    private var promptHosted = false
     private var answer: CompletableDeferred<Boolean?>? = null
     private val mutableMessage = MutableStateFlow<String?>(null)
     val message = mutableMessage.asStateFlow()
@@ -114,6 +126,15 @@ class PodcastProgress @Inject constructor(
         }
     }
     fun answer(useRemote: Boolean?) { answer?.complete(useRemote) }
+
+    /** Ask mode needs a visible dialog; without one the prompt would block playback until the app returns. */
+    fun setPromptHosted(hosted: Boolean) {
+        promptHosted = hosted
+        if (!hosted) {
+            mutablePrompt.value = null
+            answer?.complete(null)
+        }
+    }
     fun leave() { active = null; activeConflicted = false; mutableConflict.value = false }
     fun owns(id: String) = active?.let { it.first == repository.session.cacheScope() && it.second == id } == true
     fun deviceId() = device
@@ -163,7 +184,7 @@ class PodcastProgress @Inject constructor(
             else if (remoteMs > 0L) remoteMs else (fallbackMs ?: 0L).coerceAtLeast(0L)
         var intent = if (restart) "restart" else "resume"
         if (restart && requestedMs == null) position = 0
-        if (requestedMs == null && !automatic && !restart && mode.value == "ask" && position > 0) {
+        if (podcastShouldAskPosition(mode.value, requestedMs, automatic, restart, position, promptHosted)) {
             val response = CompletableDeferred<Boolean?>()
             answer?.complete(null); answer = response
             mutablePrompt.value = EpisodeProgressPrompt(title, position, position, false)
@@ -224,6 +245,8 @@ class PodcastProgress @Inject constructor(
                     save(owner, id, latest.acknowledged(pending.update, remote))
                     if (latest.update.sessionId == pending.update.sessionId) mutablePositions.value = mutablePositions.value + (id to remote)
                 }
+                // A successful write answers any earlier "sync failed" notice.
+                mutableMessage.value = null
             } catch (error: CancellationException) { throw error }
             catch (error: HttpException) {
                 if (owner != repository.session.cacheScope()) return@withLock
@@ -232,7 +255,12 @@ class PodcastProgress @Inject constructor(
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { null }
                     val isActiveSession = active == Triple(owner, id, pending.update.sessionId)
-                    if (current == null) { markConflict(owner, id, pending.update.sessionId); return@withLock }
+                    // Without the server state there is nothing to adopt or rebase onto. Keep a historical
+                    // record retryable instead of freezing it as a conflict the user never saw.
+                    if (current == null) {
+                        if (isActiveSession) markConflict(owner, id, pending.update.sessionId)
+                        return@withLock
+                    }
                     if (!isActiveSession) {
                         stateLock.withLock {
                             ownerValid(owner)

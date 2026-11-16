@@ -60,4 +60,24 @@ class PodcastProgressTest {
         assertEquals(conflict.update.baseVersion, later.update.baseVersion)
         assertTrue(later.conflictsWith(EpisodeProgress("episode", version = 10, sessionId = "new-device")))
     }
+
+    @Test fun resumingThePreparedEpisodeDoesNotPrepareAgain() {
+        assertFalse(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = true, ended = false))
+        // A finished episode starts a new session so the completed rule and next episode apply.
+        assertTrue(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = true, ended = true))
+        // Another item, a lost ownership or a never prepared item all need a fresh preparation.
+        assertTrue(podcastResumeNeedsPreparation("episode-entry", "other-entry", ownsProgress = true, ended = false))
+        assertTrue(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = false, ended = false))
+        assertTrue(podcastResumeNeedsPreparation(null, "episode-entry", ownsProgress = true, ended = false))
+    }
+
+    @Test fun askModeOnlyPromptsWhenADialogCanBeShown() {
+        assertTrue(podcastShouldAskPosition("ask", null, automatic = false, restart = false, positionMs = 1_200_000, hosted = true))
+        assertFalse(podcastShouldAskPosition("ask", null, automatic = false, restart = false, positionMs = 1_200_000, hosted = false))
+        assertFalse(podcastShouldAskPosition("ask", null, automatic = true, restart = false, positionMs = 1_200_000, hosted = true))
+        assertFalse(podcastShouldAskPosition("ask", null, automatic = false, restart = true, positionMs = 1_200_000, hosted = true))
+        assertFalse(podcastShouldAskPosition("ask", 600_000L, automatic = false, restart = false, positionMs = 600_000, hosted = true))
+        assertFalse(podcastShouldAskPosition("auto", null, automatic = false, restart = false, positionMs = 1_200_000, hosted = true))
+        assertFalse(podcastShouldAskPosition("ask", null, automatic = false, restart = false, positionMs = 0, hosted = true))
+    }
 }

@@ -266,10 +266,19 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
         player = AbsolutePlayer(engine, resolver)
         player.onPlayWhenReadyRequested = { playWhenReady ->
-            val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
+            val item = player.currentMediaItem
+            val podcast = podcastEpisodeId(item?.mediaMetadata?.extras?.getString("track_id")) != null
             if (podcast && !applyingPodcast) {
                 if (playWhenReady) {
-                    if (restoring) pendingPodcastAutoplay = true else preparePodcast()
+                    // Resuming an episode that is already prepared only unpauses. Re-entering it through a
+                    // tap goes through a media transition, which clears progressEntry and prepares again.
+                    val id = item?.mediaMetadata?.extras?.getString("track_id")?.let(::podcastEpisodeId)
+                    val needsPreparation = podcastResumeNeedsPreparation(
+                        progressEntry, item?.mediaId, id != null && podcastProgress.owns(id),
+                        player.playbackState == Player.STATE_ENDED,
+                    )
+                    if (restoring) pendingPodcastAutoplay = true
+                    else if (needsPreparation) preparePodcast()
                     true
                 } else {
                     pendingPodcastAutoplay = false

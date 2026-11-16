@@ -399,10 +399,16 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     val libraryLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(libraryLifecycle, state.serverSelection, state.podcastId) {
         libraryLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            vm.refreshLibraries()
-            vm.podcastProgress.refreshMode()
-            state.podcastId?.let(vm.podcastBrowser::refreshForeground)
-            while (true) { kotlinx.coroutines.delay(30_000); vm.refreshLibraries() }
+            // Ask mode needs a dialog; leaving the foreground releases any blocked preparation.
+            vm.podcastProgress.setPromptHosted(true)
+            try {
+                vm.refreshLibraries()
+                vm.podcastProgress.refreshMode()
+                state.podcastId?.let(vm.podcastBrowser::refreshForeground)
+                while (true) { kotlinx.coroutines.delay(30_000); vm.refreshLibraries() }
+            } finally {
+                vm.podcastProgress.setPromptHosted(false)
+            }
         }
     }
     val progressPrompt by vm.podcastProgress.prompt.collectAsStateWithLifecycle()
