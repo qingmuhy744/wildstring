@@ -19,7 +19,6 @@ import com.wildstring.app.playback.PlaybackService
 import com.wildstring.app.playback.mediaItem
 import com.wildstring.app.ui.MusicViewModel
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -54,14 +53,9 @@ class PodcastResumeServiceTest {
             PodcastEpisode(id, show.id, id, id, audioUrl = "https://example.invalid/audio.mp3", durationSeconds = 12)
         }
         val detail = PodcastDetail(show, episodes)
-        val reads = ConcurrentLinkedQueue<String>()
-        val writes = ConcurrentLinkedQueue<Pair<String, String>>()
-        val ready = CountDownLatch(1)
-        val release = CountDownLatch(1)
+        val reads = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val writes = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
         val autoContinue = AtomicBoolean(false)
-        val pauseCompletedRead = AtomicBoolean(false)
-        val completedReady = CountDownLatch(1)
-        val completedRelease = CountDownLatch(1)
         val audio = instrumentation.context.assets.open("playback.mp3").use { it.readBytes() }
         var controller: MediaController? = null
         MockWebServer().use { server ->
@@ -81,8 +75,6 @@ class PodcastResumeServiceTest {
                         val id = path.substringBeforeLast('/').substringAfterLast('/')
                         if (request.method == "GET") {
                             reads += id
-                            if (id == "second") { ready.countDown(); release.await(10, TimeUnit.SECONDS) }
-                            if (id == "first" && pauseCompletedRead.get()) { completedReady.countDown(); completedRelease.await(10, TimeUnit.SECONDS) }
                             val completed = id in listOf("first", "third")
                             val position = if (id == "fourth") 4 else if (id == "second") 3 else 12
                             return json("""{"episode_id":"$id","position_seconds":$position,"duration_seconds":12,"completed":$completed,"version":0,"device_id":"","session_id":"","sequence":0}""")
@@ -101,6 +93,11 @@ class PodcastResumeServiceTest {
             }
             server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
             val address = server.url("/").toString()
+            fun bodyOf(episodeId: String, write: Pair<String, String>): com.google.gson.JsonObject? =
+                if (write.first != episodeId) null else JsonParser.parseString(write.second).asJsonObject
+            fun plays(episodeId: String) = synchronized(writes) {
+                writes.count { it.first == episodeId && JsonParser.parseString(it.second).asJsonObject.get("event").asString == "play" }
+            }
             try {
                 val login = onMain { vm.settings.quality(0); vm.connect(address, "resume", "synthetic-password", true) }
                 await("Synthetic login") { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
@@ -111,32 +108,79 @@ class PodcastResumeServiceTest {
                 val player = checkNotNull(controller)
                 diagnostics = { onMain { "id=${player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")} playing=${player.isPlaying} ready=${player.playWhenReady} state=${player.playbackState} position=${player.currentPosition} error=${player.playerError} sync=${vm.podcastProgress.message.value} reads=$reads writes=$writes" } }
                 val item = onMain { episodes.first().toTrack(show).mediaItem(vm.repository) }
+                val secondItem = onMain { episodes[1].toTrack(show).mediaItem(vm.repository) }
+
+                // A user start is not an automatic continuation: a server-completed episode replays from 0.
                 onMain { player.setMediaItem(item); player.prepare(); player.play() }
-                val successorRead = ready.await(10, TimeUnit.SECONDS)
-                assertTrue("Completed first episode must advance even when automatic continuation is off: ${diagnostics()}", successorRead)
-                assertTrue("Completed episodes never open a progress session", writes.none { it.first == "first" })
-                assertFalse("Successor cannot make sound before its progress read", onMain { player.isPlaying })
-                release.countDown()
-                await("Service-only successor resumes at server position") {
+                await("User start of a server-completed episode still reads its progress before starting") {
+                    synchronized(reads) { reads.count { it == "first" } >= 1 }
+                }
+                await("User start of a completed episode restarts it from 0 instead of advancing") {
+                    onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "first" && player.currentPosition in 0..2_000 }
+                }
+                val startWrite = synchronized(writes) { writes.count { it.first == "first" && bodyOf("first", it)?.get("event")?.asString == "play" } }
+                assertEquals("A user start of a server-completed episode opens exactly one play session: ${diagnostics()}", 1, startWrite)
+                val startBody = synchronized(writes) { writes.filter { it.first == "first" && bodyOf("first", it)?.get("event")?.asString == "play" } }
+                assertEquals("A user start must carry intent=restart: ${diagnostics()}", "restart", startBody.single().let { bodyOf("first", it)!!.get("intent").asString })
+                assertEquals("Only automatic continuation skips a completed episode; a user start rewinds to position 0: ${diagnostics()}",
+                    0, startBody.single().let { bodyOf("first", it)!!.get("position_seconds").asInt })
+                assertFalse("Only automatic continuation skips a completed episode: a user start must not read or play the next episode: ${diagnostics()}",
+                    synchronized(reads) { reads.contains("second") })
+
+                // Automatic transitions with no Activity.
+                compose.activityRule.scenario.moveToState(Lifecycle.State.DESTROYED)
+                val beforeLineReads = synchronized(reads) { reads.toList() }
+                onMain { player.pause() }
+                onMain { player.setMediaItem(secondItem); player.prepare(); player.play() }
+                await("A normal episode plays at its server position") {
                     onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "second" && player.currentPosition >= 3000 }
                 }
-                assertEquals(1, writes.count { it.first == "second" && JsonParser.parseString(it.second).asJsonObject.get("event").asString == "play" })
-                compose.activityRule.scenario.moveToState(Lifecycle.State.DESTROYED)
-                autoContinue.set(true)
                 onMain { player.seekTo(11_500) }
-                await("Automatic transition skips remotely completed episode with no Activity") {
+                await("With auto-continue off an automatic ending stays on its own episode") {
+                    onMain { player.playbackState == Player.STATE_ENDED && !player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "second" }
+                }
+                SystemClock.sleep(500)
+                assertTrue("Auto-continue off must not read or play a successor: ${diagnostics()}",
+                    synchronized(reads) { reads.drop(beforeLineReads.size) }.none { it in listOf("third", "fourth") })
+
+                // Auto-continue on: a fresh automatic start reads progress, then its ending skips the completed "third".
+                autoContinue.set(true)
+                val automaticSecond = onMain { episodes[1].toTrack(show).mediaItem(vm.repository) }
+                onMain { player.setMediaItem(automaticSecond); player.prepare(); player.play() }
+                await("Automatic continuation reads progress before it plays") {
+                    onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "second" && player.currentPosition >= 3000 }
+                }
+                assertEquals("Automatic continuation to a playable episode writes one resume play: ${diagnostics()}", 2, plays("second"))
+                onMain { player.seekTo(11_500) }
+                await("Automatic transition skips a remotely completed episode with no Activity") {
                     onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "fourth" && player.currentPosition >= 4000 }
                 }
-                assertTrue(reads.containsAll(listOf("first", "second", "third", "fourth")))
-                assertTrue("Completed automatic successor must remain GET-only", writes.none { it.first == "third" })
-                assertEquals(1, writes.count { it.first == "fourth" && JsonParser.parseString(it.second).asJsonObject.get("event").asString == "play" })
-                assertTrue(writes.all { JsonParser.parseString(it.second).asJsonObject.get("intent").asString == "resume" })
+                assertTrue("Automatic transition judges the completed episode from its progress read: ${diagnostics()}", synchronized(reads) { reads.contains("third") })
+                assertTrue("Skipping a completed episode is GET-only and opens no progress session: ${diagnostics()}",
+                    synchronized(writes) { writes.none { it.first == "third" } })
+                assertEquals("The episode after the skipped one starts in one resume session: ${diagnostics()}", 1, plays("fourth"))
+                assertTrue("An automatically started episode does not restart: ${diagnostics()}",
+                    synchronized(writes) { writes.filter { it.first == "fourth" && bodyOf("fourth", it)?.get("event")?.asString == "play" }
+                        .all { bodyOf("fourth", it)?.get("intent")?.asString == "resume" } })
+
+                // Queue context: a completed queued entry stays put instead of following the show line.
                 val queueItem = item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(
                     Bundle(item.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", true) }).build()).build()
+                val beforeQueueReads = synchronized(reads) { reads.toList() }
+                val beforeQueuePlays = synchronized(writes) { plays("first") }
                 onMain { player.setMediaItem(queueItem); player.prepare(); player.play() }
-                await("Completed last queued episode stays in its queue") {
-                    reads.count { it == "first" } >= 2 && onMain { vm.podcastProgress.message.value == AppLanguage.string(R.string.podcast_already_completed) }
+                await("Queued completed episode restarts from 0 like any user start") {
+                    onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "first" && player.currentPosition in 0..2_000 }
                 }
+                onMain { player.seekTo(11_500) }
+                await("A completed queue entry ends on its own episode instead of advancing") {
+                    onMain { player.playbackState == Player.STATE_ENDED && !player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "first" }
+                }
+                SystemClock.sleep(500)
+                val queueReads = synchronized(reads) { reads.drop(beforeQueueReads.size) }
+                assertTrue("The completed queue entry still reads its own progress first: ${diagnostics()}", queueReads.firstOrNull() == "first")
+                assertFalse("A completed queue entry does not open a successor session in its own line: ${diagnostics()}", queueReads.contains("second"))
+                assertEquals("A finished queue entry still opened exactly one play session: ${diagnostics()}", beforeQueuePlays + 1, plays("first"))
                 await("Queue context is saved alongside the playlist") {
                     instrumentation.targetContext.getSharedPreferences("playback-context", android.content.Context.MODE_PRIVATE)
                         .getStringSet(vm.repository.session.storageScope(), emptySet())?.contains(item.mediaId) == true
@@ -156,26 +200,20 @@ class PodcastResumeServiceTest {
                 await("Restored queued episode retains its playback context") {
                     onMain { restored.currentMediaItem?.mediaMetadata?.extras?.getBoolean("podcast_queue_context") == true }
                 }
-                val beforeRestoreRead = reads.size
+                val beforeRestoreRead = synchronized(reads) { reads.toList() }
+                val beforeRestorePlays = synchronized(writes) { plays("first") }
                 onMain { restored.play() }
-                await("Restored completed queue entry reads progress") { reads.size > beforeRestoreRead }
+                await("Restored completed queue entry reads progress before starting") {
+                    onMain { restored.isPlaying && podcastEpisodeId(restored.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "first" && restored.currentPosition in 0..2_000 }
+                }
                 SystemClock.sleep(500)
-                assertEquals("Queue must not continue into its show after service restoration", beforeRestoreRead + 1, reads.size)
-                assertEquals("first", onMain { podcastEpisodeId(restored.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) })
-                assertFalse(onMain { restored.isPlaying })
-                assertTrue("Completed queue entries remain GET-only", writes.none { it.first == "first" })
-                pauseCompletedRead.set(true)
-                onMain { restored.setMediaItem(item); restored.prepare(); restored.play() }
-                assertTrue(completedReady.await(10, TimeUnit.SECONDS))
-                onMain { restored.pause() }
-                val readsBeforePause = reads.size
-                completedRelease.countDown()
-                SystemClock.sleep(500)
-                assertEquals("Pause during completed progress read cancels successor playback", readsBeforePause, reads.size)
-                assertFalse(onMain { restored.isPlaying })
+                val restoreReads = synchronized(reads) { reads.drop(beforeRestoreRead.size) }
+                assertEquals("A restored completed queue entry reads only its own progress, never its show's next episode: ${diagnostics()}", listOf("first"), restoreReads)
+                assertEquals("Restored completed queue entry stays on its own episode", "first", onMain { podcastEpisodeId(restored.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) })
+                assertEquals("A restored completed queue entry restarts one play session from 0: ${diagnostics()}", beforeRestorePlays + 1, plays("first"))
+                val restorePlay = synchronized(writes) { writes.filter { it.first == "first" && bodyOf("first", it)?.get("event")?.asString == "play" } }.last()
+                assertEquals("Restored user start must carry intent=restart", "restart", bodyOf("first", restorePlay)!!.get("intent").asString)
             } finally {
-                release.countDown()
-                completedRelease.countDown()
                 onMain { controller?.let { it.pause(); it.clearMediaItems(); it.release() } }
             }
         }
