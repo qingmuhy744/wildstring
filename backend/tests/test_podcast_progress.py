@@ -387,3 +387,46 @@ def test_schema_33_bookmarks_survive_migration(episode_client, settings):
     assert saved["version"] == 0 and saved["session_id"] == ""
     response = write(client, episode, position_seconds=300, event="seek")
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("intent", ["resume", "restart", None])
+def test_completion_intent_persists_across_session_events(episode_client, intent):
+    client, episode, _ = episode_client
+    completed = write(client, episode, position_seconds=3600, event="ended").json()
+    fields = {"intent": intent} if intent else {}
+    # Each write carries intent, including seeks and repeated play events.
+    for sequence, event in enumerate(["play", "progress", "seek", "pause", "stop", "play"], 1):
+        result = write(
+            client,
+            episode,
+            session_id="new-listening-session",
+            base_version=completed["version"],
+            sequence=sequence,
+            position_seconds=(sequence - 1) * 100,
+            event=event,
+            **fields,
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["completed"] is (intent == "resume")
+
+
+@pytest.mark.parametrize("intent", ["resume", "restart"])
+@pytest.mark.parametrize("event,position", [("pause", 3480), ("stop", 3480), ("ended", 3600)])
+def test_intent_still_allows_natural_completion(episode_client, intent, event, position):
+    client, episode, _ = episode_client
+    result = write(client, episode, intent=intent, position_seconds=position, event=event)
+    assert result.status_code == 200
+    assert result.json()["completed"] is True
+
+
+def test_intent_does_not_bypass_version_or_sequence(episode_client):
+    client, episode, _ = episode_client
+    completed = write(client, episode, intent="resume", event="ended", position_seconds=3600).json()
+    duplicate = write(client, episode, intent="restart", position_seconds=0)
+    assert duplicate.json() == completed
+    conflict = write(client, episode, session_id="stale-listening-session", intent="restart")
+    assert conflict.status_code == 409
+    current = conflict.json()["detail"]["current"]
+    assert current == completed
+    assert current["device_id"] == "A"
+    assert current["updated_at"]
