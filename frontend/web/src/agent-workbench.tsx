@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { CurationDraftPreview } from './curation-drafts';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
@@ -82,10 +83,7 @@ const lyricQualityLabel = (t: (key: string) => string, value: unknown) => {
   if (typeof q.level === 'number' && lyricLevelKeys[q.level]) return t(lyricLevelKeys[q.level]);
   return String(q.label || '');
 };
-const localizeAnalysis = (
-  t: (key: string, options?: Record<string, unknown>) => string,
-  text: string,
-) => {
+const localizeAnalysis = (t: TFunction, text: string) => {
   const skipped = text.match(/^本地规则已检查 (\d+) 首，未发现待解释的问题，已跳过本次 AI 分析。/);
   if (skipped) return t('agentWorkbench.ruleCheckSkippedAi', { count: Number(skipped[1]) });
   const progress = text.match(/^已完成 (\d+) 次受控工具调用，请查看草案及实际应用状态。$/);

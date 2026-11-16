@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { Icon } from './icons';
@@ -23,10 +24,7 @@ const taskErrorExactKeys: Record<string, string> = {
   '源站 SSL 证书校验失败': 'podcastDownloads.errSsl',
 };
 
-export function localizeTaskError(
-  t: (key: string, options?: Record<string, unknown>) => string,
-  error?: string | null,
-): string {
+export function localizeTaskError(t: TFunction, error?: string | null): string {
   if (!error) return t('podcastDownloads.defaultTaskError');
   if (taskErrorExactKeys[error]) return t(taskErrorExactKeys[error]);
   const retry = error.match(/^第 (\d+)\/(\d+) 次重试等待中 \((\d+)s\): (.+)$/);
