@@ -238,7 +238,7 @@ Acceptance for any change to a transition: record the animated edges per frame a
 - **Episode Row States (Three Distinct Visual Tiers)**:
   1. **Currently Playing (`current`)**: Full-row warm tint (`--accent-tint`), left animated/colored `waveform` icon, bold ink title, subtitle `日期 · N分钟 · 正在播放` (in coral), inline queue button shows disabled `正在播放`.
   2. **In Progress / Unplayed**: Left bordered circular play button, normal ink title, subtitle `日期 · 剩 N 分钟` (coral highlight), and a slim `3.5px` coral progress bar at the bottom of the row if in progress. Inline queue button displays `+ 待播` or `✓ 已待播` (accent pressed style; clicking toggles queue status).
-  3. **Completed (`completed` or `position >= duration`)**: Visual muting with row opacity `0.62`, muted grey play circle, **greyed-out title (`var(--podcast-subtle)` / `var(--faint)`)**, inline `✓ 已听完` status tag right after the title, muted subtitle `日期 · N分钟 · 已听完`, and **no bottom progress bar**.
+  3. **Completed (`completed` from the accepted server progress)**: Do not infer completion from position or remaining duration; old bookmarks keep their recorded completion state. Visual muting with row opacity `0.62`, muted grey play circle, **greyed-out title (`var(--podcast-subtle)` / `var(--faint)`)**, inline `✓ 已听完` status tag right after the title, muted subtitle `日期 · N分钟 · 已听完`, and **no bottom progress bar**.
 - **Episode Context Menu (`RowMenu`) & Dialog Actions**:
   - `播放单集`, `下一集播放`, `加入待播` (or toggle via inline quick button).
   - `标为已听完` / `标为未听`: manual completion toggle immediately persisting progress and toggling row muting.
