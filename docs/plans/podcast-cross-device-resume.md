@@ -1,14 +1,35 @@
-状态：已确认
+状态：已实施
 
 # 播客跨设备续听
 
 ## 实施进度
 
 - 前置 PR #148 已合入本方案工作分支（合并提交 `199cfea`）。
-- 服务端已提交（`03b416c` 进度意图、`732a12f` 账号续听模式、`2c67e63` 最近收听时间）：服务端 `intent` 保护、schema 53、账号级续听模式 GET/PUT、单集最近收听时间字段；`make check` 通过，进度、播客详情与收藏专项（`test_podcast_progress.py`、`test_podcasts.py`、`test_podcast_favorites.py`）38 项通过；`make test-affected` 655 项通过、2 项跳过（可选 Chromaprint、需另编译夹具的原生插件）。本批为后端验证，整体 L3 的四端、视觉、交互和真机验收尚未执行。
-- 待实施：Android、Apple、Web 的会话意图、冲突提示与显式接管、先读后播／离线降级、前台刷新及账号设置接入；四端控件与视觉、交互、双端真机验收。
-- 上述本地测试记录对应这三个服务端提交的代码，不代表 CI、原生设备验收或发布状态。
-- 整体仍为「已确认」，不因服务端局部实现改为「已实施」。
+- 服务端已实现 `intent` 保护、schema 53、账号级续听模式 GET/PUT 与单集最近收听时间字段（`03b416c`、`732a12f`、`2c67e63`）。服务端阶段的进度、播客详情与收藏专项 38 项通过，`make test-affected` 655 项通过、2 项跳过。
+- Android、Apple、Web 已接入会话意图、冲突停传与显式接管、先读后播／离线降级、前台刷新、账号设置，以及单集从头播放菜单和续听询问。Android 的完成跳集、片尾自动续播与待播上下文恢复由后台服务负责，不依赖页面存活；Apple 的离线记录按既有检查点节奏补传，保留原事件，历史 409 采用远端后丢弃。
+- 「已实施」表示代码落地，不代表整体 L3、双端真机验收、合并或发布完成。实际覆盖与缺口如下。
+
+### 验证记录（2026-11-16）
+
+| 范围 | 实际结果 |
+| --- | --- |
+| 静态检查 | 最终源码 `make check` 通过；包括类型、格式、安全、i18n 与旧文案断言扫描。Web 使用 Node 22。 |
+| 后端 | `make ci` 中完整后端 906 项通过、2 项跳过；跳过可选 Chromaprint 与需单独构建夹具的原生插件。 |
+| Web 播客 | `make test-podcast-web` 119 项通过、1 项跳过；跳过的是手机项目重复视觉用例，桌面用例实际渲染 390px。账号刷新、离线缓存、存储不可写、冲突重试等专项另有 6 项通过。 |
+| Web 其他配置 | 最终 `make test-web` 334 项通过、164 项按夹具配置跳过；出品方 6 项、曲库权限 18 项、大曲库 2 项、连续浏览 12 项、多碟排序 2 项、AAC 转码 4 项通过。 |
+| Android | 最终 `make android-ci` 通过，166 项单元测试无失败或跳过，Debug／Release 构建与 lint 通过。Phone 网络 5 项、服务 1 项、UI 1 项通过；Pad 服务 1 项、UI 1 项通过，修正截图等待后 UI 再跑 1 项通过。最终稳定账号作用域修复由 Pad 服务专项覆盖，包含新 SessionStore 与真实服务重建；Phone 服务轮次早于该修复。 |
+| Apple | `make ios-test` 的 CorePlayback 107 项、CoreNetwork 105 项通过；`make macos-test` 43 项通过；`make ios-build` 成功。覆盖迟到 GET、等待期间暂停、同设备单次重试、接管、历史 409、短集离线 ended 补传与重启后节流恢复。 |
+| 运行时与依赖 | Node 22 下 `make source-plugins dependency-audit` 通过，运行时 10 项测试通过，两个 npm audit 均无漏洞；`uv lock --check --project backend` 通过。 |
+
+`make ci` 首轮在默认 Web 配置的一项导入历史测试失败后中止，其余配置随后分别补跑。已确定并修正两处现有测试前置条件：导入测试等待 POST 持久化并按返回任务 ID 定位（延迟请求可稳定复现旧测试失败），出品方权限测试等待详情读取完成再导航；分别全文件 10 项与 6 项通过。未把首轮 `make ci` 记为通过。
+
+视觉与交互证据：
+
+- Web 24 张截图已逐张查看：节目页、单集菜单、续听询问、冲突、账号设置、保存错误，各覆盖 1360px／390px 与浅深主题；位于 `artifacts/resume-*.png`。相关播放、接管、菜单与设置路径由 Playwright 实际执行。
+- Android 标准 Phone（1080×1920）与 Pad（2560×1600）均开启物理键盘输入；两种形态各 12 张浅深主题截图已逐张查看，覆盖节目页、从头播放菜单、账号模式、续听询问与冲突接管；位于 `artifacts/android-podcast-resume/{phone,pad}/screenshots/PodcastResumeUiTest/`。服务专项实测 Activity／ViewModel 销毁后的真实片尾与后继 GET 门禁、服务重建后待播不串线、完成 GET 等待时暂停不自动出声。
+- macOS 6 张截图已逐张查看：设置、播放器（冲突、加载、错误及空队列）、单集行，各覆盖浅深主题；位于 `/tmp/wildstring-resume-{settings,player,row}-{light,dark}.png`。未拍展开菜单和询问弹窗。
+- 完整空／加载／错误／权限不足与长文案矩阵尚未覆盖；iOS 未完成 390px 实际视觉与交互验收；Android／macOS 同账号双端真机联调、锁屏切网和系统回收后的真实设备 UAT 尚未执行。现有自动化和局部截图不代表整体 L3 验收完成。
+- 出品方测试还定位到一个既有导航竞态：详情请求未结束时切到出品方，迟到详情响应可能重新打开详情页；相关实现与 `origin/main` 一致，本批未扩大产品修复范围。
 
 ## 目标
 
@@ -63,7 +84,7 @@
 
 ### 2. 冲突处理（四端共用规则）
 
-当前 Android 和 Apple 都会在 409 时改写版本、开新会话、重传本机位置：Android `data/PodcastProgress.kt:155-165`，Apple `PlaybackService.swift:1615-1640`（`play`/`seek`/`ended` 和播放中的 `progress` 都会重试）。这会让另一台设备刚写的进度或已听完被覆盖。Web 不会覆盖（`podcast-progress.ts:232-235` 在 409 时置 `conflict` 并停传），但提示文案要求用户必须动作。
+修复前 Android 和 Apple 都会在 409 时改写版本、开新会话、重传本机位置：Android `data/PodcastProgress.kt:155-165`，Apple `PlaybackService.swift:1615-1640`（行号对应修复前版本，`play`/`seek`/`ended` 和播放中的 `progress` 都会重试）。这会让另一台设备刚写的进度或已听完被覆盖。修复前 Web 不会覆盖（`podcast-progress.ts:232-235` 在 409 时置 `conflict` 并停传），但提示文案要求用户必须动作。
 
 **服务器不改规则**。409 的响应体里已经带着 `current.device_id`、`current.version` 和 `current.updated_at`，客户端据此判断即可，不新增字段，也不做时间判断。
 
@@ -91,7 +112,7 @@
 - 冲突会话不再上传；显式接管，或重新点播并按服务器状态开播，都会恢复同步。
 - 接管本身也用最新观察到的 `current.version` 提交；再次遇到 409 就保留提示，不无限自动重试。
 
-这是**契约变更**：`contracts/podcast-progress.md` 目前写的是「冲突始终询问」，实际四端都没有询问框（Android 的对话框在 0.8.7 删除，Apple 与 Web 只在开始收听时按模式询问）。新规则是「不覆盖别的设备的会话，接管由用户明确操作触发」，契约与四端实现一起改。
+这是**契约变更**：修复前的 `contracts/podcast-progress.md` 写的是「冲突始终询问」，修复前实际四端都没有播放中冲突询问框（Android 的对话框在 0.8.7 删除，Apple 与 Web 只在开始收听时按模式询问）。新规则是「不覆盖别的设备的会话，接管由用户明确操作触发」，契约与四端实现一起改。
 
 ### 3. 冲突提示（四端）
 
@@ -105,10 +126,10 @@
 - 首次冲突后停止上传，不会再有后续 409 触发重复提示。
 - 自己设备造成的冲突静默重传，不提示。
 - 后台补传撞到冲突不提示，回到前台按当时状态显示。
-- 现有文案 `playerPage.podcastUpdatedElsewhere`「另一台设备刚更新了本集，请重新选择接续位置」改成上面这句：现在的措辞暗示用户必须动作，实际不动作也能继续听，只是不同步。
-- Android 的进度提示通道目前没有接到界面：`data/PodcastProgress.kt:55-56` 的 `message` 在 `ui/` 里没有收集方，`pod_prog_sync_failed_check_network`、`pod_prog_server_update_required` 都是写了没显示。同批接上，提示条复用这个通道。
-- macOS / iOS 没有现成的进度提示位置，新增在播放器一栏，沿用现有播放状态的提示样式。
-- Web 已有播放中的 409 提示（`podcast-progress.ts:234` 的 `podcastProgress.conflictNotice`「另一台设备更新了本集进度，本机位置已保留，请选择接续位置」），但措辞要改成同一句，并补上「用本机进度」按钮。提示位沿用 `player.tsx:622` 的 `podcastProgressMessage` 与 `podcast-progress-dialog.tsx:16-18`。
+- 修复前文案 `playerPage.podcastUpdatedElsewhere`「另一台设备刚更新了本集，请重新选择接续位置」改成上面这句：旧措辞暗示用户必须动作，实际不动作也能继续听，只是不同步。
+- Android 修复前的进度提示通道没有接到界面：`data/PodcastProgress.kt:55-56` 的 `message` 在 `ui/` 里没有收集方，`pod_prog_sync_failed_check_network`、`pod_prog_server_update_required` 都是写了没显示。同批接上，提示条复用这个通道。
+- macOS / iOS 修复前没有进度提示位置，本批新增在播放器一栏，沿用播放状态的提示样式。
+- Web 修复前已有播放中的 409 提示（`podcast-progress.ts:234` 的 `podcastProgress.conflictNotice`「另一台设备更新了本集进度，本机位置已保留，请选择接续位置」），本批改成同一句，并补上「用本机进度」按钮。提示位沿用 `player.tsx:622` 的 `podcastProgressMessage` 与 `podcast-progress-dialog.tsx:16-18`（行号对应修复前版本）。
 
 ### 4. Android
 
@@ -141,7 +162,7 @@
   - 服务器已是已听完的处理以**获知完成状态**为前提：降级开始时并不知道服务器状态，第一次心跳写入若被接受就正常同步；若响应显示已听完，并且本机是续听，则停止后续写入、按已听完处理并提示可以改播下一集；本机是明确「从头播放」时按 `restart` 正常写入。
   - 这一状态要落盘：进程被杀、切网或页面关闭后，待发送记录随现有本地持久化恢复，回到前台时沿用同一会话继续尝试。
   - 迟到的读取结果一律丢弃：不进位置、不建会话、不改提示。
-- 下一集选择复用现有规则，与 Android 一致：待播线取待播列表下一项，节目线用 `resolvePodcastTransitionItem` 与现有顺序、跳过已听完设置。`contracts/podcast-queue.md` 第 45 行的两条线不互相跳仍然成立。
+- 下一集选择复用现有规则，与 Android 一致：待播线取待播列表下一项，节目线用 `podcastAdjacentItem` 与 `PodcastContinuation` 的现有顺序、跳过已听完设置；远端读取统一进入开播准备流程。`contracts/podcast-queue.md` 第 45 行的两条线不互相跳仍然成立。
 - 优先级：明确的「从头播放」先于「跳过已听完」。用户点「从头播放」从头播，不因服务器标记已听完改播下一集。
 - macOS「继续」改为挑最近听的那一集（有进度的集里 `last_listened_at` 最新的那个），全部听完时停住并显示已听完，不退回第一集。
 - 窗口重新成为当前窗口（macOS）或场景回到前台（iOS）时静默重拉当前节目，离上次不到 30 秒不重复拉；保留手动刷新。
@@ -180,7 +201,7 @@
 
 ### 9. 文档
 
-客户端账号同步交付时，CHANGELOG 与对应发布说明须明确：续听模式改为账号级，旧本机设置不自动迁移；服务器无偏好记录时使用 `auto`，原本选择「询问」或「从头」的用户需重新设置一次。当前仅服务端就绪，既有客户端仍使用原本机偏好，不在此时宣称用户行为已改变。
+CHANGELOG「未发布」已说明：续听模式改为账号级，旧本机设置不自动迁移；服务器无偏好记录时使用 `auto`，原本选择「询问」或「从头」的用户需重新设置一次。正式发布时将这条升级说明同步到对应发布说明，并遵守先服务器、后客户端的顺序。
 
 实现落地时同步：`contracts/podcast-progress.md` 补 `intent` 字段与携带方式、冲突规则变更；新增或补充续听模式端点的契约；`docs/product/scope.md` 核对播客设置描述；`docs/releasing.md` 与版本台账按发版节奏处理；本方案状态随进度更新。
 
@@ -217,4 +238,5 @@
 - 升级后原有本机续听偏好不自动带到服务器，用户需要重新选一次。接受这个一次性成本，不做自动迁移。
 - 恢复 Android 询问对话框会改变默认操作路径（原来静默续听）；不需要迁移旧值，因为 `ask` 一直是合法值，只是之前没接上界面。
 - Apple 开播前等待最多 1.5 秒，弱网下比现在慢。以缓冲状态提示，超时退回本地位置且不上报，不回退成「先出声再跳」。
+- schema 53 不自动降级。已迁移数据库若直接运行只支持 schema 52 的旧服务器，会因数据库版本较新而拒绝启动；服务端回退应保留 schema 53 的兼容迁移，或按备份恢复程序恢复匹配版本的数据，不能把代码拆成提交等同于数据库可直接回退。
 - 回滚按提交单元进行：服务器 `intent` 缺省行为不变，客户端可单独回退。Android 的检查点存在 `podcast_checkpoints.payload` 这个 JSON 字符串列里（`QueueDatabase.kt:23`），新增 `intent` 字段不需要升 Room 版本；回退后旧版本会忽略这个字段，不影响已有记录。
