@@ -6,6 +6,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import com.google.gson.Gson
 import com.wildstring.app.data.*
@@ -442,6 +443,58 @@ class ContinuousCatalogTest {
                 compose.runOnIdle { vm.playCollection() }
                 compose.waitUntil(10_000) { vm.state.value.current?.id == albumSongs.sortedByDescending { it.title }.first().id }
             } finally { compose.runOnIdle { vm.controller?.pause(); vm.sort("track_number") } }
+        }
+    }
+
+    @Test fun alphabetRailClearsCoversInGridAndListAndCapturesBothThemes() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            try {
+                val density = compose.activity.resources.displayMetrics.density
+                // The rail must sit outside every item of the visible row, not only the leftmost one.
+                fun assertClear(itemTags: List<String>) {
+                    val rail = compose.onNodeWithTag("alphabet-rail").fetchSemanticsNode().boundsInRoot
+                    itemTags.forEach { tag ->
+                        val item = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+                        assertTrue("$tag ends at ${item.right} but the rail starts at ${rail.left}",
+                            item.right <= rail.left - 8 * density + 1)
+                    }
+                }
+                fun theme(mode: String) {
+                    compose.runOnIdle { vm.settings.appearance(mode) }
+                    compose.waitUntil(5_000) { vm.settings.state.value.appearance == mode }
+                    compose.waitForIdle()
+                }
+                compose.runOnIdle { vm.navigate("library") }
+                ready(vm)
+                theme("dark")
+                compose.onNodeWithTag("album-grid").performScrollToIndex(0)
+                // However many columns the window fits, the rightmost item of the first row must clear the rail.
+                val firstRow = compose.onNodeWithTag("catalog-item-0").fetchSemanticsNode().boundsInRoot
+                assertClear(compose.onAllNodes(hasTestTagPrefix("catalog-item-")).fetchSemanticsNodes()
+                    .filter { kotlin.math.abs(it.boundsInRoot.top - firstRow.top) < 2 * density }
+                    .maxBy { it.boundsInRoot.right }.let { rightmost ->
+                        val name = rightmost.config.getOrNull(SemanticsProperties.TestTag).orEmpty()
+                        listOf("catalog-item-0", name).filter { it != "catalog-item-" }.distinct()
+                    })
+                capture("alphabet-albums-dark.png")
+                theme("light")
+                capture("alphabet-albums-light.png")
+                compose.mainClock.advanceTimeBy(3_000)
+                capture("alphabet-albums-idle-light.png")
+                compose.runOnIdle { vm.kind("tracks") }
+                ready(vm)
+                compose.onNodeWithTag("catalog-list").performScrollToIndex(0)
+                assertClear(listOf("catalog-item-0", "catalog-item-6"))
+                capture("alphabet-songs-light.png")
+                theme("dark")
+                capture("alphabet-songs-dark.png")
+                compose.onNodeWithTag("alphabet-M").performClick()
+                compose.waitUntil(10_000) { vm.state.value.window.trackAt(110) != null }
+                compose.onNodeWithTag("catalog-item-110").assertIsDisplayed()
+                compose.onNodeWithTag("alphabet-M").assertIsSelected()
+                capture("alphabet-songs-active-dark.png")
+            } finally { compose.runOnIdle { vm.settings.appearance("light"); vm.repository.session.invalidate() } }
         }
     }
 }
