@@ -193,6 +193,7 @@ public final class PlaybackService {
     }
     @ObservationIgnored private var restoredPodcast: StoredPodcast?
     @ObservationIgnored private var podcastStartedOffline = false
+    @ObservationIgnored var podcastSettleTimeout: Duration = .milliseconds(1500)
     @ObservationIgnored private var podcastWriteTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var podcastHistoryFlush: Task<Void, Never>?
     @ObservationIgnored public var podcastDeviceID = ""
@@ -1585,14 +1586,21 @@ public final class PlaybackService {
         guard podcastBootToken == token, currentItem?.trackID == "podcast_ep_\(episode)" else { return }
         if !settled, let snapshot, pendingHistoricalPodcast(episode) != nil {
             // Unsynced progress from an earlier session goes through the normal path first; the new session
-            // then starts from the resulting server state. A newer token keeps the 1.5s fallback from racing it.
+            // then starts from the resulting server state. The step is capped like the initial read: on timeout
+            // or failure the session starts from the local pending record (the offline start), and a late
+            // result is dropped because the token no longer matches.
             let next = UUID()
             podcastBootToken = next
             podcastBoot = Task { @MainActor [weak self] in
                 guard let self else { return }
-                let latest = await self.settleHistoricalPodcast(episode, snapshot: snapshot)
+                let latest = await self.settleHistoricalPodcast(episode, snapshot: snapshot, token: next)
                 self.finishPodcastBoot(token: next, episode: episode, snapshot: latest, fallback: fallback,
                                        autoplay: autoplay, restart: explicitRestart, automatic: automatic, settled: true)
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: self?.podcastSettleTimeout ?? .milliseconds(1500))
+                self?.finishPodcastBoot(token: next, episode: episode, snapshot: nil, fallback: fallback,
+                                        autoplay: autoplay, restart: explicitRestart, automatic: automatic, settled: true)
             }
             return
         }
@@ -1679,7 +1687,9 @@ public final class PlaybackService {
 
     /// Submits the pending record of an earlier session for the episode about to start, and returns the
     /// server state the new session should begin from. 409 adopts the server state and drops the record.
-    private func settleHistoricalPodcast(_ episode: String, snapshot: PodcastProgressSnapshot) async -> PodcastProgressSnapshot {
+    /// Returns nil when the upload failed or the boot moved on, so the caller starts from the local record.
+    private func settleHistoricalPodcast(_ episode: String, snapshot: PodcastProgressSnapshot,
+                                         token: UUID) async -> PodcastProgressSnapshot? {
         guard var stored = pendingHistoricalPodcast(episode), let key = podcastStorageKey(episode),
               let cloud = podcastCloud, let submit = submitPodcastProgress,
               let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
@@ -1697,13 +1707,17 @@ public final class PlaybackService {
             return current
         }
         save(stored)
-        switch await submit(episode, write) {
+        let result = await submit(episode, write)
+        guard podcastBootToken == token else { return nil }
+        switch result {
         case .ok, .completed:
             let completed = stored.completed
             stored.bookmark.clear()
             stored.pending = false
             save(stored)
-            if let latest = await loadPodcastProgress?(episode) { return latest }
+            let reloaded = await loadPodcastProgress?(episode)
+            guard podcastBootToken == token else { return nil }
+            if let latest = reloaded { return latest }
             return PodcastProgressSnapshot(version: snapshot.version, positionSeconds: write.positionSeconds,
                                            durationSeconds: write.durationSeconds,
                                            completed: completed || snapshot.completed == true,
@@ -1711,12 +1725,14 @@ public final class PlaybackService {
         case .conflictCurrent(let current):
             return adopt(current)
         case .conflict:
-            if let current = await loadPodcastProgress?(episode) { return adopt(current) }
+            let current = await loadPodcastProgress?(episode)
+            guard podcastBootToken == token else { return nil }
+            if let current { return adopt(current) }
             stored.bookmark.clear()
             save(stored)
             return snapshot
         case .failed:
-            return snapshot
+            return nil
         }
     }
 

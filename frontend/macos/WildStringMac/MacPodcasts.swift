@@ -464,17 +464,23 @@ struct MacPodcastsView: View {
                         .font(.callout)
                         .foregroundStyle(MacTheme.muted)
                     HStack(spacing: 0) {
-                        Text(L10n("macPodcasts.totalEpisodesWithDot", detail.episodes.count))
-                            .foregroundStyle(MacTheme.muted)
-                        Text(unplayedCount > 0 ? L10n("macPodcasts.unplayedCount", unplayedCount) : L10n("macPodcasts.allCompleted"))
-                            .foregroundStyle(unplayedCount > 0 ? MacTheme.accentDeep : MacTheme.muted)
-                            .fontWeight(unplayedCount > 0 ? .medium : .regular)
+                        // When everything is played the action row already says so; the stats line only counts.
+                        if unplayedCount > 0 {
+                            Text(L10n("macPodcasts.totalEpisodesWithDot", detail.episodes.count))
+                                .foregroundStyle(MacTheme.muted)
+                            Text(L10n("macPodcasts.unplayedCount", unplayedCount))
+                                .foregroundStyle(MacTheme.accentDeep)
+                                .fontWeight(.medium)
+                        } else {
+                            Text(L10n("macPodcasts.showEpisodesTotal", detail.episodes.count))
+                                .foregroundStyle(MacTheme.muted)
+                        }
                     }
                     .font(MacTheme.caption)
 
                     HStack(spacing: 10) {
                         if detail.episodes.contains(where: { !isCompleted($0) }),
-                           let next = detail.episodes.filter({ $0.positionSeconds > 0 })
+                           let next = detail.episodes.filter({ $0.positionSeconds > 0 && !isCompleted($0) })
                             .max(by: { ($0.lastListenedAt ?? "") < ($1.lastListenedAt ?? "") })
                             ?? detail.episodes.first(where: { !isCompleted($0) }) {
                             let isCurrentNext = playback.currentItem?.trackID == "podcast_ep_\(next.id)"
@@ -521,7 +527,8 @@ struct MacPodcastsView: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                             .background(MacTheme.panel, in: Capsule())
-                            .accessibilityElement(children: .combine)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(L10n("macPodcasts.allCompleted"))
                         }
                         if detail.podcast.followed {
                             Menu {
