@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { HelpText } from './desktop-help';
 import { hints } from './help-content';
@@ -94,7 +95,7 @@ function candidateLabel(
   candidate: Candidate,
   track: ReviewTrack,
   providers: Record<string, string>,
-  t: (key: string, options?: Record<string, unknown>) => string,
+  t: TFunction,
 ) {
   const album =
     typeof candidate.fields.album === 'string' && candidate.fields.album
