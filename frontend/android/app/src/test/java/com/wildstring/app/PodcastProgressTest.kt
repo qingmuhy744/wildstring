@@ -9,6 +9,14 @@ class PodcastProgressTest {
     private fun checkpoint() = EpisodeCheckpoint(EpisodeProgress("episode", version = 5),
         PodcastProgressUpdate("session-one", "device-A", 5, 1, 1200, 3600, "play"))
 
+    @Test fun oldOutboxJsonHasNoIntentAndNewIntentSurvivesCheckpoints() {
+        val old = Gson().fromJson(Gson().toJson(checkpoint()), EpisodeCheckpoint::class.java)
+        assertNull(old.update.intent)
+        val resumed = old.copy(update = old.update.copy(intent = "resume")).checkpoint(1800_000, 3600_000, "pause")
+        val restored = Gson().fromJson(Gson().toJson(resumed), EpisodeCheckpoint::class.java)
+        assertEquals("resume", restored.update.intent)
+        assertEquals("pause", restored.update.event)
+    }
     @Test fun rewindIsANewEventAndKeepsTheCapturedRevision() {
         val value = checkpoint().checkpoint(300_000, 3600_000, "seek")
         assertEquals(300L, value.update.positionSeconds)

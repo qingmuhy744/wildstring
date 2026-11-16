@@ -207,6 +207,7 @@ fun PodcastChannelPage(
                                         onPlayEpisode = { ep ->
                                             vm.playPodcastEpisode(ep, selectedPodcast)
                                         },
+                                        onRestartEpisode = { ep -> vm.playPodcastEpisode(ep, selectedPodcast, positionMs = 0L) },
                                         onQueueEpisode = { ep, next ->
                                             vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                                         },
@@ -1045,6 +1046,7 @@ private fun PodcastDetailView(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onPlayEpisode: (PodcastEpisode) -> Unit,
+    onRestartEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
     onRemoveQueuedEpisode: (String) -> Unit = {},
     isEpisodeQueued: (String) -> Boolean = { false },
@@ -1199,10 +1201,13 @@ private fun PodcastDetailView(
                         Spacer(Modifier.height(14.dp))
 
                         // Header actions: primary continue/latest pill paired on one row with the follow/rule pill.
-                        val nextPlayable = detail?.episodes.orEmpty().asSequence()
-                            .filter { !it.completed }
-                            .maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
-                            ?: detail?.episodes.orEmpty().maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                        val playable = detail?.episodes.orEmpty().map { episode ->
+                            positions[episode.id]?.let { episode.copy(positionSeconds = it.positionSeconds.toInt(), completed = it.completed) } ?: episode
+                        }
+                        val nextPlayable = playable.filter { !it.completed && it.positionSeconds > 0 && it.lastListenedAt != null }
+                            .maxByOrNull { it.lastListenedAt.orEmpty() }
+                            ?: playable.filterNot { it.completed }.maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
+                            ?: playable.maxByOrNull { podcastPublishedMillis(it.pubDate) ?: 0L }
                         val nextResumable = (nextPlayable?.positionSeconds ?: 0) > 0
                         val isPad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
                         Row(
@@ -1350,6 +1355,7 @@ private fun PodcastDetailView(
                             isActive = active,
                             isFavorite = fav,
                             onPlay = { onPlayEpisode(ep) },
+                            onRestart = { onRestartEpisode(ep) },
                             onPlayNext = { onQueueEpisode(ep, true) },
                             onAddToQueue = { onQueueEpisode(ep, false) },
                             onRemoveFromQueue = { onRemoveQueuedEpisode(ep.id) },
@@ -1378,6 +1384,7 @@ private fun EpisodeRowItem(
     isActive: Boolean = false,
     isFavorite: Boolean = false,
     onPlay: () -> Unit,
+    onRestart: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onRemoveFromQueue: () -> Unit = {},
@@ -1452,6 +1459,8 @@ private fun EpisodeRowItem(
                         )
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.podcast_resume_restart)) },
+                            onClick = { showMenu = false; feedback(TactileKind.Tap); onRestart() })
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.podcast_play_next)) },
                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },

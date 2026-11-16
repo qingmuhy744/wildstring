@@ -237,6 +237,7 @@ data class PodcastEpisode(
     @SerializedName("season_number") val seasonNumber: Int? = null,
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("position_seconds") val positionSeconds: Int = 0,
+    @SerializedName("last_listened_at") val lastListenedAt: String? = null,
     val completed: Boolean = false,
     val loved: Boolean = false,
     val favorite: Boolean = false,
@@ -325,7 +326,10 @@ data class PodcastProgressUpdate(
     @SerializedName("position_seconds") val positionSeconds: Long,
     @SerializedName("duration_seconds") val durationSeconds: Long,
     val event: String,
+    val intent: String? = null,
 )
+
+data class PodcastResumeMode(@SerializedName("resume_mode") val resumeMode: String)
 
 data class PodcastPlaybackSettings(
     @SerializedName("user_id") val userId: String,

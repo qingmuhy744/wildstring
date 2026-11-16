@@ -582,6 +582,8 @@ private fun PodcastPlayerControls(
 ) {
     val position by vm.position.collectAsStateWithLifecycle()
     val buffered by vm.buffered.collectAsStateWithLifecycle()
+    val progressConflict by vm.podcastProgress.conflict.collectAsStateWithLifecycle()
+    val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     var scrub by remember { mutableStateOf<Float?>(null) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -800,6 +802,16 @@ private fun PodcastPlayerControls(
                     }
                 }
                 if (moreShown > 0f) Box(Modifier.presence(moreShown)) { moreButton() }
+            }
+            if (progressConflict || progressMessage != null) {
+                Surface(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (progressConflict) stringResource(R.string.pod_prog_conflict_resolution_notice) else progressMessage.orEmpty(),
+                            Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        if (progressConflict) TextButton(tactile(vm.podcastProgress::useLocalProgress)) { Text(stringResource(R.string.podcast_use_local_progress)) }
+                    }
+                }
             }
             state.playbackError?.let { message ->
                 Surface(

@@ -12,6 +12,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
@@ -34,6 +35,10 @@ data class EpisodeCheckpoint(
         if (sent.sessionId != update.sessionId) this else copy(remote = value, dirty = update.sequence > sent.sequence)
 }
 data class EpisodeProgressPrompt(val title: String, val remoteMs: Long, val localMs: Long, val conflict: Boolean)
+sealed interface PodcastPreparation {
+    data class Play(val positionMs: Long) : PodcastPreparation
+    data object Completed : PodcastPreparation
+}
 
 /** Episode bookmarks live outside the queue. The service owns checkpoints; UI only answers conflicts. */
 @Singleton
@@ -49,6 +54,15 @@ class PodcastProgress @Inject constructor(
     private val lastSent = mutableMapOf<String, Long>()
     private var active: Triple<String, String, String>? = null
     private var activeConflicted = false
+    private val mutableConflict = MutableStateFlow(false)
+    val conflict = mutableConflict.asStateFlow()
+    private var modeRevision = 0
+    private var automaticNext = false
+    fun prepareNextAutomatically() { automaticNext = true }
+    fun consumeAutomaticNext(): Boolean = automaticNext.also { automaticNext = false }
+    private val mutableQueueChanges = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val queueChanges = mutableQueueChanges.asSharedFlow()
+    fun queueChanged() { mutableQueueChanges.tryEmit(Unit) }
     private val mutablePrompt = MutableStateFlow<EpisodeProgressPrompt?>(null)
     val prompt = mutablePrompt.asStateFlow()
     private var answer: CompletableDeferred<Boolean?>? = null
@@ -65,16 +79,58 @@ class PodcastProgress @Inject constructor(
             leave(); answer?.complete(null); mutablePrompt.value = null; mutableMessage.value = null
             mutablePositions.value = emptyMap()
             mutableMode.value = modeForOwner()
+            refreshMode()
             flushAll()
         } }
     }
-    private fun modeForOwner() = prefs.getString("mode:${repository.session.storageScope()}", "auto").takeIf { it in listOf("auto", "restart", "ask") } ?: "auto"
-    fun mode(value: String) { require(value in listOf("auto", "restart", "ask")); prefs.edit().putString("mode:${repository.session.storageScope()}", value).apply(); mutableMode.value = value }
+    private fun modeForOwner() = prefs.getString("account-mode:${repository.session.storageScope()}", "auto").takeIf { it in listOf("auto", "restart", "ask") } ?: "auto"
+    fun refreshMode() {
+        val owner = repository.session.cacheScope() ?: return
+        val revision = modeRevision
+        scope.launch {
+            try {
+                val value = request { repository.api().podcastResumeMode(RequestOwner(owner)) }.resumeMode
+                if (owner == repository.session.cacheScope() && revision == modeRevision && value in listOf("auto", "restart", "ask")) {
+                    prefs.edit().putString("account-mode:${repository.session.storageScope()}", value).apply()
+                    mutableMode.value = value
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { }
+        }
+    }
+    fun mode(value: String) {
+        require(value in listOf("auto", "restart", "ask"))
+        val owner = repository.session.cacheScope() ?: return
+        val revision = ++modeRevision
+        scope.launch {
+            try {
+                val saved = request { repository.api().updatePodcastResumeMode(PodcastResumeMode(value), RequestOwner(owner)) }.resumeMode
+                if (owner == repository.session.cacheScope() && revision == modeRevision) {
+                    prefs.edit().putString("account-mode:${repository.session.storageScope()}", saved).apply()
+                    mutableMode.value = saved
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
+        }
+    }
     fun answer(useRemote: Boolean?) { answer?.complete(useRemote) }
-    fun leave() { active = null; activeConflicted = false }
-    fun owns(id: String) = !activeConflicted && active?.let { it.first == repository.session.cacheScope() && it.second == id } == true
-    fun recordManualProgress(id: String, progress: EpisodeProgress) {
+    fun leave() { active = null; activeConflicted = false; mutableConflict.value = false }
+    fun owns(id: String) = active?.let { it.first == repository.session.cacheScope() && it.second == id } == true
+    fun deviceId() = device
+    suspend fun recordManualProgress(id: String, progress: EpisodeProgress, completed: Boolean) {
         mutablePositions.value = mutablePositions.value + (id to progress)
+        val session = active?.takeIf { it.first == repository.session.cacheScope() && it.second == id } ?: return
+        stateLock.withLock {
+            val latest = read(session.first, id)?.takeIf { it.update.sessionId == session.third } ?: return@withLock
+            val update = latest.update.copy(sessionId = progress.sessionId, deviceId = progress.deviceId,
+                baseVersion = progress.version, sequence = progress.sequence, positionSeconds = progress.positionSeconds,
+                durationSeconds = progress.durationSeconds, event = if (completed) "ended" else "stop",
+                intent = if (completed) "resume" else "restart")
+            save(session.first, id, latest.copy(remote = progress, update = update, dirty = false, conflict = false))
+            active = Triple(session.first, id, progress.sessionId)
+            activeConflicted = false
+            mutableConflict.value = false
+        }
     }
     private fun ownerValid(owner: String) { if (owner != repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.pod_prog_session_changed)) }
     // Requests use the ephemeral login generation; durable rows use the stable server/account key.
@@ -88,28 +144,41 @@ class PodcastProgress @Inject constructor(
         catch (_: TimeoutCancellationException) { throw IOException(AppLanguage.string(R.string.pod_prog_not_synced)) }
 
     /** Only called for a play/seek intent, never on passive restoration or background retry. */
-    suspend fun prepare(id: String, title: String, durationMs: Long, requestedMs: Long? = null, automatic: Boolean = false, fallbackMs: Long? = null): Long? {
+    suspend fun prepare(id: String, title: String, durationMs: Long, requestedMs: Long? = null, automatic: Boolean = false, fallbackMs: Long? = null, explicitRestart: Boolean = false): PodcastPreparation? {
         val owner = repository.session.cacheScope() ?: return null
+        leave()
         flush(owner, id)
         val local = stateLock.withLock { read(owner, id) }
+        var online = true
         val remote = try { request { repository.api().podcastProgress(id, RequestOwner(owner)) } }
-            catch (error: IOException) { local?.remote ?: EpisodeProgress(id) }
+            catch (error: IOException) { online = false; local?.remote ?: EpisodeProgress(id) }
         ownerValid(owner)
+        mutablePositions.value = mutablePositions.value + (id to remote)
+        val restart = explicitRestart || (requestedMs == null && !automatic && mode.value == "restart")
+        if (remote.completed && !restart) return PodcastPreparation.Completed
         val conflict = local?.conflictsWith(remote) == true
-        val remoteMs = if (remote.completed) 0L else remote.positionSeconds * 1000L
-        var position = requestedMs ?: if (local?.dirty == true && !conflict) local.update.positionSeconds * 1000L
-            else if (remoteMs > 0L || remote.completed) remoteMs
-            else (fallbackMs ?: 0L).coerceAtLeast(0L)
-        if (requestedMs == null && mode.value == "restart") position = 0
+        val remoteMs = remote.positionSeconds * 1000L
+        var position = requestedMs ?: if (online) remoteMs
+            else if (local?.dirty == true && !conflict) local.update.positionSeconds * 1000L
+            else if (remoteMs > 0L) remoteMs else (fallbackMs ?: 0L).coerceAtLeast(0L)
+        var intent = if (restart) "restart" else "resume"
+        if (restart && requestedMs == null) position = 0
+        if (requestedMs == null && !automatic && !restart && mode.value == "ask" && position > 0) {
+            val response = CompletableDeferred<Boolean?>()
+            answer?.complete(null); answer = response
+            mutablePrompt.value = EpisodeProgressPrompt(title, position, position, false)
+            val resume = try { response.await() } finally { if (answer === response) { answer = null; mutablePrompt.value = null } }
+            if (resume == null) return null
+            if (!resume) { position = 0; intent = "restart" }
+        }
         mutableMessage.value = null
-        ownerValid(owner)
         val session = UUID.randomUUID().toString()
         val value = EpisodeCheckpoint(remote, PodcastProgressUpdate(session, device, remote.version, 1,
-            (position / 1000).coerceAtLeast(0), (durationMs / 1000).coerceAtLeast(0), "play"))
-        stateLock.withLock { ownerValid(owner); save(owner, id, value); active = Triple(owner, id, session); activeConflicted = false }
-        flush(owner, id)
+            (position / 1000).coerceAtLeast(0), (durationMs / 1000).coerceAtLeast(0), "play", intent))
+        stateLock.withLock { ownerValid(owner); save(owner, id, value); active = Triple(owner, id, session); activeConflicted = false; mutableConflict.value = false }
+        if (online) flush(owner, id)
         ownerValid(owner)
-        return position
+        return PodcastPreparation.Play(position)
     }
     fun checkpoint(id: String, positionMs: Long, durationMs: Long, event: String, force: Boolean = false) {
         val session = active?.takeIf { it.first == repository.session.cacheScope() && it.second == id } ?: return
@@ -120,11 +189,13 @@ class PodcastProgress @Inject constructor(
                     val value = read(session.first, id)?.takeIf { it.update.sessionId == session.third } ?: return@withLock
                     save(session.first, id, value.checkpoint(positionMs, durationMs, event))
                 }
-                if (force || android.os.SystemClock.elapsedRealtime() - (lastSent["${session.first}:$id"] ?: 0) >= 10_000) flush(session.first, id)
+                if (!activeConflicted && (force || android.os.SystemClock.elapsedRealtime() - (lastSent["${session.first}:$id"] ?: 0) >= 10_000)) flush(session.first, id)
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
         }
     }
+    fun completed() { mutableMessage.value = AppLanguage.string(R.string.podcast_already_completed) }
+    fun syncProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
     fun playbackProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_load_failed_retry) }
     fun retry() { scope.launch { flushAll(throttle = true) } }
     private suspend fun flushAll(throttle: Boolean = false) {
@@ -134,11 +205,16 @@ class PodcastProgress @Inject constructor(
             if (!throttle || android.os.SystemClock.elapsedRealtime() - (lastSent["$owner:${row.episodeId}"] ?: 0) >= 10_000) flush(owner, row.episodeId)
         }
     }
-    private suspend fun flush(owner: String, id: String) {
+    private fun conflictCurrent(error: HttpException): EpisodeProgress? = runCatching {
+        val body = com.google.gson.JsonParser.parseString(error.response()?.errorBody()?.string()).asJsonObject
+        gson.fromJson(body.getAsJsonObject("detail").getAsJsonObject("current"), EpisodeProgress::class.java)
+    }.getOrNull()
+
+    private suspend fun flush(owner: String, id: String, retrySameDevice: Boolean = true) {
         val key = "$owner:$id"
         networkLocks.getOrPut(key) { Mutex() }.withLock {
             ownerValid(owner)
-            val pending = stateLock.withLock { read(owner, id) }?.takeIf { it.dirty } ?: return@withLock
+            val pending = stateLock.withLock { read(owner, id) }?.takeIf { it.dirty && !it.conflict } ?: return@withLock
             lastSent[key] = android.os.SystemClock.elapsedRealtime()
             try {
                 val remote = request { repository.api().updatePodcastProgress(id, pending.update, RequestOwner(owner)) }
@@ -152,42 +228,72 @@ class PodcastProgress @Inject constructor(
             catch (error: HttpException) {
                 if (owner != repository.session.cacheScope()) return@withLock
                 if (error.code() == 409) {
-                    val current = runCatching { request { repository.api().podcastProgress(id, RequestOwner(owner)) } }.getOrNull()
+                    val current = conflictCurrent(error) ?: try { request { repository.api().podcastProgress(id, RequestOwner(owner)) } }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
                     val isActiveSession = active == Triple(owner, id, pending.update.sessionId)
-                    if (current != null && (isActiveSession || (current.deviceId.isNotBlank() && current.deviceId == device))) {
-                        val rebased = stateLock.withLock {
-                            ownerValid(owner)
-                            val latest = read(owner, id)?.takeIf { it.update.sessionId == pending.update.sessionId } ?: return@withLock null
-                            latest.copy(remote = current, update = latest.update.copy(baseVersion = current.version), conflict = false).also { save(owner, id, it) }
-                        }
-                        if (rebased != null) {
-                            runCatching {
-                                val remote = request { repository.api().updatePodcastProgress(id, rebased.update, RequestOwner(owner)) }
-                                stateLock.withLock {
-                                    ownerValid(owner)
-                                    val latest = read(owner, id) ?: return@withLock
-                                    save(owner, id, latest.acknowledged(rebased.update, remote))
-                                    if (latest.update.sessionId == rebased.update.sessionId) mutablePositions.value = mutablePositions.value + (id to remote)
-                                }
-                            }
-                            return@withLock
-                        }
-                    } else if (current != null && !isActiveSession) {
-                        // A background outbox entry was superseded by another device; adopt the newer server state cleanly.
+                    if (current == null) { markConflict(owner, id, pending.update.sessionId); return@withLock }
+                    if (!isActiveSession) {
                         stateLock.withLock {
                             ownerValid(owner)
                             val latest = read(owner, id)?.takeIf { it.update.sessionId == pending.update.sessionId } ?: return@withLock
                             save(owner, id, latest.copy(remote = current, dirty = false, conflict = false))
                             mutablePositions.value = mutablePositions.value + (id to current)
                         }
-                        return@withLock
-                    }
-                    stateLock.withLock {
-                        val latest = read(owner, id)?.takeIf { it.update.sessionId == pending.update.sessionId } ?: return@withLock
-                        save(owner, id, latest.copy(dirty = false, conflict = false))
-                    }
+                    } else if (retrySameDevice && current.deviceId == device) {
+                        val rebased = stateLock.withLock {
+                            val latest = read(owner, id)?.takeIf { it.update.sessionId == pending.update.sessionId } ?: return@withLock null
+                            latest.copy(remote = current, update = latest.update.copy(baseVersion = current.version)).also { save(owner, id, it) }
+                        }
+                        if (rebased != null) {
+                            try {
+                                val remote = request { repository.api().updatePodcastProgress(id, pending.update.copy(baseVersion = current.version), RequestOwner(owner)) }
+                                stateLock.withLock {
+                                    ownerValid(owner)
+                                    val latest = read(owner, id) ?: return@withLock
+                                    save(owner, id, latest.acknowledged(pending.update, remote))
+                                    if (latest.update.sessionId == rebased.update.sessionId) mutablePositions.value = mutablePositions.value + (id to remote)
+                                }
+                            } catch (retryError: CancellationException) { throw retryError }
+                            catch (retryError: HttpException) {
+                                if (retryError.code() == 409) markConflict(owner, id, pending.update.sessionId, conflictCurrent(retryError))
+                            }
+                        }
+                    } else markConflict(owner, id, pending.update.sessionId, current)
                 } else if (error.code() == 422) mutableMessage.value = AppLanguage.string(R.string.pod_prog_server_update_required)
             } catch (_: IOException) { /* Persisted outbox is retried; never turn a retry into a new claim. */ }
         }
     }
+    private suspend fun markConflict(owner: String, id: String, session: String, current: EpisodeProgress? = null) {
+        stateLock.withLock {
+            val latest = read(owner, id)?.takeIf { it.update.sessionId == session } ?: return@withLock
+            save(owner, id, latest.copy(remote = current ?: latest.remote, conflict = true))
+            if (active == Triple(owner, id, session)) { activeConflicted = true; mutableConflict.value = true }
+        }
+    }
+
+    fun useLocalProgress() {
+        val session = active ?: return
+        scope.launch {
+            val current = try { request { repository.api().podcastProgress(session.second, RequestOwner(session.first)) } }
+                catch (error: CancellationException) { throw error }
+                catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network); return@launch }
+            stateLock.withLock {
+                val latest = read(session.first, session.second)?.takeIf { it.update.sessionId == session.third && it.conflict } ?: return@launch
+                val nextSession = UUID.randomUUID().toString()
+                val update = latest.update.copy(sessionId = nextSession, baseVersion = current.version, sequence = 1, intent = "resume")
+                save(session.first, session.second, latest.copy(remote = current, update = update, dirty = true, conflict = false))
+                active = Triple(session.first, session.second, nextSession)
+                activeConflicted = false
+            }
+            flush(session.first, session.second, retrySameDevice = false)
+            val claimed = stateLock.withLock {
+                val current = active ?: return@withLock false
+                read(current.first, current.second)?.remote?.sessionId == current.third
+            }
+            if (claimed && !activeConflicted) mutableConflict.value = false
+            else active?.let { markConflict(it.first, it.second, it.third) }
+        }
+    }
+
 }

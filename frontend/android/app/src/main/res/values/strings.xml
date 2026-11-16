@@ -1589,7 +1589,7 @@
     <string name="pod_player_sleep_timer">Sleep timer</string>
     <string name="pod_player_tab_article">Article</string>
     <string name="pod_player_tab_cover">Cover</string>
-    <string name="pod_prog_conflict_resolution_notice">Another device updated this episode. Local progress is kept. Please choose a resume position next time you play.</string>
+    <string name="pod_prog_conflict_resolution_notice">Another device updated this episode’s progress. This device’s progress is not syncing to the server.</string>
     <string name="pod_prog_load_failed_retry">Couldn\'t read episode progress right now. Please retry.</string>
     <string name="pod_prog_newer_on_other_device">This episode has newer progress on another device</string>
     <string name="pod_prog_not_synced">Episode progress has not been synced yet.</string>
@@ -2140,4 +2140,7 @@
     <string name="podcast_gain_title">Show volume boost</string>
     <string name="podcast_gain_local">Saved on this device for all episodes of this show.</string>
     <string name="podcast_gain_distortion">If the sound distorts, lower the boost.</string>
+    <string name="podcast_use_local_progress">Use this device’s progress</string>
+    <string name="podcast_resume_question">Continue from the saved position?</string>
+    <string name="podcast_already_completed">Already played</string>
 </resources>

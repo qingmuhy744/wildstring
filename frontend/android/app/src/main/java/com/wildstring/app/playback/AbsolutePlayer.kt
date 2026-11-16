@@ -15,6 +15,11 @@ import com.wildstring.app.data.PlaybackRequest
 /** Exposes a whole-song timeline to both the app and lock-screen controllers. */
 internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolver: PlaybackResolver) : ForwardingSimpleBasePlayer(engine) {
     private var refreshing = false
+    var onPlayWhenReadyRequested: ((Boolean) -> Boolean)? = null
+    override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        if (onPlayWhenReadyRequested?.invoke(playWhenReady) == true) return Futures.immediateVoidFuture()
+        return super.handleSetPlayWhenReady(playWhenReady)
+    }
     init {
         engine.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {

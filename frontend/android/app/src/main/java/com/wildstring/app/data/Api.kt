@@ -84,6 +84,8 @@ interface Api {
     @POST("api/v1/podcasts/{id}/refresh") suspend fun refreshPodcast(@Path("id") id: String): PodcastDetail
     @POST("api/v1/podcasts/refresh-all") suspend fun refreshAllPodcasts(): JsonObject
     @DELETE("api/v1/podcasts/{id}") suspend fun deletePodcast(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("api/v1/podcasts/resume-mode") suspend fun podcastResumeMode(@Tag owner: RequestOwner): PodcastResumeMode
+    @PUT("api/v1/podcasts/resume-mode") suspend fun updatePodcastResumeMode(@Body body: PodcastResumeMode, @Tag owner: RequestOwner): PodcastResumeMode
     @GET("api/v1/podcasts/episodes/{id}/progress") suspend fun podcastProgress(@Path("id") id: String, @Tag owner: RequestOwner): EpisodeProgress
     @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate, @Tag owner: RequestOwner): EpisodeProgress
     @GET("api/v1/podcasts/{id}/download-settings") suspend fun podcastDownloadSettings(@Path("id") id: String, @Tag owner: RequestOwner): PodcastDownloadSettings

@@ -78,7 +78,10 @@ class PlaybackService : MediaSessionService() {
     private val gainProcessor = GainAudioProcessor()
     private var gainRequest: Job? = null
     private var podcastStart: Job? = null
+    private var podcastAdvance: Job? = null
     private var preparingPodcast = false
+    private var preparingPodcastEntry: String? = null
+    private var automaticPodcastEntry: String? = null
     private var pendingPodcastAutoplay = false
     private var applyingPodcast = false
     private var progressEntry: String? = null
@@ -107,22 +110,97 @@ class PlaybackService : MediaSessionService() {
         }
         val generation = ++podcastGeneration
         preparingPodcast = true
-        player.pause()
-        val explicit = requestedMs ?: if (consumedPodcastIntents.add(item.mediaId) && extras.containsKey("podcast_requested_position")) extras.getLong("podcast_requested_position") else null
+        preparingPodcastEntry = item.mediaId
+        engine.pause()
+        val explicitIntent = consumedPodcastIntents.add(item.mediaId) && extras.containsKey("podcast_requested_position")
+        val explicit = requestedMs ?: if (explicitIntent) extras.getLong("podcast_requested_position") else null
         val fallback = player.currentPosition.coerceAtLeast(0L).takeIf { it > 0L }
             ?: extras.getLong("podcast_fallback_position", 0L).takeIf { it > 0L }
-        val shouldPlay = pendingPodcastAutoplay
         podcastStart = scope.launch {
+            var completed = false
+            var completedAutoplay = false
             try {
-                val position = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic, fallback) ?: return@launch
+                val automaticNext = podcastProgress.consumeAutomaticNext()
+                val preparation = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic || automaticNext, fallback, explicitRestart = explicitIntent && explicit == 0L) ?: return@launch
                 if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
-                applyingPodcast = true
-                player.seekTo(position)
-                progressEntry = item.mediaId
-                if (shouldPlay) player.play()
+                if (preparation == PodcastPreparation.Completed) {
+                    completed = true
+                    completedAutoplay = pendingPodcastAutoplay
+                } else {
+                    applyingPodcast = true
+                    player.seekTo((preparation as PodcastPreparation.Play).positionMs)
+                    progressEntry = item.mediaId
+                    if (pendingPodcastAutoplay) player.play()
+                }
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { podcastProgress.playbackProblem() }
-            finally { if (generation == podcastGeneration) { applyingPodcast = false; preparingPodcast = false; pendingPodcastAutoplay = false } }
+            finally { if (generation == podcastGeneration) { applyingPodcast = false; preparingPodcast = false; preparingPodcastEntry = null; pendingPodcastAutoplay = false } }
+            if (completed) {
+                if (completedAutoplay) advancePodcast(completedRead = true) else podcastProgress.completed()
+            }
+        }
+    }
+
+    /** The service owns episode boundaries even when there is no Activity or ViewModel. */
+    private fun advancePodcast(completedRead: Boolean) {
+        if (podcastAdvance?.isActive == true) return
+        val item = player.currentMediaItem ?: return
+        val extras = item.mediaMetadata.extras ?: return
+        val id = podcastEpisodeId(extras.getString("track_id")) ?: return
+        val owner = repository.session.cacheScope() ?: return
+        if (extras.getString("profile") != owner) return
+        engine.pause()
+        if (sleep.state.value.entryId == item.mediaId || sleep.state.value.expired(SystemClock.elapsedRealtime())) {
+            sleep.cancel()
+            return
+        }
+        podcastAdvance = scope.launch {
+            try {
+                if (!completedRead) {
+                    try {
+                        val queue = repository.podcastQueue()
+                        if (queue.items.any { it.episodeId == id }) {
+                            repository.replacePodcastQueue(queue.version, podcastProgress.deviceId(), podcastQueueRemoveEpisode(queue.items, id))
+                            podcastProgress.queueChanged()
+                        }
+                    } catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { podcastProgress.syncProblem() }
+                }
+                if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
+                if (extras.getBoolean("podcast_queue_context")) {
+                    if (player.hasNextMediaItem()) {
+                        automaticPodcastEntry = player.getMediaItemAt(player.nextMediaItemIndex).mediaId
+                        player.seekToNextMediaItem()
+                    } else if (completedRead) podcastProgress.completed()
+                    return@launch
+                }
+                val episode = repository.cachedPodcastEpisode(id) ?: repository.podcastEpisode(id)
+                val detail = repository.cachedPodcastDetail(episode.podcastId) ?: repository.podcastDetail(episode.podcastId)
+                val preferences = try { repository.podcastQueuePreferences() }
+                    catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { null }
+                val preference = podcastContinuePreferenceFor(preferences, episode.podcastId, settings.podcastContinuePreference())
+                val next = if (completedRead) podcastManualNeighbor(episode, detail, preference, 1, podcastProgress.positions.value)
+                    else nextEpisode(episode, detail, podcastProgress.positions.value, preference)
+                if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
+                if (next == null) {
+                    if (completedRead) podcastProgress.completed()
+                    return@launch
+                }
+                val index = (0 until player.mediaItemCount).firstOrNull {
+                    podcastEpisodeId(player.getMediaItemAt(it).mediaMetadata.extras?.getString("track_id")) == next.id
+                }
+                if (index != null) {
+                    automaticPodcastEntry = player.getMediaItemAt(index).mediaId
+                    player.seekTo(index, 0)
+                } else {
+                    val target = repository.rememberPodcastEpisode(next, detail.podcast).mediaItem(repository)
+                    automaticPodcastEntry = target.mediaId
+                    player.setMediaItem(target)
+                    player.prepare()
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { podcastProgress.playbackProblem() }
         }
     }
 
@@ -165,6 +243,7 @@ class PlaybackService : MediaSessionService() {
     private var restoring = true
     private var lastSavedQueue: List<QueueEntry>? = null
     private var queueEntries: List<QueueEntry> = emptyList()
+    private val playbackContextPrefs by lazy { getSharedPreferences("playback-context", MODE_PRIVATE) }
 
     override fun onCreate() {
         super.onCreate()
@@ -186,6 +265,19 @@ class PlaybackService : MediaSessionService() {
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
         player = AbsolutePlayer(engine, resolver)
+        player.onPlayWhenReadyRequested = { playWhenReady ->
+            val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
+            if (podcast && !applyingPodcast) {
+                if (playWhenReady) {
+                    if (restoring) pendingPodcastAutoplay = true else preparePodcast()
+                    true
+                } else {
+                    pendingPodcastAutoplay = false
+                    automaticPodcastEntry = null
+                    false
+                }
+            } else false
+        }
         engine.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) { health.audioUnderruns.incrementAndGet() }
         })
@@ -239,6 +331,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                engine.setPauseAtEndOfMediaItems(podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) != null)
                 gainProcessor.factor = 1f; refreshGain()
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
                 if (reason in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) completeFeedback()
@@ -249,7 +342,13 @@ class PlaybackService : MediaSessionService() {
                     reason !in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
                     sleep.cancel()
                 }
-                podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; pendingPodcastAutoplay = false; applyingPodcast = false; progressEntry = null
+                val automatic = automaticPodcastEntry == mediaItem?.mediaId
+                if (automatic) automaticPodcastEntry = null
+                if (!preparingPodcast || preparingPodcastEntry != mediaItem?.mediaId) {
+                    podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; preparingPodcastEntry = null
+                    if (!restoring) pendingPodcastAutoplay = false
+                    applyingPodcast = false; progressEntry = null
+                }
                 if (podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) == null) podcastProgress.leave()
                 listeningEntry = mediaItem?.mediaId
                 report()
@@ -258,13 +357,14 @@ class PlaybackService : MediaSessionService() {
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
-                if (player.playWhenReady) preparePodcast(automatic = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+                if (automatic || player.playWhenReady) preparePodcast(automatic = automatic || reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, false)
                     checkpointPodcast("ended", true)
                     completeFeedback(); report()
+                    advancePodcast(completedRead = false)
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -273,14 +373,13 @@ class PlaybackService : MediaSessionService() {
                 report(); persist(force = !isPlaying)
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (playWhenReady && preparingPodcast && !applyingPodcast) { player.pause(); return }
-                val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
-                if (playWhenReady && podcast && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
-                    if (progressEntry != player.currentMediaItem?.mediaId) {
-                        preparePodcast()
-                    }
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    checkpointPodcast("ended", true)
+                    advancePodcast(completedRead = false)
+                    return
                 }
-                else if (playWhenReady && !podcast) sharing.localPlaybackStarted()
+                val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
+                if (playWhenReady && !podcast) sharing.localPlaybackStarted()
                 else if (!playWhenReady) { checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true); persist(force = true) }
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
@@ -368,11 +467,17 @@ class PlaybackService : MediaSessionService() {
                 report(); persist()
             }
         }
-        scope.launch { try { restore() } finally { restoring = false; persist() } }
+        scope.launch { try { restore() } finally {
+            restoring = false
+            val requested = pendingPodcastAutoplay
+            pendingPodcastAutoplay = false
+            if (requested) preparePodcast()
+            persist()
+        } }
     }
 
     private fun discardPlaybackOwner() {
-        podcastGeneration++; podcastStart?.cancel(); podcastProgress.leave(); progressEntry = null
+        podcastGeneration++; podcastStart?.cancel(); podcastAdvance?.cancel(); podcastProgress.leave(); progressEntry = null
         gainRequest?.cancel(); gainProcessor.factor = 1f
         listeningOwner = null; queueOwner = null; listeningTrack = null; listeningEntry = null
         queueEntries = emptyList(); clock = ListeningClock(); sentMs = 0
@@ -411,6 +516,7 @@ class PlaybackService : MediaSessionService() {
         val endpoint = repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url ?: return
         val profile = queueOwner ?: return
         if (profile != repository.session.cacheScope()) return
+        val storageOwner = repository.session.withStorageScope(profile) { it } ?: return
         val entries = queueEntries
         val shared = SharedPlayback(trackIds = entries.map { it.trackId }, index = player.currentMediaItemIndex.coerceAtLeast(0),
             positionMs = player.currentPosition.coerceAtLeast(0), playbackState = if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.playWhenReady) "playing" else "paused", mode = if (player.shuffleModeEnabled) "shuffle" else when (player.repeatMode) {
@@ -422,12 +528,16 @@ class PlaybackService : MediaSessionService() {
             catch (_: Exception) { /* Sharing failure never interrupts the local queue. */ }
         }
         val position = SavedPosition(endpoint = endpoint, entryId = player.currentMediaItem?.mediaId, positionMs = player.currentPosition.coerceAtLeast(0))
+        val podcastQueueEntries = (0 until player.mediaItemCount).mapNotNull { index ->
+            player.getMediaItemAt(index).takeIf { it.mediaMetadata.extras?.getBoolean("podcast_queue_context") == true }?.mediaId
+        }.toSet()
         scope.launch { saveMutex.withLock {
             if (profile != repository.session.cacheScope() || endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url) return@withLock
             withContext(Dispatchers.IO) {
                 if (lastSavedQueue == entries) repository.database.queue().insertPosition(position)
                 else repository.database.queue().save(entries, position)
             }
+            playbackContextPrefs.edit().putStringSet(storageOwner, podcastQueueEntries).apply()
             lastSavedQueue = entries
         } }
     }
@@ -435,17 +545,23 @@ class PlaybackService : MediaSessionService() {
     private suspend fun restore() {
         try {
             val profile = repository.session.cacheScope() ?: return
+            val storageOwner = repository.session.withStorageScope(profile) { it } ?: return
             val dao = repository.database.queue()
             val (saved, entries) = withContext(Dispatchers.IO) { dao.position() to dao.entries() }
             if (saved == null || saved.endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url || entries.isEmpty()) return
             val offline = try { if (!repository.api().status().authenticated) return; false }
             catch (error: IOException) { if (error is javax.net.ssl.SSLException || repository.session.cacheScope() != profile) return; true }
             val items = mutableListOf<MediaItem>()
+            val podcastQueueEntries = playbackContextPrefs.getStringSet(storageOwner, emptySet()).orEmpty()
             for (entry in entries.take(5000)) {
                 if (player.mediaItemCount != 0) { return }
                 try {
                     val track = (if (offline) repository.cachedTrack(entry.trackId) else repository.track(entry.trackId)) ?: continue
-                    if (track.status == "available") items += track.mediaItem(repository, entry.entryId)
+                    if (track.status == "available") {
+                        val item = track.mediaItem(repository, entry.entryId)
+                        val extras = Bundle(item.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", entry.entryId in podcastQueueEntries) }
+                        items += item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+                    }
                 } catch (error: retrofit2.HttpException) {
                     if (error.code() != 404 && error.code() != 409) throw error
                 }
