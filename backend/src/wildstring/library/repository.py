@@ -9,7 +9,7 @@ from uuid import uuid4
 from wildstring.database import Database
 from wildstring.library.albums import album_key
 from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure_artist_queries
-from wildstring.library.browsing import BROWSE_KEYS, BrowseKind, configure_browse_queries
+from wildstring.library.browsing import BROWSE_KEYS, BrowseKind
 from wildstring.library.edits import observe
 from wildstring.library.metadata import Metadata, normalize
 from wildstring.library.scope import current_library
@@ -31,9 +31,9 @@ ALBUM_SELECTION = """SELECT album_id AS id,
     count(*) AS track_count, sum(duration_ms) AS duration_ms,
     min(added_at) AS added_at,
     min(NULLIF(json_extract(extra, '$.release_date'), '')) AS release_date,
-    COALESCE(min(CASE WHEN album_artists != '[]'
-        THEN browse_sort(json_extract(album_artists, '$[0]')) END),
-        min(browse_sort(COALESCE(json_extract(artists, '$[0]'), '')))) AS sort_artist
+    min(album_sort) AS album_sort, min(album_group) AS album_group,
+    COALESCE(min(CASE WHEN album_artists != '[]' THEN album_artist_sort END),
+        min(track_artist_sort)) AS sort_artist
     FROM tracks
     WHERE library_selected(library_id, :library_id) AND track_available(status)
     AND (:artist_id IS NULL OR id IN
@@ -253,8 +253,8 @@ class LibraryRepository:
         from wildstring.library.tag_fields import DETAIL_DEFAULTS
 
         result.update(DETAIL_DEFAULTS | json.loads(result.pop("extra", "{}")))
-        for key in ("seen_run", "search_text", "mtime_ns"):
-            result.pop(key)
+        for key in ("seen_run", "search_text", "mtime_ns", "title_sort", "title_group"):
+            result.pop(key, None)
         for key in ("artists", "album_artists"):
             result[key] = json.loads(result[key])
         result["has_cover"] = bool(result["has_cover"])
@@ -290,7 +290,6 @@ class LibraryRepository:
         }
         with self.database.connect() as connection:
             configure_artist_queries(connection, role, include_unavailable=include_unavailable)
-            configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", TRACK_SELECTION, ")")),
                 parameters,
@@ -351,7 +350,8 @@ class LibraryRepository:
 
     def _album(self, connection, row) -> dict:
         result = dict(row)
-        result.pop("sort_artist", None)
+        for key in ("sort_artist", "album_sort", "album_group"):
+            result.pop(key, None)
         members = connection.execute(
             """SELECT id, artists, album_artists,library_id FROM tracks
             WHERE library_visible(library_id) AND album_id = ? AND track_available(status)
@@ -396,7 +396,6 @@ class LibraryRepository:
         }
         with self.database.connect() as connection:
             configure_artist_queries(connection, role, include_unavailable=include_unavailable)
-            configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", ALBUM_SELECTION, ")")),
                 parameters,
@@ -434,7 +433,6 @@ class LibraryRepository:
         }
         with self.database.connect() as connection:
             configure_artist_queries(connection, role, include_unavailable=include_unavailable)
-            configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", ARTIST_SELECTION, ")")),
                 parameters,
@@ -445,13 +443,19 @@ class LibraryRepository:
                         ARTIST_CREDITS,
                         "SELECT * FROM (",
                         ARTIST_SELECTION,
-                        ") ORDER BY browse_sort(name), id LIMIT :limit OFFSET :offset",
+                        ") ORDER BY name_sort, id LIMIT :limit OFFSET :offset",
                     )
                 ),
                 parameters,
             ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item.pop("name_sort", None)
+            item.pop("name_group", None)
+            items.append(item)
         return {
-            "items": [dict(row) for row in rows],
+            "items": items,
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -480,10 +484,13 @@ class LibraryRepository:
             "albums": ALBUM_SELECTION,
             "artists": ARTIST_SELECTION,
         }[kind]
-        group_expression = "browse_group(name)" if kind == "artists" else "browse_group(title)"
+        group_expression = {
+            "artists": "name_group",
+            "albums": "album_group",
+            "tracks": "title_group",
+        }[kind]
         with self.database.connect() as connection:
             configure_artist_queries(connection, role, include_unavailable=include_unavailable)
-            configure_browse_queries(connection)
             rows = connection.execute(
                 "".join(
                     (
@@ -520,7 +527,12 @@ class LibraryRepository:
                 ),
                 {"library_id": self.library_id(), "artist_id": artist_id},
             ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        result = dict(row)
+        result.pop("name_sort", None)
+        result.pop("name_group", None)
+        return result
 
     def album(self, album_id: str, *, include_unavailable: bool = False) -> dict | None:
         with self.database.connect() as connection:

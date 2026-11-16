@@ -7,17 +7,19 @@ import sqlite3
 from wildstring.library.metadata import normalize
 
 ARTIST_CREDITS = """WITH artist_credits AS (
-    SELECT DISTINCT t.id AS track_id, p.id AS artist_id, p.name
+    SELECT DISTINCT t.id AS track_id, p.id AS artist_id, p.name, p.name_sort, p.name_group
     FROM track_credits c JOIN tracks t ON t.id=c.track_id JOIN people p ON p.id=c.person_id
     WHERE library_selected(t.library_id, :library_id) AND track_available(t.status)
     AND (credit_role() IS NULL OR c.role=credit_role())
 )
 """
 ARTIST_SUMMARY = """SELECT c.artist_id AS id, min(c.name) AS name,
+    min(c.name_sort) AS name_sort, min(c.name_group) AS name_group,
     count(DISTINCT t.id) AS track_count, count(DISTINCT t.album_id) AS album_count,
     sum(t.duration_ms) AS duration_ms,
     COALESCE(min(CASE WHEN t.has_cover THEN t.id END), min(t.id)) AS cover_track_id
-    FROM (SELECT artist_id, track_id, min(name) AS name FROM artist_credits
+    FROM (SELECT artist_id, track_id, min(name) AS name, min(name_sort) AS name_sort,
+          min(name_group) AS name_group FROM artist_credits
           GROUP BY artist_id, track_id) c JOIN tracks t ON t.id = c.track_id
 """
 

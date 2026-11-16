@@ -49,7 +49,7 @@ def favorites_setup(settings, authenticated_client):
             listener.close()
 
 
-def test_schema_version_and_cascade(settings):
+def test_favorites_schema_and_cascade(settings):
     db = Database(settings.data_dir)
     db.initialize()
     with db.connect() as conn:

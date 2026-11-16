@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS podcast_resume_prefs (
     resume_mode TEXT NOT NULL CHECK(resume_mode IN ('auto', 'ask', 'restart')),
     updated_at TEXT NOT NULL
 );
-PRAGMA user_version=53;
+PRAGMA user_version=54;
 COMMIT;
 """
 

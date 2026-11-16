@@ -141,7 +141,9 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
     /** Read-only one-off probe for one route; never mutates selection, sessions or profile. */
     sealed interface RouteProbe {
         data class Connected(val latencyMs: Int) : RouteProbe
-        data object SessionExpired : RouteProbe
+        // A data object generates equals() that checkcasts and discards the value.
+        // CodeQL reports that temporary as an unread local (alert 218).
+        object SessionExpired : RouteProbe
         data class Unreachable(val detail: String?) : RouteProbe
     }
 

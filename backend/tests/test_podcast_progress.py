@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.podcast_progress import ProgressWrite, save_progress
 
 HEADERS = {"X-Wildstring-Client": "web"}
@@ -469,14 +469,20 @@ def test_resume_mode_defaults_validation_and_account_isolation(episode_client):
     assert client.get(url).json() == {"resume_mode": "restart"}
 
 
-def test_resume_preference_schema52_upgrade_preserves_bookmarks(episode_client, settings):
+def test_resume_preference_schema53_upgrade_preserves_bookmarks(episode_client, settings):
     client, episode, _ = episode_client
     saved = write(client, episode, position_seconds=600).json()
     database = Database(settings.data_dir)
     with database.connect(write=True) as connection:
         connection.execute("DROP TABLE podcast_resume_prefs")
-        connection.execute("PRAGMA user_version=52")
+        connection.execute("PRAGMA user_version=53")
     database.initialize()
+    with database.connect() as connection:
+        # A database already at 53 (pinyin browse keys) must still gain the resume table.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 54
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='podcast_resume_prefs'"
+        ).fetchone()
     assert read(client, episode) == saved
     assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "auto"}
     # Re-initialization must preserve a changed preference.

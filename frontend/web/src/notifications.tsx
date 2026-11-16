@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from './api';
 import type { AgentNotification, NotificationAction, NotificationPage } from './agent-api';
@@ -40,10 +41,7 @@ function localizeNotificationTitle(t: (key: string) => string, title: string): s
   return notificationTitleKeys[title] ? t(notificationTitleKeys[title]) : title;
 }
 
-function localizeNotificationSummary(
-  t: (key: string, options?: Record<string, unknown>) => string,
-  summary: string,
-): string {
+function localizeNotificationSummary(t: TFunction, summary: string): string {
   if (notificationSummaryKeys[summary]) return t(notificationSummaryKeys[summary]);
   const insp = summary.match(/^已检查 (\d+) 首，发现 (\d+) 项，失败 (\d+) 首。(?: 错误：(.+))?$/);
   if (insp) {
