@@ -12,6 +12,24 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.library.repository import now
 from wildstring.podcast_access import admit, require_episode
 
+# Five percent of the episode, never less than 30 seconds and never more than
+# 2 minutes. Stopping inside this tail counts as listened. A shorter episode
+# still finishes only on a real end event.
+_TAIL_FLOOR_SECONDS = 30
+_TAIL_CAP_SECONDS = 120
+
+
+def completion_tail_seconds(duration: int) -> int:
+    if duration <= 0:
+        return 0
+    return max(_TAIL_FLOOR_SECONDS, min(_TAIL_CAP_SECONDS, duration * 5 // 100))
+
+
+def stopped_in_completion_tail(position: int, duration: int) -> bool:
+    tail = completion_tail_seconds(duration)
+    return bool(tail) and duration > tail and duration - position <= tail
+
+
 SCHEMA = """
 BEGIN IMMEDIATE;
 ALTER TABLE podcast_progress ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
@@ -81,7 +99,11 @@ def save_progress(manager, user_id, episode_id, body: ProgressWrite):
         # Position is intentionally not monotonic: a newer seek can rewind.
         duration = body.duration_seconds or current.duration_seconds
         position = min(body.position_seconds, duration) if duration else body.position_seconds
-        completed = body.event == "ended" and (not duration or position >= duration - 2)
+        finished_at_end = body.event == "ended" and (not duration or position >= duration - 2)
+        finished_in_tail = body.event in ("pause", "stop", "ended") and stopped_in_completion_tail(
+            position, duration
+        )
+        completed = finished_at_end or finished_in_tail
         if same_session and current.completed and body.event in ("pause", "stop", "progress"):
             completed = completed or position == current.position_seconds
         connection.execute(
