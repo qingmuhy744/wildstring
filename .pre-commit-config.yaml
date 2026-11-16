@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: local
     hooks:
@@ -90,3 +92,8 @@ repos:
         language: system
         files: ^(frontend/web/src/.*\.(tsx?|json)|frontend/web/tests/.*\.spec\.ts|scripts/test_affected\.py)$
         pass_filenames: false
+      - id: no-co-authored-by
+        name: no Co-Authored-By trailer
+        entry: python3 scripts/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
