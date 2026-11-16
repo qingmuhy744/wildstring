@@ -58,6 +58,11 @@ from wildstring.podcast_publishers import (
     publisher_fields,
 )
 from wildstring.podcast_resources import PodcastResources
+from wildstring.podcast_resume import (
+    ResumePreference,
+    get_resume_preference,
+    save_resume_preference,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2989,6 +2994,21 @@ def podcast_router(
         user: Annotated[dict, Depends(auth.require_session)],
     ):
         return manager.auto_downloads.configure(user["id"], podcast_id, payload)
+
+    @router.get("/resume-mode", response_model=ResumePreference)
+    def read_resume_mode(user: Annotated[dict, Depends(auth.require_session)]):
+        return get_resume_preference(manager.database, user["id"])
+
+    @router.put(
+        "/resume-mode",
+        response_model=ResumePreference,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def update_resume_mode(
+        payload: ResumePreference,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return save_resume_preference(manager.database, user["id"], payload)
 
     @router.get("/{podcast_id}", response_model=PodcastDetailResponse)
     def get_podcast(

@@ -430,3 +430,56 @@ def test_intent_does_not_bypass_version_or_sequence(episode_client):
     assert current == completed
     assert current["device_id"] == "A"
     assert current["updated_at"]
+
+
+def test_resume_mode_defaults_validation_and_account_isolation(episode_client):
+    client, _, _ = episode_client
+    url = "/api/v1/podcasts/resume-mode"
+    assert client.get(url).json() == {"resume_mode": "auto"}
+    for mode in ("ask", "restart", "auto", "ask"):
+        result = client.put(url, headers=HEADERS, json={"resume_mode": mode})
+        assert result.status_code == 200, result.text
+        assert client.get(url).json() == {"resume_mode": mode}
+    for body in ({"resume_mode": "invalid"}, {}, {"resume_mode": "auto", "initialize": True}):
+        assert client.put(url, headers=HEADERS, json=body).status_code == 422
+    assert client.get(url).json() == {"resume_mode": "ask"}
+    created = client.post(
+        "/api/v1/manage/users",
+        headers=HEADERS,
+        json={
+            "username": "resume-listener",
+            "password": "test-listener-password-123",
+            "profile": "listener",
+        },
+    )
+    assert created.status_code == 201
+    client.post("/api/v1/auth/logout", headers=HEADERS)
+    assert client.get(url).status_code == 401
+    assert client.put(url, headers=HEADERS, json={"resume_mode": "restart"}).status_code == 401
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            headers=HEADERS,
+            json={"username": "resume-listener", "password": "test-listener-password-123"},
+        ).status_code
+        == 200
+    )
+    assert client.get(url).json() == {"resume_mode": "auto"}
+    assert client.put(url, headers=HEADERS, json={"resume_mode": "restart"}).status_code == 200
+    assert client.get(url).json() == {"resume_mode": "restart"}
+
+
+def test_resume_preference_schema52_upgrade_preserves_bookmarks(episode_client, settings):
+    client, episode, _ = episode_client
+    saved = write(client, episode, position_seconds=600).json()
+    database = Database(settings.data_dir)
+    with database.connect(write=True) as connection:
+        connection.execute("DROP TABLE podcast_resume_prefs")
+        connection.execute("PRAGMA user_version=52")
+    database.initialize()
+    assert read(client, episode) == saved
+    assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "auto"}
+    # Re-initialization must preserve a changed preference.
+    client.put("/api/v1/podcasts/resume-mode", headers=HEADERS, json={"resume_mode": "ask"})
+    database.initialize()
+    assert client.get("/api/v1/podcasts/resume-mode").json() == {"resume_mode": "ask"}

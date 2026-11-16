@@ -59,6 +59,15 @@
 }
 ```
 
+## 账号级续听模式
+
+需要登录，按认证账号隔离，不接收其他用户 ID。
+
+- `GET /api/v1/podcasts/resume-mode` 返回 `{"resume_mode":"auto"}`，无记录时默认 `auto`，读取不会创建记录。
+- `PUT /api/v1/podcasts/resume-mode` 接收并返回 `{"resume_mode":"ask"}`，合法值仅 `auto` / `ask` / `restart`，未知字段或非法值返回 422。沿用现有写请求的客户端／CSRF 校验。
+- schema 53 新增 `podcast_resume_prefs`，保存账号、模式与更新时间；不自动导入旧客户端的本机设置。
+- 客户端接入目标：登录、回前台、进入设置页时拉取；开播使用缓存，修改成功后才更新缓存，离线使用上次缓存。四端接入与冲突提示的实施状态见[执行方案](../docs/plans/podcast-cross-device-resume.md)，服务端端点存在不代表客户端已完成账号同步。
+
 ## 顺序与冲突
 
 1. 同一用户、同一集：新会话必须匹配 `base_version`，接受后替换当前会话并增加版本；同时争用时只有一个成功。
