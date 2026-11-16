@@ -1473,6 +1473,16 @@ public final class PlaybackService {
         snapshot.completed == true
     }
 
+    /// Mirrors the server tail rule so a write that legitimately finished the episode is not mistaken
+    /// for another device having already completed it.
+    static func writeCompletesEpisode(_ write: PodcastProgressWrite) -> Bool {
+        if write.event == "ended" { return true }
+        guard write.event == "pause" || write.event == "stop" else { return false }
+        let duration = write.durationSeconds
+        let tail = min(120, max(30, Int(Double(duration) * 0.05)))
+        return duration > tail && duration - write.positionSeconds <= tail
+    }
+
     func waitForPodcastTasks() async {
         var turn: Int
         repeat {
@@ -1701,7 +1711,8 @@ public final class PlaybackService {
                 }
                 return
             }
-            if result == .completed, self.podcastStartedOffline, write.intent == "resume", event != "ended" {
+            if result == .completed, self.podcastStartedOffline, write.intent == "resume",
+               !Self.writeCompletesEpisode(write) {
                 self.podcast.block()
                 self.podcastKnownCompleted = true
                 self.saveStoredPodcast(position: self.currentTime, completed: true)

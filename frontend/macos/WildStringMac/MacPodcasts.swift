@@ -759,7 +759,7 @@ struct MacPodcastsView: View {
     private func toggleEpisodeCompleted(_ episode: PodcastEpisode) async {
         let target = !isCompleted(episode)
         do {
-            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target, deviceID: playback.podcastDeviceID)
             await open(episode.podcastId, showSpinner: false)
         } catch {
             detailMessage = L10n("macPodcasts.markCompletedFailed", MacErrorText.message(for: error))

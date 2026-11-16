@@ -304,7 +304,9 @@ extension WildstringClient {
         return try JSONDecoder().decode(PodcastProgressSnapshot.self, from: data)
     }
 
-    public func markPodcastEpisodeCompleted(episodeID: String, duration: Int = 0, completed: Bool) async throws {
+    /// `deviceID` must be the same id the playback service writes with, so marking the episode the
+    /// player is holding does not look like another device's update on the next heartbeat.
+    public func markPodcastEpisodeCompleted(episodeID: String, duration: Int = 0, completed: Bool, deviceID: String) async throws {
         let current = try? await podcastProgress(episodeId: episodeID)
         let baseVersion = current?.version ?? 0
         let effectiveDuration = max(1, duration > 0 ? duration : (current?.durationSeconds ?? 1))
@@ -313,7 +315,7 @@ extension WildstringClient {
         let session = "manual-" + UUID().uuidString
         let write = PodcastProgressWrite(
             sessionId: session,
-            deviceId: "wildstring-client",
+            deviceId: deviceID,
             baseVersion: baseVersion,
             sequence: 1,
             positionSeconds: position,

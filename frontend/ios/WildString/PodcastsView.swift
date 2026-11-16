@@ -358,7 +358,7 @@ private struct PodcastDetailView: View {
     private func toggleCompleted(_ episode: PodcastEpisode) async {
         let target = !isCompleted(episode)
         do {
-            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target, deviceID: playback.podcastDeviceID)
             await load()
         } catch {
             message = L10n("podcasts.markCompletedFailed", ErrorText.message(for: error))
