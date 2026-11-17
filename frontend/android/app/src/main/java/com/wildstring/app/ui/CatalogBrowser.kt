@@ -99,7 +99,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
         val gutter = alphabetGutter(indexed)
         // One grid and one absolute item index in every mode retain the viewport on resize.
         LazyVerticalGrid(
-            columns = when { albumGrid -> GridCells.Adaptive(140.dp); cardGrid -> GridCells.Adaptive(260.dp); else -> GridCells.Fixed(1) },
+            columns = when { albumGrid -> if (pad) GridCells.Adaptive(140.dp) else GridCells.Fixed(2); cardGrid -> GridCells.Adaptive(260.dp); else -> GridCells.Fixed(1) },
             state = grid,
             // Same 1180dp reading width as the Web shell, so ultra-wide windows do not stretch rows apart.
             modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(end = gutter).testTag(if (albumGrid) "album-grid" else "catalog-list"),
@@ -132,7 +132,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
                         onLongClickLabel = stringResource(R.string.album_actions),
                         onLongClick = { playlistFeedback(TactileKind.DragStart); albumActions(album) },
                     )) {
-                        Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
+                        Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f).testTag("album-cover-$index"))
                         Text(album.title, Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(album.artists.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

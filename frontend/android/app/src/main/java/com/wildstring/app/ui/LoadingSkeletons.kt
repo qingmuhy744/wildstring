@@ -3,6 +3,9 @@ package com.wildstring.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -25,6 +28,26 @@ internal fun SkeletonLine(modifier: Modifier = Modifier, widthFraction: Float = 
 
 @Composable
 internal fun CatalogSkeleton(kind: String, modifier: Modifier = Modifier) {
+    if (kind == "albums") {
+        Surface(modifier.widthIn(max = 1180.dp).fillMaxSize().testTag("catalog-skeleton"), color = MaterialTheme.colorScheme.background) {
+            LazyVerticalGrid(columns = if (LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad) GridCells.Adaptive(140.dp) else GridCells.Fixed(2),
+                contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                        SkeletonLine(Modifier.width(100.dp))
+                    }
+                }
+                items(6) { index ->
+                    Column(Modifier.testTag("album-skeleton-$index"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(1f))
+                        SkeletonLine(widthFraction = .72f)
+                        SkeletonLine(widthFraction = .45f)
+                    }
+                }
+            }
+        }
+        return
+    }
     Surface(modifier.fillMaxSize().testTag("catalog-skeleton"), color = MaterialTheme.colorScheme.background) {
         LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -32,12 +55,11 @@ internal fun CatalogSkeleton(kind: String, modifier: Modifier = Modifier) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SkeletonLine(Modifier.width(150.dp), .55f)
                     SkeletonLine(Modifier.width(230.dp), .78f)
-                    if (kind == "albums") SkeletonLine(Modifier.width(100.dp), .35f)
                 }
             }
             items(7) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 68.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SkeletonBlock(Modifier.size(if (kind == "albums") 84.dp else 52.dp))
+                    SkeletonBlock(Modifier.size(52.dp))
                     Column(Modifier.weight(1f).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         SkeletonLine(widthFraction = .72f)
                         SkeletonLine(widthFraction = .45f)

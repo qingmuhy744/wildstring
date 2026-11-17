@@ -1,4 +1,4 @@
-状态：已确认
+状态：已实施
 
 # Android 曲库浏览减噪
 
@@ -24,3 +24,12 @@ L2：`make check`、`make test-affected`、`make android-test`，实际设备渲
 ## 风险与回滚
 
 修改前检查相关测试与计数文案引用，保留搜索反馈。网格变化不得替换已有滚动状态或服务器绝对索引。没有新增动画；字母栏现有效果由已有设备测试验证。设计规范与实现分别提交，必要时一起撤销。
+
+## 实施与验证记录
+
+- 手机专辑固定两列，平板保持自适应；加载占位改用对应的正方形封面网格。默认专辑／艺人总数隐藏，搜索成功后保留数量，错误时不显示误导的零结果。歌曲行菜单和专辑排序使用现有次级文字色。
+- 已反查全部共享调用：TrackRow 由 CatalogBrowser 的歌曲／最近播放／收藏／歌单／专辑详情等目录共用；排序覆盖专辑目录与歌曲工具栏；非专辑骨架仍用于目录及歌单工具。ContinuousCatalogTest 与 NativePlaybackTest 覆盖相关导航和播放路径，未改变业务规则。
+- `make check`、`make test-affected`、`make android-test` 与 `make android-check` 通过。此改动未命中后端／Web 受影响测试，Android JVM 共 171 项通过，设备源码编译通过。
+- 5 个设备类共 29 项通过：CatalogBrowseLayoutTest（2）、CatalogInputGestureTest（4）、CatalogToolbarLayoutTest（7）、ContinuousCatalogTest（10）、NativePlaybackTest（6）。验证了网格列数／封面比例、48dp 操作区、索引间距与淡化、排序、角色筛选、搜索数量、菜单加队列、真实音频播放、切页与返回。
+- Android 15 模拟器使用隔离合成曲库，实际渲染 390×844 手机和 1200×800 平板布局，浅深主题下的歌曲／专辑／艺人正常态及专辑加载／空／500 错误／403 权限态共 28 张截图，已逐张查看并确认无菜单遮挡、非预期换行或溢出。原始证据位于 `artifacts/android-instrumented/iteration-1/attempt-1/screenshots/CatalogBrowseLayoutTest/`；窗口测试结束后恢复物理尺寸和密度，保留硬件键盘输入。
+- 远程 Actions 在 PR 中记录；未执行完整设备套件、真实曲库／真机 UAT、其他平台视觉验收或发版。没有新增或修改动画，字母栏淡化由既有设备测试验证。
