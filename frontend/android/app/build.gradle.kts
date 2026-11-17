@@ -32,6 +32,9 @@ android {
         keyAlias = signingValues[2]
         keyPassword = signingValues[3]
     }
+    providers.environmentVariable("ANDROID_DEV_KEYSTORE_PATH").orNull?.let { path ->
+        signingConfigs.getByName("debug").storeFile = file(path)
+    }
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"

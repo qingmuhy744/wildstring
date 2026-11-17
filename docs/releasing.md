@@ -4,11 +4,15 @@
 
 `.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：锁定依赖、hooks、Python/Web 测试、Web 构建与锁文件检查。容器任务执行 `make docker-up docker-smoke docker-test`，检查 API、Web、FFmpeg、非 root、只读音乐及后端测试，最后停止容器并保留数据卷。
 
-`.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用临时签名，可与正式版共存；正式安装包从 Releases 下载。
+`.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用独立固定签名，可与正式版共存，同签名 Dev 包之间可覆盖安装；正式安装包从 Releases 下载。Fork / Dependabot 的无密钥构建继续检查，但不上传可安装的 Dev 附件。
 
 完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。发版前手动运行 **Android APK**，选择待发布提交所在分支并勾选 `run_emulator`。该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
 
 PR 工作流只有仓库读取权限，不读取发布私钥。
+
+Dev 签名使用专用 Actions secret `ANDROID_DEV_KEYSTORE_BASE64`，只在同仓库可信任务中恢复；Release 的 Android 验证任务也仅传入这个 Dev secret。调试 keystore 使用 Android 标准的 `androiddebugkey` 别名与 `android` 密码，私钥本体必须保密。公开指纹以 [`frontend/android/dev-signing-certificate.sha256`](../frontend/android/dev-signing-certificate.sha256) 为准，输入密钥与输出 APK 都需匹配该指纹，临时密钥在任务结束时删除。证书不符或可信任务缺少 secret 时失败，不降级上传随机签名包。
+
+Dev 密钥备份在主工作区未跟踪的 `.env.android-dev.keystore`（0600），与正式密钥分开保存，不进入 Git、Gradle 缓存或附件。本地需要生成与 CI 同签名的 Dev 包时，设置 `ANDROID_DEV_KEYSTORE_PATH` 为该文件的绝对路径后执行既有 Android 构建命令；未设置时仍使用开发机自己的调试密钥。本机默认调试包与 CI Dev 包也可能不能互相覆盖。
 
 CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包安装检查保持一致。应用不依赖 Google Play 服务；Google APIs 镜像中的 Pixel Launcher 曾在回归中弹出无响应窗口、抢走焦点并导致后续用例连锁失败。回归仍保留全部窗口焦点、输入法及布局断言，不跳过失败用例。仪器化套件按发现到的测试类分成两个 shard，各自使用全新模拟器运行；两部分合起来覆盖每个类恰好一次，避免单个长会话在后半程丢失模拟器时把剩余类记为未运行。
 
@@ -61,6 +65,6 @@ Release 正文记录容器 manifest 摘要。首次推送后需要核对 GHCR �
 
 用户从 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载 APK，无需解压 Actions artifact。Android 8.0 起可安装；默认使用系统信任的 HTTPS；客户端可逐线路显式允许 HTTP，但服务器 `https_only` 策略仍会拒绝 HTTP API／MCP 请求，见 [连接契约](../contracts/server-connections.md)。后续同一包名、同一发布密钥并递增 versionCode 后可覆盖升级。
 
-开发测试包仍从 **Actions → Android APK → Artifacts → wildstring-android-debug** 下载并解压。它的临时签名可能随运行变化，不能代替正式发布签名。
+开发测试包从 **Actions → Android APK → Artifacts → wildstring-android-debug** 下载并解压，附件包含 APK、校验和与 Dev 公开证书指纹。切换到固定签名之前的临时签名 Dev 包通常需先卸载一次；卸载会清除该 Dev 应用的本机数据，之后的固定签名包可覆盖安装。Dev 签名不代替正式发布签名。实施与验收见 [Dev 签名方案](plans/android-dev-signing.md)。
 
 手机和平板截图由 `UiAutomation.takeScreenshot()` 写入 AGP `additionalTestOutputDir`，测试卸载前取回；对应报告保留 14 天。发布 APK 的安装检查另外上传真实连接页截图。夹具只存在于独立测试 APK 中。模拟器通过不代表真机省电、后台兼容和全部音频编码均已验收。
