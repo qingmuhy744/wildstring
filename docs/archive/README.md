@@ -29,7 +29,7 @@
 
 ## 已过时的说明
 
-这些文件保留当时的写法，不再随代码更新。现行命令见 `AGENTS.md` §4，现行 schema 见 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION`，现行行为见 `contracts/`。
+这些文件保留当时的写法，不再随代码更新。现行命令见 [开发与本地部署](../development.md) 和 `Makefile`，现行 schema 见 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION`，现行行为见 `contracts/`。
 
 | 文档 | 内容 | 说明 |
 | --- | --- | --- |

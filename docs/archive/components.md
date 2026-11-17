@@ -1,6 +1,8 @@
 # 组件分工
 
-状态：归档，不代表现行实现。
+状态：已归档，不代表现行实现。
+归档原因：模块清单和文中 schema 数值停留在历史版本，不再随代码更新。
+现行入口：[产品范围](../product/scope.md)、[接口契约](../../contracts/) 与各端 README。
 
 后端使用 **Python 3.12 模块化单体（FastAPI）**，客户端覆盖 **Web（React 19 + TypeScript）、macOS（SwiftUI + AppKit）、iOS（SwiftUI）与 Android（Kotlin + Jetpack Compose + Media3）**。存储采用 SQLite（WAL）与本地托管文件目录，不依赖外部数据库、Redis 或独立消息队列。
 
