@@ -964,6 +964,142 @@ test('音乐单曲循环不接管播客结束，节目线不改走待播列表',
   expect((await audio(page)).source).not.toContain('/episodes/radio-2/stream');
 });
 
+for (const lateRead of [false, true]) {
+  test(`待播弹窗跟随未完成的快捷保存刷新${lateRead ? '，迟到读取不回滚' : ''}`, async ({
+    page,
+  }, info) => {
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+    await resetPodcastQueue(page);
+    const current = await (await page.request.get('/api/v1/podcasts/queue')).json();
+    const seeded = await page.request.put('/api/v1/podcasts/queue', {
+      headers: { 'X-Wildstring-Client': 'web' },
+      data: {
+        version: current.version,
+        device_id: 'dialog-sync-test',
+        items: [6, 5].map((n) => ({ episode_id: `radio-${n}`, origin: 'manual' })),
+      },
+    });
+    expect(seeded.ok()).toBeTruthy();
+    await page.reload();
+    await podcastCatalog(page);
+    await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
+    await page.getByRole('button', { name: /全部单集/ }).click();
+    const row = (n: number) =>
+      page.locator('.podcast-episode-row').filter({ hasText: `第 ${n} 集` });
+    await expect(row(5).getByRole('button', { name: '✓ 已待播', exact: true })).toBeVisible();
+
+    let releaseSave = () => {};
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    let saveStarted = () => {};
+    const saving = new Promise<void>((resolve) => {
+      saveStarted = resolve;
+    });
+    let releaseRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let readStarted = () => {};
+    const reading = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    let holdSave = true;
+    let holdRead = true;
+    await page.route('**/api/v1/podcasts/queue', async (route) => {
+      if (route.request().method() === 'PUT' && holdSave) {
+        holdSave = false;
+        saveStarted();
+        await saveGate;
+      } else if (route.request().method() === 'GET' && holdRead) {
+        holdRead = false;
+        // Capture the real old server snapshot, rather than inventing a mock response.
+        const response = await route.fetch();
+        readStarted();
+        if (lateRead) await readGate;
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    });
+    const dialog = page.getByRole('dialog', { name: '待播列表' });
+    const titles = dialog
+      .getByRole('region', { name: '待播单集' })
+      .locator('.podcast-inbox-item strong');
+    const expected = [6, 4].map((n) => `第 ${n} 集：给午后的一封声音来信`);
+    try {
+      await row(5).getByRole('button', { name: '✓ 已待播', exact: true }).click();
+      await saving;
+      await row(4).getByRole('button', { name: '+ 待播', exact: true }).click();
+      await page.getByRole('button', { name: '待播列表', exact: true }).click();
+      await reading;
+      if (!lateRead) {
+        await expect(titles).toHaveText([6, 5].map((n) => `第 ${n} 集：给午后的一封声音来信`));
+      }
+      releaseSave();
+      await expect
+        .poll(async () => {
+          const queue = await (await page.request.get('/api/v1/podcasts/queue')).json();
+          return queue.items.map((item: { episode_id: string }) => item.episode_id);
+        })
+        .toEqual(['radio-6', 'radio-4']);
+      await expect(titles).toHaveText(expected);
+      if (lateRead) {
+        // Wait for both old rows to resolve so the initial load has a chance to overwrite the save.
+        const staleRows = [6, 5].map((n) =>
+          page
+            .waitForResponse((response) => response.url().endsWith(`/podcasts/episodes/radio-${n}`))
+            .then((response) => response.finished()),
+        );
+        releaseRead();
+        await Promise.all(staleRows);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            }),
+        );
+        await expect(titles).toHaveText(expected);
+      }
+      // The refreshed content must carry its matching version into the next edit.
+      await dialog.getByRole('button', { name: /上移.*第 4 集/ }).click();
+      await expect
+        .poll(async () => {
+          const queue = await (await page.request.get('/api/v1/podcasts/queue')).json();
+          return queue.items.map((item: { episode_id: string }) => item.episode_id);
+        })
+        .toEqual(['radio-4', 'radio-6']);
+      await expect(titles).toHaveText([...expected].reverse());
+      if (!lateRead) {
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate((value) => {
+            localStorage.setItem('wildstring-theme', value);
+            window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+          }, theme);
+          await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+          await dialog.screenshot({
+            animations: 'disabled',
+            path: `../../artifacts/queue-dialog-sync-${theme}-${info.project.name}.png`,
+          });
+        }
+      }
+      await dialog
+        .getByRole('listitem')
+        .filter({ hasText: expected[0] })
+        .getByRole('button', { name: '移除', exact: true })
+        .click();
+      await expect(titles).toHaveText([expected[1]]);
+      await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+      await expect(dialog).toBeHidden();
+    } finally {
+      releaseSave();
+      releaseRead();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+}
+
 test('单集行快捷待播切换、统一待播列表一键播放及底栏队列续播预览', async ({ page }, info) => {
   await login(page);
   await podcastCatalog(page);
