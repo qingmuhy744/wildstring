@@ -1,6 +1,6 @@
 # 播客目录搜索契约
 
-状态：已纳入 [0.8.2](../docs/releases/v0.8.2.md)，区域热门探索扩展见 [0.8.4](../docs/releases/v0.8.4.md)。设计依据参考 audiobookshelf 的 iTunes 搜索方式。
+设计依据参考 audiobookshelf 的 iTunes 搜索方式。
 
 ## 范围与原则
 

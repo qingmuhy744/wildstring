@@ -1,6 +1,6 @@
 # 0.3.0 手机使用闭环（开发契约）
 
-状态：历史批次契约，已随 PR #14（[0.3.0](../docs/releases/v0.3.0.md)）交付（原 0.2.3 内容一并并入）。本文保留 0.3.0 当时的接口与验收边界；跨设备接续、推荐与 AI 的后续演进分别以 [客户端接续](../docs/architecture/client-continuity.md)、[推荐契约](recommendations.md) 和 [Agent 契约](agent-platform.md) 为准。
+本文约束共享播放快照、每日推荐与 AI 找歌的现行接口；跨设备接续实现边界见 [客户端接续](../docs/architecture/client-continuity.md)，推荐与 Agent 的扩展边界分别见 [推荐契约](recommendations.md) 和 [Agent 契约](agent-platform.md)。
 
 ## 新增接口约定
 
