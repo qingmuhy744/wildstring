@@ -47,8 +47,14 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().toString()): MediaItem =
-    MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
+fun List<Track>.mediaItems(repository: Repository): List<MediaItem> {
+    val network = if (any { it.podcastEpisodeId != null }) repository.podcastNetwork() else null
+    return map { it.mediaItem(repository, podcastNetwork = network) }
+}
+
+fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().toString(), podcastNetwork: String? = null): MediaItem {
+    val original = repository.originalStream(id, podcastNetwork)
+    return MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id, original))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setDurationMs(durationMs.takeIf { it > 0 })
             .setArtworkUri(if (mayHaveCover) Uri.parse(repository.cover(id)) else null)
@@ -58,9 +64,10 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
                 podcast?.let { putString("podcast_id", it.podcastId) }
                 putLong("duration_ms", durationMs)
                 putString("format", format)
-                putString("original_stream", repository.originalStream(id))
+                putString("original_stream", original)
                 podcast?.resumePositionMs?.takeIf { it > 0L }?.let { putLong("podcast_fallback_position", it) }
             }).build()).build()
+}
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -132,7 +139,9 @@ class PlaybackService : MediaSessionService() {
                     completedAutoplay = pendingPodcastAutoplay && start != PodcastStart.RESUME
                 } else {
                     applyingPodcast = true
-                    player.seekTo((preparation as PodcastPreparation.Play).positionMs)
+                    // Podcast streams use the original timeline. The controller-facing wrapper
+                    // can omit SEEK until the source is ready; ExoPlayer retains an early seek.
+                    engine.seekTo((preparation as PodcastPreparation.Play).positionMs)
                     progressEntry = item.mediaId
                     restoredPodcastEntry = null
                     resumeSeekMs = null

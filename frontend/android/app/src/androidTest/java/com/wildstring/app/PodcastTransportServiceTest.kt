@@ -62,6 +62,9 @@ class PodcastTransportServiceTest {
         val show = PodcastSummary("transport-show", "合成播放控制节目", feedUrl = "https://example.invalid/feed")
         val episode = PodcastEpisode("transport-episode", show.id, "guid", "后退十五秒后继续收听",
             audioUrl = "https://example.invalid/audio.wav", durationSeconds = 90)
+        val episodes = (0 until 800).map { index ->
+            if (index == 627) episode else episode.copy(id = "transport-$index", guid = "guid-$index", title = "合成第 $index 集")
+        }
         // Ninety seconds of synthetic PCM silence allow a real 15-second rewind without a binary fixture.
         val dataSize = 90 * 8000 * 2
         val audio = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN).apply {
@@ -70,13 +73,14 @@ class PodcastTransportServiceTest {
             put("data".toByteArray()); putInt(dataSize)
         }.array()
         val gets = AtomicInteger()
+        val streams = AtomicInteger()
         val writes = CopyOnWriteArrayList<String>()
         val offlineWrites = AtomicInteger()
         val network = AtomicReference("normal")
         val mode = AtomicReference("auto")
         val blocked = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val remote = AtomicReference("""{"episode_id":"${episode.id}","position_seconds":60,"duration_seconds":90,"completed":false,"version":0,"device_id":"","session_id":"","sequence":0}""")
+        val remote = AtomicReference("""{"episode_id":"${episode.id}","position_seconds":60,"duration_seconds":90,"completed":false,"version":1,"device_id":"bookmark-device","session_id":"saved-bookmark-session","sequence":1}""")
         MockWebServer().use { server ->
             fun json(body: String, code: Int = 200) = MockResponse().setResponseCode(code)
                 .setHeader("Content-Type", "application/json").setBody(body)
@@ -91,10 +95,14 @@ class PodcastTransportServiceTest {
                     }
                     if (path.endsWith("/queue/preferences")) return json(Gson().toJson(PodcastQueuePreferences(autoContinue = false)))
                     if (path.endsWith("/podcasts/queue")) return json("""{"version":0,"items":[]}""")
-                    if (path.endsWith("/podcasts/${show.id}")) return json(Gson().toJson(PodcastDetail(show, listOf(episode))))
+                    if (path.endsWith("/podcasts/${show.id}")) return json(Gson().toJson(PodcastDetail(show, episodes)))
                     if (path.endsWith("/episodes/${episode.id}")) return json(Gson().toJson(episode))
                     if (path.endsWith("/podcasts")) return json(Gson().toJson(listOf(show)))
-                    if (path.endsWith("/stream")) return audioStreamFixture(request, audio, "audio/wav", "\"transport-audio\"")
+                    if (path.endsWith("/stream")) {
+                        val response = audioStreamFixture(request, audio, "audio/wav", "\"transport-audio\"")
+                        // The bookmark can arrive before the audio timeline becomes seekable.
+                        return if (streams.getAndIncrement() == 0) response.setHeadersDelay(1, TimeUnit.SECONDS) else response
+                    }
                     if (path.endsWith("/progress")) {
                         if (request.method == "GET") { gets.incrementAndGet(); return json(remote.get()) }
                         val body = request.body.readUtf8(); writes += body
@@ -106,12 +114,19 @@ class PodcastTransportServiceTest {
                                 return json("""{"detail":{"current":${remote.get()}}}""", 409)
                             }
                         }
-                        val update = JsonParser.parseString(body).asJsonObject
-                        update.addProperty("episode_id", episode.id)
-                        update.addProperty("version", JsonParser.parseString(remote.get()).asJsonObject.get("version").asLong + 1)
-                        update.addProperty("completed", false)
-                        remote.set(update.toString())
-                        return json(remote.get())
+                        synchronized(remote) {
+                            val current = JsonParser.parseString(remote.get()).asJsonObject
+                            val update = JsonParser.parseString(body).asJsonObject
+                            val same = current.get("session_id") == update.get("session_id") && current.get("device_id") == update.get("device_id")
+                            if (!same && update.get("base_version").asLong != current.get("version").asLong)
+                                return json("""{"detail":{"current":${remote.get()}}}""", 409)
+                            if (same && update.get("sequence").asLong <= current.get("sequence").asLong) return json(remote.get())
+                            update.addProperty("episode_id", episode.id)
+                            update.addProperty("version", current.get("version").asLong + 1)
+                            update.addProperty("completed", false)
+                            remote.set(update.toString())
+                            return json(remote.get())
+                        }
                     }
                     if (path.endsWith("/albums") || path.endsWith("/tracks")) return json("""{"items":[],"total":0,"limit":50,"offset":0}""")
                     if (path.endsWith("/lyrics")) return json("""{"kind":"none","lines":[]}""")
@@ -129,7 +144,13 @@ class PodcastTransportServiceTest {
                     val track = vm.repository.rememberPlaybackTrack(episode.toTrack(show))
                     player.setMediaItem(track.mediaItem(vm.repository)); player.prepare(); player.play()
                 }
-                await("Episode starts from its server bookmark") { onMain { player.isPlaying && player.currentPosition >= 60_000 } }
+                val initialStart = SystemClock.elapsedRealtime()
+                await("Episode starts from its server bookmark") { onMain {
+                    val ready = player.isPlaying && player.currentPosition >= 60_000
+                    if (!ready && SystemClock.elapsedRealtime() - initialStart > 9_000) android.util.Log.e("PodcastStartup",
+                        "initial_playing=${player.isPlaying} intended=${player.playWhenReady} position=${player.currentPosition} state=${player.playbackState} mode=${vm.podcastProgress.mode.value} reads=${gets.get()} writes=${writes.size} remote=${remote.get()} message=${vm.podcastProgress.message.value}")
+                    ready
+                } }
                 val audioManager = instrumentation.targetContext.getSystemService(android.media.AudioManager::class.java)
                 val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                     .setOnAudioFocusChangeListener { }.build()
@@ -226,6 +247,34 @@ class PodcastTransportServiceTest {
                 assertTrue("The next explicit resume can claim its selected local target", writes.any {
                     JsonParser.parseString(it).asJsonObject.get("session_id").asString != initialSession
                 })
+
+                network.set("normal")
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                var lastTick = 0L
+                var longestGap = 0L
+                val tick = object : Runnable {
+                    override fun run() {
+                        val now = SystemClock.elapsedRealtime()
+                        if (lastTick != 0L) longestGap = maxOf(longestGap, now - lastTick)
+                        lastTick = now
+                        handler.postDelayed(this, 16)
+                    }
+                }
+                try {
+                    val previousEntry = onMain { player.currentMediaItem!!.mediaId }
+                    val started = SystemClock.elapsedRealtime()
+                    onMain { tick.run(); vm.playPodcastEpisode(episode, show, positionMs = 0) }
+                    await("Restart from a large show reaches the real service and advances from zero", timeoutMs = 20_000) {
+                        onMain { player.currentMediaItem?.mediaId != previousEntry && player.isPlaying && player.currentPosition in 500..6_000 }
+                    }
+                    onMain { handler.removeCallbacks(tick) }
+                    android.util.Log.i("PodcastStartup", "service_restart_ms=${SystemClock.elapsedRealtime() - started} longest_main_gap_ms=$longestGap")
+                    assertTrue("The real service must not freeze the UI for a large show: ${longestGap}ms", longestGap < 750)
+                    assertEquals(628, onMain { player.mediaItemCount })
+                    await("Restart uploads its new session") { JsonParser.parseString(remote.get()).asJsonObject.get("intent")?.asString == "restart" }
+                    assertFalse("Explicit restart must not report our own session as another device", vm.podcastProgress.conflict.value)
+                    capture("podcast-transport-large-show-restart")
+                } finally { onMain { handler.removeCallbacks(tick) } }
             } finally {
                 release.countDown()
                 onMain { vm.controller?.pause(); vm.controller?.clearMediaItems(); vm.settings.appearance("system") }

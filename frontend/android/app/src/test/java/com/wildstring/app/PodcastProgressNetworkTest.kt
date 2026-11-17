@@ -8,6 +8,8 @@ import com.wildstring.app.data.*
 import java.net.InetAddress
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -39,6 +41,62 @@ import org.robolectric.shadows.ShadowSystemClock
     shadows = [PodcastProgressNetworkTest.MemorySessionKey::class])
 @LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 class PodcastProgressNetworkTest {
+    @Test fun restartFollowsOurPendingWriteWithoutReportingAnotherDevice() = verifyRestartDuringOwnWrite(false)
+
+    @Test fun restartFollowsOurAcknowledgementWhenTheReadSnapshotIsOlder() = verifyRestartDuringOwnWrite(true)
+
+    @Test fun restartStillStopsWhenAnotherDeviceWinsDuringOurPendingWrite() = verifyRestartDuringOwnWrite(false, true)
+
+    private fun verifyRestartDuringOwnWrite(delayRead: Boolean, otherDeviceWins: Boolean = false) = ProgressFixture().use { fixture ->
+        val server = BookmarkServer(fixture)
+        val progress = PodcastProgress(fixture.context, fixture.repository)
+        runBlocking {
+            progress.prepare("episode", "Episode", 3_600_000)
+            withTimeout(5000) { while (server.current.get().deviceId != progress.deviceId()) delay(20) }
+            val oldSession = server.current.get().sessionId
+            server.blockWrite.set(true)
+            progress.checkpoint("episode", 42_000, 3_600_000, "pause", true)
+            assertTrue(server.writeEntered.await(5, TimeUnit.SECONDS))
+            server.blockRead.set(delayRead)
+            try {
+                val restart = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                    progress.prepare("episode", "Episode", 3_600_000, requestedMs = 0, explicitRestart = true)
+                }
+                if (delayRead) {
+                    assertTrue(server.readEntered.await(5, TimeUnit.SECONDS))
+                    server.releaseWrite.countDown()
+                    withTimeout(5000) {
+                        while (true) {
+                            val row = fixture.repository.database.podcasts().get(fixture.repository.session.storageScope()!!, "episode")
+                            val local = row?.let { com.google.gson.Gson().fromJson(it.payload, EpisodeCheckpoint::class.java) }
+                            if (local?.remote?.positionSeconds == 42L) break
+                            delay(20)
+                        }
+                    }
+                    server.releaseRead.countDown()
+                }
+                assertEquals(PodcastPreparation.Play(0), withTimeout(2000) { restart.await() })
+                if (otherDeviceWins) server.takeOver(9)
+                server.releaseWrite.countDown()
+                withTimeout(5000) { while (server.writes.size < 3 ||
+                    (server.current.get().sessionId == oldSession && !progress.conflict.value)) delay(20) }
+                if (otherDeviceWins) {
+                    withTimeout(5000) { progress.conflict.first { it } }
+                    assertEquals("other", server.current.get().deviceId)
+                    assertEquals(9L, server.current.get().positionSeconds)
+                    assertEquals("A real conflict must not trigger an automatic reclaim", 3, server.writes.size)
+                } else {
+                    assertFalse("Our own successful upload must not look like another device", progress.conflict.value)
+                    assertNotEquals(oldSession, server.current.get().sessionId)
+                    assertEquals(0L, server.current.get().positionSeconds)
+                }
+                assertEquals("restart", server.writes.last().intent)
+            } finally {
+                server.releaseRead.countDown()
+                server.releaseWrite.countDown()
+            }
+        }
+    }
     @Test fun resumePreservesOwnPendingPointWithoutReapplyingAnyMode() = ProgressFixture().use { fixture ->
         val server = BookmarkServer(fixture)
         val progress = PodcastProgress(fixture.context, fixture.repository)
@@ -118,6 +176,12 @@ class PodcastProgressNetworkTest {
         val writes = CopyOnWriteArrayList<PodcastProgressUpdate>()
         val reads = CopyOnWriteArrayList<String>()
         val readMode = AtomicReference("normal")
+        val blockWrite = AtomicBoolean(false)
+        val writeEntered = CountDownLatch(1)
+        val releaseWrite = CountDownLatch(1)
+        val blockRead = AtomicBoolean(false)
+        val readEntered = CountDownLatch(1)
+        val releaseRead = CountDownLatch(1)
         private val mode = AtomicReference("auto")
         fun takeOver(position: Long, completed: Boolean = false) {
             synchronized(current) { current.set(current.get().copy(version = current.get().version + 1,
@@ -134,15 +198,24 @@ class PodcastProgressNetworkTest {
                     }
                     if (request.method == "GET") {
                         val selected = readMode.get(); reads += selected
+                        val snapshot = current.get()
+                        if (blockRead.compareAndSet(true, false)) {
+                            readEntered.countDown()
+                            check(releaseRead.await(5, TimeUnit.SECONDS))
+                        }
                         return when (selected) {
                             "slow" -> json(gson.toJson(current.get())).setBodyDelay(5, java.util.concurrent.TimeUnit.SECONDS)
                             "503" -> json("{}", 503)
                             "401" -> json("{}", 401)
-                            else -> json(gson.toJson(current.get()))
+                            else -> json(gson.toJson(snapshot))
                         }
                     }
                     val write = gson.fromJson(request.body.readUtf8(), PodcastProgressUpdate::class.java)
                     writes += write
+                    if (blockWrite.compareAndSet(true, false)) {
+                        writeEntered.countDown()
+                        check(releaseWrite.await(5, TimeUnit.SECONDS))
+                    }
                     synchronized(current) {
                         val old = current.get()
                         val same = write.sessionId == old.sessionId && write.deviceId == old.deviceId

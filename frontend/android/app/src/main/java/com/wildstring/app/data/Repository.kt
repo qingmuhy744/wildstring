@@ -168,7 +168,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException(AppLanguage.string(R.string.repo_cover_unavailable))
         bytes
     }
-    private fun podcastNetwork(): String {
+    internal fun podcastNetwork(): String {
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val caps = manager.getNetworkCapabilities(manager.activeNetwork)
         return when {
@@ -177,13 +177,13 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
             else -> "unknown"
         }
     }
-    fun originalStream(id: String): String =
+    fun originalStream(id: String, podcastNetwork: String? = null): String =
         if (id.startsWith("podcast_ep_")) {
-            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1&cache=1&network=${podcastNetwork()}"
+            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1&cache=1&network=${podcastNetwork ?: podcastNetwork()}"
         } else {
             url("api", "v1", "tracks", id, "stream")
         }
-    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (podcastEpisodeId(id) != null || downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
+    fun stream(id: String, original: String = originalStream(id)): String = PlaybackRequest.url(original, if (podcastEpisodeId(id) != null || downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
 
     suspend fun podcasts(): List<PodcastSummary> = api().podcasts(if (session.account?.profile in listOf("owner", "librarian")) null else true)
     suspend fun libraries(includeDisabled: Boolean = false): List<MusicLibrary> {

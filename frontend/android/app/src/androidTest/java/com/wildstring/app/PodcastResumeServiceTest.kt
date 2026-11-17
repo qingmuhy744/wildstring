@@ -56,6 +56,10 @@ class PodcastResumeServiceTest {
         val reads = java.util.Collections.synchronizedList(mutableListOf<String>())
         val writes = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
         val autoContinue = AtomicBoolean(false)
+        val bookmarks = episodes.associate { episode -> episode.id to EpisodeProgress(episode.id,
+            version = 1, sessionId = "saved-bookmark-session", deviceId = "bookmark-device", sequence = 1,
+            positionSeconds = if (episode.id == "fourth") 4 else if (episode.id == "second") 3 else 12,
+            durationSeconds = 12, completed = episode.id in listOf("first", "third")) }.toMutableMap()
         val audio = instrumentation.context.assets.open("playback.mp3").use { it.readBytes() }
         var controller: MediaController? = null
         MockWebServer().use { server ->
@@ -75,15 +79,21 @@ class PodcastResumeServiceTest {
                         val id = path.substringBeforeLast('/').substringAfterLast('/')
                         if (request.method == "GET") {
                             reads += id
-                            val completed = id in listOf("first", "third")
-                            val position = if (id == "fourth") 4 else if (id == "second") 3 else 12
-                            return json("""{"episode_id":"$id","position_seconds":$position,"duration_seconds":12,"completed":$completed,"version":0,"device_id":"","session_id":"","sequence":0}""")
+                            return synchronized(bookmarks) { json(Gson().toJson(bookmarks.getValue(id))) }
                         }
                         val body = request.body.readUtf8(); writes += id to body
-                        val update = JsonParser.parseString(body).asJsonObject
-                        update.addProperty("episode_id", id); update.addProperty("version", 1)
-                        update.addProperty("completed", update.get("event").asString == "ended")
-                        return json(update.toString())
+                        val update = Gson().fromJson(body, PodcastProgressUpdate::class.java)
+                        return synchronized(bookmarks) {
+                            val current = bookmarks.getValue(id)
+                            val same = current.sessionId == update.sessionId && current.deviceId == update.deviceId
+                            if (!same && update.baseVersion != current.version) return@synchronized json(
+                                """{"detail":{"current":${Gson().toJson(current)}}}""").setResponseCode(409)
+                            if (!same || update.sequence > current.sequence) bookmarks[id] = EpisodeProgress(id,
+                                current.version + 1, update.sessionId, update.deviceId, update.sequence,
+                                update.positionSeconds, update.durationSeconds,
+                                update.event == "ended" || (current.completed && update.intent == "resume"))
+                            json(Gson().toJson(bookmarks.getValue(id)))
+                        }
                     }
                     if (episodes.any { path.endsWith("/episodes/${it.id}") }) return json(Gson().toJson(episodes.first { path.endsWith("/${it.id}") }))
                     if (path.endsWith("/albums") || path.endsWith("/tracks")) return json("""{"items":[],"total":0,"limit":50,"offset":0}""")
@@ -143,14 +153,16 @@ class PodcastResumeServiceTest {
                 assertTrue("Auto-continue off must not read or play a successor: ${diagnostics()}",
                     synchronized(reads) { reads.drop(beforeLineReads.size) }.none { it in listOf("third", "fourth") })
 
-                // Auto-continue on: a fresh automatic start reads progress, then its ending skips the completed "third".
+                // Reselecting the finished second episode restarts it; its next ending skips the completed third.
                 autoContinue.set(true)
                 val automaticSecond = onMain { episodes[1].toTrack(show).mediaItem(vm.repository) }
                 onMain { player.setMediaItem(automaticSecond); player.prepare(); player.play() }
-                await("Automatic continuation reads progress before it plays") {
-                    onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "second" && player.currentPosition >= 3000 }
+                await("Reselecting a completed episode restarts before automatic continuation") {
+                    onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "second" && player.currentPosition in 0..2_000 }
                 }
-                assertEquals("Automatic continuation to a playable episode writes one resume play: ${diagnostics()}", 2, plays("second"))
+                assertEquals("Reselecting a completed episode writes one new play: ${diagnostics()}", 2, plays("second"))
+                assertEquals("restart", synchronized(writes) { writes.last { it.first == "second" && bodyOf("second", it)?.get("event")?.asString == "play" } }
+                    .let { bodyOf("second", it)!!.get("intent").asString })
                 onMain { player.seekTo(11_500) }
                 await("Automatic transition skips a remotely completed episode with no Activity") {
                     onMain { player.isPlaying && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "fourth" && player.currentPosition >= 4000 }
@@ -164,6 +176,11 @@ class PodcastResumeServiceTest {
                         .all { bodyOf("fourth", it)?.get("intent")?.asString == "resume" } })
 
                 // Queue context: a completed queued entry stays put instead of following the show line.
+                synchronized(bookmarks) {
+                    val first = bookmarks.getValue("first")
+                    bookmarks["first"] = first.copy(version = first.version + 1, completed = true, positionSeconds = 12,
+                        sessionId = "other-completed-session", deviceId = "other-device", sequence = 1)
+                }
                 val queueItem = item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(
                     Bundle(item.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", true) }).build()).build()
                 val beforeQueueReads = synchronized(reads) { reads.toList() }

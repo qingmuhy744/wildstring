@@ -46,6 +46,8 @@ fun podcastAutomaticNextMatches(pendingId: String?, id: String): Boolean = pendi
 data class EpisodeCheckpoint(
     val remote: EpisodeProgress, val update: PodcastProgressUpdate,
     val dirty: Boolean = true, val conflict: Boolean = false,
+    // Only an acknowledged request from this exact predecessor can advance a new, unsent claim.
+    val supersededSessionId: String? = null,
 ) {
     fun conflictsWith(value: EpisodeProgress) = dirty && (conflict ||
         (update.sessionId != value.sessionId && update.baseVersion != value.version &&
@@ -57,8 +59,13 @@ data class EpisodeCheckpoint(
         return copy(update = update.copy(sequence = update.sequence + 1, positionSeconds = seconds,
             durationSeconds = if (duration > 0) duration / 1000 else update.durationSeconds, event = kind), dirty = true)
     }
-    fun acknowledged(sent: PodcastProgressUpdate, value: EpisodeProgress): EpisodeCheckpoint =
-        if (sent.sessionId != update.sessionId) this else copy(remote = value, dirty = update.sequence > sent.sequence)
+    fun acknowledged(sent: PodcastProgressUpdate, value: EpisodeProgress): EpisodeCheckpoint = when {
+        sent.sessionId == update.sessionId -> copy(remote = value, dirty = update.sequence > sent.sequence, supersededSessionId = null)
+        !conflict && supersededSessionId == sent.sessionId && value.sessionId == sent.sessionId &&
+            value.deviceId == sent.deviceId && update.baseVersion == remote.version && value.version > remote.version ->
+            copy(remote = value, update = update.copy(baseVersion = value.version), supersededSessionId = null)
+        else -> this
+    }
 }
 data class EpisodeProgressPrompt(val title: String, val remoteMs: Long, val localMs: Long, val conflict: Boolean)
 
@@ -234,11 +241,23 @@ class PodcastProgress @Inject constructor(
         }
         mutableMessage.value = null
         val reuse = start == PodcastStart.RESUME && (same || !online) && local?.conflict == false && local.update.intent != "restart"
-        val value = if (reuse) local!!.checkpoint(position, durationMs, "play").copy(remote = remote)
-            else EpisodeCheckpoint(remote, PodcastProgressUpdate(UUID.randomUUID().toString(), device, remote.version, 1,
-                (position / 1000).coerceAtLeast(0), (durationMs / 1000).coerceAtLeast(0), "play", intent))
-        val session = value.update.sessionId
-        stateLock.withLock { ownerValid(owner); save(owner, id, value); active = Triple(owner, id, session); activeConflicted = false; mutableConflict.value = false }
+        stateLock.withLock {
+            ownerValid(owner)
+            val latest = read(owner, id)
+            // GET may have taken its snapshot before our previous PUT was acknowledged. This is
+            // local request succession, never an inference from another writer's device ID.
+            val predecessor = latest?.takeIf { online && !it.conflict &&
+                (remote == it.remote || (remote.sessionId == it.update.sessionId && remote.deviceId == it.update.deviceId)) }
+            val base = predecessor?.remote?.takeIf { it.sessionId == predecessor.update.sessionId && it.version > remote.version } ?: remote
+            val value = if (reuse) latest!!.checkpoint(position, durationMs, "play").copy(remote = base)
+                else EpisodeCheckpoint(base, PodcastProgressUpdate(UUID.randomUUID().toString(), device, base.version, 1,
+                    (position / 1000).coerceAtLeast(0), (durationMs / 1000).coerceAtLeast(0), "play", intent),
+                    supersededSessionId = predecessor?.update?.sessionId)
+            save(owner, id, value)
+            active = Triple(owner, id, value.update.sessionId)
+            activeConflicted = false
+            mutableConflict.value = false
+        }
         if (online) scope.launch {
             try { flush(owner, id) }
             catch (error: CancellationException) { throw error }
