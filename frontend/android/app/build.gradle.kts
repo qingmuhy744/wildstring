@@ -17,8 +17,8 @@ android {
         manifestPlaceholders["appName"] = "野弦"
         minSdk = 26
         targetSdk = 36
-        versionCode = 54
-        versionName = "0.8.18"
+        versionCode = 55
+        versionName = "0.8.19"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
