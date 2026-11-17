@@ -1612,7 +1612,7 @@ struct PlaybackServiceTests {
         #expect(!service.didFinishQueue)
     }
 
-    @Test func coldResumeKeepsUnsentPauseAheadOfItsOwnServerEcho() async throws {
+    @Test(arguments: [false, true]) func coldResumeKeepsUnsentPauseAndHonorsExplicitSeek(explicitSeek: Bool) async throws {
         let suite = "wildstring.cold-pause.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -1640,9 +1640,10 @@ struct PlaybackServiceTests {
         let session = bookmark.sessionId
         service.loadPodcastProgress = { _ in .init(version: 8, positionSeconds: 15, durationSeconds: 60, completed: false, deviceId: "local", sessionId: session, sequence: 1) }
         await service.restore()
+        if explicitSeek { service.seek(to: 35) }
         service.resume()
         await service.waitForPodcastTasks()
-        #expect(service.currentTime == 20)
+        #expect(service.currentTime == (explicitSeek ? 35 : 20))
     }
 
     @Test func offlineSessionSurvivesRestoreAndUploadsOnFirstPlaybackTick() async throws {

@@ -198,7 +198,7 @@ public final class PlaybackService {
     @ObservationIgnored private var podcastWriteTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var podcastHistoryFlush: Task<Void, Never>?
     @ObservationIgnored public var podcastDeviceID = ""
-    /// Reads the full remote bookmark snapshot (version, position, duration, completed) before a new episode session.
+    /// Reads the remote bookmark before explicit episode selection or resume.
     @ObservationIgnored public var loadPodcastProgress: (@Sendable (String) async throws -> PodcastProgressSnapshot?)?
     /// Reads the bookmark version before a new episode session. Nil means the read failed.
     @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
@@ -653,7 +653,7 @@ public final class PlaybackService {
 
     private func performSeek(to seconds: Double, isUserInitiated: Bool) {
         guard currentItem != nil else { return }
-        if isUserInitiated, currentItemIsPodcast, !intendedPlaying || podcastBootToken != nil {
+        if isUserInitiated, Self.podcastEpisodeID(currentItem?.trackID ?? "") != nil, !intendedPlaying || podcastBootToken != nil {
             podcastResumeSeek = max(0, seconds)
         }
         if isUserInitiated {

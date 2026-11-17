@@ -233,33 +233,43 @@ test('恢复已听完保持暂停，明确定位后回听仍保留已听完', as
   expect((await state(page)).completed).toBe(true);
 });
 
-test('暂停上传仍阻塞时主动恢复能接续，不等待 PUT', async ({ page }) => {
-  await login(page);
-  await otherDevice(page, 7);
-  await episodes(page);
-  await start(page);
-  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  let blocked = false;
-  await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
-    if (route.request().method() === 'PUT') {
-      blocked = true;
-      await gate;
+for (const trigger of ['resume', 'select'])
+  test(`暂停上传阻塞时 ${trigger} 不等待 PUT，也不丢本机新位置`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 7);
+    await episodes(page);
+    await start(page);
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let blocked = false;
+    await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+      if (route.request().method() === 'PUT') {
+        blocked = true;
+        await gate;
+      }
+      await route.continue().catch(() => {});
+    });
+    try {
+      await page.getByRole('button', { name: '暂停', exact: true }).click();
+      await expect.poll(() => blocked).toBe(true);
+      if (trigger === 'resume') {
+        await otherDevice(page, 2);
+        await page.getByRole('button', { name: '播放', exact: true }).click();
+      } else {
+        await page.getByRole('slider', { name: '播放进度', exact: true }).fill('5');
+        await expect.poll(async () => (await local(page))?.position_seconds).toBe(5);
+        await page.locator('.episode-play-btn').first().click();
+      }
+      await expect.poll(async () => (await audio(page)).paused, { timeout: 2500 }).toBe(false);
+      await expect
+        .poll(async () => (await audio(page)).time)
+        .toBeGreaterThanOrEqual(trigger === 'resume' ? 2 : 5);
+      expect((await audio(page)).time).toBeLessThan(trigger === 'resume' ? 5 : 6);
+    } finally {
+      release();
     }
-    await route.continue().catch(() => {});
   });
-  try {
-    await page.getByRole('button', { name: '暂停', exact: true }).click();
-    await expect.poll(() => blocked).toBe(true);
-    await otherDevice(page, 2);
-    await page.getByRole('button', { name: '播放', exact: true }).click();
-    await expect.poll(async () => (await audio(page)).paused, { timeout: 2500 }).toBe(false);
-    expect((await audio(page)).time).toBeLessThan(5);
-  } finally {
-    release();
-  }
-});
 
 for (const mode of ['auto', 'ask', 'restart']) {
   test(`${mode} 偏好不应用于普通暂停恢复`, async ({ page }) => {

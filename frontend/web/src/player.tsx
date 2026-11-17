@@ -626,11 +626,11 @@ export function usePlayer(userId: string) {
       if (intent !== podcastIntent.current) return;
       let position =
         seconds ??
-        (online
-          ? remote.position_seconds
-          : local?.dirty
-            ? local.position_seconds
-            : remote.position_seconds);
+        (!online ||
+        remote.version === 0 ||
+        (local?.session_id === remote.session_id && local.sequence >= remote.sequence)
+          ? (local?.position_seconds ?? remote.position_seconds)
+          : remote.position_seconds);
       let sessionIntent: 'resume' | 'restart' = 'resume';
       const mode = episodeResumeMode(userId);
       if (
