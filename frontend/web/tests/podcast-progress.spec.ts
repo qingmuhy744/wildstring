@@ -403,7 +403,8 @@ test('历史离线记录发生冲突时丢弃并按服务器进度重新播放',
   expect(await state(page)).toEqual(newer);
   await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(8);
-  expect((await state(page)).session_id).not.toBe(newer.session_id);
+  // Playback permission starts the upload; audio seeking can finish before its response.
+  await expect.poll(async () => (await state(page)).session_id).not.toBe(newer.session_id);
 });
 
 test('加入待播和刷新不抢占进度；默认自动接续开始收听', async ({ page }) => {
