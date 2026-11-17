@@ -134,6 +134,11 @@ ios-test: ## Run the iOS core package unit tests
 ios-build: ios-gen ## Build the iOS app for the simulator
 	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' -derivedDataPath artifacts/ios-derived.noindex build
 
+.PHONY: ios-ui-test
+IOS_TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro
+ios-ui-test: ios-gen ## Render iOS player states and sample transport motion on a simulator
+	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination '$(IOS_TEST_DESTINATION)' -derivedDataPath artifacts/ios-ui-tests.noindex CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test
+
 .PHONY: macos-gen macos-build macos-dmg macos-test
 MACOS_CONFIGURATION ?= Debug
 
@@ -231,7 +236,7 @@ test-libraries-web: build-web ## Verify library selection, owner configuration, 
 	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
 
 test-podcast-web: build-web ## Verify radio playback, episode downloads, directory search, OPML and identity management
-	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-episode.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-presentation.spec.ts podcast-episode.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
 
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
 	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts

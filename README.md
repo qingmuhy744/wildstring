@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **正式版 [v0.8.19](docs/releases/v0.8.19.md)** · 修复 Android 缓存较多时播客点播、切集长时间停留在旧集的问题，连续点播以最新选择为准；收敛手机专辑网格、曲库计数和次级操作样式。数据库 schema 保持 54，Android 可覆盖升级。
+- **正式版 [v0.8.20](docs/releases/v0.8.20.md)** · 统一四端播客暂停恢复、回退与跨设备接续，修复本机重播误报冲突、Android 起播卡顿与 Web 待播竞态；稳定封面、待播操作区和播放按钮反馈，Dev 包使用固定签名。数据库 schema 保持 54。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 

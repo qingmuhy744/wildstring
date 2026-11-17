@@ -1616,11 +1616,22 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                               : t('podcasts.queueStateAdd')
                         }
                       >
-                        {currentEpisodeId === ep.id && isPlayingPodcast
-                          ? t('podcasts.nowPlaying')
-                          : queuedSet.has(ep.id)
-                            ? t('podcasts.queuedBadge')
-                            : t('podcasts.addToQueueBtn')}
+                        <span className="episode-queue-label">
+                          {currentEpisodeId === ep.id && isPlayingPodcast
+                            ? t('podcasts.nowPlaying')
+                            : queuedSet.has(ep.id)
+                              ? t('podcasts.queuedBadge')
+                              : t('podcasts.addToQueueBtn')}
+                        </span>
+                        {[
+                          t('podcasts.nowPlaying'),
+                          t('podcasts.queuedBadge'),
+                          t('podcasts.addToQueueBtn'),
+                        ].map((label) => (
+                          <span className="episode-queue-measure" aria-hidden="true" key={label}>
+                            {label}
+                          </span>
+                        ))}
                       </button>
                     </div>
                   </RowMenu>

@@ -9,8 +9,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.8.19"
-    CURRENT_PROJECT_VERSION: "54"
+    MARKETING_VERSION: "0.8.20"
+    CURRENT_PROJECT_VERSION: "55"
     SWIFT_EMIT_LOC_STRINGS: "NO"
 targets:
   WildString:
@@ -58,6 +58,21 @@ targets:
       configs:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: com.wildstring.app.debug
+  WildStringPresentationTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: WildStringPresentationTests
+    dependencies:
+      - target: WildString
+      - package: WildStringKit
+        product: CoreNetwork
+      - package: WildStringKit
+        product: CorePlayback
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.wildstring.app.presentation-tests
 schemes:
   WildString:
     build:
@@ -65,3 +80,7 @@ schemes:
         WildString: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - WildStringPresentationTests

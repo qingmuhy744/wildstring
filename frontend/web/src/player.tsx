@@ -14,6 +14,7 @@ import {
   type Track,
 } from './api';
 import { Cover } from './cover';
+import { PlaybackGlyph } from './playback-glyph';
 import { Icon } from './icons';
 import { maybePlayRadioClick } from './radio-click';
 import { FavoriteButton, type Favorites } from './favorites';
@@ -1767,10 +1768,10 @@ export function PlaybackControls({ player }: { player: Player }) {
           }}
           disabled={!current}
           aria-label={player.wantsPlayback ? t('playerPage.pause') : t('playerPage.play')}
+          aria-pressed={player.wantsPlayback}
+          aria-busy={player.buffering}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d={player.wantsPlayback ? 'M7 5h4v14H7zm6 0h4v14h-4z' : 'M8 5l11 7-11 7z'} />
-          </svg>
+          <PlaybackGlyph playing={player.wantsPlayback} buffering={player.buffering} />
         </button>
         <button
           className="icon-button transport-track-button"

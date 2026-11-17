@@ -977,47 +977,27 @@ struct MacPodcastEpisodeRow: View {
         }
     }
 
-    @ViewBuilder
     private var inlineQueueButton: some View {
-        if current {
-            Text(buffering ? L10n("macPlayer.buffering") : (playing ? L10n("macPodcasts.nowPlaying") : L10n("macPodcasts.paused")))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MacTheme.accentDeep)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(MacTheme.accent.opacity(0.12), in: Capsule())
-        } else if isQueued {
-            Button {
-                toggleQueue?()
-            } label: {
-                Text(L10n("macPodcasts.queuedBadge"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MacTheme.accentDeep)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(MacTheme.accent.opacity(0.12), in: Capsule())
+        let labels = [L10n("macPodcasts.addToQueueBadge"), L10n("macPodcasts.queuedBadge"),
+                      L10n("macPodcasts.nowPlaying"), L10n("macPodcasts.paused"), L10n("macPlayer.buffering")]
+        let label = current ? (buffering ? labels[4] : (playing ? labels[2] : labels[3])) : (isQueued ? labels[1] : labels[0])
+        return Button {
+            if let toggleQueue { toggleQueue() } else if !isQueued { append() }
+        } label: {
+            ZStack {
+                ForEach(labels, id: \.self) { Text($0).hidden().accessibilityHidden(true) }
+                Text(label)
             }
-            .buttonStyle(.plain)
-            .help(L10n("macPodcasts.removeFromQueueHelp"))
-        } else {
-            Button {
-                if let toggleQueue {
-                    toggleQueue()
-                } else {
-                    append()
-                }
-            } label: {
-                Text(L10n("macPodcasts.addToQueueBadge"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MacTheme.muted)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(MacTheme.panel, in: Capsule())
-                    .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .help(L10n("macPodcasts.addToQueueHelp"))
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(current || isQueued ? MacTheme.accentDeep : MacTheme.muted)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 28)
+            .background(current || isQueued ? MacTheme.accent.opacity(0.12) : MacTheme.panel, in: Capsule())
+            .overlay(Capsule().strokeBorder(current || isQueued ? Color.clear : MacTheme.border, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .disabled(current)
+        .help(current ? label : (isQueued ? L10n("macPodcasts.removeFromQueueHelp") : L10n("macPodcasts.addToQueueHelp")))
     }
 
     @ViewBuilder

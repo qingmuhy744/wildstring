@@ -23,6 +23,7 @@ struct CoverImage: View {
     let trackID: String?
     var size: CGFloat = 44
     var circular = false
+    var flexible = false
 
     @State private var image: UIImage?
 
@@ -41,7 +42,8 @@ struct CoverImage: View {
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: flexible ? nil : size, height: flexible ? nil : size)
+        .aspectRatio(1, contentMode: .fit)
         .clipShape(circular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 6)))
         .task(id: trackID) { await load() }
     }

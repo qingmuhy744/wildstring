@@ -2,6 +2,7 @@ import { useEffect, useRef, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { time } from './api';
 import { Cover } from './cover';
+import { PlaybackGlyph } from './playback-glyph';
 import i18n from './i18n';
 import { readAudioPeak } from './playback-gain';
 import { PodcastSkipButton, type Player } from './player';
@@ -170,8 +171,9 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
               player.wantsPlayback ? t('podcastStage.radioPause') : t('podcastStage.radioPlay')
             }
             aria-pressed={player.wantsPlayback}
+            aria-busy={player.buffering}
           >
-            <span aria-hidden="true">{player.wantsPlayback ? 'Ⅱ' : '▶'}</span>
+            <PlaybackGlyph playing={player.wantsPlayback} buffering={player.buffering} />
           </button>
           <PodcastSkipButton player={player} seconds={30} direction="forward" variant="retro" />
         </div>

@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Latest release [v0.8.19](docs/releases/v0.8.19.md)** · Fixes Android podcast start and episode-switch delays with large caches, cancels superseded play requests, and simplifies album grids and catalog controls. Database schema remains 54; the Android release supports in-place upgrades.
+- **Latest release [v0.8.20](docs/releases/v0.8.20.md)** · Unifies podcast resume and cross-device bookmarks across all four clients, fixes self-conflicts on replay, Android start delays and Web queue races, and stabilizes artwork, queue actions and transport feedback. Dev APKs use a fixed signature; database schema remains 54.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 

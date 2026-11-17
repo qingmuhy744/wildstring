@@ -4072,7 +4072,7 @@
 }
 
 .episode-queue-btn {
-  display: inline-flex;
+  display: inline-grid;
   align-items: center;
   justify-content: center;
   min-height: 32px;
@@ -4328,4 +4328,13 @@
 .queue-continuation-empty {
   margin: 8px 0 0;
   font-size: 0.82rem;
+}
+
+.episode-queue-label,
+.episode-queue-measure {
+  grid-area: 1 / 1;
+}
+.episode-queue-measure {
+  visibility: hidden;
+  font-weight: 600;
 }

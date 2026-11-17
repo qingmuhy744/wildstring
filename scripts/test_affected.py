@@ -38,6 +38,7 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
     },
     "podcast-continuation.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-player.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
+    "podcast-presentation.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-episode.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-progress.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "personal-settings.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
@@ -53,6 +54,11 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
 
 # Mapping from Web source file stems to primary Playwright specs
 WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
+    "playback-glyph": [
+        "podcast-presentation.spec.ts",
+        "podcast-player.spec.ts",
+        "completion.spec.ts",
+    ],
     "offline-panel": ["playlist-offline.spec.ts", "completion.spec.ts"],
     "personal-settings": [
         "personal-settings.spec.ts",
