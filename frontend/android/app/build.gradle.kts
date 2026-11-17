@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
+val robolectricSdk = configurations.create("robolectricSdk") {
+    isCanBeConsumed = false
+    isTransitive = false
+}
 android {
     namespace = "com.wildstring.app"
     compileSdk = 37
@@ -49,8 +53,15 @@ android {
     // Pure-Kotlin test helpers used by both the JVM unit tests and the instrumented tests.
     sourceSets.getByName("test").kotlin.srcDir("src/sharedTest/kotlin")
     sourceSets.getByName("androidTest").kotlin.srcDir("src/sharedTest/kotlin")
+    testOptions.unitTests.isIncludeAndroidResources = true
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     lint { abortOnError = true }
+}
+tasks.withType<Test>().configureEach {
+    // Resolve the sandbox SDK through Gradle locks and checksum verification, never Robolectric's downloader.
+    inputs.files(robolectricSdk)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricSdk.singleFile.parent)
 }
 hilt {
     enableAggregatingTask = false
@@ -83,6 +94,8 @@ dependencies {
     implementation(libs.coroutines)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.robolectric)
+    add(robolectricSdk.name, libs.robolectric.sdk)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.test)
     androidTestImplementation(libs.android.test)
