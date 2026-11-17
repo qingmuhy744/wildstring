@@ -80,14 +80,14 @@ class PodcastProgressTest {
         assertTrue(later.conflictsWith(EpisodeProgress("episode", version = 10, sessionId = "new-device")))
     }
 
-    @Test fun resumingThePreparedEpisodeDoesNotPrepareAgain() {
-        assertFalse(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = true, ended = false))
-        // A finished episode starts a new session so the completed rule and next episode apply.
-        assertTrue(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = true, ended = true))
-        // Another item, a lost ownership or a never prepared item all need a fresh preparation.
-        assertTrue(podcastResumeNeedsPreparation("episode-entry", "other-entry", ownsProgress = true, ended = false))
-        assertTrue(podcastResumeNeedsPreparation("episode-entry", "episode-entry", ownsProgress = false, ended = false))
-        assertTrue(podcastResumeNeedsPreparation(null, "episode-entry", ownsProgress = true, ended = false))
+    @Test fun resumeUsesLatestOperationRatherThanMaximumPosition() {
+        val local = checkpoint().copy(update = checkpoint().update.copy(deviceId = "device-A", sessionId = "session-one", sequence = 4))
+        val own = EpisodeProgress("episode", version = 8, sessionId = "session-one", deviceId = "device-A", sequence = 3, positionSeconds = 900)
+        assertEquals(1_210_000L, podcastResumePosition(own, local, 1_210_000L))
+        assertEquals(600_000L, podcastResumePosition(own.copy(sessionId = "other", deviceId = "device-B", positionSeconds = 600), local, 1_210_000L))
+        assertEquals(1_210_000L, podcastResumePosition(null, local.copy(conflict = true), 1_210_000L))
+        assertEquals(1_200_000L, podcastResumePosition(null, local.copy(conflict = true), null))
+        assertEquals(0L, podcastResumePosition(null, null, null))
     }
 
     @Test fun askModeOnlyPromptsWhenADialogCanBeShown() {

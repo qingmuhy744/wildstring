@@ -41,7 +41,7 @@ struct MiniPlayerBar: View {
                         Haptics.tap()
                         playback.togglePlayPause()
                     } label: {
-                        Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        Image(systemName: playback.wantsPlayback ? "pause.fill" : "play.fill")
                             .font(.title3)
                             .frame(width: 32, height: 32)
                     }

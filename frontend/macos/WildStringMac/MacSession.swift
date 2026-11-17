@@ -499,7 +499,7 @@ final class MacSession {
         }
         playback.loadPodcastProgress = { [weak client] episodeID in
             guard let client else { return nil }
-            return try? await client.podcastProgress(episodeId: episodeID)
+            return try await client.podcastProgress(episodeId: episodeID)
         }
         playback.loadPodcastBaseVersion = { [weak client] episodeID in
             guard let client else { return nil }

@@ -85,6 +85,8 @@ class PlaybackService : MediaSessionService() {
     private var pendingPodcastAutoplay = false
     private var applyingPodcast = false
     private var progressEntry: String? = null
+    private var restoredPodcastEntry: String? = null
+    private var resumeSeekMs: Long? = null
     private var podcastGeneration = 0L
     private val consumedPodcastIntents = mutableSetOf<String>()
     private fun checkpointPodcast(event: String, force: Boolean = false) {
@@ -94,7 +96,8 @@ class PlaybackService : MediaSessionService() {
         val id = podcastEpisodeId(item.mediaMetadata.extras?.getString("track_id")) ?: return
         podcastProgress.checkpoint(id, player.currentPosition, player.duration, event, force)
     }
-    private fun preparePodcast(automatic: Boolean = false, requestedMs: Long? = null, autoplay: Boolean = true) {
+    private fun preparePodcast(automatic: Boolean = false, requestedMs: Long? = null, autoplay: Boolean = true,
+        start: PodcastStart = if (automatic) PodcastStart.AUTOMATIC else PodcastStart.SELECT) {
         if (restoring || applyingPodcast || (preparingPodcast && requestedMs == null)) return
         val item = player.currentMediaItem ?: return
         val extras = item.mediaMetadata.extras ?: return
@@ -121,15 +124,18 @@ class PlaybackService : MediaSessionService() {
             var completedAutoplay = false
             try {
                 val automaticNext = podcastProgress.consumeAutomaticNext(id)
-                val preparation = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic || automaticNext, fallback, explicitRestart = explicitIntent && explicit == 0L) ?: return@launch
+                val preparation = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic || automaticNext, fallback, explicitRestart = explicitIntent && explicit == 0L,
+                    start = if (automatic || automaticNext) PodcastStart.AUTOMATIC else start) ?: return@launch
                 if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
                 if (preparation == PodcastPreparation.Completed) {
                     completed = true
-                    completedAutoplay = pendingPodcastAutoplay
+                    completedAutoplay = pendingPodcastAutoplay && start != PodcastStart.RESUME
                 } else {
                     applyingPodcast = true
                     player.seekTo((preparation as PodcastPreparation.Play).positionMs)
                     progressEntry = item.mediaId
+                    restoredPodcastEntry = null
+                    resumeSeekMs = null
                     if (pendingPodcastAutoplay) player.play()
                 }
             } catch (error: CancellationException) { throw error }
@@ -157,6 +163,8 @@ class PlaybackService : MediaSessionService() {
         podcastAdvance = scope.launch {
             try {
                 if (!completedRead) {
+                    if (!podcastProgress.finish(id, player.currentPosition, player.duration)) return@launch
+                    if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
                     try {
                         val queue = repository.podcastQueue()
                         if (queue.items.any { it.episodeId == id }) {
@@ -270,19 +278,19 @@ class PlaybackService : MediaSessionService() {
             val podcast = podcastEpisodeId(item?.mediaMetadata?.extras?.getString("track_id")) != null
             if (podcast && !applyingPodcast) {
                 if (playWhenReady) {
-                    // Resuming an episode that is already prepared only unpauses. Re-entering it through a
-                    // tap goes through a media transition, which clears progressEntry and prepares again.
-                    val id = item?.mediaMetadata?.extras?.getString("track_id")?.let(::podcastEpisodeId)
-                    val needsPreparation = podcastResumeNeedsPreparation(
-                        progressEntry, item?.mediaId, id != null && podcastProgress.owns(id),
-                        player.playbackState == Player.STATE_ENDED,
-                    )
+                    podcastAdvance?.cancel(); podcastAdvance = null
                     if (restoring) pendingPodcastAutoplay = true
-                    else if (needsPreparation) preparePodcast()
-                    restoring || needsPreparation
+                    else if (preparingPodcast) pendingPodcastAutoplay = true
+                    else if (!player.playWhenReady) preparePodcast(requestedMs = resumeSeekMs,
+                        start = if (progressEntry == item?.mediaId || restoredPodcastEntry == item?.mediaId) PodcastStart.RESUME else PodcastStart.SELECT)
+                    restoring || preparingPodcast
                 } else {
+                    podcastAdvance?.cancel(); podcastAdvance = null
                     pendingPodcastAutoplay = false
                     automaticPodcastEntry = null
+                    if (preparingPodcast) {
+                        podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; preparingPodcastEntry = null
+                    }
                     false
                 }
             } else false
@@ -356,7 +364,8 @@ class PlaybackService : MediaSessionService() {
                 if (!preparingPodcast || preparingPodcastEntry != mediaItem?.mediaId) {
                     podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; preparingPodcastEntry = null
                     if (!restoring) pendingPodcastAutoplay = false
-                    applyingPodcast = false; progressEntry = null
+                    applyingPodcast = false; progressEntry = null; resumeSeekMs = null
+                    restoredPodcastEntry = restoredPodcastEntry?.takeIf { it == mediaItem?.mediaId }
                 }
                 if (podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) == null) podcastProgress.leave()
                 listeningEntry = mediaItem?.mediaId
@@ -404,8 +413,10 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
                 if (reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItem?.mediaId == newPosition.mediaItem?.mediaId && !applyingPodcast && !restoring) {
+                    if (!player.playWhenReady || preparingPodcast) resumeSeekMs = newPosition.positionMs
                     if (!preparingPodcast && player.currentMediaItem?.mediaId == progressEntry && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id"))?.let(podcastProgress::owns) == true) checkpointPodcast("seek", true)
-                    else preparePodcast(requestedMs = newPosition.positionMs, autoplay = if (preparingPodcast) pendingPodcastAutoplay else player.playWhenReady)
+                    else if (preparingPodcast || player.playWhenReady) preparePodcast(requestedMs = newPosition.positionMs,
+                        autoplay = if (preparingPodcast) pendingPodcastAutoplay else player.playWhenReady, start = PodcastStart.RESUME)
                 }
                 if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack && oldPosition.mediaItem?.mediaMetadata?.extras?.getString("profile") == listeningOwner) {
                     clock.sample(SystemClock.elapsedRealtime(), oldPosition.positionMs, false)
@@ -474,7 +485,7 @@ class PlaybackService : MediaSessionService() {
             while (isActive) {
                 delay(5_000)
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
-                checkpointPodcast("progress")
+                if (player.isPlaying) checkpointPodcast("progress")
                 podcastProgress.retry()
                 report(); persist()
             }
@@ -483,7 +494,7 @@ class PlaybackService : MediaSessionService() {
             restoring = false
             val requested = pendingPodcastAutoplay
             pendingPodcastAutoplay = false
-            if (requested) preparePodcast()
+            if (requested) preparePodcast(start = if (restoredPodcastEntry == player.currentMediaItem?.mediaId) PodcastStart.RESUME else PodcastStart.SELECT)
             persist()
         } }
     }
@@ -580,6 +591,7 @@ class PlaybackService : MediaSessionService() {
             }
             if (items.isEmpty() || player.mediaItemCount != 0 || saved.endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url || repository.session.cacheScope() != profile) return
             val index = items.indexOfFirst { it.mediaId == saved.entryId }.coerceAtLeast(0)
+            restoredPodcastEntry = items[index].mediaId
             player.setMediaItems(items, index, saved.positionMs)
             player.prepare()
             player.playWhenReady = false
@@ -591,7 +603,7 @@ class PlaybackService : MediaSessionService() {
         if (controllerInfo.uid == Process.myUid() || controllerInfo.isTrusted) session else null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.isPlaying) "progress" else "pause", true)
+        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.playWhenReady) "progress" else "pause", true)
         persist(force = true)
         super.onTaskRemoved(rootIntent)
     }

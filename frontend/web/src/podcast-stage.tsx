@@ -166,10 +166,12 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
               maybePlayRadioClick();
               player.toggle();
             }}
-            aria-label={player.playing ? t('podcastStage.radioPause') : t('podcastStage.radioPlay')}
-            aria-pressed={player.playing}
+            aria-label={
+              player.wantsPlayback ? t('podcastStage.radioPause') : t('podcastStage.radioPlay')
+            }
+            aria-pressed={player.wantsPlayback}
           >
-            <span aria-hidden="true">{player.playing ? 'Ⅱ' : '▶'}</span>
+            <span aria-hidden="true">{player.wantsPlayback ? 'Ⅱ' : '▶'}</span>
           </button>
           <PodcastSkipButton player={player} seconds={30} direction="forward" variant="retro" />
         </div>

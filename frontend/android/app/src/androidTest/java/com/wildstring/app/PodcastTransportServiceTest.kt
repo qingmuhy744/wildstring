@@ -101,11 +101,14 @@ class PodcastTransportServiceTest {
                         when (network.get()) {
                             "blocked" -> { blocked.countDown(); check(release.await(20, TimeUnit.SECONDS)) }
                             "offline" -> { offlineWrites.incrementAndGet(); return MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST) }
-                            "conflict" -> return json("""{"detail":{"current":{"episode_id":"${episode.id}","version":1000,"device_id":"other-device","session_id":"other-session","sequence":1,"position_seconds":75,"duration_seconds":90,"completed":false}}}""", 409)
+                            "conflict" -> {
+                                remote.set("""{"episode_id":"${episode.id}","version":1000,"device_id":"other-device","session_id":"other-session","sequence":1,"position_seconds":75,"duration_seconds":90,"completed":false}""")
+                                return json("""{"detail":{"current":${remote.get()}}}""", 409)
+                            }
                         }
                         val update = JsonParser.parseString(body).asJsonObject
                         update.addProperty("episode_id", episode.id)
-                        update.addProperty("version", writes.size)
+                        update.addProperty("version", JsonParser.parseString(remote.get()).asJsonObject.get("version").asLong + 1)
                         update.addProperty("completed", false)
                         remote.set(update.toString())
                         return json(remote.get())
@@ -131,6 +134,7 @@ class PodcastTransportServiceTest {
                 val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                     .setOnAudioFocusChangeListener { }.build()
                 val beforeFocus = writes.size
+                val beforeFocusReads = gets.get()
                 try {
                     assertEquals(android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED, onMain { audioManager.requestAudioFocus(focus) })
                     await("Temporary audio-focus loss suppresses audio without a pause request") {
@@ -142,13 +146,25 @@ class PodcastTransportServiceTest {
                     })
                 } finally { onMain { audioManager.abandonAudioFocusRequest(focus) } }
                 await("Playback resumes when audio focus returns") { onMain { player.isPlaying } }
+                assertEquals("System focus recovery does not inspect cross-device progress", beforeFocusReads, gets.get())
                 val system = try {
                     instrumentation.uiAutomation.adoptShellPermissionIdentity("android.permission.MEDIA_CONTENT_CONTROL")
                     instrumentation.targetContext.getSystemService(android.media.session.MediaSessionManager::class.java)
                         .getActiveSessions(null).single { it.packageName == instrumentation.targetContext.packageName }
                 } finally { instrumentation.uiAutomation.dropShellPermissionIdentity() }
-                val initialReads = gets.get()
-                val initialSession = JsonParser.parseString(writes.first()).asJsonObject.get("session_id").asString
+                onMain { player.pause() }
+                await("Phone pauses before another device listens") { onMain { !player.playWhenReady } }
+                await("The pause is uploaded before the other device takes over") {
+                    JsonParser.parseString(remote.get()).asJsonObject.get("event")?.asString == "pause"
+                }
+                remote.set("""{"episode_id":"${episode.id}","position_seconds":20,"duration_seconds":90,"completed":false,"version":100,"device_id":"other-device","session_id":"other-session","sequence":1}""")
+                val beforeHandoff = gets.get()
+                system.transportControls.play()
+                await("Explicit system play follows the other device's newer rewind") {
+                    gets.get() > beforeHandoff && onMain { player.isPlaying && player.currentPosition in 20_000..23_000 }
+                }
+                await("The explicit handoff claims a new session") { JsonParser.parseString(remote.get()).asJsonObject.get("session_id").asString != "other-session" }
+                val initialSession = JsonParser.parseString(writes.last()).asJsonObject.get("session_id").asString
                 compose.onNodeWithTag("mini-player-open").performClick()
                 onMain { vm.podcastProgress.mode("ask") }
                 await("Ask mode is saved") { vm.podcastProgress.mode.value == "ask" }
@@ -164,12 +180,15 @@ class PodcastTransportServiceTest {
                         onMain { !player.playWhenReady && player.playbackState == Player.STATE_READY && kotlin.math.abs(player.currentPosition - (before - 15_000)) < 1500 }
                     }
                     capture("podcast-transport-paused-$theme", playing = false)
+                    val beforeResumeReads = gets.get()
                     compose.onNodeWithTag("podcast-play-pause").performClick()
                     await("UI resume reaches the engine and advances after rewind") {
                         onMain { player.isPlaying && player.currentPosition > before - 14_500 }
                     }
                     capture("podcast-transport-playing-$theme")
                     assertNull("Resume must not open another position prompt", vm.podcastProgress.prompt.value)
+                    assertEquals("Explicit resume inspects progress once", beforeResumeReads + 1, gets.get())
+                    assertEquals("Own unmodified cloud session is retained", initialSession, JsonParser.parseString(writes.last()).asJsonObject.get("session_id").asString)
                 }
 
                 // A stalled server must not hold the UI's seek or the system controller's resume command.
@@ -204,12 +223,8 @@ class PodcastTransportServiceTest {
                 compose.onNodeWithTag("mini-player-open").assertIsDisplayed().performClick()
                 compose.onNodeWithTag("podcast-rewind").assertIsDisplayed()
                 assertTrue("Leaving and reopening the player preserves playback", onMain { player.isPlaying })
-                assertEquals("Local controls must not read progress again", initialReads, gets.get())
-                assertTrue("Local controls must keep their original session", writes.all {
-                    JsonParser.parseString(it).asJsonObject.get("session_id").asString == initialSession
-                })
-                assertEquals("Only the initial entry sends play", 1, writes.count {
-                    JsonParser.parseString(it).asJsonObject.get("event").asString == "play"
+                assertTrue("The next explicit resume can claim its selected local target", writes.any {
+                    JsonParser.parseString(it).asJsonObject.get("session_id").asString != initialSession
                 })
             } finally {
                 release.countDown()

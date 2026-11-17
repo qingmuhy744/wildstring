@@ -143,13 +143,13 @@ struct MacQueueView: View {
                         placeholder: item.trackID.hasPrefix("podcast_ep_") ? "antenna.radiowaves.left.and.right" : "music.note")
                     if current {
                         RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.45))
-                        Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        Image(systemName: playback.wantsPlayback ? "pause.fill" : "play.fill")
                             .font(.caption).foregroundStyle(.white)
                     }
                 }.frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .help(current ? (playback.isPlaying ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playTrack", item.title))
+            .help(current ? (playback.wantsPlayback ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playTrack", item.title))
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
                     .font(.system(size: 13, weight: current ? .semibold : .regular))
@@ -183,7 +183,7 @@ struct MacQueueView: View {
 
     @ViewBuilder
     private func actions(_ item: PlaybackService.Item, position: Int) -> some View {
-        Button(item.id == playback.currentItem?.id ? (playback.isPlaying ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playNow")) {
+        Button(item.id == playback.currentItem?.id ? (playback.wantsPlayback ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playNow")) {
             play(item)
         }
         if let current = entries.firstIndex(where: { $0.id == playback.currentItem?.id }) {

@@ -266,15 +266,15 @@ struct NowPlayingView: View {
                     Haptics.tap()
                     playback.togglePlayPause()
                 } label: {
-                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                    Image(systemName: playback.wantsPlayback ? "pause.fill" : "play.fill")
                         .font(.system(size: 24, weight: .semibold))
-                        .offset(x: playback.isPlaying ? 0 : 1)
+                        .offset(x: playback.wantsPlayback ? 0 : 1)
                         .foregroundStyle(colorScheme == .dark ? Color(red: 0.13, green: 0.106, blue: 0.09) : Color(red: 1, green: 0.98, blue: 0.953))
                         .frame(width: 64, height: 64)
                         .background(colorScheme == .dark ? Color.wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(playback.isPlaying ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
+                .accessibilityLabel(playback.wantsPlayback ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
                 Button {
                     Haptics.tap()
                     if isPodcast {

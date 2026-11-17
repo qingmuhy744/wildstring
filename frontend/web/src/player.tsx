@@ -134,6 +134,9 @@ export function usePlayer(userId: string) {
   const podcastProgress = useRef<PodcastProgressStore | null>(null);
   const podcastTrack = useRef<Track | null>(null);
   const podcastIntent = useRef(0);
+  const podcastRead = useRef<AbortController | null>(null);
+  const resumeSeek = useRef<number | null>(null);
+  const permissionBlocked = useRef(false);
   const podcastLine = useRef<'show' | 'queue'>('show');
   const [podcastProgressPrompt, setPodcastProgressPrompt] = useState<PodcastProgressPrompt | null>(
     null,
@@ -166,14 +169,17 @@ export function usePlayer(userId: string) {
     podcastProgress.current?.checkpoint(id, element.currentTime, element.duration, event, force);
   }
   useEffect(() => {
-    const store = new PodcastProgressStore(userId, (id, problem, finished) => {
+    const store = new PodcastProgressStore(userId, (id, problem) => {
       if (episodeId(podcastTrack.current?.id) === id) {
         setPodcastProgressMessage(problem || '');
-        if (finished) audio.current?.pause();
       }
     });
     podcastProgress.current = store;
-    const background = () => checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+    const background = () =>
+      checkpointPodcast(
+        audio.current?.ended ? 'ended' : desiredPlay.current ? 'progress' : 'pause',
+        true,
+      );
     const refreshMode = () => void refreshEpisodeResumeMode(userId).catch(() => {});
     const visibility = () => {
       if (document.visibilityState === 'hidden') background();
@@ -454,9 +460,10 @@ export function usePlayer(userId: string) {
     return () => clearTimeout(timer);
   }, [buffering, current]);
 
-  function play() {
+  function playLocal() {
     desiredPlay.current = true;
     playbackGain.prepare();
+    if (podcastRead.current) return;
     if (loading.current) {
       desiredPlay.current = true;
       return;
@@ -468,15 +475,25 @@ export function usePlayer(userId: string) {
       return;
     }
     const attempt = generation.current;
-    element.play().catch((reason: DOMException) => {
-      if (attempt !== generation.current || reason.name === 'AbortError') return;
-      setBuffering(false);
-      setError(
-        reason.name === 'NotAllowedError'
-          ? i18n.t('playerPage.clickToContinue')
-          : i18n.t('playerPage.cannotPlayRetry'),
-      );
-    });
+    element
+      .play()
+      .then(() => {
+        if (attempt !== generation.current) return;
+        permissionBlocked.current = false;
+        const id = episodeId(podcastTrack.current?.id);
+        if (id) podcastProgress.current?.activate(id);
+      })
+      .catch((reason: DOMException) => {
+        if (attempt !== generation.current || reason.name === 'AbortError') return;
+        permissionBlocked.current = reason.name === 'NotAllowedError';
+        desiredPlay.current = false;
+        setBuffering(false);
+        setError(
+          reason.name === 'NotAllowedError'
+            ? i18n.t('playerPage.clickToContinue')
+            : i18n.t('playerPage.cannotPlayRetry'),
+        );
+      });
   }
 
   async function loadSource(track: Track, seconds: number, autoplay: boolean, delay = 0) {
@@ -524,7 +541,7 @@ export function usePlayer(userId: string) {
       if (element.getAttribute('src') === url && next?.mode === 'original' && !element.error) {
         loading.current = false;
         setBuffering(false);
-        if (desiredPlay.current) play();
+        if (desiredPlay.current) playLocal();
         return;
       }
       pendingSeek.current = next?.mode !== 'transcode' && seconds > 0 ? seconds : null;
@@ -535,7 +552,7 @@ export function usePlayer(userId: string) {
       element.playbackRate = rate;
       element.preservesPitch = true;
       loading.current = false;
-      if (desiredPlay.current) play();
+      if (desiredPlay.current) playLocal();
       else setBuffering(false);
     } catch (reason) {
       if (controller.signal.aborted || attempt !== generation.current) return;
@@ -577,6 +594,10 @@ export function usePlayer(userId: string) {
       setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
       return;
     }
+    podcastRead.current?.abort();
+    podcastRead.current = null;
+    resumeSeek.current = null;
+    permissionBlocked.current = false;
     const intent = ++podcastIntent.current;
     answerProgress.current(null);
     const begin = (position: number) => {
@@ -641,6 +662,104 @@ export function usePlayer(userId: string) {
       if (intent === podcastIntent.current)
         setError(i18n.t('playerPage.cannotReadPodcastProgress'));
     });
+  }
+
+  function pauseUser() {
+    desiredPlay.current = false;
+    podcastIntent.current++;
+    podcastRead.current?.abort();
+    podcastRead.current = null;
+    answerProgress.current(null);
+    audio.current?.pause();
+    checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+    setBuffering(false);
+  }
+
+  function resume() {
+    const element = audio.current;
+    const id = episodeId(current?.id);
+    const store = podcastProgress.current;
+    if (!element || !current) return;
+    if (!id || !store) {
+      playLocal();
+      return;
+    }
+    if (desiredPlay.current && (podcastRead.current || loading.current || !element.paused)) return;
+    if (permissionBlocked.current && store.waitingForPermission(id)) {
+      playLocal();
+      return;
+    }
+    const intent = ++podcastIntent.current;
+    podcastRead.current?.abort();
+    const controller = new AbortController();
+    podcastRead.current = controller;
+    desiredPlay.current = true;
+    setBuffering(true);
+    setError('');
+    void (async () => {
+      const { remote, local, online } = await store.inspect(id, true, controller.signal);
+      if (intent !== podcastIntent.current) return;
+      const explicit = resumeSeek.current;
+      const same = !!local && remote.session_id === local.session_id;
+      if (
+        explicit === null &&
+        (remote.completed ||
+          (local?.event === 'ended' && (!online || remote.version === 0 || same)))
+      ) {
+        desiredPlay.current = false;
+        store.leave();
+        setPodcastProgressMessage(i18n.t('podcastProgress.completedElsewhere'));
+        return;
+      }
+      const fallback =
+        pendingSeek.current ??
+        (store.isActive(id) && element.readyState >= 1
+          ? offset.current + element.currentTime
+          : (local?.position_seconds ?? position));
+      const target =
+        explicit ??
+        (!online ||
+        remote.version === 0 ||
+        (same && (store.isActive(id) || local.sequence >= remote.sequence))
+          ? fallback
+          : remote.position_seconds);
+      await store.begin(
+        id,
+        remote,
+        target,
+        current.duration_ms / 1000,
+        'resume',
+        online,
+        same || !online,
+      );
+      if (intent !== podcastIntent.current) return;
+      resumeSeek.current = null;
+      setPodcastProgressMessage('');
+      podcastRead.current = null;
+      if (
+        loading.current ||
+        element.error ||
+        !element.getAttribute('src') ||
+        planRef.current?.mode === 'transcode'
+      ) {
+        await loadSource(current, target, true);
+      } else {
+        if (element.readyState >= 1) element.currentTime = target;
+        else pendingSeek.current = target;
+        setPosition(target);
+        playLocal();
+      }
+    })()
+      .catch(() => {
+        if (intent === podcastIntent.current) {
+          desiredPlay.current = false;
+          setError(i18n.t('playerPage.cannotReadPodcastProgress'));
+        }
+      })
+      .finally(() => {
+        if (podcastRead.current === controller) podcastRead.current = null;
+        if (intent === podcastIntent.current && element.paused) setBuffering(false);
+      });
   }
 
   function feedback(action: 'skip' | 'complete') {
@@ -960,10 +1079,12 @@ export function usePlayer(userId: string) {
     if (!audio.current || !current || !duration) return;
     const target = Math.max(0, Math.min(value, duration - 0.05));
     const id = episodeId(current.id);
-    if (id && !podcastProgress.current?.isActive(id)) {
-      // A deliberate seek is an intent to listen, even when the restored player is paused.
-      start(queue, index, target, !audio.current.paused);
-      return;
+    const restartingRead = !!podcastRead.current;
+    if (id && (audio.current.paused || restartingRead)) resumeSeek.current = target;
+    if (restartingRead) {
+      podcastIntent.current++;
+      podcastRead.current?.abort();
+      podcastRead.current = null;
     }
     if (
       planRef.current?.mode === 'transcode' ||
@@ -983,21 +1104,31 @@ export function usePlayer(userId: string) {
       audio.current.currentTime = target;
       setPosition(target);
     }
+    if (restartingRead) {
+      desiredPlay.current = false;
+      resume();
+    }
   }
 
   function toggle() {
     if (!current || !audio.current) return;
+    if (podcastRead.current) {
+      pauseUser();
+      return;
+    }
     if (loading.current) {
       desiredPlay.current = !desiredPlay.current;
       return;
     }
     if (!audio.current.paused) {
-      desiredPlay.current = false;
-      audio.current.pause();
-      setBuffering(false);
+      pauseUser();
     } else {
       setError('');
       const id = episodeId(current.id);
+      if (id) {
+        resume();
+        return;
+      }
       if (
         (id && !podcastProgress.current?.isActive(id)) ||
         audio.current.error ||
@@ -1005,7 +1136,7 @@ export function usePlayer(userId: string) {
         !audio.current.getAttribute('src')
       )
         start(queue, index);
-      else play();
+      else playLocal();
     }
   }
 
@@ -1106,12 +1237,11 @@ export function usePlayer(userId: string) {
       album: current.album || '',
     });
     const actions: [MediaSessionAction, MediaSessionActionHandler][] = [
-      ['play', () => (current.podcast_id ? start(queue, index) : play())],
+      ['play', resume],
       [
         'pause',
         () => {
-          desiredPlay.current = false;
-          audio.current?.pause();
+          pauseUser();
         },
       ],
       ['previoustrack', () => step(-1)],
@@ -1166,6 +1296,7 @@ export function usePlayer(userId: string) {
     index,
     current,
     playing,
+    wantsPlayback: playing || (!!current?.podcast_id && desiredPlay.current),
     position,
     duration,
     volume,
@@ -1371,7 +1502,6 @@ export function usePlayer(userId: string) {
       },
       onPlay: () => setPlaying(true),
       onPause: () => {
-        checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
         if (audio.current) tracker.current.playing(audio.current, false);
         setPlaying(false);
         if (!loading.current || !desiredPlay.current) setBuffering(false);
@@ -1384,6 +1514,8 @@ export function usePlayer(userId: string) {
         if (audio.current) tracker.current.afterSeek(audio.current);
       },
       onPlaying: () => {
+        const id = episodeId(current?.id);
+        if (id) podcastProgress.current?.activate(id);
         if (audio.current) tracker.current.playing(audio.current, true);
         setBuffering(false);
         setError('');
@@ -1414,7 +1546,20 @@ export function usePlayer(userId: string) {
         setPlaying(false);
         setBuffering(false);
         feedback('complete');
-        step(1, true);
+        const id = episodeId(current?.id);
+        if (!id) step(1, true);
+        else {
+          desiredPlay.current = false;
+          const intent = podcastIntent.current;
+          void podcastProgress.current?.finish(id).then((accepted) => {
+            if (
+              accepted &&
+              intent === podcastIntent.current &&
+              episodeId(podcastTrack.current?.id) === id
+            )
+              step(1, true);
+          });
+        }
       },
       onError: mediaError,
     },
@@ -1605,10 +1750,10 @@ export function PlaybackControls({ player }: { player: Player }) {
             player.toggle();
           }}
           disabled={!current}
-          aria-label={playing ? t('playerPage.pause') : t('playerPage.play')}
+          aria-label={player.wantsPlayback ? t('playerPage.pause') : t('playerPage.play')}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d={playing ? 'M7 5h4v14H7zm6 0h4v14h-4z' : 'M8 5l11 7-11 7z'} />
+            <path d={player.wantsPlayback ? 'M7 5h4v14H7zm6 0h4v14h-4z' : 'M8 5l11 7-11 7z'} />
           </svg>
         </button>
         <button

@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Lyrics and podcast presentation data")
 struct LyricsAndPodcastDecodingTests {
+    @Test func podcastBookmarkIncludesWriterIdentity() throws {
+        let data = Data(#"{"episode_id":"e1","version":7,"session_id":"session-b","device_id":"phone-b","sequence":4,"position_seconds":12,"duration_seconds":60,"completed":false}"#.utf8)
+        let bookmark = try JSONDecoder().decode(PodcastProgressSnapshot.self, from: data)
+        #expect(bookmark.sessionId == "session-b")
+        #expect(bookmark.sequence == 4)
+        #expect(bookmark.deviceId == "phone-b")
+    }
+
     @Test func wordLyricsDecodeAlongsideLegacyLines() throws {
         let data = Data(#"{"kind":"synced","lines":[{"time_ms":1000,"text":"甲乙","words":[{"start_ms":1000,"end_ms":1500,"text":"甲"},{"start_ms":1500,"end_ms":2500,"text":"乙"}],"translation":"A B","romanization":"jia yi"},{"time_ms":3000,"text":"普通行"}]}"#.utf8)
         let lyrics = try JSONDecoder().decode(Lyrics.self, from: data)

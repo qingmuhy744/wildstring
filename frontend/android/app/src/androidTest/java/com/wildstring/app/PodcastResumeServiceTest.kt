@@ -203,16 +203,15 @@ class PodcastResumeServiceTest {
                 val beforeRestoreRead = synchronized(reads) { reads.toList() }
                 val beforeRestorePlays = synchronized(writes) { plays("first") }
                 onMain { restored.play() }
-                await("Restored completed queue entry reads progress before starting") {
-                    onMain { restored.isPlaying && podcastEpisodeId(restored.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == "first" && restored.currentPosition in 0..2_000 }
+                await("Restored completed queue entry reads progress and remains paused") {
+                    synchronized(reads) { reads.size > beforeRestoreRead.size } &&
+                        onMain { !restored.playWhenReady && !restored.isPlaying }
                 }
                 SystemClock.sleep(500)
                 val restoreReads = synchronized(reads) { reads.drop(beforeRestoreRead.size) }
                 assertEquals("A restored completed queue entry reads only its own progress, never its show's next episode: ${diagnostics()}", listOf("first"), restoreReads)
                 assertEquals("Restored completed queue entry stays on its own episode", "first", onMain { podcastEpisodeId(restored.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) })
-                assertEquals("A restored completed queue entry restarts one play session from 0: ${diagnostics()}", beforeRestorePlays + 1, plays("first"))
-                val restorePlay = synchronized(writes) { writes.filter { it.first == "first" && bodyOf("first", it)?.get("event")?.asString == "play" } }.last()
-                assertEquals("Restored user start must carry intent=restart", "restart", bodyOf("first", restorePlay)!!.get("intent").asString)
+                assertEquals("Resuming a restored completed entry opens no restart session: ${diagnostics()}", beforeRestorePlays, plays("first"))
             } finally {
                 onMain { controller?.let { it.pause(); it.clearMediaItems(); it.release() } }
             }

@@ -118,14 +118,14 @@ struct MacPodcastPlayer: View {
                         if playback.isBuffering {
                             MacOnAccentProgress(side: 16)
                         } else {
-                            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                            Image(systemName: playback.wantsPlayback ? "pause.fill" : "play.fill")
                                 .font(.title2).foregroundStyle(MacTheme.onAccent)
                         }
                     }
                     .frame(width: 54, height: 54)
                     .background(MacTheme.accentDeep, in: Circle())
-                }.help(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
-                    .accessibilityLabel(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
+                }.help(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.wantsPlayback ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
+                    .accessibilityLabel(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : (playback.wantsPlayback ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume")))
                 Button { playback.seek(to: playback.currentTime + 30) } label: {
                     Image(systemName: "goforward.30").font(.title2)
                 }.help(L10n("macPodcastPlayer.skipForward30")).accessibilityLabel(L10n("macPodcastPlayer.skipForward30"))

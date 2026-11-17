@@ -8,6 +8,7 @@
 - 各版本交付内容见 [CHANGELOG](../../CHANGELOG.md) 与 `docs/releases/`；实现状态以对应契约和发布说明为准；文档中的计划不代表已实现。
 
 - schema 54 增加账号级播客续听模式端点；四端接入先读后播、会话 `intent`、冲突后停传与显式接管，续听模式按账号同步且不迁移旧本机设置。实现与实际验收范围见 [0.8.18 发布说明](../releases/v0.8.18.md)；本轮 0.8.19 主要修复 Android 播客点播性能并收敛曲库浏览，schema 保持 54。
+- 播客暂停恢复在 Web、Android、macOS、iOS 统一：主动恢复有界读取最新书签，自动音频恢复保留本机位置，失权或结束未确认时不自动改待播／开后继。规则与实际验收见[单集进度契约](../../contracts/podcast-progress.md)及[接续方案](../plans/podcast-resume-handoff.md)。
 
 ## 定位
 

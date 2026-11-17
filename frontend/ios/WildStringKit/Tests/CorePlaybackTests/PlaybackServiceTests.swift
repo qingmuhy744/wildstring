@@ -871,7 +871,7 @@ struct PlaybackServiceTests {
         }
         service.submitPodcastProgress = { episodeID, write in
             recorder.append(episodeID, write)
-            return .ok
+            return write.event == "ended" ? .completed : .ok
         }
 
         service.configurePodcastContinuation(
@@ -964,7 +964,7 @@ struct PlaybackServiceTests {
                 return nil
             }
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
 
         service.configurePodcastContinuation(
             podcastID: "show-a",
@@ -1070,7 +1070,7 @@ struct PlaybackServiceTests {
         }
         service.submitPodcastProgress = { episodeID, write in
             recorder.append(episodeID, write)
-            return .ok
+            return write.event == "ended" ? .completed : .ok
         }
 
         let itemA = try #require(await cloud.playbackItem(for: "ep-a"))
@@ -1108,7 +1108,7 @@ struct PlaybackServiceTests {
         }
         service.submitPodcastProgress = { episodeID, write in
             recorder.append(episodeID, write)
-            return .ok
+            return write.event == "ended" ? .completed : .ok
         }
 
         let item40 = PlaybackService.Item(
@@ -1150,7 +1150,7 @@ struct PlaybackServiceTests {
         }
         service.submitPodcastProgress = { episodeID, write in
             recorder.append(episodeID, write)
-            return .ok
+            return write.event == "ended" ? .completed : .ok
         }
 
         let item40 = PlaybackService.Item(
@@ -1206,7 +1206,7 @@ struct PlaybackServiceTests {
         service.loadPodcastProgress = { id in
             .init(version: 2, positionSeconds: id == "done" ? 600 : 90, durationSeconds: 1000, completed: id == "done")
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         service.configurePodcastContinuation(episodes: [
             .init(id: "first", title: "First", chronologicalIndex: 2, isCompleted: false, durationSeconds: 600),
             .init(id: "done", title: "Done", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
@@ -1227,7 +1227,7 @@ struct PlaybackServiceTests {
         service.loadPodcastProgress = { id in
             .init(version: 2, positionSeconds: id == "done" ? 600 : 90, durationSeconds: 600, completed: id == "done")
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         service.configurePodcastContinuation(episodes: [
             .init(id: "first", title: "First", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
             .init(id: "done", title: "Done", chronologicalIndex: 0, isCompleted: false, durationSeconds: 600)
@@ -1244,18 +1244,18 @@ struct PlaybackServiceTests {
     private actor PendingRecorder {
         var online = false
         var writes: [PodcastProgressWrite] = []
-        var historicalResult: PodcastSubmitResult = .ok
-        func goOnline(_ result: PodcastSubmitResult) { online = true; historicalResult = result }
+        func goOnline() { online = true }
         func submit(_ id: String, _ write: PodcastProgressWrite) -> PodcastSubmitResult {
             guard online else { return .failed }
             if id == "pend" { writes.append(write) }
-            return write.sessionId == writes.first?.sessionId && write.event != "play" ? historicalResult : .ok
+            return write.event == "ended" ? .completed : .ok
         }
     }
 
-    private func makePendingScenario(historical: PodcastSubmitResult, serverAfterHistorical: PodcastProgressSnapshot,
+    private func makePendingScenario(remote: PodcastProgressSnapshot,
                                      defaults: UserDefaults) async throws -> (PlaybackService, PendingRecorder) {
-        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore())
+        PodcastResumeProtocol.respond { _ in (501, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
         let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
         let service = try makeService(store: InMemoryQueueStore())
         service.podcastCloud = cloud
@@ -1264,9 +1264,7 @@ struct PlaybackServiceTests {
         service.submitPodcastProgress = { id, write in await recorder.submit(id, write) }
         service.loadPodcastProgress = { id in
             guard await recorder.online, id == "pend" else { return nil }
-            return await recorder.writes.isEmpty
-                ? PodcastProgressSnapshot(version: 5, positionSeconds: 10, durationSeconds: 600, completed: false)
-                : serverAfterHistorical
+            return remote
         }
         // Listen offline so the position stays pending, then leave the episode.
         let pend = PlaybackService.Item(trackID: "podcast_ep_pend", title: "Pend", artist: "Host",
@@ -1277,40 +1275,39 @@ struct PlaybackServiceTests {
         service.pause()
         service.playPodcastEpisode(.init(trackID: "podcast_ep_other", title: "Other", artist: "Host", streamPath: "unused"))
         await service.waitForPodcastTasks()
-        await recorder.goOnline(historical)
+        await recorder.goOnline()
         service.playPodcastEpisode(pend)
         await service.waitForPodcastTasks()
         return (service, recorder)
     }
 
-    @Test func pendingLocalProgressIsSubmittedBeforeNewSessionStartsFromServerState() async throws {
+    @Test func explicitSelectionReadsCurrentBookmarkWithoutFlushingOldSession() async throws {
         let suite = "wildstring.pending-start.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let (service, recorder) = try await makePendingScenario(
-            historical: .ok,
-            serverAfterHistorical: .init(version: 6, positionSeconds: 30, durationSeconds: 600, completed: false),
+            remote: .init(version: 6, positionSeconds: 30, durationSeconds: 600, completed: false),
             defaults: defaults)
         defer { service.shutdown() }
         let writes = await recorder.writes
         let historical = try #require(writes.first)
         #expect(historical.positionSeconds == 30)
-        #expect(historical.baseVersion == 0)
+        #expect(historical.baseVersion == 6)
         let play = try #require(writes.first { $0.event == "play" })
-        #expect(play.sessionId != historical.sessionId)
+        #expect(writes.count == 1)
         #expect(play.baseVersion == 6)
         #expect(play.positionSeconds == 30)
         #expect(service.currentTime == 30)
     }
 
-    @Test func pendingLocalProgressConflictAdoptsServerStateInsteadOfOverwriting() async throws {
+    @Test func explicitSelectionAdoptsRemoteWithoutUploadingStalePosition() async throws {
         let suite = "wildstring.pending-conflict.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let other = PodcastProgressSnapshot(version: 9, positionSeconds: 400, durationSeconds: 600,
                                             completed: false, deviceId: "other-device")
         let (service, recorder) = try await makePendingScenario(
-            historical: .conflictCurrent(other), serverAfterHistorical: other, defaults: defaults)
+            remote: other, defaults: defaults)
         defer { service.shutdown() }
         let writes = await recorder.writes
         let historical = try #require(writes.first)
@@ -1320,119 +1317,6 @@ struct PlaybackServiceTests {
         #expect(play.positionSeconds == 400)
         #expect(service.currentTime == 400)
         #expect(service.podcastProgressMessage == nil)
-    }
-
-    private actor SettleGate {
-        enum Mode { case offline, slow(Duration), failed, conflict(PodcastProgressSnapshot) }
-        var mode: Mode = .offline
-        var writes: [PodcastProgressWrite] = []
-        var online = false
-        func set(_ mode: Mode) { self.mode = mode; online = true }
-        func submit(_ write: PodcastProgressWrite) async -> PodcastSubmitResult {
-            if online { writes.append(write) }
-            switch mode {
-            case .offline, .failed: return .failed
-            case .slow(let delay): try? await Task.sleep(for: delay); return .ok
-            case .conflict(let current): return .conflictCurrent(current)
-            }
-        }
-    }
-
-    /// Leaves 30s of unsynced progress for "pend", then replays it with the given upload behaviour.
-    private func makeSettleScenario(mode: SettleGate.Mode, defaults: UserDefaults) async throws -> (PlaybackService, SettleGate) {
-        let client = WildstringClient(server: try ServerAddress(input: "settle.example.invalid"), store: InMemorySessionStore())
-        let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
-        let service = try makeService(store: InMemoryQueueStore())
-        service.podcastCloud = cloud
-        service.podcastDeviceID = "local"
-        service.podcastSettleTimeout = .milliseconds(80)
-        let gate = SettleGate()
-        service.submitPodcastProgress = { _, write in await gate.submit(write) }
-        service.loadPodcastProgress = { id in
-            guard await gate.online, id == "pend" else { return nil }
-            return PodcastProgressSnapshot(version: 5, positionSeconds: 10, durationSeconds: 600, completed: false)
-        }
-        let pend = PlaybackService.Item(trackID: "podcast_ep_pend", title: "Pend", artist: "Host",
-                                        streamPath: "unused", durationSeconds: 600)
-        service.playPodcastEpisode(pend)
-        await service.waitForPodcastTasks()
-        service.handleTick(seconds: 30)
-        service.pause()
-        service.playPodcastEpisode(.init(trackID: "podcast_ep_other", title: "Other", artist: "Host", streamPath: "unused"))
-        await service.waitForPodcastTasks()
-        await gate.set(mode)
-        service.playPodcastEpisode(pend)
-        await service.waitForPodcastTasks()
-        return (service, gate)
-    }
-
-    private func storedSession(_ defaults: UserDefaults) throws -> (session: String, pending: Bool?) {
-        struct Saved: Decodable { var bookmark: PodcastBookmark; var pending: Bool? }
-        let data = try #require(defaults.data(forKey: "wildstring.podcast.progress.account.pend"))
-        let saved = try JSONDecoder().decode(Saved.self, from: data)
-        return (saved.bookmark.sessionId, saved.pending)
-    }
-
-    @Test func slowPendingUploadDoesNotBlockStartAndUsesLocalPosition() async throws {
-        let suite = "wildstring.pending-slow.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let (service, gate) = try await makeSettleScenario(mode: .slow(.seconds(5)), defaults: defaults)
-        defer { service.shutdown() }
-        // The 5s upload is still in flight, yet the session already started from the local position.
-        #expect(service.currentItem?.trackID == "podcast_ep_pend")
-        #expect(service.currentTime == 30)
-        #expect(!(await gate.writes.contains { $0.event == "play" }))
-        #expect(service.podcastProgressMessage == nil)
-    }
-
-    @Test func failedPendingUploadKeepsLocalPositionAndNextWriteUsesConflictPath() async throws {
-        let suite = "wildstring.pending-failed.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let (service, gate) = try await makeSettleScenario(mode: .failed, defaults: defaults)
-        defer { service.shutdown() }
-        #expect(service.currentTime == 30)
-        let historical = try #require(await gate.writes.first)
-        #expect(historical.positionSeconds == 30)
-        #expect(!(await gate.writes.contains { $0.event == "play" }))
-        let stored = try storedSession(defaults)
-        #expect(stored.session != historical.sessionId)
-        #expect(stored.pending != false)
-        // The next checkpoint reaches the server with the old base version and meets another device's state.
-        let other = PodcastProgressSnapshot(version: 9, positionSeconds: 400, durationSeconds: 600,
-                                            completed: false, deviceId: "other-device")
-        await gate.set(.conflict(other))
-        service.pause()
-        await service.waitForPodcastTasks()
-        let checkpoint = try #require(await gate.writes.last)
-        #expect(checkpoint.sessionId == stored.session)
-        #expect(checkpoint.baseVersion == 0)
-        #expect(service.podcastProgressMessage == KitL10n("kit.playback.podcastProgressConflict"))
-        #expect(service.currentTime == 30)
-        let count = await gate.writes.count
-        service.pause()
-        await service.waitForPodcastTasks()
-        #expect(await gate.writes.count == count)
-    }
-
-    @Test func lateSettleResultAfterTheCapIsIgnored() async throws {
-        let suite = "wildstring.pending-late.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let (service, gate) = try await makeSettleScenario(mode: .slow(.milliseconds(300)), defaults: defaults)
-        defer { service.shutdown() }
-        let before = try storedSession(defaults)
-        #expect(service.currentTime == 30)
-        try await Task.sleep(for: .milliseconds(500))
-        let historical = try #require(await gate.writes.first)
-        #expect(service.currentTime == 30)
-        #expect(service.currentItem?.trackID == "podcast_ep_pend")
-        let after = try storedSession(defaults)
-        #expect(after.session == before.session)
-        #expect(after.session != historical.sessionId)
-        #expect(after.pending == before.pending)
-        #expect(!(await gate.writes.contains { $0.event == "play" }))
     }
 
     @Test func askModeUsesFreshProgressBeforePreparingAudio() async throws {
@@ -1453,7 +1337,7 @@ struct PlaybackServiceTests {
         service.loadPodcastProgress = { _ in
             PodcastProgressSnapshot(version: 4, positionSeconds: 300, durationSeconds: 2400, completed: false)
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         service.playPodcastEpisode(.init(trackID: "podcast_ep_ask", title: "Ask", artist: "Host",
                                          streamPath: "api/v1/podcasts/episodes/ask/stream", resumePositionSeconds: 50))
         await service.waitForPodcastTasks()
@@ -1509,7 +1393,7 @@ struct PlaybackServiceTests {
             try? await Task.sleep(for: .milliseconds(120))
             return PodcastProgressSnapshot(version: 4, positionSeconds: 300, durationSeconds: 2400, completed: false)
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         let item = PlaybackService.Item(trackID: "podcast_ep_slow", title: "Slow", artist: "Host",
                                         streamPath: "api/v1/podcasts/episodes/slow/stream",
                                         resumePositionSeconds: 50, durationSeconds: 2400)
@@ -1546,15 +1430,21 @@ struct PlaybackServiceTests {
         #expect(await recorder.writes.isEmpty)
     }
 
-    @Test func pausingDuringCompletedEpisodeReadKeepsTheNextEpisodePaused() async throws {
+    @Test func pausingDuringAutomaticReadCancelsFurtherEpisodeSelection() async throws {
+        actor Reads {
+            var done = false
+            func started(_ id: String) { if id == "done" { done = true } }
+        }
+        let reads = Reads()
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }
         service.loadPodcastProgress = { id in
+            await reads.started(id)
             if id == "done" { try? await Task.sleep(for: .milliseconds(100)) }
             return .init(version: 2, positionSeconds: id == "done" ? 600 : 90,
                          durationSeconds: 1000, completed: id == "done")
         }
-        service.submitPodcastProgress = { _, _ in .ok }
+        service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         service.configurePodcastContinuation(episodes: [
             .init(id: "first", title: "First", chronologicalIndex: 2, isCompleted: false, durationSeconds: 600),
             .init(id: "done", title: "Done", chronologicalIndex: 1, isCompleted: false, durationSeconds: 600),
@@ -1563,11 +1453,15 @@ struct PlaybackServiceTests {
         service.playPodcastEpisode(.init(trackID: "podcast_ep_first", title: "First", artist: "Host", streamPath: "unused"))
         await service.waitForPodcastTasks()
         service.handleItemEnded()
-        try await Task.sleep(for: .milliseconds(20))
+        for _ in 0..<100 {
+            if await reads.done { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await reads.done)
         service.pause()
         await service.waitForPodcastTasks()
-        #expect(service.currentItem?.trackID == "podcast_ep_next")
-        #expect(service.currentTime == 90)
+        #expect(service.currentItem?.trackID == "podcast_ep_done")
+        #expect(service.currentTime == 0)
         #expect(!service.wantsPlayback)
         #expect(!service.isPlaying)
     }
@@ -1576,7 +1470,8 @@ struct PlaybackServiceTests {
         let suite = "wildstring.ended-progress.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore())
+        PodcastResumeProtocol.respond { _ in (501, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
         let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }
@@ -1631,7 +1526,8 @@ struct PlaybackServiceTests {
         let suite = "wildstring.historical-progress.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore())
+        PodcastResumeProtocol.respond { _ in (501, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"), store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
         let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }
@@ -1716,6 +1612,39 @@ struct PlaybackServiceTests {
         #expect(!service.didFinishQueue)
     }
 
+    @Test func coldResumeKeepsUnsentPauseAheadOfItsOwnServerEcho() async throws {
+        let suite = "wildstring.cold-pause.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        PodcastResumeProtocol.respond { _ in (501, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "cold.example.invalid"), store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
+        let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        var bookmark = PodcastBookmark()
+        bookmark.begin(episodeId: "cold", deviceId: "local", baseVersion: 7)
+        _ = bookmark.next(positionSeconds: 15, durationSeconds: 60, event: "play", nowMs: 0, force: true)
+        _ = bookmark.next(positionSeconds: 20, durationSeconds: 60, event: "pause", nowMs: 1, force: true)
+        struct Saved: Encodable {
+            var bookmark: PodcastBookmark
+            var position = 20.0, duration = 60.0
+            var completed = false, conflict = false, pending = true
+            var version = 7
+            var pendingEvent = "pause"
+        }
+        defaults.set(try JSONEncoder().encode(Saved(bookmark: bookmark)), forKey: "wildstring.podcast.progress.account.cold")
+        let store = InMemoryQueueStore()
+        try await store.saveQueue([.init(trackID: "podcast_ep_cold", title: "Cold", artist: "Host", streamPath: "unused", durationSeconds: 60)], currentIndex: 0)
+        try await store.saveProgress(.init(index: 0, position: 20))
+        let service = try makeService(store: store)
+        defer { service.shutdown() }
+        service.podcastCloud = cloud; service.podcastDeviceID = "local"
+        let session = bookmark.sessionId
+        service.loadPodcastProgress = { _ in .init(version: 8, positionSeconds: 15, durationSeconds: 60, completed: false, deviceId: "local", sessionId: session, sequence: 1) }
+        await service.restore()
+        service.resume()
+        await service.waitForPodcastTasks()
+        #expect(service.currentTime == 20)
+    }
+
     @Test func offlineSessionSurvivesRestoreAndUploadsOnFirstPlaybackTick() async throws {
         let suite = "wildstring.offline-progress.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -1763,7 +1692,7 @@ struct PlaybackServiceTests {
         #expect(writes.first?.baseVersion == 0)
     }
 
-    @Test func sameDeviceConflictRetriesOnceAndKeepsNewestVersionForTakeover() async throws {
+    @Test func sameDeviceDifferentSessionStopsUntilExplicitTakeover() async throws {
         actor Recorder {
             var writes: [PodcastProgressWrite] = []
             func submit(_ write: PodcastProgressWrite) -> PodcastSubmitResult {
@@ -1781,16 +1710,16 @@ struct PlaybackServiceTests {
         service.playPodcastEpisode(.init(trackID: "podcast_ep_retry", title: "Retry", artist: "Host", streamPath: "unused"))
         await service.waitForPodcastTasks()
         let writes = await recorder.writes
-        #expect(writes.count == 2)
-        #expect(writes[1].baseVersion == 8)
+        #expect(writes.count == 1)
+        #expect(writes.first?.baseVersion == 7)
         #expect(service.podcastCanUseLocalProgress)
         service.pause()
         await service.waitForPodcastTasks()
-        #expect(await recorder.writes.count == 2)
+        #expect(await recorder.writes.count == 1)
         service.useLocalPodcastProgress()
         try await Task.sleep(for: .milliseconds(30))
-        #expect(await recorder.writes.last?.baseVersion == 9)
-        #expect(await recorder.writes.count == 3)
+        #expect(await recorder.writes.last?.baseVersion == 8)
+        #expect(await recorder.writes.count == 2)
     }
 
     @Test func pauseDuringNewEpisodeReadDoesNotWriteIntoThePreviousSession() async throws {
@@ -1811,9 +1740,10 @@ struct PlaybackServiceTests {
         service.playPodcastEpisode(.init(trackID: "podcast_ep_second", title: "Second", artist: "Host", streamPath: "unused"))
         service.pause()
         await service.waitForPodcastTasks()
-        #expect(await recorder.ids == ["first", "second"])
+        #expect(await recorder.ids == ["first"])
         #expect(!service.wantsPlayback)
-        #expect(service.currentTime == 500)
+        #expect(service.currentItem?.trackID == "podcast_ep_second")
+        #expect(service.currentTime == 0)
     }
 
     @Test func delayedRemotePodcastProgressDoesNotOverwriteUserSeekDuringBoot() async throws {
@@ -1837,7 +1767,7 @@ struct PlaybackServiceTests {
         }
         service.submitPodcastProgress = { episodeID, write in
             recorder.append(episodeID, write)
-            return .ok
+            return write.event == "ended" ? .completed : .ok
         }
 
         let item40 = PlaybackService.Item(
