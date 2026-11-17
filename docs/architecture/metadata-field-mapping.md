@@ -1,10 +1,6 @@
-状态：部分实施；保留原字段映射设计，音频标签写回与往返验证尚未实施。当前字段边界见 [元数据来源契约](../../contracts/metadata-providers.md)。
-
 # 音乐标签与野弦字段映射
 
-日期：2026-10-16。状态：**字段统一方向已由用户提出；以下是核对后的映射建议；0.2.2 已实现主要字段读取与数据库编辑，文件写回及往返验证仍待开发。**
-
-目标是让 Mp3tag、MusicBrainz Picard 整理的文件能被野弦正确读取，未来写回托管副本后仍能被这些工具识别。本文细化[自动整理方案](../product/metadata-automation.md)，不发布新 API，也不改变导入源只读、数据库修正先行、显式写回副本的边界。
+目标是让 Mp3tag、MusicBrainz Picard 整理的文件能被野弦正确读取，未来写回托管副本后仍能被这些工具识别。本文定义字段互操作边界，不发布新 API，也不改变导入源只读、数据库修正先行、显式写回副本的边界；当前字段读取以 [TagReader](../../backend/src/wildstring/library/tag_fields.py) 为准。
 
 ## 1. 统一语义，按格式读写
 
@@ -108,4 +104,4 @@ ARRANGER=戊
 4. 用 Mp3tag、Picard 生成的合成文件验证“读取 → 改一个字段 → 写回副本 → 外部编辑器重读”；比较多值、未知字段、歌词、图片和音频内容是否保留。
 5. 本地字段模型和映射验证先完成，再把 MusicBrainz、Last.fm 建议转换到同一模型。联网结果确认后才能生效，不另外维护一套不兼容的标签名称。
 
-当前[标签读取](../../backend/src/wildstring/library/metadata.py)已调用 [TagReader](../../backend/src/wildstring/library/tag_fields.py)，包含独立 `ARTISTS` / `ALBUMARTISTS`、词曲编、曲碟总数、日期与外部 ID 的读取；具体格式映射以 `TagReader` 为准。上述音频标签写回与外部编辑器往返验证仍是后续目标。本文没有修改这些实现，没有执行标签写回，也没有改动真实音乐。
+当前[标签读取](../../backend/src/wildstring/library/metadata.py)调用 [TagReader](../../backend/src/wildstring/library/tag_fields.py)，包含独立 `ARTISTS` / `ALBUMARTISTS`、词曲编、曲碟总数、日期与外部 ID 的读取；具体格式映射以 `TagReader` 为准。上述音频标签写回与外部编辑器往返验证仍是后续目标。

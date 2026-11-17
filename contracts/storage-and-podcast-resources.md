@@ -1,6 +1,6 @@
 # 库存储、迁移与播客共享资源
 
-存储契约起于 schema 43，单集收藏保护在 schema 50 引入；当前 schema 以 `backend/src/wildstring/database.py` 为准（schema 51 移除旧 AI 配置、schema 52 把稍后听并入待播列表，均不改变存储与资源结构）。历史验证记录见 [0.8.0 说明](../docs/releases/v0.8.0.md)、[客户端与播客探索改进](../docs/product/client-and-podcast-explore.md) 与 [0.8.8 说明](../docs/releases/v0.8.8.md)。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
+存储契约起于 schema 43，单集收藏保护在 schema 50 引入；当前 schema 以 `backend/src/wildstring/database.py` 为准（schema 51 移除旧 AI 配置、schema 52 把稍后听并入待播列表，均不改变存储与资源结构）。历史验证记录见 [0.8.0 说明](../docs/releases/v0.8.0.md)、[0.8.3 说明](../docs/releases/v0.8.3.md) 与 [0.8.8 说明](../docs/releases/v0.8.8.md)。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
 
 ## 库配置
 

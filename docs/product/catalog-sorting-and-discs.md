@@ -10,9 +10,9 @@ Web 与 Android 提供专辑名称、入库时间、发行时间、艺人排序�
 
 专辑曲目响应补充全量、同权限与同筛选的 `discs`（number、track_count、duration_ms、offset）；曲序排序时 offset 指该碟的全局起点，跨分页不重复计算标题。普通／手工歌单保留现有顺序。
 
-验证入口：`make test`、`make test-catalog-web`、`make test-browse-web`、`make test-large-web`、`make android-ci` 和 `make android-connected-test`。发布及 home 部署分别核验。
+验证入口：`make test`、`make test-catalog-web`、`make test-browse-web`、`make test-large-web`、`make android-ci` 和 `make android-connected-test`。
 
-## Android 页面操作（0.5.11）
+## Android 页面操作
 
 升降序放在排序菜单内，并标记当前方向；选中已有方向不重复切换或重载。播放全部、曲数、排序与列表操作根据实际文字宽度和系统字体大小排列，空间足够时单行，不足时分行，曲数不逐字换行。
 

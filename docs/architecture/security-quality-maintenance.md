@@ -6,7 +6,7 @@
 
 - `agent_common` 保存权限主体、工具定义和序列化等公共契约。助手、巡检、研究、通知和路由依赖契约；公共契约不反向导入平台或服务实现。
 - `library.import_files` 保存导入与待整理流程共用的命名、哈希和安全复制函数，避免两种业务流程相互导入。
-- `library.scope` 保存库身份、账号上下文、权限计算与设置解析；schema 36 的 SQL 独立于目录管理和存储实现。0.8.0 的循环依赖拆分、生成代码提示及路径误报依据见[逐条审查记录](../archive/codeql-0.8.0-review.md)。
+- `library.scope` 保存库身份、账号上下文、权限计算与设置解析；schema 36 的 SQL 独立于目录管理和存储实现。0.8.0 的循环依赖拆分、生成代码提示及路径误报依据见[逐条审查记录](https://github.com/qingmuhy744/wildstring/blob/2c769ec31604dca3242b8e7424916047cd5bd9d0/docs/archive/codeql-0.8.0-review.md)。
 - `source_models` 保存歌词候选的验证模型，来源管理与后台扫描共同使用。
 - POSIX 目录遍历为每一个文件描述符设置 `finally` 关闭路径；仍使用目录描述符、`O_NOFOLLOW` 和排他发布保护只读导入源。
 
@@ -18,7 +18,7 @@
 - 系统栏使用 AndroidX Core 1.17 的 `WindowCompat.enableEdgeToEdge`，媒体控制器连接使用 `onConnectAsync` 和包含控制器参数的构造器，保留自身、受信任外部控制器和不受信任控制器的权限边界。
 - Compose 仪器测试采用 `androidx.compose.ui.test.junit4.v2` 的规则工厂，使用 `StandardTestDispatcher` 排队执行组合协程；通过 `waitForIdle`、`runOnIdle` 和可观察的 UI 状态同步。旧 API 会在调用线程立即执行协程，迁移要求见 [Android 官方说明](https://developer.android.com/develop/ui/compose/testing/migrate-v2)。
 - Web 导航计数使用 `Map`，切换入口验证已知视图；设计预览中的设置值以 `textContent` 输出。跨标签偏好测试通过另一个标签修改存储，触发真实的 `storage` 事件。
-- 酷狗插件 1.1.2 的配置只保留元数据与歌词所需的公开平台参数，裁剪脚本同时更新来源哈希。独立导入的旧插件仍需升级 ZIP；本轮没有修改已部署插件。
+- 酷狗插件配置只保留元数据与歌词所需的公开平台参数，裁剪脚本同时更新来源哈希。独立导入的旧插件仍需升级 ZIP。
 
 `apk` 是每个 PR 的必需检查，Android 工作流的 PR 触发不设置路径过滤；主分支推送仍按路径过滤。这样文档或预览页修复也能提供合并规则所需的检查结果。
 
