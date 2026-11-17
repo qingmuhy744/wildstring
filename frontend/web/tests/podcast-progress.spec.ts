@@ -836,6 +836,14 @@ test('续听界面桌面与手机浅深主题视觉证据', async ({ page }, inf
           window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
         }, theme);
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        if (name === 'conflict')
+          await expect
+            .poll(async () => {
+              const notice = await page.locator('.device-resume-notice').boundingBox();
+              const bar = await page.locator('.player').boundingBox();
+              return !!notice && !!bar && Math.round(notice.y + notice.height) <= Math.round(bar.y);
+            })
+            .toBe(true);
         await page.screenshot({
           path: `../../artifacts/resume-${name}-${width}-${theme}.png`,
           animations: 'disabled',

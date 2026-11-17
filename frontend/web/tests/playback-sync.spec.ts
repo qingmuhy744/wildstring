@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { audio, login, section } from './helpers';
 
-test('默认询问，确认后暂停恢复，不回写；播放后暂停自动保存', async ({ page }) => {
+test('默认询问，确认后暂停恢复，不回写；播放后暂停自动保存', async ({ page }, info) => {
   let state = {
     version: 0,
     device_id: '',
@@ -49,6 +49,24 @@ test('默认询问，确认后暂停恢复，不回写；播放后暂停自动�
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   const dialog = page.getByRole('region', { name: '跨设备接续', exact: true });
   await expect(dialog).toBeVisible();
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 900 });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => {
+      localStorage.setItem('wildstring-theme', value);
+      window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+    }, theme);
+    await expect
+      .poll(async () => {
+        const notice = await dialog.boundingBox();
+        const bar = await page.locator('.player').boundingBox();
+        return !!notice && !!bar && Math.round(notice.y + notice.height) <= Math.round(bar.y);
+      })
+      .toBe(true);
+    await page.screenshot({
+      path: `../../artifacts/resume-music-${info.project.name}-${theme}.png`,
+      animations: 'disabled',
+    });
+  }
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await page.getByRole('searchbox').fill('提示出现时仍能搜索');
   await expect(page.getByRole('searchbox')).toBeFocused();

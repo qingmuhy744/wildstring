@@ -1585,8 +1585,24 @@ export function PlayerBar({
 }) {
   const { t } = useTranslation();
   const { current, queue } = player;
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = bar.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      document.documentElement.style.setProperty(
+        '--player-bar-height',
+        `${element.getBoundingClientRect().height}px`,
+      );
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty('--player-bar-height');
+    };
+  }, []);
   return (
-    <section className="player" aria-label={t('playerPage.playerAria')}>
+    <section ref={bar} className="player" aria-label={t('playerPage.playerAria')}>
       <audio ref={player.audio} preload="metadata" {...player.audioEvents} />
       <div className="now-playing">
         <button
