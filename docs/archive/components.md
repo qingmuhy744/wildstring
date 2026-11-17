@@ -1,5 +1,9 @@
 # 组件分工
 
+状态：已归档，不代表现行实现。
+归档原因：模块清单和文中 schema 数值停留在历史版本，不再随代码更新。
+现行入口：[产品范围](../product/scope.md)、[接口契约](../../contracts/) 与各端 README。
+
 后端使用 **Python 3.12 模块化单体（FastAPI）**，客户端覆盖 **Web（React 19 + TypeScript）、macOS（SwiftUI + AppKit）、iOS（SwiftUI）与 Android（Kotlin + Jetpack Compose + Media3）**。存储采用 SQLite（WAL）与本地托管文件目录，不依赖外部数据库、Redis 或独立消息队列。
 
 ## 当前工程
@@ -29,4 +33,4 @@
 - **显式 Schema 迁移**：数据库使用 `PRAGMA user_version` 标记并事务初始化（当前版本 `48`）；高于应用支持版本时拒绝启动，不自动降级。
 - **权限与工具同源校验**：内部主键由野弦生成，外部平台 ID 作为映射。AI 助手与 MCP 工具复用普通业务服务与权限校验（含多库授权与角色边界），模型不可用绝不阻断基础浏览与播放。
 
-[服务端修复与写回设计](metadata-repair.md) · [Agent 平台契约](../../contracts/agent-platform.md) · [多库与个人关注](../../contracts/multiple-libraries.md)
+[服务端修复与写回设计](../architecture/metadata-repair.md) · [Agent 平台契约](../../contracts/agent-platform.md) · [多库与个人关注](../../contracts/multiple-libraries.md)
