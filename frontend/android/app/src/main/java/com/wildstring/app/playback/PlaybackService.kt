@@ -279,7 +279,7 @@ class PlaybackService : MediaSessionService() {
                     )
                     if (restoring) pendingPodcastAutoplay = true
                     else if (needsPreparation) preparePodcast()
-                    true
+                    restoring || needsPreparation
                 } else {
                     pendingPodcastAutoplay = false
                     automaticPodcastEntry = null
@@ -369,7 +369,8 @@ class PlaybackService : MediaSessionService() {
                 if (automatic || player.playWhenReady) preparePodcast(automatic = automatic || reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
+                if (playbackState == Player.STATE_IDLE) checkpointPodcast("stop", true)
+                else if (playbackState == Player.STATE_ENDED) {
                     clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, false)
                     checkpointPodcast("ended", true)
                     completeFeedback(); report()
@@ -378,7 +379,9 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, isPlaying)
-                checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else if (isPlaying) "progress" else "pause", !isPlaying)
+                // Buffering and transient audio-focus suppression also stop audible playback.
+                // Pause/stop/ended checkpoints belong to their actual transport callbacks.
+                if (isPlaying) checkpointPodcast("progress")
                 report(); persist(force = !isPlaying)
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
