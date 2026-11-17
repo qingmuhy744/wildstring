@@ -1,4 +1,4 @@
-状态：已确认
+状态：已实施
 
 # Android 播客规则的 JVM 回归与发布门槛
 
@@ -31,3 +31,10 @@
 - Robolectric 主线程调度与真实设备不同，保留真实 HTTP 与数据库，使用独立运行的主 Looper；不为迁移修改生产调度逻辑。
 - SDK JAR 首次下载增加 JVM 测试冷启动成本，由 Gradle 缓存复用。
 - 测试迁移与流程文档分别提交；需要回滚时撤销迁移提交，恢复原设备规则测试，发布前完整回归要求仍有效。
+
+## 实施与验证记录
+
+- 5 个网络规则用例整体迁入 JVM，原有 47 条断言保持一致。AndroidKeyStore 只在测试中替换密钥生成，凭据加解密、HTTP、Repository 和内存 Room 仍执行真实实现。
+- `make android-locks`、严格依赖校验下的 `make android-ci` 已通过；JVM 共 176 项通过，其中迁移类 5 项合计约 6.5 秒。Debug／Release 构建与 Lint、设备测试源码编译通过。
+- 原有 2257 个依赖文件校验值全部保留，包括 5 个 Linux aapt2 条目；生产 Debug／Release 的编译和运行依赖未变化。
+- `make ci` 与远程 Actions 结果在 PR 中记录；完整设备回归、真机 UAT 及发布不在本次验证结果内。
