@@ -87,8 +87,12 @@ class PodcastProgressNetworkTest {
             assertEquals(PodcastPreparation.Play(26_000), progress.prepare("episode", "Episode", 3_600_000,
                 fallbackMs = 26_000, start = PodcastStart.RESUME))
             server.readMode.set("401")
-            assertTrue(runCatching { progress.prepare("episode", "Episode", 3_600_000,
-                fallbackMs = 27_000, start = PodcastStart.RESUME) }.isFailure)
+            val rejected = runCatching { progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 27_000, start = PodcastStart.RESUME) }
+            assertEquals("401", server.reads.last())
+            // The real auth interceptor may clear the active owner before Retrofit delivers the 401.
+            // Both cancellation (null) and an error must keep preparation from returning fallback audio.
+            assertNull("Authentication failure must not prepare offline playback", rejected.getOrNull())
         }
     }
 
@@ -112,6 +116,7 @@ class PodcastProgressNetworkTest {
         val current = AtomicReference(EpisodeProgress("episode", version = 1, sessionId = "other-session",
             deviceId = "other", sequence = 1, positionSeconds = 30, durationSeconds = 3600))
         val writes = CopyOnWriteArrayList<PodcastProgressUpdate>()
+        val reads = CopyOnWriteArrayList<String>()
         val readMode = AtomicReference("normal")
         private val mode = AtomicReference("auto")
         fun takeOver(position: Long, completed: Boolean = false) {
@@ -127,11 +132,14 @@ class PodcastProgressNetworkTest {
                         if (request.method == "PUT") mode.set(JsonParser.parseString(request.body.readUtf8()).asJsonObject.get("resume_mode").asString)
                         return json("""{"resume_mode":"${mode.get()}"}""")
                     }
-                    if (request.method == "GET") return when (readMode.get()) {
-                        "slow" -> json(gson.toJson(current.get())).setBodyDelay(5, java.util.concurrent.TimeUnit.SECONDS)
-                        "503" -> json("{}", 503)
-                        "401" -> json("{}", 401)
-                        else -> json(gson.toJson(current.get()))
+                    if (request.method == "GET") {
+                        val selected = readMode.get(); reads += selected
+                        return when (selected) {
+                            "slow" -> json(gson.toJson(current.get())).setBodyDelay(5, java.util.concurrent.TimeUnit.SECONDS)
+                            "503" -> json("{}", 503)
+                            "401" -> json("{}", 401)
+                            else -> json(gson.toJson(current.get()))
+                        }
                     }
                     val write = gson.fromJson(request.body.readUtf8(), PodcastProgressUpdate::class.java)
                     writes += write
