@@ -1,7 +1,7 @@
 package com.wildstring.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateDpAsState
@@ -12,6 +12,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -42,11 +43,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -67,6 +68,8 @@ import kotlin.math.roundToInt
 import com.wildstring.app.data.friendlyError
 import kotlinx.coroutines.CancellationException
 
+private enum class PodcastTransportIcon { Buffering, Pause, Play }
+
 @Composable
 internal fun PodcastPlayerScreen(
     vm: MusicViewModel, state: MusicState, wide: Boolean, dragEnabled: Boolean,
@@ -74,9 +77,6 @@ internal fun PodcastPlayerScreen(
     onQueue: () -> Unit, onSleep: () -> Unit, onOpenShow: () -> Unit = {},
 ) {
     val track = state.current ?: return
-    // Height taken by the progress / playback notices under the controls. The cover is sized as if
-    // the notice were absent plus a fixed reserve, so a notice never resizes the cover or rewraps the title.
-    var noticeHeight by remember { mutableStateOf(0.dp) }
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val motionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
@@ -231,79 +231,74 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 }
             }
             val coverPane: @Composable () -> Unit = {
-                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    // The block is laid out in the height left when no notice is shown, minus the reserve,
-                    // and pinned to the top: a notice then only eats the reserve below it.
-                    val blockHeight = (maxHeight + noticeHeight - PodcastNoticeReserve).coerceIn(0.dp, maxHeight)
-                    // Leave room under the cover for a three-line title and the show line, so the block never clips.
-                    val coverSize = minOf(maxWidth, blockHeight * .64f, blockHeight - PodcastCoverTextAllowance, 400.dp).coerceAtLeast(0.dp)
+                Box(Modifier.fillMaxSize().testTag("podcast-cover-slot"), contentAlignment = Alignment.Center) {
+                    // Column measures the unweighted text first. The square artwork uses only the
+                    // remaining height; short titles and absent notices no longer leave a hidden reserve.
                     Column(
                         Modifier
+                            .widthIn(max = 400.dp)
                             .fillMaxWidth()
-                            .height(blockHeight)
-                            .verticalScroll(rememberScrollState(), overscrollEffect = null)
-                            .padding(top = 6.dp, bottom = 8.dp),
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        Column(Modifier.width(coverSize)) {
-                            Cover(
-                                vm,
-                                track.id,
-                                track.album ?: track.title,
-                                Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .combinedClickable(
-                                        onClick = tactile { article = true },
-                                        onLongClick = { preview = true },
-                                    ),
-                            )
-                            Spacer(Modifier.height(18.dp))
-                            Text(
-                                track.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.fillMaxWidth(),
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            val showName = track.album?.takeIf { it.isNotBlank() }
-                            val authorName = track.artist.takeIf { it.isNotBlank() && it != track.album }
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                if (showName != null) {
-                                    PodcastShowName(
-                                        name = showName,
-                                        onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        tag = "podcast-player-show",
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                }
-                                if (showName != null && authorName != null) {
-                                    Text(" · ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (authorName != null) {
-                                    Text(
-                                        authorName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                } else if (showName == null) {
-                                    Text(
-                                        track.artist,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
+                        Cover(
+                            vm,
+                            track.id,
+                            track.album ?: track.title,
+                            Modifier
+                                .weight(1f, fill = false)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(20.dp))
+                                .combinedClickable(
+                                    onClick = tactile { article = true },
+                                    onLongClick = { preview = true },
+                                ),
+                        )
+                        Spacer(Modifier.height(18.dp))
+                        Text(
+                            track.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth().testTag("podcast-player-title"),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        val showName = track.album?.takeIf { it.isNotBlank() }
+                        val authorName = track.artist.takeIf { it.isNotBlank() && it != track.album }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            if (showName != null) {
+                                PodcastShowName(
+                                    name = showName,
+                                    onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    tag = "podcast-player-show",
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                            }
+                            if (showName != null && authorName != null) {
+                                Text(" · ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (authorName != null) {
+                                Text(
+                                    authorName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                            } else if (showName == null) {
+                                Text(
+                                    track.artist,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }
@@ -348,7 +343,6 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Box(Modifier.weight(1f).fillMaxWidth()) { coverPane() }
                     PodcastPlayerControls(
                         vm, state, duration, onQueue, compact = false, motionAllowed = motionAllowed,
-                        onNoticeHeight = { noticeHeight = it },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp).then(swipeModifier),
                     )
                 }
@@ -357,7 +351,6 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 content(Modifier.weight(1f).fillMaxWidth().then(tabSwipeModifier))
                 PodcastPlayerControls(
                     vm, state, duration, onQueue, compact = article, motionAllowed = motionAllowed,
-                    onNoticeHeight = { noticeHeight = it },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).then(swipeModifier),
                 )
             }
@@ -590,9 +583,7 @@ private fun PodcastPlayerControls(
     compact: Boolean,
     motionAllowed: Boolean,
     modifier: Modifier,
-    onNoticeHeight: (Dp) -> Unit = {},
 ) {
-    val density = LocalDensity.current
     val position by vm.position.collectAsStateWithLifecycle()
     val buffered by vm.buffered.collectAsStateWithLifecycle()
     val progressConflict by vm.podcastProgress.conflict.collectAsStateWithLifecycle()
@@ -603,6 +594,12 @@ private fun PodcastPlayerControls(
     var scrub by remember { mutableStateOf<Float?>(null) }
     var speedMenu by remember { mutableStateOf(false) }
     var speed by remember(vm.controller) { mutableFloatStateOf(vm.controller?.playbackParameters?.speed ?: 1f) }
+    val playActionLabel = stringResource(if (state.playing || vm.controller?.playWhenReady == true) R.string.pod_player_pause else R.string.pod_player_play)
+    val playbackStateLabel = stringResource(when {
+        state.buffering -> R.string.playback_buffering
+        state.playing -> R.string.playback_playing
+        else -> R.string.playback_paused
+    })
     val ms = if (motionAllowed) 240 else 0
     val fade = tween<Float>(ms, easing = FastOutSlowInEasing)
     val dpSpec = tween<Dp>(ms, easing = FastOutSlowInEasing)
@@ -789,23 +786,45 @@ private fun PodcastPlayerControls(
                 }
                 FilledIconButton(
                     onClick = tactile(vm::toggle),
-                    modifier = Modifier.size(playButton).testTag("podcast-play-pause"),
+                    modifier = Modifier.size(playButton).testTag("podcast-play-pause")
+                        .semantics {
+                            contentDescription = playActionLabel
+                            stateDescription = playbackStateLabel
+                        },
                     shape = CircleShape,
                 ) {
-                    if (state.buffering) {
-                        CircularProgressIndicator(
-                            Modifier.size(playIcon * .8f),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Crossfade(state.playing, animationSpec = tween(if (motionAllowed) 130 else 0), label = "podcast-play-pause") { playing ->
-                            Icon(
-                                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                if (playing) stringResource(R.string.pod_player_pause) else stringResource(R.string.pod_player_play),
-                                Modifier.size(playIcon),
+                    val iconState = when {
+                        state.buffering -> PodcastTransportIcon.Buffering
+                        state.playing -> PodcastTransportIcon.Pause
+                        else -> PodcastTransportIcon.Play
+                    }
+                    val glyph: @Composable (PodcastTransportIcon) -> Unit = { icon ->
+                        if (icon == PodcastTransportIcon.Buffering) {
+                            if (motionAllowed) CircularProgressIndicator(
+                                Modifier.size(playIcon * .8f), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary,
                             )
+                            else CircularProgressIndicator(
+                                progress = { .75f }, modifier = Modifier.size(playIcon * .8f),
+                                strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        } else {
+                            Icon(if (icon == PodcastTransportIcon.Pause) Icons.Default.Pause else Icons.Default.PlayArrow, null, Modifier.size(playIcon))
                         }
+                    }
+                    Box(Modifier.size(playIcon).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                        // A zero-duration AnimatedContent still retains the departing content for a
+                        // frame. Reduced motion renders the current glyph directly instead.
+                        if (!motionAllowed) glyph(iconState)
+                        else AnimatedContent(
+                            targetState = iconState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                            transitionSpec = {
+                                (fadeIn(fade) + scaleIn(fade, initialScale = .88f))
+                                    .togetherWith(fadeOut(fade)).using(null)
+                            },
+                            label = "podcast-transport-icon",
+                        ) { glyph(it) }
                     }
                 }
                 IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }, Modifier.testTag("podcast-forward")) {
@@ -818,7 +837,7 @@ private fun PodcastPlayerControls(
                 }
                 if (moreShown > 0f) Box(Modifier.presence(moreShown)) { moreButton() }
             }
-            Column(Modifier.fillMaxWidth().onSizeChanged { onNoticeHeight(with(density) { it.height.toDp() }) }) {
+            Column(Modifier.fillMaxWidth()) {
             if (progressConflict || progressMessage != null) {
                 Surface(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("podcast-progress-notice"), shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -855,12 +874,6 @@ private fun PodcastPlayerControls(
         }
     }
 }
-
-/** Room kept free under the cover block for a notice (12dp gap + a 56dp text-button row, rounded up). */
-private val PodcastNoticeReserve = 80.dp
-
-/** Height of the title (up to three lines), show line, gaps and padding under the cover. */
-private val PodcastCoverTextAllowance = 152.dp
 
 private fun formatPodcastTime(ms: Long): String {
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
