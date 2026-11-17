@@ -22,7 +22,7 @@
 
 0.2.3：`priority` 必须是包含 `musicbrainz`、`lastfm` 各一次的数组，默认顺序为 MusicBrainz 在前。AcoustID 是录音识别步骤，启用它必须同时启用 MusicBrainz、配置应用 Key 且 fpcalc 可用。公开设置新增 `acoustid_configured`、`fingerprint_available`，均为只读状态。
 
-候选新增 `match` 对象；指纹匹配时含 `method=acoustid`、`score`、`acoustid_id`，普通文字查询为空对象。候选按当前来源优先级和指纹相似度显示，同一录音的不同发行版分开保留。强制刷新绕过联网响应缓存；missing 模式不推荐已有字段或人工留空字段，仍不自动应用。详细边界见 [元数据刷新](../docs/archive/metadata-refresh-0.2.3.md)。
+候选新增 `match` 对象；指纹匹配时含 `method=acoustid`、`score`、`acoustid_id`，普通文字查询为空对象。候选按当前来源优先级和指纹相似度显示，同一录音的不同发行版分开保留。强制刷新绕过联网响应缓存；missing 模式不推荐已有字段或人工留空字段，仍不自动应用。详细边界见 [元数据刷新](https://github.com/qingmuhy744/wildstring/blob/2c769ec31604dca3242b8e7424916047cd5bd9d0/docs/archive/metadata-refresh-0.2.3.md)。
 
 `POST /listening` 新增可选 `started_at`（Unix 秒）和 `state`（playing/paused/ended）；旧客户端省略 state 时仍累计本地记录，不推送正在播放。服务端核对开始时间、会话归属和实际累计，Last.fm 还要求曲长大于 30 秒且实际收听达到半曲/240 秒较短值。现有心跳间隔 5 秒。新客户端对 0.2.1 后端的收听请求会因额外字段返回 422，请同步升级服务端到 0.2.2；基础播放接口未改变。离线重启跨设备恢复不在本版范围。
 

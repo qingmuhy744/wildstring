@@ -1,6 +1,6 @@
 # 歌词视图跨端契约
 
-状态：四端均已实现对应规则，逐项实现与历史验证边界见第 6 节；纳入 [0.8.8](../docs/releases/v0.8.8.md)。未完成的截图与真机验收不因代码交付而自动通过。本契约只约束**展示与交互**；歌词解析、时间轴、译文配对、偏移与编辑仍见 [歌词编辑](lyrics-editing.md) 和 [本地歌词解析规则](local-library-assets.md)。
+本契约约束四端歌词视图的**展示与交互**；歌词解析、时间轴、译文配对、偏移与编辑仍见 [歌词编辑](lyrics-editing.md) 和 [本地歌词解析规则](local-library-assets.md)。
 
 数据来自 `GET /api/v1/tracks/{id}/lyrics` 的 `kind: none | plain | synced` 及 `lines[].time_ms / words / translation / romanization`。四端共用同一份数据，不另建客户端时间轴，不伪造时间。
 

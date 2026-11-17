@@ -1,5 +1,3 @@
-状态：已实施（随 PR #149 交付）
-
 # 截图矩阵（agent 统一入口）
 
 `scripts/agent_shot.sh` 的唯一数据源。脚本按 `|` 解析下表，列名固定，加行即加覆盖；不要改列名，也不要在表格里写多行单元格。产物写到 `artifacts/shots/<platform>/`，每次运行先清空该目录（避免上一轮 Phone 的 PNG 混进 Pad 结果）。
@@ -49,6 +47,6 @@
 
 - web 与 android 的 `quick` 行全部由现有 spec / instrumented 测试的实际产物支撑，脚本只做复制与改名，不重跑页面流程；`manual` 行没有自动化触发，不编造覆盖。
 - Android 的 `quick` 行只来自 `PodcastResumeUiTest`：它在测试内按 `screenWidthDp >= 600` 分 `phone`/`pad`，按主题循环输出 8 种状态，两种 AVD 都在 `hw.keyboard=yes` 下运行（脚本会校验，缺失即失败）。
-- macOS 的 `quick` 行只复用既有 `WILDSTRING_SCREENSHOT_DIR` 输出；宽栏节目页、播放器条、续听弹窗与设置页目前没有快照用例，标 `manual`。新增快照测试属于后续范围，本轮不碰 `frontend/`。
+- macOS 的 `quick` 行只复用既有 `WILDSTRING_SCREENSHOT_DIR` 输出；宽栏节目页、播放器条、续听弹窗与设置页目前没有快照用例，标 `manual`。新增快照测试时同步把对应行改为 `quick` 并填写可执行用例。
 - iOS 目前没有渲染到 PNG 的测试目标，全部 `manual`。`scripts/agent_shot.sh ios` 会明确报告「quick 层未实现」，并给出 `simctl` 人工命令，宿主为 CI 时如实记为缺口。
 - 真机窗口层（窗口装饰、材质、焦点环、真实动画）不在本矩阵范围内，由用户在交付前按脚本 `--window` 打印的步骤人工签收。

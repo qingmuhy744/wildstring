@@ -1,4 +1,5 @@
 default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
 
 repos:
   - repo: local
@@ -91,6 +92,12 @@ repos:
         entry: python3 scripts/test_affected.py --scan-only --fail-on-stale
         language: system
         files: ^(frontend/web/src/.*\.(tsx?|json)|frontend/web/tests/.*\.spec\.ts|scripts/test_affected\.py)$
+        pass_filenames: false
+      - id: documentation
+        name: Documentation links and states
+        entry: python3 scripts/check_docs.py
+        language: system
+        files: (\.md$|^scripts/check_docs\.py$)
         pass_filenames: false
       - id: no-co-authored-by
         name: no Co-Authored-By trailer

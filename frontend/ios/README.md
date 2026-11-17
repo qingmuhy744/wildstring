@@ -1,6 +1,6 @@
 # 野弦 iOS
 
-SwiftUI 原生客户端，最低 iOS 17。产品范围见 [iOS 第一版](../../docs/product/ios-v1.md)，技术决策见 [ADR 0004](../../docs/decisions/0004-native-ios.md)。
+SwiftUI 原生客户端，最低 iOS 17。产品范围见 [产品范围](../../docs/product/scope.md)，技术决策见 [ADR 0004](../../docs/decisions/0004-native-ios.md)。
 
 ## 构建
 

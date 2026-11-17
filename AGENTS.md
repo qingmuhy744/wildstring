@@ -3,12 +3,12 @@
 ## 1. 定位与文档
 
 - 产品定位为 AI native 的自托管音乐与播客播放器，覆盖 Python 后端及 Web、Android、macOS、iOS 客户端。
-- 动手前先读 `docs/product/scope.md` 与 `DESIGN.md`。文档中的计划不代表已实现，交付时分别说明实现与验证状态。
-- 文档职责：`AGENTS.md` 管工作流程与验收，`DESIGN.md` 管视觉与布局规范（数值只在这里维护，技能与其他文档引用而不复制），产品范围以 `docs/product/scope.md` 为准，批次记录见 `docs/product/scope-history.md` 与 `docs/releases/`，实现状态以其引用契约为准。
+- 动手前先读 `docs/product/scope.md`、`DESIGN.md` 和相关契约。文档中的计划不代表已实现，交付时分别说明实现与验证状态。活动树只保留现行文档与未结束方案；历史方案、审计和批次细节通过 Git 查询，发布记录保留在 `docs/releases/`。
+- 文档职责：`AGENTS.md` 管工作流程与验收，`DESIGN.md` 管视觉与布局规范（数值只在这里维护，技能与其他文档引用而不复制），产品范围以 `docs/product/scope.md` 为准，开发运维入口见 `docs/development.md`，版本记录见 `docs/releases/`，实现状态以其引用契约为准。命令以 `Makefile`、schema 以代码常量为准，其他文档链接而不复制易变数值。
 - 跨文件重构、批量机械改动、需要反复跑测试的重活，先落 `docs/plans/<主题>.md` 并标状态，按 `docs/plans/README.md` 的生命周期推进；这类改动只在用户显式点名时交给外部 agent，默认不自动拆分。
 - 发现过时条目或相互冲突时，结合当前用户要求和实际实现核对并修正文档，不选择性套用；无法确定的产品决策再向用户澄清。修改 `AGENTS.md` 或 `DESIGN.md` 前先说明原因，并与功能改动分开提交。
-- 删除或重命名代码、文件、接口与配置时，用 `git grep` 反查文档里的引用和链接一并修正。发版时同步版本台账：两份 README 的最新版本、`scope.md`「当前状态」、`docs/releasing.md` 的版本对照表与 Android versionCode 清单。
-- `docs/plans/` 下的重活方案按 `docs/plans/README.md` 使用五态（草案、已确认、已实施、已交付于 PR #N、已取消）；其余计划、设计与审计类文档开头写一行状态（进行中、已交付于 vX.Y.Z、已取消或已被某文档取代），状态变化时更新这一行，不在正文里保留“开发分支”“尚未发布”等时效说法。
+- 删除或重命名代码、文件、接口与配置时，用 `git grep` 反查文档里的引用和链接一并修正。发版时同步版本入口：两份 README 的最新版本、`scope.md`「当前状态」、`CHANGELOG.md` 与对应 `docs/releases/` 发布说明，并核对各端构建配置中的版本与构建号。
+- 现行文档默认描述现行行为，不另写「现行行为」状态。`docs/plans/` 只保留活动方案，按 `docs/plans/README.md` 使用五态（草案、已确认、已实施、已交付于 PR #N、已取消）；方案交付并从默认分支移除后删除活动副本。其余计划、设计与审计类文档开头写一行状态（进行中、已交付于 vX.Y.Z、已取消或已被某文档取代），状态变化时更新这一行，不在正文里保留“开发分支”“尚未发布”等时效说法。确需引用历史正文时，使用固定到不可变提交的链接。
 
 ## 2. 设计与界面原则（UI 改动适用）
 
@@ -39,6 +39,7 @@
 
 - Python 使用 3.12 和 `backend/uv.lock`；Web 与插件运行时使用 Node 22 与对应 `package-lock.json`；Android 使用 JDK 21；macOS / iOS 使用 XcodeGen（`project.yml`）。开发入口统一放入 `Makefile`。
 - 初始化用 `make setup`，日常改动自检用 `make check` 与 `make test-affected`（或 `make test-affected-desktop`），全量检查用 `make ci`。
+- 本地开发、导入扫描、容器、备份与 TLS 入口见 `docs/development.md`；命令与参数以 `Makefile` 为准。
 - 本地 Android 模拟器测试基准保持极简的两套标准形态（Phone: 1080×1920，Pad: 2560×1600），配置与启动时必须开启物理键盘输入（`hw.keyboard = yes`），确保在 Android Studio 内嵌窗口与独立窗口中均可直接使用电脑键盘输入。
 - Android CI 保持快速反馈：普通 push / pull_request 只执行构建、静态检查和单元测试，不自动启动模拟器。保留既有每周定时模拟器回归和 Release 流程中的自动设备回归、正式包安装冒烟；打标签前必须按 §3 手动通过 `run_emulator=true` 的完整设备回归。调整模拟器资源时保持该触发策略，不将模拟器测试加入常规 CI，也不把常规 CI 通过当作设备回归通过。
 - 修改依赖后更新对应锁文件；Gradle 的 `verification-metadata.xml` 在 macOS 上生成时不含 linux 变体（如 aapt2）校验，Android 升级依赖后需从官方 Maven 补齐 linux 条目再推送。

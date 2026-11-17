@@ -71,7 +71,7 @@ make check
 
 在另一个终端用 `make admin` 设置管理员密码、`make import-music` 导入曲库。首次运行浏览器测试前执行 `make browser-install`，完整检查使用 `make ci`。
 
-[后端](backend) · [Web](frontend/web) · [接口契约](contracts) · [容器配置](deploy) · [视觉规范](DESIGN.md)
+[开发与本地部署](docs/development.md) · [后端](backend) · [Web](frontend/web) · [接口契约](contracts) · [容器配置](deploy) · [视觉规范](DESIGN.md)
 
 ## 项目与社区
 

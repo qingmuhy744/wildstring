@@ -71,7 +71,7 @@ make check
 
 In a separate terminal, use `make admin` to set the administrator password and `make import-music` to import your library. Run `make browser-install` before your first browser test and use `make ci` for the full checks.
 
-[Backend](backend) · [Web](frontend/web) · [API contracts](contracts) · [Container configuration](deploy) · [Design guide](DESIGN.md)
+[Development and deployment](docs/development.md) · [Backend](backend) · [Web](frontend/web) · [API contracts](contracts) · [Container configuration](deploy) · [Design guide](DESIGN.md)
 
 ## Project and community
 
