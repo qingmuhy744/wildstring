@@ -26,7 +26,8 @@ import com.wildstring.app.data.*
     Box(modifier) {
         TextButton({ expanded = true }, Modifier.heightIn(min = 48.dp).testTag("catalog-sort").semantics {
             stateDescription = if (state.order == "asc") resources.getString(R.string.sort_ascending) else resources.getString(R.string.sort_descending)
-        }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+        }, colors = ButtonDefaults.textButtonColors(contentColor = if (state.kind == "albums") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary),
+            contentPadding = PaddingValues(horizontal = 6.dp)) {
             Text(stringResource(catalogSortLabel(state.sort, context)), modifier = Modifier.weight(1f, fill = false),
                 style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             Icon(Icons.Default.ArrowDropDown, null)

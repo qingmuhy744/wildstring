@@ -732,8 +732,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 listOf("album_artist" to stringResource(R.string.album_artists), "artist" to stringResource(R.string.artists), "vocalist" to stringResource(R.string.vocalists), "lyricist" to stringResource(R.string.lyricists), "composer" to stringResource(R.string.composers), "arranger" to stringResource(R.string.arrangers)).forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
                                             }
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(stringResource(R.string.artist_count, state.total), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+                                            if (state.query.isNotBlank() && !state.loading && state.error == null) {
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(stringResource(R.string.artist_count, state.total), Modifier.testTag("catalog-result-count"), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+                                            }
                                         }
                                     }
                                     if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -743,8 +745,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true, compactWidth = rail) { feature = it }
                                     state.error?.let { ErrorMessage(it, vm::load) }
                                     if (state.offline) Text(stringResource(R.string.catalog_offline), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp, vertical = 6.dp))
-                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(stringResource(R.string.album_count, state.total), Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                                        if (state.query.isNotBlank() && !state.loading && state.error == null) Text(stringResource(R.string.album_count, state.total), Modifier.weight(1f).testTag("catalog-result-count"), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                         CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
                                     }
                                     if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
@@ -1260,7 +1262,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
         if (current) Icon(Icons.Default.GraphicEq, null, Modifier.size(18.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
-        IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }
+        IconButton(actions, Modifier.size(48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
