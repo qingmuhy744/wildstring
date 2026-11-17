@@ -871,6 +871,9 @@ test('续听界面桌面与手机浅深主题视觉证据', async ({ page }, inf
   await shot('dialog');
   await dialog.getByRole('button', { name: '继续 0:07' }).click();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  // Playback permission precedes the first upload's acknowledgement. Seed the competing
+  // device only after that claim settles, so fixture setup does not race its CAS version.
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
   await otherDevice(page, 8);
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');
   await expect(page.getByRole('button', { name: '用本机进度' })).toBeVisible();
