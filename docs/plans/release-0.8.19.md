@@ -1,4 +1,4 @@
-状态：已实施
+状态：已交付于 PR #162
 
 # 0.8.19 补丁发布
 
@@ -27,4 +27,6 @@ L3。本地执行版本一致性与锁文件检查、make check、make test-affe
 
 ## 执行记录
 
-- 已准备各端版本、构建号、锁文件、台账与发布说明；待发布准备 PR 合并及最终提交的完整设备门禁。
+- PR #160 已合入 main；版本、构建号、锁文件、台账与发布说明通过 PR #162 合并，发布候选为 main 提交 `64af42427583a0bf319659662a858643d105488c`。
+- 本地发布准备检查、锁文件和版本一致性通过；后端 908 项通过、2 项可选跳过。Web 首次因缺少 Playwright 浏览器而中断，安装并验证 Chromium 后补跑全部剩余 Web 目标，各组共 497 项通过，另有按环境配置跳过的用例。
+- 发布候选的完整 Android 设备门禁见 [对应运行](https://github.com/qingmuhy744/wildstring/actions/runs/44006063985)，主线检查与 Release 均绑定此候选；发布完成状态及正式附件见 [v0.8.19 Release](https://github.com/qingmuhy744/wildstring/releases/tag/v0.8.19)。版本准备合入不等于正式发布成功。
