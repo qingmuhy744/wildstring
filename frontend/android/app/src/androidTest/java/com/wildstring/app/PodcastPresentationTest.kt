@@ -198,6 +198,22 @@ class PodcastPresentationTest {
         capture("presentation-row-completed")
     }
 
+    @Test fun coverGesturesKeepHorizontalTabsAndPullDownDismissal(): Unit = Fixture().use { f ->
+        if (compose.onAllNodesWithTag("podcast-cover-tab").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithContentDescription(f.show.title, useUnmergedTree = true).performTouchInput { click() }
+            compose.onNodeWithTag("podcast-article-surface").assertIsDisplayed()
+            compose.onNodeWithTag("podcast-article-surface").performTouchInput { swipeRight(startX = width * .2f, endX = width * .8f) }
+            compose.onNodeWithTag("podcast-cover-slot").performTouchInput { swipeLeft(startX = width * .8f, endX = width * .2f) }
+            compose.onNodeWithTag("podcast-article-surface").assertIsDisplayed()
+            compose.onNodeWithTag("podcast-article-surface").performTouchInput { swipeRight(startX = width * .2f, endX = width * .8f) }
+            compose.onNodeWithTag("podcast-cover-slot").assertIsDisplayed()
+        }
+        compose.onNodeWithTag("podcast-cover-slot").performTouchInput {
+            swipeDown(startY = height * .2f, endY = height * .8f, durationMillis = 400)
+        }
+        compose.onNodeWithTag("podcast-episode-${f.episode.id}").assertIsDisplayed()
+    }
+
     private data class IconFrame(val time: Int, val bounds: Rect, val hash: Int, val changed: Int)
     private fun transition(f: Fixture, from: MusicState, to: MusicState): List<IconFrame> {
         compose.runOnIdle { f.state.value = from }

@@ -38,8 +38,9 @@
 ## 实施与验证
 
 - 播放器与单集行的全部生产调用点已用 `git grep` 核对：全屏入口仍由 `WildStringApp` 托管，单集行仍只在节目详情使用。移除的提示高度回传与预留常量没有残留引用。
-- `make check`、`make test-affected` 通过；后者没有选中后端或 Web 功能用例。`make android-ci` 通过，包含 186 项 JVM、设备测试编译、Debug / Release 构建和 lint；最终设备夹具另完成测试 APK 构建与 Debug lint。
-- 标准 Phone / Pad 各通过新增 `PodcastPresentationTest` 的 7 项，以及 `PodcastTransportServiceTest`、`PodcastResumeServiceTest`、`PlatformMediaSessionTest` 各一项。Phone 的既有封面／文章逐帧用例 5 项通过，宽屏一项按条件跳过；该项在 Pad 单独通过。390px 节目详情的 2 项及长屏封面的 1 项通过，合计 29 项设备专项通过、1 项按设备条件跳过，无类级自动重试。
+- `make check`、`make test-affected` 通过；后者没有选中后端或 Web 功能用例。`make android-ci` 通过，包含 186 项 JVM、设备测试编译、Debug / Release 构建和 lint；最终手势补丁另完成 186 项 JVM、Debug 构建、设备测试编译和 Debug lint。
+- 标准 Phone / Pad 各通过新增 `PodcastPresentationTest` 的 8 项，以及 `PodcastTransportServiceTest`、`PodcastResumeServiceTest`、`PlatformMediaSessionTest` 各一项。Phone 的既有封面／文章逐帧用例 5 项通过，宽屏一项按条件跳过；该项在 Pad 单独通过。390px 节目详情的 2 项及长屏封面的 1 项通过，合计 31 项设备专项通过、1 项按设备条件跳过，无类级自动重试。
+- 保留封面点击、横滑切换与下拉收起。移除滚动布局后，下拉输入不再自动进入原嵌套滚动处理；封面复用已有收起手势，不新增阈值。新手势用例在缺少该绑定的 APK 上实际失败，补齐后 Phone / Pad 均通过。
 - 新判据在旧行为 APK 上实际失败：合成场景的卡片底边移动 62px；封面期望约 766px、实际 555px；缓冲结束没有中间帧。APK 已保存并与当时安装包的 SHA-256 核对。普通播放／暂停的旧淡入淡出原本可通过，实际缺口在缓冲分支。
 - 最终 Phone / Pad 每条图标转场各采样 28 帧：正常播放、暂停、缓冲结束各有 16 个不同画面；关闭 App 动画或系统动画后只有一个画面，加载指示也保持静止。`MotionAssertions` 检查外框边界与落位后的像素变化；落位后没有像素变化。
 - 逐张检查 69 张相关截图，包括手机、平板、长屏、390px 与宽窗口的浅深主题、长标题、放大字号、待播三态、已听完、文章加载／空／500／403、音源错误和同步冲突。组件截图与 Compose 当前帧同步；服务截图中的实时进度和触摸反馈不作为静态动效判据。

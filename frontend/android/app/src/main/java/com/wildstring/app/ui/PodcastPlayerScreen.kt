@@ -231,7 +231,7 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 }
             }
             val coverPane: @Composable () -> Unit = {
-                Box(Modifier.fillMaxSize().testTag("podcast-cover-slot"), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().testTag("podcast-cover-slot").then(swipeModifier), contentAlignment = Alignment.Center) {
                     // Column measures the unweighted text first. The square artwork uses only the
                     // remaining height; short titles and absent notices no longer leave a hidden reserve.
                     Column(
