@@ -405,7 +405,7 @@ final class ConnectionModel {
             guard let client else { return .failed }
             do {
                 let snapshot = try await client.savePodcastProgress(episodeId: episodeID, write: write)
-                return snapshot.completed == true ? .completed : .ok
+                return .accepted(snapshot)
             } catch let error as APIError where error.statusCode == 409 {
                 if let conflict = try? JSONDecoder().decode(PodcastProgressConflict.self, from: error.body) {
                     return .conflictCurrent(conflict.detail.current)

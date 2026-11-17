@@ -596,6 +596,63 @@ test('已听完点播和菜单从头播放都发送 restart', async ({ page }) =
     .toBeGreaterThanOrEqual(2);
 });
 
+for (const timing of ['late', 'early', 'foreign'] as const) {
+  const acceptedBeforeRead = timing !== 'late';
+  test(`从头播放衔接本机旧上传确认 ${timing === 'foreign' ? '真正异设备获胜' : acceptedBeforeRead ? '先于读取返回' : '晚于新会话建立'}`, async ({
+    page,
+  }) => {
+    await login(page);
+    await otherDevice(page, 0);
+    await episodes(page);
+    await start(page);
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let blocked = false;
+    let firstWrite = true;
+    await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+      if (route.request().method() === 'PUT' && firstWrite) {
+        firstWrite = false;
+        blocked = true;
+        await gate;
+      } else if (route.request().method() === 'GET' && acceptedBeforeRead) {
+        const response = await route.fetch();
+        release();
+        await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+        if (timing === 'foreign') await otherDevice(page, 9);
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    });
+    try {
+      await page.getByRole('slider', { name: '播放进度', exact: true }).fill('3');
+      await expect.poll(() => blocked).toBe(true);
+      await page
+        .locator('.podcast-episode-row')
+        .first()
+        .getByRole('button', { name: /更多操作/ })
+        .click();
+      await page.getByRole('menuitem', { name: '从头播放' }).click();
+      await expect.poll(async () => (await audio(page)).paused).toBe(false);
+      await expect.poll(async () => (await audio(page)).time).toBeLessThan(3);
+      release();
+      if (timing === 'foreign') {
+        await expect.poll(async () => (await local(page))?.conflict).toBe(true);
+        expect((await state(page)).position_seconds).toBe(9);
+        expect((await audio(page)).paused).toBe(false);
+      } else {
+        await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+        expect((await local(page)).conflict).toBe(false);
+        expect((await state(page)).session_id).toBe((await local(page)).session_id);
+        expect((await state(page)).completed).toBe(false);
+      }
+    } finally {
+      release();
+    }
+  });
+}
+
 test('账号续听模式读取、失败不缓存及刷新', async ({ page }) => {
   await login(page);
   const modePath = '/api/v1/podcasts/resume-mode';

@@ -120,6 +120,105 @@ struct PlaybackLifecycleTests {
         }
     }
 
+    @Test(arguments: [false, true], [false, true])
+    func restartingWhileOwnUploadIsBlockedDoesNotConflictWithIt(acceptedBeforeRead: Bool, foreignWins: Bool) async throws {
+        let cloud = ProgressFixture()
+        let suite = "wildstring.restart.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RestartQueueProtocol.self]
+        let client = WildstringClient(server: try ServerAddress(input: "fixture.invalid"),
+            store: InMemorySessionStore(), configuration: configuration)
+        do {
+            try await withLocalPlayback { service, _, item in
+                service.podcastCloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: suite, defaults: defaults)
+                service.podcastDeviceID = "local"
+                service.loadPodcastProgress = { _ in try await cloud.load() }
+                service.submitPodcastProgress = { _, write in await cloud.submit(write) }
+                var episode = item; episode.trackID = "podcast_ep_synthetic"
+                service.playPodcastEpisode(episode)
+                try await waitUntil { service.isPlaying }
+                await service.waitForPodcastTasks()
+                let version = await cloud.current.version
+                await cloud.blockWrites()
+                service.seek(to: 3)
+                try await waitUntil { await cloud.hasBlockedWrite }
+                if acceptedBeforeRead { await cloud.blockReads() }
+                service.playPodcastEpisode(episode, position: 0)
+                if acceptedBeforeRead {
+                    try await waitUntil { await cloud.hasBlockedRead }
+                    await cloud.releaseWrites()
+                    try await waitUntil { await cloud.current.version > version }
+                    if foreignWins { await cloud.takeOver(position: 9) }
+                    await cloud.releaseReads()
+                }
+                try await waitUntil { service.isPlaying && service.player.currentTime().seconds < 3 }
+                if !acceptedBeforeRead {
+                    #expect(await cloud.hasBlockedWrite)
+                    if foreignWins { await cloud.takeOver(position: 9) }
+                    await cloud.releaseWrites()
+                }
+                await service.waitForPodcastTasks()
+                #expect(service.podcastCanUseLocalProgress == foreignWins)
+                let current = await cloud.current
+                if foreignWins { #expect(current.positionSeconds == 9) }
+                else {
+                    #expect(current.positionSeconds < 3)
+                    #expect(await cloud.writes.last?.sessionId == current.sessionId)
+                }
+            }
+        } catch {
+            await cloud.releaseWrites()
+            await cloud.releaseReads()
+            throw error
+        }
+    }
+
+    @Test func restartAfterExplicitTakeoverDoesNotRaceItsOwnUpload() async throws {
+        let cloud = ProgressFixture()
+        let suite = "wildstring.takeover-restart.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RestartQueueProtocol.self]
+        let client = WildstringClient(server: try ServerAddress(input: "fixture.invalid"),
+            store: InMemorySessionStore(), configuration: configuration)
+        do {
+            try await withLocalPlayback { service, _, item in
+                service.podcastCloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: suite, defaults: defaults)
+                service.podcastDeviceID = "local"
+                service.loadPodcastProgress = { _ in try await cloud.load() }
+                service.submitPodcastProgress = { _, write in await cloud.submit(write) }
+                var episode = item; episode.trackID = "podcast_ep_synthetic"
+                service.playPodcastEpisode(episode)
+                try await waitUntil { service.isPlaying }
+                await service.waitForPodcastTasks()
+                await cloud.takeOver(position: 20)
+                service.seek(to: 3)
+                try await waitUntil { service.podcastCanUseLocalProgress }
+                await service.waitForPodcastTasks()
+                let version = await cloud.current.version
+                await cloud.blockWrites()
+                service.useLocalPodcastProgress()
+                try await waitUntil { await cloud.hasBlockedWrite }
+                await cloud.blockReads()
+                service.playPodcastEpisode(episode, position: 0)
+                try await waitUntil { await cloud.hasBlockedRead }
+                await cloud.releaseWrites()
+                try await waitUntil { await cloud.current.version > version }
+                await cloud.releaseReads()
+                try await waitUntil { service.isPlaying && service.player.currentTime().seconds < 3 }
+                await service.waitForPodcastTasks()
+                #expect(!service.podcastCanUseLocalProgress)
+                #expect(await cloud.current.positionSeconds < 3)
+            }
+        } catch {
+            await cloud.releaseWrites(); await cloud.releaseReads()
+            throw error
+        }
+    }
+
     @Test func timedOutResumeIgnoresLateReadAndUsesLatestLocalPoint() async throws {
         let cloud = ProgressFixture()
         do {
@@ -377,6 +476,7 @@ struct PlaybackLifecycleTests {
         private var readers: [(PodcastProgressSnapshot, CheckedContinuation<PodcastProgressSnapshot?, Never>)] = []
         private var writers: [CheckedContinuation<Void, Never>] = []
         var hasBlockedWrite: Bool { !writers.isEmpty }
+        var hasBlockedRead: Bool { !readers.isEmpty }
         func takeOver(position: Int, completed: Bool = false) {
             current = .init(version: current.version + 1, positionSeconds: position, durationSeconds: 60,
                 completed: completed, deviceId: "other", sessionId: UUID().uuidString, sequence: 1)
@@ -406,12 +506,12 @@ struct PlaybackLifecycleTests {
             if offline { return .failed }
             let same = current.sessionId == write.sessionId && current.deviceId == write.deviceId
             if !same && current.version != write.baseVersion { return .conflictCurrent(current) }
-            if same && write.sequence <= (current.sequence ?? 0) { return current.completed == true ? .completed : .ok }
+            if same && write.sequence <= (current.sequence ?? 0) { return .accepted(current) }
             let completed = current.completed == true || write.event == "ended"
             current = .init(version: current.version + 1, positionSeconds: write.positionSeconds,
                 durationSeconds: write.durationSeconds, completed: completed, deviceId: write.deviceId,
                 sessionId: write.sessionId, sequence: write.sequence)
-            return completed ? .completed : .ok
+            return .accepted(current)
         }
     }
 
@@ -436,4 +536,16 @@ struct PlaybackLifecycleTests {
             artist: "Test", streamPath: "unused")
         try await body(service, store, item)
     }
+}
+
+private final class RestartQueueProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 503,
+            httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

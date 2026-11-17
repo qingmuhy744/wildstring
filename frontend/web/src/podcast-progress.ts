@@ -26,6 +26,7 @@ export interface EpisodeCheckpoint {
   intent?: 'resume' | 'restart';
   offline_start?: boolean;
   permission_pending?: boolean;
+  superseded_session_id?: string;
 }
 
 export const emptyProgress = (id: string): EpisodeProgress => ({
@@ -195,10 +196,24 @@ export class PodcastProgressStore {
     const continuing =
       reuse && this.isActive(id) && !local?.conflict && local?.intent !== 'restart';
     const session = continuing ? local!.session_id : eventId();
+    const predecessor =
+      online &&
+      local &&
+      !local.conflict &&
+      (remote.version === local.remote.version ||
+        (remote.session_id === local.session_id && remote.device_id === this.device))
+        ? local
+        : null;
+    const base =
+      predecessor &&
+      predecessor.remote.session_id === predecessor.session_id &&
+      predecessor.remote.version > remote.version
+        ? predecessor.remote
+        : remote;
     this.save(id, {
-      remote,
+      remote: base,
       session_id: session,
-      base_version: remote.version,
+      base_version: base.version,
       sequence: continuing ? local!.sequence + 1 : 1,
       position_seconds: Math.max(0, Math.floor(position)),
       duration_seconds: Math.max(0, Math.floor(duration)),
@@ -208,6 +223,7 @@ export class PodcastProgressStore {
       permission_pending: true,
       dirty: true,
       conflict: false,
+      superseded_session_id: continuing ? undefined : predecessor?.session_id,
     });
     this.active = { id, session };
     this.lastSent.set(id, Date.now());
@@ -330,7 +346,32 @@ export class PodcastProgressStore {
       });
       if (this.controller.signal.aborted) return;
       const latest = this.read(id);
-      if (!latest || latest.session_id !== pending.session_id) return;
+      if (!latest) return;
+      if (latest.session_id !== pending.session_id) {
+        if (response.ok) {
+          const remote: EpisodeProgress = await response.json();
+          if (this.controller.signal.aborted) return;
+          const current = this.read(id);
+          // The per-episode send chain keeps this successor unsent until the old request returns.
+          if (
+            current &&
+            !current.conflict &&
+            current.superseded_session_id === pending.session_id &&
+            remote.session_id === pending.session_id &&
+            remote.device_id === this.device &&
+            current.base_version === current.remote.version &&
+            remote.version > current.remote.version
+          ) {
+            this.save(id, {
+              ...current,
+              remote,
+              base_version: remote.version,
+              superseded_session_id: undefined,
+            });
+          }
+        }
+        return;
+      }
       if (response.status === 409) {
         const { detail } = await response.json();
         const remote: EpisodeProgress = detail.current;
@@ -355,6 +396,7 @@ export class PodcastProgressStore {
           remote,
           dirty: current.sequence > pending.sequence,
           offline_start: false,
+          superseded_session_id: undefined,
         });
         this.changed(id);
         window.dispatchEvent(
