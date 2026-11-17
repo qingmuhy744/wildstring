@@ -75,6 +75,7 @@ class PodcastQueueController(
     private val beforeAutomatic: (episodeId: String) -> Unit = {},
 ) {
     private val mutex = Mutex()
+    private var playRequest: Job? = null
     private val mutable = MutableStateFlow(PodcastCloudState())
     val state: StateFlow<PodcastCloudState> = mutable.asStateFlow()
     private var snapshot = PodcastQueueSnapshot()
@@ -101,16 +102,22 @@ class PodcastQueueController(
         }
     }
 
-    fun playEpisode(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long?) = scope.launch {
-        try { playShowNow(episode, podcast, positionMs) }
-        catch (error: CancellationException) { throw error }
-        catch (error: Exception) { mutable.update { it.copy(notice = friendlyError(error)) } }
-    }
+    fun playEpisode(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long?) =
+        requestPlayback { playShowNow(episode, podcast, positionMs) }
 
-    fun playFromQueue(startEpisodeId: String?) = scope.launch {
-        try { playQueueNow(startEpisodeId) }
-        catch (error: CancellationException) { throw error }
-        catch (error: Exception) { mutable.update { it.copy(notice = friendlyError(error)) } }
+    fun playFromQueue(startEpisodeId: String?) = requestPlayback { playQueueNow(startEpisodeId) }
+
+    /** A later selection supersedes any pending show/queue preparation. */
+    private fun requestPlayback(block: suspend () -> Unit): Job {
+        playRequest?.cancel()
+        return scope.launch {
+            try { block() }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                mutable.update { it.copy(notice = friendlyError(error)) }
+            }
+        }.also { playRequest = it }
     }
 
     fun followsQueue(): Boolean = playbackContext?.let { it == PodcastPlaybackContext.QUEUE }
@@ -237,6 +244,7 @@ class PodcastQueueController(
     fun clearNotice() { mutable.update { it.copy(notice = null) } }
 
     fun reset() {
+        playRequest?.cancel(); playRequest = null
         snapshot = PodcastQueueSnapshot()
         loaded = false
         diverged = false
@@ -285,7 +293,7 @@ class PodcastQueueController(
 
     /** Show, episode, search, and favorites. Does not rewrite the cloud queue. */
     private suspend fun playShowNow(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long?) {
-        playbackContext = PodcastPlaybackContext.SHOW
+        val owner = repository.session.cacheScope()
         if (player() == null) {
             mutable.update { it.copy(notice = context.getString(R.string.podcast_player_preparing)) }
             return
@@ -294,6 +302,9 @@ class PodcastQueueController(
         val lineup = if (detail == null) listOf(episode) else podcastShowLineup(episode, detail, preferenceFor(podcast.id), positions())
         val summary = detail?.podcast ?: podcast
         val tracks = lineup.map { item -> repository.rememberPodcastEpisode(if (item.id == episode.id) episode else item, summary) }
+        currentCoroutineContext().ensureActive()
+        requireOwner(owner)
+        playbackContext = PodcastPlaybackContext.SHOW
         prepareAdvance()
         val index = tracks.indexOfFirst { podcastEpisodeId(it.id) == episode.id }.coerceAtLeast(0)
         play(tracks.ifEmpty { listOf(repository.rememberPodcastEpisode(episode, summary)) }, index, positionMs, true)
@@ -301,7 +312,7 @@ class PodcastQueueController(
 
     /** Pending list and play-all. Starts at [startEpisodeId] when that episode is queued. */
     private suspend fun playQueueNow(startEpisodeId: String?) {
-        playbackContext = PodcastPlaybackContext.QUEUE
+        val owner = repository.session.cacheScope()
         if (player() == null) {
             mutable.update { it.copy(notice = context.getString(R.string.podcast_player_preparing)) }
             return
@@ -329,6 +340,9 @@ class PodcastQueueController(
         val tracks = resolveTracks(items, anchor)
         if (tracks.isEmpty()) return
         val index = tracks.indexOfFirst { podcastEpisodeId(it.id) == anchorItem.episodeId }.coerceAtLeast(0)
+        currentCoroutineContext().ensureActive()
+        requireOwner(owner)
+        playbackContext = PodcastPlaybackContext.QUEUE
         prepareAdvance()
         play(tracks, index, null, true)
     }
