@@ -41,4 +41,4 @@
 - 在隔离附件目录实际执行发布前校验步骤，APK 证书与固定指纹一致，APK 和公开证书指纹文件的 `SHA256SUMS` 均匹配。
 - 将同一 Dev 密钥复制到不同的临时路径，分别实际构建 APK，证书指纹一致。Phone 上先确认旧签名不能直接替换，再只清理合成模拟器中的旧 Dev 安装；固定签名的第一份 APK 写入应用私有测试标记，第二份 APK 增加验证资产并重新签名后通过 `adb install -r` 覆盖。安装后的 APK 已包含新资产，私有测试标记保持原值，证明更新实际生效且保留数据。
 - 公开证书指纹随源码保存，私钥备份仅位于被忽略的 `.env.android-dev.keystore`；验证记录位于本地 `artifacts/android-dev-signing/verification.json`，不提交 APK 或密钥。
-- 专用 Actions secret 尚未配置，远端固定签名验证待完成；没有触发正式 Release，也未修改或读取正式签名私钥。
+- 专用 Actions secret 已按用户授权配置；远端安装包必须在上传前通过固定证书校验，实际构建结果见 [PR #165 的检查记录](https://github.com/qingmuhy744/wildstring/pull/165/checks)。没有触发正式 Release，也未修改或读取正式签名私钥。
