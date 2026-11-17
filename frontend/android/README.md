@@ -2,7 +2,7 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前源码版本：0.8.18（versionCode 54），见 [`app/build.gradle.kts`](app/build.gradle.kts) 与 [0.8.18 发布说明](../../docs/releases/v0.8.18.md)；正式安装包以 GitHub Releases 为准。0.6.1 起支持按线路显式放行自托管 HTTP、封面与歌词直切、歌词滑动后显式跳转及个人资料修改，当批记录见 [0.6.1 发布说明](../../docs/releases/v0.6.1.md)。
+当前源码版本：0.8.19（versionCode 55），见 [`app/build.gradle.kts`](app/build.gradle.kts) 与 [0.8.19 发布说明](../../docs/releases/v0.8.19.md)；正式安装包以 GitHub Releases 为准。0.6.1 起支持按线路显式放行自托管 HTTP、封面与歌词直切、歌词滑动后显式跳转及个人资料修改，当批记录见 [0.6.1 发布说明](../../docs/releases/v0.6.1.md)。
 
 0.3.0 在设置中增加封面／黑胶／磁带选择并记住本机选择（当时默认封面；现行默认黑胶及卡带横屏规范见 [DESIGN.md](../../DESIGN.md) §6.7、§6.9）。黑胶中心封面放大，手机横屏采用视觉与播放控制左右布局。长按视觉或歌词可查看正向大封面，点空白或返回关闭，播放继续。唱臂、唱片与双卷轴跟随实际播放状态，暂停、缓冲、后台及关闭系统动画时停转；三种样式共用音频和队列。播放背景延伸至系统栏，按钮保留安全间距，进度条使用主题配色。实现与验证状态见 [播放页样式](../../docs/archive/player-styles-0.2.3.md)。
 
