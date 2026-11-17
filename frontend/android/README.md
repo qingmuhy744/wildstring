@@ -22,9 +22,15 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 本批 UI 与交互改进归入 0.2.1（versionCode 4）。本地 `make android-ci android-connected-test` 已通过：20 项单元测试、Debug / Release Lint、R8 构建及 9 项 Android 15 ARM64 模拟器回归；含触感开关与节流、反馈异常不阻断操作、队列拖动反馈类型、发现页数据与查看全部、悬浮播放条 / 队列、设置轻下拉防抖、返回与列表位置恢复、手机 / 平板导航、主题 / 缓存设置，以及真实音频播放与缓冲 / underrun 指标检查。截图使用 androidTest 接口夹具；国产真机手势、后台限制和功耗仍待验证。
 
+## 曲库浏览
+
+手机专辑页采用两列正方形封面网格，平板按可用宽度增加列数，加载占位使用同样布局。专辑名最多两行，艺人名一行截断。默认专辑／艺人页省略总数，关键词搜索保留结果数量；角色筛选和专辑排序仍可直接操作。歌曲菜单保留行尾独立触控区，图标和专辑排序入口使用现有次级文字色；字母索引继续独占一栏并在闲置后淡化。布局尺寸与颜色以 [DESIGN.md](../../DESIGN.md) §5.3 为准。
+
 ## 构建
 
-日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行；发版前在 GitHub Actions 手动运行 **Android APK**，选择待发布分支并勾选 `run_emulator`（默认开启）。该手动运行仍需全部通过，不将跳过模拟器的日常 CI 记作设备验收。正式签名包的发版安装冒烟仍由 Release 工作流执行。
+日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行；打标签前必须在 GitHub Actions 的待发布 main 最终提交手动运行 **Android APK**，勾选 `run_emulator`（默认开启）、`test_classes` 留空。该手动运行仍需全部通过，修复后在新的最终提交重新通过，不将跳过模拟器的日常 CI 记作设备验收。正式签名包的发版安装冒烟仍由 Release 工作流执行。
+
+`src/test` 中的 `PodcastProgressNetworkTest` 使用 Robolectric、MockWebServer 与内存 Room 数据库，在 JVM 验证完成状态、续听模式、读写次数、冲突接管及离线补传，随 `make android-test` / `make android-ci` 执行，无需启动模拟器。Robolectric 与 Android 37 sandbox SDK 均由 Gradle 锁定并校验 SHA-256；SDK 复用 Gradle 缓存，测试期间禁用 Robolectric 自行下载。`PodcastResumeServiceTest`、`PodcastResumeUiTest` 保留设备上的真实 MediaSession／服务生命周期与交互、截图验证，JVM 通过不能替代这些验收。
 
 准备 JDK 21、Android SDK `platforms;android-37.0` 与 `build-tools;36.1.0`。在仓库根目录执行：
 

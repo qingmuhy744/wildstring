@@ -1,11 +1,17 @@
 package com.wildstring.app
 
+import android.app.Application
+import androidx.room.Room
+import androidx.test.platform.app.InstrumentationRegistry
 import com.google.gson.JsonParser
-import com.wildstring.app.data.PodcastPreparation
-import com.wildstring.app.data.PodcastProgress
+import com.wildstring.app.data.*
+import java.net.InetAddress
+import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -13,12 +19,33 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowSystemClock
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [37], application = Application::class,
+    instrumentedPackages = ["com.wildstring.app.data.SessionStore"],
+    shadows = [PodcastProgressNetworkTest.MemorySessionKey::class])
+@LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 class PodcastProgressNetworkTest {
-    @Test fun otherDeviceConflictStopsWritesUntilExplicitResumeTakeover() = PodcastRoutingFixture().use { fixture ->
+    /** Replace only the hardware-backed key; SessionStore still encrypts and decrypts real credentials. */
+    @Implements(value = SessionStore::class, isInAndroidSdk = false)
+    class MemorySessionKey {
+        private val secret = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        @Implementation protected fun key(): SecretKey = secret
+    }
+
+    @Test fun otherDeviceConflictStopsWritesUntilExplicitResumeTakeover() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
         val gets = AtomicInteger()
         val writes = CopyOnWriteArrayList<String>()
@@ -65,7 +92,7 @@ class PodcastProgressNetworkTest {
         }
     }
 
-    @Test fun completedEpisodeSkipsOnlyForAutomaticPlayAndAskModeOffersChoice() = PodcastRoutingFixture().use { fixture ->
+    @Test fun completedEpisodeSkipsOnlyForAutomaticPlayAndAskModeOffersChoice() = ProgressFixture().use { fixture ->
         val completed = AtomicBoolean(true)
         val mode = java.util.concurrent.atomic.AtomicReference("auto")
         val puts = AtomicInteger()
@@ -137,7 +164,7 @@ class PodcastProgressNetworkTest {
         }
     }
 
-    @Test fun sameDeviceConflictRetriesOnlyCurrentWriteAndTakeoverConflictStopsAgain() = PodcastRoutingFixture().use { fixture ->
+    @Test fun sameDeviceConflictRetriesOnlyCurrentWriteAndTakeoverConflictStopsAgain() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
         val writes = CopyOnWriteArrayList<String>()
         fixture.server.dispatcher = object : Dispatcher() {
@@ -174,7 +201,7 @@ class PodcastProgressNetworkTest {
         }
     }
 
-    @Test fun offlinePreparationPersistsSessionWithoutInitialPlayAndHeartbeatRetries() = PodcastRoutingFixture().use { fixture ->
+    @Test fun offlinePreparationPersistsSessionWithoutInitialPlayAndHeartbeatRetries() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
         fixture.server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -197,7 +224,7 @@ class PodcastProgressNetworkTest {
         }
     }
 
-    @Test fun historicalConflictIsDiscardedEvenWhenItBelongsToSameDevice() = PodcastRoutingFixture().use { fixture ->
+    @Test fun historicalConflictIsDiscardedEvenWhenItBelongsToSameDevice() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
         fixture.server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -212,7 +239,7 @@ class PodcastProgressNetworkTest {
         runBlocking {
             assertTrue(progress.prepare("episode", "Episode", 3_600_000) is PodcastPreparation.Play)
             progress.leave()
-            delay(10_100) // The service retries outbox writes at most once per ten seconds.
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(11)) // The outbox retry is throttled by Android's clock.
             progress.retry()
             withTimeout(5000) { while (puts.get() < 2) delay(20) }
             delay(200)
@@ -229,4 +256,32 @@ class PodcastProgressNetworkTest {
 
     private fun state(version: Int, device: String, session: String, sequence: Long = 1, position: Long = 0, completed: Boolean = false) =
         """{"episode_id":"episode","version":$version,"device_id":"$device","session_id":"$session","sequence":$sequence,"position_seconds":$position,"duration_seconds":3600,"completed":$completed}"""
+
+    private class ProgressFixture : AutoCloseable {
+        val context = RuntimeEnvironment.getApplication()
+        private val session = SessionStore(context)
+        private val settings = AppSettings(context)
+        private val cache = ClientCache(context, session, settings)
+        private val client = ApplicationModule.client(session, cache)
+        private val database = Room.inMemoryDatabaseBuilder(context, QueueDatabase::class.java).build()
+        val repository = Repository(context, session, client, database, cache, settings, OfflineDownloads(context, session, client))
+        val server = MockWebServer()
+
+        init {
+            AppLanguage.install(context)
+            server.start(InetAddress.getByName("127.0.0.1"), 0)
+            session.configure(server.url("/").toString(), true)
+            session.write("wildstring_session=synthetic; Path=/; Max-Age=3600")
+            session.bindAccount(Account("test", "test", "listener"))
+        }
+
+        override fun close() {
+            session.invalidate()
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            client.dispatcher.cancelAll()
+            client.connectionPool.evictAll()
+            database.close()
+            server.close()
+        }
+    }
 }
