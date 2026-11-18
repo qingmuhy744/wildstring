@@ -4,6 +4,8 @@
 
 `.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：锁定依赖、hooks、Python/Web 测试、Web 构建与锁文件检查。容器任务执行 `make docker-up docker-smoke docker-test`，检查 API、Web、FFmpeg、非 root、只读音乐及后端测试，最后停止容器并保留数据卷。
 
+`make dependency-audit` 审计完整 Web 和插件 npm 依赖。Web 构建链的 [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) 有一项经确认的限时例外，具体版本、范围和截止时间见[审计脚本](../scripts/audit_web_dependencies.py)。CI 原样打印审计报告及例外命中提示。新增公告、受影响版本变更、进入生产依赖或到期未修复仍会阻断。确认上游补丁后更新锁文件并移除临时代码，同时将 Web 恢复为常规完整审计。
+
 `.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用独立固定签名，可与正式版共存，同签名 Dev 包之间可覆盖安装；正式安装包从 Releases 下载。Fork / Dependabot 的无密钥构建继续检查，但不上传可安装的 Dev 附件。
 
 完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。发版前手动运行 **Android APK**，选择待发布提交所在分支并勾选 `run_emulator`。该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。

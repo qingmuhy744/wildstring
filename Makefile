@@ -258,7 +258,7 @@ shots: ## Capture screenshots through scripts/agent_shot.sh
 
 .PHONY: dependency-audit
 dependency-audit: ## Audit complete Web and provider npm lockfiles, including build dependencies
-	npm --prefix frontend/web audit --audit-level=low
+	$(PYTHON) scripts/audit_web_dependencies.py
 	npm --prefix plugins/node-runtime audit --audit-level=low
 
 ci: check source-plugins dependency-audit test test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
