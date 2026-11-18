@@ -441,7 +441,7 @@
   position: fixed;
   z-index: 900;
   right: 20px;
-  bottom: calc(110px + env(safe-area-inset-bottom));
+  bottom: max(calc(110px + env(safe-area-inset-bottom)), var(--player-bar-height, 0px));
   box-sizing: border-box;
   width: min(380px, calc(100vw - 32px));
   border: 1px solid var(--border);
@@ -554,7 +554,7 @@
 @media (max-width: 600px) {
   .device-resume-notice {
     right: 16px;
-    bottom: calc(100px + env(safe-area-inset-bottom));
+    bottom: max(calc(100px + env(safe-area-inset-bottom)), var(--player-bar-height, 0px));
   }
 }
 

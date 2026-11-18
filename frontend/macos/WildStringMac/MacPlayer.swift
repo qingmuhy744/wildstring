@@ -125,21 +125,14 @@ struct MacTransportBar: View {
                             if isPodcast { playback.seek(to: max(0, playback.currentTime - 15)) } else { playback.previous() }
                         }
                         Button { playback.togglePlayPause() } label: {
-                            Group {
-                                if playback.isBuffering {
-                                    MacOnAccentProgress(side: 16)
-                                } else {
-                                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(MacTheme.onAccent)
-                                }
-                            }
+                            PlaybackTransportGlyph(playing: playback.wantsPlayback, buffering: playback.isBuffering, size: 14, foreground: MacTheme.onAccent)
                             .frame(width: 38, height: 38)
                             .background(MacTheme.accent, in: Circle())
                         }
                         .buttonStyle(.plain)
-                        .help(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")))
-                        .accessibilityLabel(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")))
+                        .help(playback.wantsPlayback ? L10n("macPlayer.pause") : L10n("macPlayer.play"))
+                        .accessibilityLabel(playback.wantsPlayback ? L10n("macPlayer.pause") : L10n("macPlayer.play"))
+                        .accessibilityValue(playback.isBuffering ? L10n("macPlayer.buffering") : "")
                         .disabled(playback.currentItem == nil)
                         transportButton(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? L10n("macPlayer.forward30s") : L10n("macPlayer.nextTrack")) {
                             if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
@@ -571,10 +564,10 @@ struct MenuBarPlayer: View {
                         Image(systemName: isPodcast ? "gobackward.15" : "backward.fill")
                     }.help(isPodcast ? L10n("macPlayer.back15s") : L10n("macPlayer.previousTrack"))
                     Button { playback.togglePlayPause() } label: {
-                        Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        Image(systemName: playback.wantsPlayback ? "pause.fill" : "play.fill")
                             .font(.title3).foregroundStyle(MacTheme.onAccent).frame(width: 42, height: 42)
                             .background(MacTheme.accent, in: Circle())
-                    }.help(playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play"))
+                    }.help(playback.wantsPlayback ? L10n("macPlayer.pause") : L10n("macPlayer.play"))
                     Button {
                         if isPodcast { playback.seek(to: playback.currentTime + 30) }
                         else { playback.next() }

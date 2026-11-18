@@ -72,7 +72,7 @@ struct MacPodcastExplore: View {
                             if previewing { ProgressView(L10n("macPodcastExplore.previewing")) }
                             if let preview {
                                 Text(L10n("macPodcastExplore.previewEpisodes", preview.author, preview.episodeCount)).foregroundStyle(MacTheme.muted)
-                                Text(MacPodcastArticle.render(preview.description, duration: 0)).textSelection(.enabled)
+                                Text(PodcastArticleText.render(preview.description, duration: 0)).textSelection(.enabled)
                                 Text(L10n("macPodcastExplore.latestEpisodes")).font(.headline)
                                 ForEach(Array(preview.latestEpisodes.enumerated()), id: \.offset) { _, episode in
                                     Text(episode.title).font(.callout).fixedSize(horizontal: false, vertical: true)

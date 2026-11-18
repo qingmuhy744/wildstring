@@ -45,18 +45,18 @@ struct NowPlayingView: View {
                     HStack(alignment: .top, spacing: 28) {
                         playerColumn
                             .frame(maxWidth: 400)
-                        LyricsPane(client: client, playback: playback)
+                        readingPane
                             .frame(maxWidth: .infinity)
                     }
                     .padding(.horizontal, 28)
-                    Spacer(minLength: 0)
+                    if !isPodcast { Spacer(minLength: 0) }
                 } else {
                     if showLyrics {
-                        LyricsPane(client: client, playback: playback)
+                        readingPane
                     } else {
                         playerColumn
                     }
-                    Spacer(minLength: 0)
+                    if !isPodcast { Spacer(minLength: 0) }
                 }
                 controls
             }
@@ -78,6 +78,12 @@ struct NowPlayingView: View {
         }
         .onPreferenceChange(PlayerWidthKey.self) { layoutWidth = $0 }
         .task { openQueueForDemoIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var readingPane: some View {
+        if isPodcast { PodcastArticlePane(client: client, playback: playback) }
+        else { LyricsPane(client: client, playback: playback) }
     }
 
     private var isPodcast: Bool {
@@ -112,9 +118,9 @@ struct NowPlayingView: View {
                 Color.clear.frame(width: 24, height: 1)
             } else {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { showLyrics.toggle() }
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { showLyrics.toggle() }
                 } label: {
-                    Text(L10n("nowPlaying.lyricsButton"))
+                    Text(isPodcast ? L10n("podcastArticle.title") : L10n("nowPlaying.lyricsButton"))
                         .font(.footnote.bold())
                         .frame(width: 44, height: 44)
                         .background(
@@ -138,7 +144,7 @@ struct NowPlayingView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if !isRegular {
-                            withAnimation(.easeInOut(duration: 0.2)) { showLyrics = true }
+                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { showLyrics = true }
                         }
                     }
                     .onLongPressGesture(minimumDuration: 0.45) {
@@ -150,7 +156,7 @@ struct NowPlayingView: View {
                     Text(item.title)
                         .font(.system(.title2, design: .serif, weight: .semibold))
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .lineLimit(isPodcast ? 3 : 2)
                     HStack(spacing: 12) {
                         Text(item.artist)
                             .font(.subheadline)
@@ -201,6 +207,7 @@ struct NowPlayingView: View {
             }
         }
         .padding(.horizontal, 24)
+        .frame(maxHeight: isPodcast ? .infinity : nil, alignment: .center)
     }
 
     private var coverSize: CGFloat {
@@ -266,15 +273,14 @@ struct NowPlayingView: View {
                     Haptics.tap()
                     playback.togglePlayPause()
                 } label: {
-                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 24, weight: .semibold))
-                        .offset(x: playback.isPlaying ? 0 : 1)
-                        .foregroundStyle(colorScheme == .dark ? Color(red: 0.13, green: 0.106, blue: 0.09) : Color(red: 1, green: 0.98, blue: 0.953))
+                    PlaybackTransportGlyph(playing: playback.wantsPlayback, buffering: playback.isBuffering, size: 24,
+                        foreground: colorScheme == .dark ? Color(red: 0.13, green: 0.106, blue: 0.09) : Color(red: 1, green: 0.98, blue: 0.953))
                         .frame(width: 64, height: 64)
                         .background(colorScheme == .dark ? Color.wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(playback.isPlaying ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
+                .accessibilityLabel(playback.wantsPlayback ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
+                .accessibilityValue(playback.isBuffering ? L10n("nowPlaying.buffering") : "")
                 Button {
                     Haptics.tap()
                     if isPodcast {
@@ -357,26 +363,31 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private func playerArtwork(_ item: PlaybackService.Item) -> some View {
-        switch playerStyle {
-        case .cover:
-            CoverImage(client: client, trackID: item.trackID, size: coverSize)
-        case .vinyl:
-            VinylArtwork(
-                client: client,
-                trackID: item.trackID,
-                size: coverSize,
-                isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil,
-                reduceMotion: reduceMotion
-            )
-        case .cassette:
-            CassetteArtwork(
-                client: client,
-                trackID: item.trackID,
-                width: coverSize,
-                isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil && !reduceMotion,
-                progress: playback.duration > 0 ? playback.currentTime / playback.duration : 0,
-                title: item.title
-            )
+        if isPodcast {
+            CoverImage(client: client, trackID: item.trackID, size: coverSize, flexible: true)
+                .layoutPriority(-1)
+        } else {
+            switch playerStyle {
+            case .cover:
+                CoverImage(client: client, trackID: item.trackID, size: coverSize)
+            case .vinyl:
+                VinylArtwork(
+                    client: client,
+                    trackID: item.trackID,
+                    size: coverSize,
+                    isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil,
+                    reduceMotion: reduceMotion
+                )
+            case .cassette:
+                CassetteArtwork(
+                    client: client,
+                    trackID: item.trackID,
+                    width: coverSize,
+                    isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil && !reduceMotion,
+                    progress: playback.duration > 0 ? playback.currentTime / playback.duration : 0,
+                    title: item.title
+                )
+            }
         }
     }
 }

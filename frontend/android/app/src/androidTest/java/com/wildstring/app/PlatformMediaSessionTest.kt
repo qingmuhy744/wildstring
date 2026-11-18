@@ -92,8 +92,8 @@ class PlatformMediaSessionTest {
             } }
             server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
             val address = server.url("/").newBuilder().host("127.0.0.1").build().toString()
-            onMain { vm.settings.quality(0); vm.connect(address, "media", "synthetic-password", true) }
-            await("Fixture account login") { vm.state.value.connected }
+            val login = onMain { vm.settings.quality(0); vm.connect(address, "media", "synthetic-password", true) }
+            await("Fixture account login completes") { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
             await("Media3 controller connected") { onMain { vm.controller != null } }
             onMain { vm.play(listOf(track)); vm.controller!!.repeatMode = Player.REPEAT_MODE_ONE }
             await("Original audio is playing") { onMain { vm.controller!!.isPlaying } }

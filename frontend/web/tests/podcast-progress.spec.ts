@@ -30,6 +30,7 @@ async function episodes(page: Page) {
 async function start(page: Page) {
   await page.locator('.episode-play-btn').first().click();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(async () => (await local(page))?.permission_pending).toBe(false);
 }
 async function local(page: Page) {
   return page.evaluate(() => {
@@ -37,6 +38,313 @@ async function local(page: Page) {
       (key) => key.startsWith('wildstring:podcast-progress:') && key.endsWith(':radio-6'),
     );
     return key ? JSON.parse(localStorage.getItem(key)!) : null;
+  });
+}
+
+test('主动恢复接续另一设备更新的较小位置', async ({ page }) => {
+  await login(page);
+  await otherDevice(page, 7);
+  await episodes(page);
+  await start(page);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+  const remote = await otherDevice(page, 2);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeLessThan(5);
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(async () => (await state(page)).session_id).not.toBe(remote.session_id);
+});
+
+test('Media Session 主动播放统一接续，通用媒体恢复不读取或抢占', async ({ page }) => {
+  await page.addInitScript(() => {
+    const session = navigator.mediaSession;
+    const set = session.setActionHandler.bind(session);
+    const handlers = new Map<string, MediaSessionActionHandler | null>();
+    Object.assign(window, { testMediaActions: handlers });
+    session.setActionHandler = (action, handler) => {
+      handlers.set(action, handler);
+      set(action, handler);
+    };
+  });
+  await login(page);
+  await otherDevice(page, 7);
+  await episodes(page);
+  await start(page);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+  const oldSession = (await local(page)).session_id;
+  await otherDevice(page, 2);
+  let reads = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith(path) && request.method() === 'GET') reads++;
+  });
+  await page.locator('audio').evaluate((element: HTMLAudioElement) => element.play());
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
+  expect(reads).toBe(0);
+  expect((await local(page)).session_id).toBe(oldSession);
+  await page.locator('audio').evaluate((element: HTMLAudioElement) => element.pause());
+  await page.evaluate(() => {
+    const handlers = (
+      window as unknown as { testMediaActions: Map<string, MediaSessionActionHandler> }
+    ).testMediaActions;
+    handlers.get('play')!({ action: 'play' });
+    handlers.get('play')!({ action: 'play' });
+  });
+  await expect.poll(async () => (await audio(page)).time).toBeLessThan(5);
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  expect(reads).toBe(1);
+});
+
+for (const action of ['pause', 'seek', 'timeout'] as const) {
+  test(`恢复读取期间 ${action} 保留本次用户意图，迟到结果不跳转`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 7);
+    await episodes(page);
+    await start(page);
+    await page.getByRole('button', { name: '暂停', exact: true }).click();
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    await otherDevice(page, 2);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reads = 0;
+    await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+      if (route.request().method() === 'GET' && ++reads === 1) {
+        const response = await route.fetch();
+        await gate;
+        await route.fulfill({ response }).catch(() => {});
+      } else await route.continue();
+    });
+    try {
+      await page.getByRole('button', { name: '播放', exact: true }).click();
+      await expect.poll(() => reads).toBe(1);
+      if (action === 'pause') {
+        await page.getByRole('button', { name: '暂停', exact: true }).click();
+      } else if (action === 'seek') {
+        await page.getByRole('slider', { name: '播放进度', exact: true }).fill('5');
+        await expect.poll(async () => (await audio(page)).paused).toBe(false);
+        expect((await audio(page)).time).toBeGreaterThanOrEqual(5);
+      } else {
+        await expect.poll(async () => (await audio(page)).paused, { timeout: 2500 }).toBe(false);
+        expect((await audio(page)).time).toBeGreaterThanOrEqual(7);
+      }
+      release();
+      // Wait past delivery of the abandoned response, without letting the short fixture reach EOF.
+      await page.waitForTimeout(150);
+      expect((await audio(page)).paused).toBe(action === 'pause');
+      expect((await audio(page)).time).toBeGreaterThanOrEqual(action === 'seek' ? 5 : 7);
+      expect(reads).toBe(action === 'seek' ? 2 : 1);
+    } finally {
+      release();
+    }
+  });
+}
+
+for (const status of [503, 401, 403, 404]) {
+  test(`恢复进度 HTTP ${status} ${status === 503 ? '降级本机' : '保持暂停'}`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 7);
+    await episodes(page);
+    await start(page);
+    await page.getByRole('button', { name: '暂停', exact: true }).click();
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    await page.route('**/podcasts/episodes/radio-6/progress', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ status, json: { detail: 'unavailable' } })
+        : route.continue(),
+    );
+    await page.getByRole('button', { name: '播放', exact: true }).click();
+    if (status === 503) {
+      await expect.poll(async () => (await audio(page)).paused).toBe(false);
+      expect((await audio(page)).time).toBeGreaterThanOrEqual(7);
+    } else {
+      await expect(page.getByRole('alert')).toContainText('暂时无法读取单集进度，请重试。');
+      expect((await audio(page)).paused).toBe(true);
+    }
+  });
+}
+
+test('浏览器拒绝播放时不上传，重新授权沿用已选位置而不重新读取', async ({ page }) => {
+  await login(page);
+  await otherDevice(page, 7);
+  await episodes(page);
+  let reads = 0,
+    writes = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith(path)) {
+      if (request.method() === 'GET') reads++;
+      if (request.method() === 'PUT') writes++;
+    }
+  });
+  await page.evaluate(() => {
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      HTMLMediaElement.prototype.play = play;
+      return Promise.reject(new DOMException('Test autoplay denied', 'NotAllowedError'));
+    };
+  });
+  await page.locator('.episode-play-btn').first().click();
+  await expect(page.getByRole('alert')).toContainText('请点击播放继续。');
+  await expect(page.getByRole('button', { name: '播放', exact: true })).toBeVisible();
+  expect((await audio(page)).paused).toBe(true);
+  expect(writes).toBe(0);
+  const record = await local(page);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
+  expect(reads).toBe(1);
+  expect((await local(page)).session_id).toBe(record.session_id);
+  await expect.poll(() => writes).toBeGreaterThan(0);
+});
+
+test('恢复已听完保持暂停，明确定位后回听仍保留已听完', async ({ page }) => {
+  await login(page);
+  await otherDevice(page, 7);
+  await episodes(page);
+  await start(page);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+  const old = await state(page);
+  const finished = await page.request.put(path, {
+    headers: { 'X-Wildstring-Client': 'web' },
+    data: {
+      session_id: crypto.randomUUID(),
+      device_id: 'other',
+      base_version: old.version,
+      sequence: 1,
+      position_seconds: 25,
+      duration_seconds: 25,
+      event: 'ended',
+    },
+  });
+  expect(finished.ok()).toBe(true);
+  let writes = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith(path) && request.method() === 'PUT') writes++;
+  });
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: '这一集已听完' })).toBeVisible();
+  expect((await audio(page)).paused).toBe(true);
+  expect(writes).toBe(0);
+  await page.getByRole('slider', { name: '播放进度', exact: true }).fill('5');
+  expect(writes).toBe(0);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(async () => (await state(page)).position_seconds).toBe(5);
+  expect((await state(page)).completed).toBe(true);
+});
+
+for (const trigger of ['resume', 'select'])
+  test(`暂停上传阻塞时 ${trigger} 不等待 PUT，也不丢本机新位置`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 7);
+    await episodes(page);
+    await start(page);
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let blocked = false;
+    await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+      if (route.request().method() === 'PUT') {
+        blocked = true;
+        await gate;
+      }
+      await route.continue().catch(() => {});
+    });
+    try {
+      await page.getByRole('button', { name: '暂停', exact: true }).click();
+      await expect.poll(() => blocked).toBe(true);
+      if (trigger === 'resume') {
+        await otherDevice(page, 2);
+        await page.getByRole('button', { name: '播放', exact: true }).click();
+      } else {
+        await page.getByRole('slider', { name: '播放进度', exact: true }).fill('5');
+        await expect.poll(async () => (await local(page))?.position_seconds).toBe(5);
+        await page.locator('.episode-play-btn').first().click();
+      }
+      await expect.poll(async () => (await audio(page)).paused, { timeout: 2500 }).toBe(false);
+      await expect
+        .poll(async () => (await audio(page)).time)
+        .toBeGreaterThanOrEqual(trigger === 'resume' ? 2 : 5);
+      expect((await audio(page)).time).toBeLessThan(trigger === 'resume' ? 5 : 6);
+    } finally {
+      release();
+    }
+  });
+
+for (const mode of ['auto', 'ask', 'restart']) {
+  test(`${mode} 偏好不应用于普通暂停恢复`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 7);
+    await episodes(page);
+    await start(page);
+    await page.getByRole('button', { name: '暂停', exact: true }).click();
+    await page.request.put('/api/v1/podcasts/resume-mode', {
+      headers: { 'X-Wildstring-Client': 'web' },
+      data: { resume_mode: mode },
+    });
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect
+      .poll(() =>
+        page.evaluate(() => localStorage.getItem('wildstring:podcast-resume-account:admin')),
+      )
+      .toBe(mode);
+    await otherDevice(page, 2);
+    await page.getByRole('button', { name: '播放', exact: true }).click();
+    await expect.poll(async () => (await audio(page)).paused).toBe(false);
+    expect((await audio(page)).time).toBeGreaterThanOrEqual(2);
+    expect((await audio(page)).time).toBeLessThan(5);
+    await expect(page.getByRole('dialog', { name: '播客单集进度' })).toHaveCount(0);
+    await page.request.put('/api/v1/podcasts/resume-mode', {
+      headers: { 'X-Wildstring-Client': 'web' },
+      data: { resume_mode: 'auto' },
+    });
+  });
+}
+
+for (const ending of ['conflict', 'offline']) {
+  test(`${ending} 片尾不移除共享待播或自动开下一集`, async ({ page }) => {
+    await login(page);
+    await otherDevice(page, 0);
+    const queue = await (await page.request.get('/api/v1/podcasts/queue')).json();
+    const saved = await page.request.put('/api/v1/podcasts/queue', {
+      headers: { 'X-Wildstring-Client': 'web' },
+      data: {
+        version: queue.version,
+        device_id: 'end-test',
+        items: [6, 5].map((n) => ({ episode_id: `radio-${n}`, origin: 'manual' })),
+      },
+    });
+    expect(saved.ok()).toBe(true);
+    await episodes(page);
+    await start(page);
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    const savedQueue = await (await page.request.get('/api/v1/podcasts/queue')).json();
+    if (ending === 'conflict') await otherDevice(page, 2);
+    else
+      await page.route('**/podcasts/episodes/radio-6/progress', (route) =>
+        route.fulfill({ status: 503 }),
+      );
+    let reads = 0,
+      queueWrites = 0;
+    page.on('request', (request) => {
+      if (
+        request.url().includes('/podcasts/episodes/') &&
+        request.url().endsWith('/progress') &&
+        request.method() === 'GET'
+      )
+        reads++;
+      if (request.url().endsWith('/podcasts/queue') && request.method() === 'PUT') queueWrites++;
+    });
+    await page.locator('audio').evaluate((element: HTMLAudioElement) => {
+      element.currentTime = element.duration - 0.15;
+    });
+    await expect.poll(async () => (await audio(page)).ended).toBe(true);
+    await page.waitForTimeout(1700);
+    expect(queueWrites).toBe(0);
+    expect(reads).toBe(0);
+    expect(await (await page.request.get('/api/v1/podcasts/queue')).json()).toEqual(savedQueue);
+    expect((await audio(page)).paused).toBe(true);
+    expect((await local(page)).event).toBe('ended');
   });
 }
 
@@ -95,7 +403,8 @@ test('历史离线记录发生冲突时丢弃并按服务器进度重新播放',
   expect(await state(page)).toEqual(newer);
   await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(8);
-  expect((await state(page)).session_id).not.toBe(newer.session_id);
+  // Playback permission starts the upload; audio seeking can finish before its response.
+  await expect.poll(async () => (await state(page)).session_id).not.toBe(newer.session_id);
 });
 
 test('加入待播和刷新不抢占进度；默认自动接续开始收听', async ({ page }) => {
@@ -193,6 +502,9 @@ test('同一浏览器另一个标签页接手后，原页面主动回听仍能�
   const second = await state(next);
   expect(second.session_id).not.toBe(first.session_id);
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');
+  await expect(page.getByRole('button', { name: '用本机进度' })).toBeVisible();
+  expect((await state(page)).session_id).toBe(second.session_id);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect.poll(async () => (await state(page)).position_seconds).toBe(2);
   expect((await state(page)).version).toBeGreaterThan(second.version);
   expect((await state(page)).session_id).not.toBe(second.session_id);
@@ -284,6 +596,63 @@ test('已听完点播和菜单从头播放都发送 restart', async ({ page }) =
     .toBeGreaterThanOrEqual(2);
 });
 
+for (const timing of ['late', 'early', 'foreign'] as const) {
+  const acceptedBeforeRead = timing !== 'late';
+  test(`从头播放衔接本机旧上传确认 ${timing === 'foreign' ? '真正异设备获胜' : acceptedBeforeRead ? '先于读取返回' : '晚于新会话建立'}`, async ({
+    page,
+  }) => {
+    await login(page);
+    await otherDevice(page, 0);
+    await episodes(page);
+    await start(page);
+    await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let blocked = false;
+    let firstWrite = true;
+    await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+      if (route.request().method() === 'PUT' && firstWrite) {
+        firstWrite = false;
+        blocked = true;
+        await gate;
+      } else if (route.request().method() === 'GET' && acceptedBeforeRead) {
+        const response = await route.fetch();
+        release();
+        await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+        if (timing === 'foreign') await otherDevice(page, 9);
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    });
+    try {
+      await page.getByRole('slider', { name: '播放进度', exact: true }).fill('3');
+      await expect.poll(() => blocked).toBe(true);
+      await page
+        .locator('.podcast-episode-row')
+        .first()
+        .getByRole('button', { name: /更多操作/ })
+        .click();
+      await page.getByRole('menuitem', { name: '从头播放' }).click();
+      await expect.poll(async () => (await audio(page)).paused).toBe(false);
+      await expect.poll(async () => (await audio(page)).time).toBeLessThan(3);
+      release();
+      if (timing === 'foreign') {
+        await expect.poll(async () => (await local(page))?.conflict).toBe(true);
+        expect((await state(page)).position_seconds).toBe(9);
+        expect((await audio(page)).paused).toBe(false);
+      } else {
+        await expect.poll(async () => (await local(page))?.dirty).toBe(false);
+        expect((await local(page)).conflict).toBe(false);
+        expect((await state(page)).session_id).toBe((await local(page)).session_id);
+        expect((await state(page)).completed).toBe(false);
+      }
+    } finally {
+      release();
+    }
+  });
+}
+
 test('账号续听模式读取、失败不缓存及刷新', async ({ page }) => {
   await login(page);
   const modePath = '/api/v1/podcasts/resume-mode';
@@ -339,7 +708,7 @@ test('账号续听模式读取、失败不缓存及刷新', async ({ page }) => 
   });
 });
 
-test('当前会话的同设备冲突仅重试这一次写入', async ({ page }) => {
+test('设备 ID 相同的另一会话也停止上传，主动恢复才接管', async ({ page }) => {
   await login(page);
   await otherDevice(page, 0);
   await episodes(page);
@@ -375,10 +744,13 @@ test('当前会话的同设备冲突仅重试这一次写入', async ({ page }) 
       writes.push(request.postDataJSON());
   });
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');
-  await expect.poll(async () => (await state(page)).position_seconds).toBe(2);
+  await expect(page.getByRole('button', { name: '用本机进度' })).toBeVisible();
+  expect((await state(page)).position_seconds).toBe(8);
+  expect(writes).toHaveLength(1);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect.poll(async () => (await local(page))?.dirty).toBe(false);
-  expect(writes).toHaveLength(2);
-  expect(writes.map((write) => write.position_seconds)).toEqual([2, 2]);
+  expect((await state(page)).position_seconds).toBeLessThan(5);
+  expect(writes.length).toBeGreaterThanOrEqual(2);
   expect(writes.every((write) => write.intent === 'resume')).toBe(true);
   await expect(page.getByRole('button', { name: '用本机进度' })).toHaveCount(0);
 });
@@ -455,6 +827,47 @@ test('离线启动未知版本，联网后按异设备冲突保留本地进度',
   expect(await state(page)).toEqual(remote);
 });
 
+test('主动恢复读取中的控件浅深主题与窄宽屏证据', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await login(page);
+  await otherDevice(page, 2);
+  await episodes(page);
+  await start(page);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  for (const width of [1360, 390])
+    for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((value) => {
+        localStorage.setItem('wildstring-theme', value);
+        window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+      }, theme);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let reading = false;
+      await page.route('**/podcasts/episodes/radio-6/progress', async (route) => {
+        if (route.request().method() === 'GET') {
+          reading = true;
+          await gate;
+        }
+        await route.continue().catch(() => {});
+      });
+      try {
+        await page.getByRole('button', { name: '播放', exact: true }).click();
+        await expect.poll(() => reading).toBe(true);
+        await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeVisible();
+        await page.screenshot({
+          path: `../../artifacts/resume-reading-${width}-${theme}.png`,
+          animations: 'disabled',
+        });
+        await page.getByRole('button', { name: '暂停', exact: true }).click();
+        expect((await audio(page)).paused).toBe(true);
+      } finally {
+        release();
+        await page.unroute('**/podcasts/episodes/radio-6/progress');
+      }
+    }
+});
+
 test('续听界面桌面与手机浅深主题视觉证据', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop');
   test.setTimeout(90000);
@@ -481,6 +894,14 @@ test('续听界面桌面与手机浅深主题视觉证据', async ({ page }, inf
           window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
         }, theme);
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        if (name === 'conflict')
+          await expect
+            .poll(async () => {
+              const notice = await page.locator('.device-resume-notice').boundingBox();
+              const bar = await page.locator('.player').boundingBox();
+              return !!notice && !!bar && Math.round(notice.y + notice.height) <= Math.round(bar.y);
+            })
+            .toBe(true);
         await page.screenshot({
           path: `../../artifacts/resume-${name}-${width}-${theme}.png`,
           animations: 'disabled',
@@ -508,6 +929,9 @@ test('续听界面桌面与手机浅深主题视觉证据', async ({ page }, inf
   await shot('dialog');
   await dialog.getByRole('button', { name: '继续 0:07' }).click();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  // Playback permission precedes the first upload's acknowledgement. Seed the competing
+  // device only after that claim settles, so fixture setup does not race its CAS version.
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
   await otherDevice(page, 8);
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');
   await expect(page.getByRole('button', { name: '用本机进度' })).toBeVisible();

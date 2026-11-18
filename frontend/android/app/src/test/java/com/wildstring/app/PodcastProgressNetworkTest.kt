@@ -8,8 +8,11 @@ import com.wildstring.app.data.*
 import java.net.InetAddress
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import kotlinx.coroutines.async
@@ -38,6 +41,195 @@ import org.robolectric.shadows.ShadowSystemClock
     shadows = [PodcastProgressNetworkTest.MemorySessionKey::class])
 @LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 class PodcastProgressNetworkTest {
+    @Test fun restartFollowsOurPendingWriteWithoutReportingAnotherDevice() = verifyRestartDuringOwnWrite(false)
+
+    @Test fun restartFollowsOurAcknowledgementWhenTheReadSnapshotIsOlder() = verifyRestartDuringOwnWrite(true)
+
+    @Test fun restartStillStopsWhenAnotherDeviceWinsDuringOurPendingWrite() = verifyRestartDuringOwnWrite(false, true)
+
+    private fun verifyRestartDuringOwnWrite(delayRead: Boolean, otherDeviceWins: Boolean = false) = ProgressFixture().use { fixture ->
+        val server = BookmarkServer(fixture)
+        val progress = PodcastProgress(fixture.context, fixture.repository)
+        runBlocking {
+            progress.prepare("episode", "Episode", 3_600_000)
+            withTimeout(5000) { while (server.current.get().deviceId != progress.deviceId()) delay(20) }
+            val oldSession = server.current.get().sessionId
+            server.blockWrite.set(true)
+            progress.checkpoint("episode", 42_000, 3_600_000, "pause", true)
+            assertTrue(server.writeEntered.await(5, TimeUnit.SECONDS))
+            server.blockRead.set(delayRead)
+            try {
+                val restart = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                    progress.prepare("episode", "Episode", 3_600_000, requestedMs = 0, explicitRestart = true)
+                }
+                if (delayRead) {
+                    assertTrue(server.readEntered.await(5, TimeUnit.SECONDS))
+                    server.releaseWrite.countDown()
+                    withTimeout(5000) {
+                        while (true) {
+                            val row = fixture.repository.database.podcasts().get(fixture.repository.session.storageScope()!!, "episode")
+                            val local = row?.let { com.google.gson.Gson().fromJson(it.payload, EpisodeCheckpoint::class.java) }
+                            if (local?.remote?.positionSeconds == 42L) break
+                            delay(20)
+                        }
+                    }
+                    server.releaseRead.countDown()
+                }
+                assertEquals(PodcastPreparation.Play(0), withTimeout(2000) { restart.await() })
+                if (otherDeviceWins) server.takeOver(9)
+                server.releaseWrite.countDown()
+                withTimeout(5000) { while (server.writes.size < 3 ||
+                    (server.current.get().sessionId == oldSession && !progress.conflict.value)) delay(20) }
+                if (otherDeviceWins) {
+                    withTimeout(5000) { progress.conflict.first { it } }
+                    assertEquals("other", server.current.get().deviceId)
+                    assertEquals(9L, server.current.get().positionSeconds)
+                    assertEquals("A real conflict must not trigger an automatic reclaim", 3, server.writes.size)
+                } else {
+                    assertFalse("Our own successful upload must not look like another device", progress.conflict.value)
+                    assertNotEquals(oldSession, server.current.get().sessionId)
+                    assertEquals(0L, server.current.get().positionSeconds)
+                }
+                assertEquals("restart", server.writes.last().intent)
+            } finally {
+                server.releaseRead.countDown()
+                server.releaseWrite.countDown()
+            }
+        }
+    }
+    @Test fun resumePreservesOwnPendingPointWithoutReapplyingAnyMode() = ProgressFixture().use { fixture ->
+        val server = BookmarkServer(fixture)
+        val progress = PodcastProgress(fixture.context, fixture.repository)
+        runBlocking {
+            progress.prepare("episode", "Episode", 3_600_000)
+            withTimeout(5000) { while (server.writes.isEmpty()) delay(20) }
+            val session = server.writes.first().sessionId
+            progress.setPromptHosted(true)
+            for (mode in listOf("auto", "ask", "restart")) {
+                progress.mode(mode)
+                withTimeout(5000) { progress.mode.first { it == mode } }
+                progress.checkpoint("episode", 150_000, 3_600_000, "pause", true)
+                withTimeout(5000) { while (server.current.get().positionSeconds != 150L) delay(20) }
+                val before = server.writes.size
+                assertEquals(PodcastPreparation.Play(150_500), progress.prepare("episode", "Episode", 3_600_000,
+                    fallbackMs = 150_500, start = PodcastStart.RESUME))
+                withTimeout(5000) { while (server.writes.size <= before) delay(20) }
+                assertNull(progress.prompt.value)
+                assertEquals(session, server.writes.last().sessionId)
+                assertEquals("resume", server.writes.last().intent)
+            }
+            server.takeOver(20)
+            assertEquals(PodcastPreparation.Play(20_000), progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 150_500, start = PodcastStart.RESUME))
+            withTimeout(5000) { while (server.current.get().deviceId != progress.deviceId()) delay(20) }
+            server.takeOver(3600, completed = true)
+            val before = server.writes.size
+            assertEquals(PodcastPreparation.Completed, progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 20_000, start = PodcastStart.RESUME))
+            assertEquals(before, server.writes.size)
+        }
+    }
+
+    @Test fun transientReadFailuresUseLocalPointButAuthenticationErrorsDoNot() = ProgressFixture().use { fixture ->
+        val server = BookmarkServer(fixture)
+        val progress = PodcastProgress(fixture.context, fixture.repository)
+        runBlocking {
+            progress.prepare("episode", "Episode", 3_600_000)
+            withTimeout(5000) { while (server.writes.isEmpty()) delay(20) }
+            server.readMode.set("slow")
+            val started = System.nanoTime()
+            assertEquals(PodcastPreparation.Play(25_000), progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 25_000, start = PodcastStart.RESUME))
+            assertTrue("One total read budget bounds preparation", (System.nanoTime() - started) / 1_000_000 < 2500)
+            server.readMode.set("503")
+            assertEquals(PodcastPreparation.Play(26_000), progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 26_000, start = PodcastStart.RESUME))
+            server.readMode.set("401")
+            val rejected = runCatching { progress.prepare("episode", "Episode", 3_600_000,
+                fallbackMs = 27_000, start = PodcastStart.RESUME) }
+            assertEquals("401", server.reads.last())
+            // The real auth interceptor may clear the active owner before Retrofit delivers the 401.
+            // Both cancellation (null) and an error must keep preparation from returning fallback audio.
+            assertNull("Authentication failure must not prepare offline playback", rejected.getOrNull())
+        }
+    }
+
+    @Test fun endingRequiresAcceptedCompletionFromTheSameSession() = ProgressFixture().use { fixture ->
+        val server = BookmarkServer(fixture)
+        val progress = PodcastProgress(fixture.context, fixture.repository)
+        runBlocking {
+            progress.prepare("episode", "Episode", 3_600_000)
+            withTimeout(5000) { while (server.writes.isEmpty()) delay(20) }
+            assertTrue(progress.finish("episode", 3_600_000, 3_600_000))
+            progress.prepare("episode", "Episode", 3_600_000, explicitRestart = true)
+            withTimeout(5000) { while (server.current.get().completed) delay(20) }
+            server.takeOver(20)
+            assertFalse(progress.finish("episode", 3_600_000, 3_600_000))
+            assertFalse(server.current.get().completed)
+            assertTrue(progress.conflict.value)
+        }
+    }
+
+    private inner class BookmarkServer(fixture: ProgressFixture) {
+        val current = AtomicReference(EpisodeProgress("episode", version = 1, sessionId = "other-session",
+            deviceId = "other", sequence = 1, positionSeconds = 30, durationSeconds = 3600))
+        val writes = CopyOnWriteArrayList<PodcastProgressUpdate>()
+        val reads = CopyOnWriteArrayList<String>()
+        val readMode = AtomicReference("normal")
+        val blockWrite = AtomicBoolean(false)
+        val writeEntered = CountDownLatch(1)
+        val releaseWrite = CountDownLatch(1)
+        val blockRead = AtomicBoolean(false)
+        val readEntered = CountDownLatch(1)
+        val releaseRead = CountDownLatch(1)
+        private val mode = AtomicReference("auto")
+        fun takeOver(position: Long, completed: Boolean = false) {
+            synchronized(current) { current.set(current.get().copy(version = current.get().version + 1,
+                sessionId = java.util.UUID.randomUUID().toString(), deviceId = "other", sequence = 1,
+                positionSeconds = position, completed = completed)) }
+        }
+        init {
+            fixture.server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val gson = com.google.gson.Gson()
+                    if (request.path == "/api/v1/podcasts/resume-mode") {
+                        if (request.method == "PUT") mode.set(JsonParser.parseString(request.body.readUtf8()).asJsonObject.get("resume_mode").asString)
+                        return json("""{"resume_mode":"${mode.get()}"}""")
+                    }
+                    if (request.method == "GET") {
+                        val selected = readMode.get(); reads += selected
+                        val snapshot = current.get()
+                        if (blockRead.compareAndSet(true, false)) {
+                            readEntered.countDown()
+                            check(releaseRead.await(5, TimeUnit.SECONDS))
+                        }
+                        return when (selected) {
+                            "slow" -> json(gson.toJson(current.get())).setBodyDelay(5, java.util.concurrent.TimeUnit.SECONDS)
+                            "503" -> json("{}", 503)
+                            "401" -> json("{}", 401)
+                            else -> json(gson.toJson(snapshot))
+                        }
+                    }
+                    val write = gson.fromJson(request.body.readUtf8(), PodcastProgressUpdate::class.java)
+                    writes += write
+                    if (blockWrite.compareAndSet(true, false)) {
+                        writeEntered.countDown()
+                        check(releaseWrite.await(5, TimeUnit.SECONDS))
+                    }
+                    synchronized(current) {
+                        val old = current.get()
+                        val same = write.sessionId == old.sessionId && write.deviceId == old.deviceId
+                        if (!same && write.baseVersion != old.version) return json("""{"detail":{"current":${gson.toJson(old)}}}""", 409)
+                        if (!same || write.sequence > old.sequence) current.set(EpisodeProgress("episode", old.version + 1,
+                            write.sessionId, write.deviceId, write.sequence, write.positionSeconds, write.durationSeconds,
+                            write.event == "ended" || (old.completed && write.intent == "resume")))
+                        return json(gson.toJson(current.get()))
+                    }
+                }
+            }
+        }
+    }
+
     /** Replace only the hardware-backed key; SessionStore still encrypts and decrypts real credentials. */
     @Implements(value = SessionStore::class, isInAndroidSdk = false)
     class MemorySessionKey {
@@ -72,6 +264,7 @@ class PodcastProgressNetworkTest {
         val progress = PodcastProgress(fixture.context, fixture.repository)
         runBlocking {
             assertTrue(progress.prepare("episode", "Episode", 3_600_000) is PodcastPreparation.Play)
+            withTimeout(5000) { while (puts.get() < 1) delay(20) }
             assertEquals(1, puts.get())
             progress.checkpoint("episode", 30_000, 3_600_000, "progress", true)
             withTimeout(5000) { progress.conflict.first { it } }
@@ -126,6 +319,7 @@ class PodcastProgressNetworkTest {
             assertFalse(progress.owns("episode"))
             // A user starting that same episode replays it from the start and claims a restart session.
             assertEquals(PodcastPreparation.Play(0), progress.prepare("episode", "Episode", 3_600_000))
+            withTimeout(5000) { while (puts.get() < 1) delay(20) }
             assertEquals(1, puts.get())
             val restart = JsonParser.parseString(writes.single()).asJsonObject
             assertEquals("restart", restart.get("intent").asString)
@@ -150,6 +344,7 @@ class PodcastProgressNetworkTest {
             assertEquals(putsBeforeAsk, puts.get())
             progress.answer(false)
             assertEquals(PodcastPreparation.Play(0), result.await())
+            withTimeout(5000) { while (puts.get() < 2) delay(20) }
             assertEquals(2, puts.get())
             assertEquals("restart", JsonParser.parseString(writes.last()).asJsonObject.get("intent").asString)
             assertEquals(0L, JsonParser.parseString(writes.last()).asJsonObject.get("position_seconds").asLong)
@@ -158,13 +353,14 @@ class PodcastProgressNetworkTest {
             progress.mode("restart")
             withTimeout(5000) { progress.mode.first { it == "restart" } }
             assertEquals(PodcastPreparation.Play(0), progress.prepare("episode", "Episode", 3_600_000))
+            withTimeout(5000) { while (puts.get() < 3) delay(20) }
             assertEquals(3, puts.get())
             assertEquals("restart", JsonParser.parseString(writes.last()).asJsonObject.get("intent").asString)
             assertFalse(progress.conflict.value)
         }
     }
 
-    @Test fun sameDeviceConflictRetriesOnlyCurrentWriteAndTakeoverConflictStopsAgain() = ProgressFixture().use { fixture ->
+    @Test fun sameDeviceNewSessionConflictStopsWithoutAutomaticRetry() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
         val writes = CopyOnWriteArrayList<String>()
         fixture.server.dispatcher = object : Dispatcher() {
@@ -176,27 +372,24 @@ class PodcastProgressNetworkTest {
                 val count = puts.incrementAndGet()
                 val remote = if (count == 1) state(1, update.get("device_id").asString, "previous-local")
                     else state(5, "other-device", "other-session")
-                return if (count == 2) json(state(2, update.get("device_id").asString, update.get("session_id").asString))
-                    else json("{\"detail\":{\"current\":$remote}}", 409)
+                return json("{\"detail\":{\"current\":$remote}}", 409)
             }
         }
         val progress = PodcastProgress(fixture.context, fixture.repository)
         runBlocking {
             assertTrue(progress.prepare("episode", "Episode", 3_600_000) is PodcastPreparation.Play)
-            assertEquals(2, puts.get())
-            val first = JsonParser.parseString(writes[0]).asJsonObject
-            val retried = JsonParser.parseString(writes[1]).asJsonObject
-            assertEquals(first.get("session_id"), retried.get("session_id"))
-            assertEquals(first.get("sequence"), retried.get("sequence"))
-            progress.checkpoint("episode", 30_000, 3_600_000, "progress", true)
             withTimeout(5000) { progress.conflict.first { it } }
+            assertEquals(1, puts.get())
+            val first = JsonParser.parseString(writes[0]).asJsonObject
+            progress.checkpoint("episode", 30_000, 3_600_000, "progress", true)
             progress.useLocalProgress()
-            withTimeout(5000) { while (puts.get() < 4) delay(20) }
+            withTimeout(5000) { while (puts.get() < 2) delay(20) }
             delay(200)
+            assertNotEquals(first.get("session_id"), JsonParser.parseString(writes[1]).asJsonObject.get("session_id"))
             assertTrue(progress.conflict.value)
             progress.checkpoint("episode", 40_000, 3_600_000, "seek", true)
             delay(200)
-            assertEquals(4, puts.get())
+            assertEquals(2, puts.get())
             assertEquals("resume", JsonParser.parseString(writes.last()).asJsonObject.get("intent").asString)
         }
     }
@@ -238,6 +431,7 @@ class PodcastProgressNetworkTest {
         val progress = PodcastProgress(fixture.context, fixture.repository)
         runBlocking {
             assertTrue(progress.prepare("episode", "Episode", 3_600_000) is PodcastPreparation.Play)
+            withTimeout(5000) { while (puts.get() < 1) delay(20) }
             progress.leave()
             ShadowSystemClock.advanceBy(Duration.ofSeconds(11)) // The outbox retry is throttled by Android's clock.
             progress.retry()

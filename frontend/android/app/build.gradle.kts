@@ -17,8 +17,8 @@ android {
         manifestPlaceholders["appName"] = "野弦"
         minSdk = 26
         targetSdk = 36
-        versionCode = 55
-        versionName = "0.8.19"
+        versionCode = 56
+        versionName = "0.8.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
@@ -31,6 +31,9 @@ android {
         storePassword = signingValues[1]
         keyAlias = signingValues[2]
         keyPassword = signingValues[3]
+    }
+    providers.environmentVariable("ANDROID_DEV_KEYSTORE_PATH").orNull?.let { path ->
+        signingConfigs.getByName("debug").storeFile = file(path)
     }
     buildTypes {
         debug {

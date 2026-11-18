@@ -150,6 +150,7 @@ public final class PlaybackService {
     @ObservationIgnored private var sleepTask: Task<Void, Never>?
     @ObservationIgnored private var didStreamFallback = false
     @ObservationIgnored var intendedPlaying = false
+    @ObservationIgnored private var audioInterrupted = false
     @ObservationIgnored private var pendingSeek: Double?
     @ObservationIgnored private var seekInFlight = false
     @ObservationIgnored var activateAudioSession: () throws -> Void = activateSystemAudioSession
@@ -163,6 +164,7 @@ public final class PlaybackService {
     @ObservationIgnored private var podcastBoot: Task<Void, Never>?
     @ObservationIgnored private var podcastBootToken: UUID?
     @ObservationIgnored private var podcastBootSeek: Double?
+    @ObservationIgnored private var podcastResumeSeek: Double?
     public struct PodcastResumePrompt: Sendable {
         public let position: Int
         public let duration: Int
@@ -192,13 +194,13 @@ public final class PlaybackService {
         var pendingEvent: String? = nil
     }
     @ObservationIgnored private var restoredPodcast: StoredPodcast?
-    @ObservationIgnored private var podcastStartedOffline = false
-    @ObservationIgnored var podcastSettleTimeout: Duration = .milliseconds(1500)
+    @ObservationIgnored var podcastReadTimeout: Duration = .milliseconds(1500)
     @ObservationIgnored private var podcastWriteTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var podcastWriteTail: [String: UUID] = [:]
     @ObservationIgnored private var podcastHistoryFlush: Task<Void, Never>?
     @ObservationIgnored public var podcastDeviceID = ""
-    /// Reads the full remote bookmark snapshot (version, position, duration, completed) before a new episode session.
-    @ObservationIgnored public var loadPodcastProgress: (@Sendable (String) async -> PodcastProgressSnapshot?)?
+    /// Reads the remote bookmark before explicit episode selection or resume.
+    @ObservationIgnored public var loadPodcastProgress: (@Sendable (String) async throws -> PodcastProgressSnapshot?)?
     /// Reads the bookmark version before a new episode session. Nil means the read failed.
     @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
     @ObservationIgnored private var podcastExplicitStartPosition = false
@@ -351,6 +353,7 @@ public final class PlaybackService {
         line: PodcastPlaybackLine = .show
     ) {
         podcastLine = line
+        podcastResumeSeek = nil
         restoredPodcast = nil
         podcastResumePrompt = nil
         pendingPodcastPrompt = nil
@@ -499,6 +502,20 @@ public final class PlaybackService {
 
     public func resume() {
         guard currentItem != nil else { return }
+        if pendingPodcastPrompt != nil { return }
+        if let episode = Self.podcastEpisodeID(currentItem?.trackID ?? ""), loadPodcastProgress != nil {
+            if intendedPlaying, isPlaying || isBuffering || audioInterrupted || podcastBootToken != nil { return }
+            intendedPlaying = true
+            errorMessage = nil
+            let token = UUID()
+            podcastBootToken = token
+            isBuffering = true
+            player.pause()
+            readPodcastProgress(episode, token: token) { [weak self] snapshot in
+                self?.finishPodcastResume(token: token, episode: episode, snapshot: snapshot)
+            }
+            return
+        }
         intendedPlaying = true
         errorMessage = nil
         if assetLoadTask != nil { return }
@@ -524,10 +541,18 @@ public final class PlaybackService {
 
     public func pause() {
         intendedPlaying = false
+        invalidatePodcastAdvance()
+        podcastAdvanceTask?.cancel()
+        podcastBoot?.cancel(); podcastBootToken = nil
+        pendingPodcastPrompt = nil; podcastResumePrompt = nil
         didFinishQueue = false
         player.pause()
         isPlaying = false
         isBuffering = false
+        if pendingSeek == nil, assetLoadTask == nil, player.currentItem?.status == .readyToPlay {
+            let native = player.currentTime().seconds
+            if native.isFinite { currentTime = transcodeBaseSeconds + native }
+        }
         if pendingSeek == nil { persistProgress() }
         checkpointListening(state: "paused")
         checkpointPodcast(event: "pause", force: true)
@@ -629,6 +654,9 @@ public final class PlaybackService {
 
     private func performSeek(to seconds: Double, isUserInitiated: Bool) {
         guard currentItem != nil else { return }
+        if isUserInitiated, Self.podcastEpisodeID(currentItem?.trackID ?? "") != nil, !intendedPlaying || podcastBootToken != nil {
+            podcastResumeSeek = max(0, seconds)
+        }
         if isUserInitiated {
             if podcastBootToken != nil {
                 podcastBootSeek = max(0, seconds)
@@ -703,7 +731,7 @@ public final class PlaybackService {
 
     private func beginPlayback() {
         guard intendedPlaying, pendingSeek == nil, assetLoadTask == nil,
-            player.currentItem != nil
+            player.currentItem != nil, podcastBootToken == nil, !audioInterrupted
         else { return }
         do {
             try activateAudioSession()
@@ -718,6 +746,83 @@ public final class PlaybackService {
             errorMessage = KitL10n("kit.playback.audioSessionFailed", error.localizedDescription)
             updateSystemNowPlaying()
         }
+    }
+
+    /// System recovery retains the original transport intent; only an explicit command reads the cloud.
+    func beginAudioInterruption() {
+        audioInterrupted = true
+        player.pause()
+    }
+
+    func resumeAfterInterruption(allowed: Bool = true) {
+        audioInterrupted = false
+        if !allowed { pause(); return }
+        guard intendedPlaying else { return }
+        beginPlayback()
+    }
+
+    private func readPodcastProgress(_ episode: String, token: UUID,
+        finish: @escaping @MainActor (PodcastProgressSnapshot?) -> Void) {
+        guard let load = loadPodcastProgress else { return }
+        podcastBoot?.cancel()
+        podcastBoot = Task { @MainActor [weak self] in
+            do {
+                let snapshot = try await load(episode)
+                guard let self, self.podcastBootToken == token else { return }
+                finish(snapshot)
+            } catch is CancellationError { return }
+            catch let error as APIError where error.statusCode < 500 {
+                guard let self, self.podcastBootToken == token else { return }
+                self.podcastBootToken = nil
+                self.intendedPlaying = false; self.isBuffering = false
+                self.errorMessage = Self.message(for: error)
+                self.updateSystemNowPlaying()
+            } catch {
+                guard let self, self.podcastBootToken == token else { return }
+                finish(nil)
+            }
+        }
+        Task { @MainActor [weak self] in
+            guard let delay = self?.podcastReadTimeout else { return }
+            try? await Task.sleep(for: delay)
+            guard let self, self.podcastBootToken == token else { return }
+            self.podcastBoot?.cancel()
+            finish(nil)
+        }
+    }
+
+    private func finishPodcastResume(token: UUID, episode: String, snapshot: PodcastProgressSnapshot?) {
+        guard podcastBootToken == token, currentItem?.trackID == "podcast_ep_\(episode)" else { return }
+        podcastBootToken = nil
+        let stored = loadStoredPodcast(episode)
+        let previous = podcast.ready ? podcast : stored?.bookmark ?? podcast
+        let same = snapshot?.sessionId == previous.sessionId && snapshot?.deviceId == podcastDeviceID
+        let localEnded = stored?.pendingEvent == "ended" && (snapshot == nil || same || snapshot?.version == 0)
+        if podcastResumeSeek == nil, snapshot?.completed == true || localEnded || (snapshot == nil && stored?.completed == true) {
+            intendedPlaying = false; isBuffering = false
+            podcast.block(); podcastKnownCompleted = true
+            podcastProgressMessage = KitL10n("kit.playback.podcastAlreadyCompleted")
+            updateSystemNowPlaying()
+            return
+        }
+        let position = podcastResumeSeek ?? (snapshot == nil || snapshot?.version == 0 || (same && previous.sequence >= (snapshot?.sequence ?? 0))
+            ? (podcast.ready ? currentTime : stored?.position ?? currentTime) : Double(snapshot!.positionSeconds))
+        let reuse = previous.ready && !previous.blocked && previous.intent != "restart" && (same || snapshot == nil)
+        let rebuild = player.currentItem == nil || currentIsTranscode
+        if rebuild {
+            startCurrent(autoplay: intendedPlaying, startAt: position, podcastPrepared: true)
+        }
+        if reuse { podcast = previous }
+        else {
+            beginPodcastBookmark(episode: episode, snapshot: snapshot, stored: stored, intent: "resume")
+        }
+        podcastHasConflict = false; podcastConflictVersion = nil; podcastProgressMessage = nil
+        podcastKnownCompleted = snapshot?.completed ?? stored?.completed ?? false
+        restoredPodcast = nil; podcastResumeSeek = nil; podcastBootSeek = nil
+        if !rebuild { performSeek(to: position, isUserInitiated: false) }
+        saveStoredPodcast(position: position, completed: podcastKnownCompleted)
+        if snapshot != nil { checkpointPodcast(event: "play", force: true) }
+        beginPlayback()
     }
 
     public func stopAndClear(preservingStoredQueue: Bool = false) {
@@ -934,7 +1039,7 @@ public final class PlaybackService {
             return
         }
         if !podcastPrepared, let episode = Self.podcastEpisodeID(item.trackID),
-           item.trackID != activeMediaID, let load = loadPodcastProgress {
+           item.trackID != activeMediaID, loadPodcastProgress != nil {
             let token = UUID()
             podcastBootToken = token
             podcastBootSeek = nil
@@ -948,16 +1053,9 @@ public final class PlaybackService {
             isPlaying = false
             isBuffering = autoplay
             let restart = podcastExplicitStartPosition
-            podcastBoot = Task { [weak self] in
-                let snapshot = await load(episode)
+            readPodcastProgress(episode, token: token) { [weak self] snapshot in
                 self?.finishPodcastBoot(token: token, episode: episode, snapshot: snapshot,
-                                        fallback: startAt, autoplay: autoplay, restart: restart,
-                                        automatic: automaticStart)
-            }
-            Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(1500))
-                self?.finishPodcastBoot(token: token, episode: episode, snapshot: nil,
-                                        fallback: startAt, autoplay: autoplay, restart: restart)
+                    fallback: startAt, autoplay: autoplay, restart: restart, automatic: automaticStart)
             }
             return
         }
@@ -1274,6 +1372,7 @@ public final class PlaybackService {
             intendedPlaying = false
             isPlaying = false
             currentTime = duration
+            checkpointPodcast(event: "ended", force: true)
             persistProgress()
             updateSystemNowPlaying()
             return
@@ -1293,39 +1392,56 @@ public final class PlaybackService {
             deliver(report)
         }
         checkpointPodcast(event: "ended", force: true)
-        if let endedTrackID, let episodeID = Self.podcastEpisodeID(endedTrackID), podcastCloud != nil {
+        if let endedTrackID, let episodeID = Self.podcastEpisodeID(endedTrackID), podcastCloud != nil || submitPodcastProgress != nil {
             let turn = invalidatePodcastAdvance()
             let cloud = podcastCloud
+            let session = podcast.sessionId
+            let sequence = podcast.sequence
+            let needsAcknowledgement = submitPodcastProgress != nil
             podcastAdvanceTask?.cancel()
             podcastAdvanceTask = Task { @MainActor in
-                await self.advanceCloudPodcast(episodeID: episodeID, endedTrackID: endedTrackID, turn: turn, cloud: cloud)
+                let deadline = ContinuousClock.now + self.podcastReadTimeout
+                while needsAcknowledgement, !Task.isCancelled, turn == self.podcastTurn, self.podcast.sessionId == session,
+                      !self.podcast.blocked, (self.podcast.completedSequence ?? 0) < sequence, ContinuousClock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                guard !Task.isCancelled, turn == self.podcastTurn, self.podcast.sessionId == session else { return }
+                guard !needsAcknowledgement || (!self.podcast.blocked && (self.podcast.completedSequence ?? 0) >= sequence) else {
+                    self.stopAtEndOfPodcast()
+                    return
+                }
+                if cloud != nil {
+                    await self.performContextStep(episodeID: episodeID, direction: .next, turn: turn, cloud: cloud, automatic: true)
+                } else {
+                    self.advanceLocalPodcast(endedTrackID: endedTrackID)
+                }
             }
             return
         }
         if endedIsPodcast {
-            podcastExplicitStartPosition = false
-            // A non-empty manual podcast queue always wins, ignoring music shuffle/repeat.
-            if podcastOverrideItem == nil, let next = advanceSequentialPodcastInLocalQueue() {
-                podcastAutomaticStart = true
-                startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
-                persistProgress()
-                return
-            }
-            if let endedTrackID,
-               let next = podcastAdjacentItem(
-                   currentID: endedTrackID, direction: .next, requireAutoContinue: true
-               ) {
-                podcastOverrideItem = next
-                podcastAutomaticStart = true
-                startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
-                return
-            }
-            stopAtEndOfPodcast()
+            advanceLocalPodcast(endedTrackID: endedTrackID)
             return
         }
         if podcastOverrideItem == nil, queue.advance() != nil {
             startCurrent(autoplay: true, startAt: 0)
             persistProgress()
+            return
+        }
+        stopAtEndOfPodcast()
+    }
+
+    private func advanceLocalPodcast(endedTrackID: String?) {
+        podcastExplicitStartPosition = false
+        if podcastOverrideItem == nil, let next = advanceSequentialPodcastInLocalQueue() {
+            podcastAutomaticStart = true
+            startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
+            persistProgress()
+            return
+        }
+        if let endedTrackID, let next = podcastAdjacentItem(currentID: endedTrackID, direction: .next, requireAutoContinue: true) {
+            podcastOverrideItem = next
+            podcastAutomaticStart = true
+            startCurrent(autoplay: true, startAt: max(0, next.resumePositionSeconds))
             return
         }
         stopAtEndOfPodcast()
@@ -1360,22 +1476,6 @@ public final class PlaybackService {
             )
         }
         return true
-    }
-
-    private func advanceCloudPodcast(
-        episodeID: String,
-        endedTrackID: String,
-        turn: Int,
-        cloud: PodcastCloudQueue?
-    ) async {
-        _ = endedTrackID
-        await performContextStep(
-            episodeID: episodeID,
-            direction: .next,
-            turn: turn,
-            cloud: cloud,
-            automatic: true
-        )
     }
 
     /// Queue line stays inside the queue. Show line uses the continuation rule and stops when the show ends.
@@ -1489,16 +1589,6 @@ public final class PlaybackService {
         snapshot.completed == true
     }
 
-    /// Mirrors the server tail rule so a write that legitimately finished the episode is not mistaken
-    /// for another device having already completed it.
-    static func writeCompletesEpisode(_ write: PodcastProgressWrite) -> Bool {
-        if write.event == "ended" { return true }
-        guard write.event == "pause" || write.event == "stop" else { return false }
-        let duration = write.durationSeconds
-        let tail = min(120, max(30, Int(Double(duration) * 0.05)))
-        return duration > tail && duration - write.positionSeconds <= tail
-    }
-
     func waitForPodcastTasks() async {
         var turn: Int
         repeat {
@@ -1514,7 +1604,6 @@ public final class PlaybackService {
     }
 
     private func stopAtEndOfPodcast() {
-        podcastOverrideItem = nil
         podcastAutomaticStart = false
         intendedPlaying = false
         isPlaying = false
@@ -1537,16 +1626,23 @@ public final class PlaybackService {
     }
 
     private func persistQueueAndProgress() {
-        let items = queue.items
-        let index = queue.currentIndex
+        var items = queue.items
+        var index = queue.currentIndex
+        if let podcastOverrideItem {
+            if let index, items.indices.contains(index) { items[index] = podcastOverrideItem }
+            else { items = [podcastOverrideItem]; index = 0 }
+        }
+        let savedItems = items
+        let savedIndex = index
         let position = currentTime
         persistence.enqueue { store in
-            try? await store.saveQueue(items, currentIndex: index)
-            try? await store.saveProgress(QueueProgress(index: index, position: position))
+            try? await store.saveQueue(savedItems, currentIndex: savedIndex)
+            try? await store.saveProgress(QueueProgress(index: savedIndex, position: position))
         }
     }
 
     private func persistProgress() {
+        if podcastOverrideItem != nil { persistQueueAndProgress(); return }
         let progress = QueueProgress(index: queue.currentIndex, position: currentTime)
         persistence.enqueue { store in
             try? await store.saveProgress(progress)
@@ -1572,41 +1668,22 @@ public final class PlaybackService {
             deliver(report)
         }
         activeMediaID = identifier
+        podcastResumeSeek = nil
         podcastBoot?.cancel()
         podcast.clear()
         podcastProgressMessage = nil
         podcastHasConflict = false
         podcastConflictVersion = nil
+        if podcastOverrideItem != nil { persistQueueAndProgress() }
     }
 
     private func finishPodcastBoot(
         token: UUID, episode: String, snapshot: PodcastProgressSnapshot?,
-        fallback: Double, autoplay: Bool, restart explicitRestart: Bool, automatic: Bool = false, settled: Bool = false
+        fallback: Double, autoplay: Bool, restart explicitRestart: Bool, automatic: Bool = false
     ) {
         guard podcastBootToken == token, currentItem?.trackID == "podcast_ep_\(episode)" else { return }
-        if !settled, let snapshot, pendingHistoricalPodcast(episode) != nil {
-            // Unsynced progress from an earlier session goes through the normal path first; the new session
-            // then starts from the resulting server state. The step is capped like the initial read: on timeout
-            // or failure the session starts from the local pending record (the offline start), and a late
-            // result is dropped because the token no longer matches.
-            let next = UUID()
-            podcastBootToken = next
-            podcastBoot = Task { @MainActor [weak self] in
-                guard let self else { return }
-                let latest = await self.settleHistoricalPodcast(episode, snapshot: snapshot, token: next)
-                self.finishPodcastBoot(token: next, episode: episode, snapshot: latest, fallback: fallback,
-                                       autoplay: autoplay, restart: explicitRestart, automatic: automatic, settled: true)
-            }
-            Task { [weak self] in
-                try? await Task.sleep(for: self?.podcastSettleTimeout ?? .milliseconds(1500))
-                self?.finishPodcastBoot(token: next, episode: episode, snapshot: nil, fallback: fallback,
-                                        autoplay: autoplay, restart: explicitRestart, automatic: automatic, settled: true)
-            }
-            return
-        }
         podcastBootToken = nil
         let stored = loadStoredPodcast(episode)
-        podcastStartedOffline = snapshot == nil
         let completed = snapshot.map(Self.isPodcastSnapshotCompleted) ?? stored?.completed ?? false
         let promptPosition = snapshot?.positionSeconds ?? Int(stored?.position ?? fallback)
         if podcastShouldAsk, !explicitRestart, !completed, promptPosition > 0 {
@@ -1659,8 +1736,12 @@ public final class PlaybackService {
         }
         let bootSeek = podcastBootSeek
         podcastBootSeek = nil
-        let position = bootSeek ?? (restart ? (completed && !automatic ? 0 : max(0, fallback)) : snapshot.map { Double(max(0, $0.positionSeconds)) }
-            ?? stored?.position ?? max(0, fallback))
+        podcastResumeSeek = nil
+        let same = stored != nil && snapshot?.sessionId == stored?.bookmark.sessionId && stored!.bookmark.sequence >= (snapshot?.sequence ?? 0)
+        let observed = snapshot == nil || snapshot?.version == 0 || same
+            ? stored?.position ?? snapshot.map { Double($0.positionSeconds) } ?? fallback
+            : Double(snapshot!.positionSeconds)
+        let position = bootSeek ?? (restart ? (completed && !automatic ? 0 : max(0, fallback)) : max(0, observed))
         startCurrent(autoplay: shouldPlay, startAt: position, podcastPrepared: true)
         if snapshot == nil, !restart, let restored = restoredPodcast, restored.bookmark.episodeId == episode {
             podcast = restored.bookmark
@@ -1670,70 +1751,23 @@ public final class PlaybackService {
                 podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
             }
         } else {
-            podcast.begin(episodeId: episode, deviceId: podcastDeviceID,
-                          baseVersion: snapshot?.version ?? stored?.version ?? 0,
-                          intent: restart ? "restart" : "resume")
+            beginPodcastBookmark(episode: episode, snapshot: snapshot, stored: stored, intent: restart ? "restart" : "resume")
         }
         restoredPodcast = nil
         saveStoredPodcast(position: position, completed: false)
         if snapshot != nil { checkpointPodcast(event: bootSeek != nil ? "seek" : (shouldPlay ? "play" : "pause"), force: true) }
     }
 
-    private func pendingHistoricalPodcast(_ episode: String) -> StoredPodcast? {
-        guard submitPodcastProgress != nil, let stored = loadStoredPodcast(episode), stored.pending != false,
-              stored.bookmark.ready, !stored.bookmark.blocked else { return nil }
-        return stored
-    }
-
-    /// Submits the pending record of an earlier session for the episode about to start, and returns the
-    /// server state the new session should begin from. 409 adopts the server state and drops the record.
-    /// Returns nil when the upload failed or the boot moved on, so the caller starts from the local record.
-    private func settleHistoricalPodcast(_ episode: String, snapshot: PodcastProgressSnapshot,
-                                         token: UUID) async -> PodcastProgressSnapshot? {
-        guard var stored = pendingHistoricalPodcast(episode), let key = podcastStorageKey(episode),
-              let cloud = podcastCloud, let submit = submitPodcastProgress,
-              let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
-                                               durationSeconds: Int(stored.duration.rounded()),
-                                               event: stored.completed ? "ended" : (stored.pendingEvent ?? "stop"),
-                                               nowMs: Self.monotonicMs(), force: true)
-        else { return snapshot }
-        func save(_ record: StoredPodcast) {
-            if let data = try? JSONEncoder().encode(record) { cloud.defaults.set(data, forKey: key) }
+    private func beginPodcastBookmark(episode: String, snapshot: PodcastProgressSnapshot?, stored: StoredPodcast?, intent: String) {
+        let predecessor = stored.flatMap { saved in
+            snapshot != nil && saved.bookmark.ready && !saved.bookmark.blocked &&
+                (snapshot?.sessionId == saved.bookmark.sessionId || snapshot?.version == saved.bookmark.baseVersion)
+                ? saved : nil
         }
-        func adopt(_ current: PodcastProgressSnapshot) -> PodcastProgressSnapshot {
-            save(StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
-                               duration: Double(current.durationSeconds ?? 0),
-                               completed: current.completed == true, version: current.version))
-            return current
-        }
-        save(stored)
-        let result = await submit(episode, write)
-        guard podcastBootToken == token else { return nil }
-        switch result {
-        case .ok, .completed:
-            let completed = stored.completed
-            stored.bookmark.clear()
-            stored.pending = false
-            save(stored)
-            let reloaded = await loadPodcastProgress?(episode)
-            guard podcastBootToken == token else { return nil }
-            if let latest = reloaded { return latest }
-            return PodcastProgressSnapshot(version: snapshot.version, positionSeconds: write.positionSeconds,
-                                           durationSeconds: write.durationSeconds,
-                                           completed: completed || snapshot.completed == true,
-                                           deviceId: podcastDeviceID)
-        case .conflictCurrent(let current):
-            return adopt(current)
-        case .conflict:
-            let current = await loadPodcastProgress?(episode)
-            guard podcastBootToken == token else { return nil }
-            if let current { return adopt(current) }
-            stored.bookmark.clear()
-            save(stored)
-            return snapshot
-        case .failed:
-            return nil
-        }
+        let localVersion = podcast.episodeId == episode ? podcast.baseVersion : 0
+        let version = max(snapshot?.version ?? stored?.version ?? localVersion, predecessor?.version ?? 0)
+        podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: version,
+                      intent: intent, superseding: predecessor?.bookmark.sessionId)
     }
 
     public func answerPodcastResume(restart: Bool?) {
@@ -1760,12 +1794,12 @@ public final class PlaybackService {
         return try? JSONDecoder().decode(StoredPodcast.self, from: data)
     }
 
-    private func saveStoredPodcast(position: Double, completed: Bool, pending: Bool = true, event: String? = nil) {
+    private func saveStoredPodcast(position: Double, completed: Bool, pending: Bool = true, event: String? = nil, acceptedVersion: Int? = nil) {
         guard podcast.ready, let key = podcastStorageKey(podcast.episodeId) else { return }
         let previous = loadStoredPodcast(podcast.episodeId)
         let pendingEvent = event ?? (previous?.bookmark.sessionId == podcast.sessionId ? previous?.pendingEvent : nil)
         let stored = StoredPodcast(bookmark: podcast, position: position, duration: duration,
-                                   completed: completed, version: podcast.baseVersion,
+                                   completed: completed, version: acceptedVersion ?? (previous?.bookmark.sessionId == podcast.sessionId ? previous!.version : podcast.baseVersion),
                                    conflict: podcastHasConflict, conflictVersion: podcastConflictVersion,
                                    pending: pending, pendingEvent: pendingEvent)
         if let data = try? JSONEncoder().encode(stored) { podcastCloud?.defaults.set(data, forKey: key) }
@@ -1795,41 +1829,29 @@ public final class PlaybackService {
         saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
         let episode = podcast.episodeId
         let storageKey = podcastStorageKey(episode)
-        guard let submit = submitPodcastProgress else { return }
-        let writeID = UUID()
-        podcastWriteTasks[writeID] = Task { @MainActor [weak self] in
-            defer { self?.podcastWriteTasks.removeValue(forKey: writeID) }
-            let result = await submit(episode, write)
-            guard let self else { return }
-            guard self.currentItem?.trackID == "podcast_ep_\(episode)",
-                  self.podcast.sessionId == write.sessionId else {
+        enqueuePodcastWrite(write, episode: episode) { service, write, result in
+            guard service.currentItem?.trackID == "podcast_ep_\(episode)",
+                  service.podcast.sessionId == write.sessionId else {
                 if case .conflictCurrent(let current) = result,
-                   self.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId,
+                   service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId,
                    let storageKey {
                     let stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
                                                duration: Double(current.durationSeconds ?? 0),
                                                completed: current.completed == true, version: current.version)
-                    if let data = try? JSONEncoder().encode(stored) { self.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                    if let data = try? JSONEncoder().encode(stored) { service.podcastCloud?.defaults.set(data, forKey: storageKey) }
                 }
                 return
             }
-            if result == .completed, self.podcastStartedOffline, write.intent == "resume",
-               !Self.writeCompletesEpisode(write) {
-                self.podcast.block()
-                self.podcastKnownCompleted = true
-                self.saveStoredPodcast(position: self.currentTime, completed: true)
-                self.podcastProgressMessage = KitL10n("kit.playback.podcastAlreadyCompleted")
-                self.podcastConflictVersion = nil
-                return
+            if result.isCompleted {
+                service.podcast.acknowledgeCompletion(write)
+                service.podcastKnownCompleted = true
+                service.saveStoredPodcast(position: service.currentTime, completed: true)
             }
-            if result == .completed {
-                self.podcastKnownCompleted = true
-                self.saveStoredPodcast(position: self.currentTime, completed: true)
-            }
-            if result == .ok || result == .completed {
-                self.podcastStartedOffline = false
-                self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted,
-                    pending: self.podcast.sequence != write.sequence || Int(self.currentTime.rounded()) != write.positionSeconds)
+            if result.succeeded {
+                let version: Int? = if case .accepted(let snapshot) = result { snapshot.version } else { nil }
+                service.saveStoredPodcast(position: service.currentTime, completed: service.podcastKnownCompleted,
+                    pending: service.podcast.sequence != write.sequence || Int(service.currentTime.rounded()) != write.positionSeconds,
+                    acceptedVersion: version)
             }
             let conflictSnapshot: PodcastProgressSnapshot?
             switch result {
@@ -1837,59 +1859,67 @@ public final class PlaybackService {
             case .conflict: conflictSnapshot = nil
             default: return
             }
-            self.podcast.block()
-            self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted)
-            self.podcastHasConflict = true
-            self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
+            service.podcast.block()
+            service.saveStoredPodcast(position: service.currentTime, completed: service.podcastKnownCompleted)
+            service.podcastHasConflict = true
+            service.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
             let latest: PodcastProgressSnapshot?
             if let conflictSnapshot { latest = conflictSnapshot }
-            else { latest = await self.loadPodcastProgress?(episode) }
-            guard let latest, self.currentItem?.trackID == "podcast_ep_\(episode)",
-                  self.podcast.sessionId == write.sessionId else { return }
-            self.podcastConflictVersion = latest.version
-            self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted)
-            if latest.deviceId == self.podcastDeviceID {
-                self.podcast.begin(episodeId: episode, deviceId: self.podcastDeviceID,
-                                   baseVersion: latest.version, intent: write.intent ?? "resume")
-                self.podcastHasConflict = false
-                self.podcastProgressMessage = nil
-                if let retry = self.podcast.next(positionSeconds: write.positionSeconds,
-                                                  durationSeconds: write.durationSeconds, event: event,
-                                                  nowMs: Self.monotonicMs(), force: true) {
-                    let result = await submit(episode, retry)
-                    guard self.podcast.sessionId == retry.sessionId,
-                          self.currentItem?.trackID == "podcast_ep_\(episode)" else { return }
-                    switch result {
-                    case .conflictCurrent(let current):
-                        self.podcastConflictVersion = current.version
-                        self.podcast.block()
-                        self.podcastHasConflict = true
-                        self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
-                    case .conflict:
-                        self.podcastConflictVersion = nil
-                        self.podcast.block()
-                        self.podcastHasConflict = true
-                        self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
-                    case .completed:
-                        self.podcastKnownCompleted = true
-                        self.podcastStartedOffline = false
-                    case .ok:
-                        self.podcastStartedOffline = false
-                    case .failed: break
-                    }
-                    self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted,
-                        pending: !(result == .ok || result == .completed) || self.podcast.sequence != retry.sequence
-                            || Int(self.currentTime.rounded()) != retry.positionSeconds)
-                }
-            } else {
-                self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
-            }
+            else { latest = try? await service.loadPodcastProgress?(episode) }
+            guard let latest, service.currentItem?.trackID == "podcast_ep_\(episode)",
+                  service.podcast.sessionId == write.sessionId else { return }
+            service.podcastConflictVersion = latest.version
+            service.saveStoredPodcast(position: service.currentTime, completed: service.podcastKnownCompleted)
         }
+    }
+
+    /// Serialize only progress writes for this episode; audio control never waits for this chain.
+    @discardableResult
+    private func enqueuePodcastWrite(_ write: PodcastProgressWrite, episode: String,
+        completed: @escaping @MainActor (PlaybackService, PodcastProgressWrite, PodcastSubmitResult) async -> Void) -> Task<Void, Never>? {
+        guard let submit = submitPodcastProgress else { return nil }
+        let storageKey = podcastStorageKey(episode)
+        let writeID = UUID()
+        let previous = podcastWriteTail[episode].flatMap { podcastWriteTasks[$0] }
+        podcastWriteTail[episode] = writeID
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            defer {
+                self?.podcastWriteTasks.removeValue(forKey: writeID)
+                if self?.podcastWriteTail[episode] == writeID { self?.podcastWriteTail.removeValue(forKey: episode) }
+            }
+            guard let self, storageKey == self.podcastStorageKey(episode) else { return }
+            var write = write
+            if self.currentItem?.trackID == "podcast_ep_\(episode)" {
+                guard self.podcast.sessionId == write.sessionId, !self.podcast.blocked else { return }
+                write.baseVersion = self.podcast.baseVersion
+            } else if let stored = self.loadStoredPodcast(episode), stored.bookmark.sessionId != write.sessionId {
+                return
+            }
+            let result = await submit(episode, write)
+            guard storageKey == self.podcastStorageKey(episode) else { return }
+            if self.podcast.sessionId != write.sessionId {
+                if case .accepted(let snapshot) = result {
+                    if self.currentItem?.trackID == "podcast_ep_\(episode)",
+                       self.podcast.acknowledgePredecessor(snapshot, sent: write) {
+                        self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted,
+                            acceptedVersion: snapshot.version)
+                    } else if var stored = self.loadStoredPodcast(episode), stored.bookmark.sessionId == write.sessionId,
+                              let storageKey {
+                        stored.version = snapshot.version
+                        if let data = try? JSONEncoder().encode(stored) { self.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                    }
+                }
+            }
+            await completed(self, write, result)
+        }
+        podcastWriteTasks[writeID] = task
+        return task
     }
 
     private func flushHistoricalPodcastProgress(force: Bool) {
         guard podcastHistoryFlush == nil, let cloud = podcastCloud, let account = cloud.accountKey,
-              let submit = submitPodcastProgress else { return }
+              submitPodcastProgress != nil else { return }
         let prefix = "wildstring.podcast.progress.\(account)."
         let keys = cloud.defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }
         podcastHistoryFlush = Task { @MainActor [weak self] in
@@ -1906,69 +1936,74 @@ public final class PlaybackService {
                                                        nowMs: Self.monotonicMs(), force: force)
                 else { continue }
                 if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
-                let result = await submit(episode, write)
-                guard self.currentItem?.trackID != "podcast_ep_\(episode)",
-                      self.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { continue }
-                switch result {
-                case .ok, .completed:
-                    stored.bookmark.clear()
-                    stored.pending = false
-                    stored.completed = stored.completed || result == .completed
-                case .conflictCurrent(let current):
-                    stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
-                                           duration: Double(current.durationSeconds ?? 0),
-                                           completed: current.completed == true, version: current.version)
-                case .conflict:
-                    if let current = await self.loadPodcastProgress?(episode) {
+                let submission = self.enqueuePodcastWrite(write, episode: episode) { service, write, result in
+                    guard service.currentItem?.trackID != "podcast_ep_\(episode)",
+                          service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
+                    switch result {
+                    case .ok, .completed, .accepted:
+                        stored.bookmark.clear()
+                        stored.pending = false
+                        stored.completed = stored.completed || result.isCompleted
+                        if case .accepted(let snapshot) = result { stored.version = snapshot.version }
+                    case .conflictCurrent(let current):
                         stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
                                                duration: Double(current.durationSeconds ?? 0),
                                                completed: current.completed == true, version: current.version)
-                    } else {
-                        stored.bookmark.clear()
+                    case .conflict:
+                        if let current = try? await service.loadPodcastProgress?(episode) {
+                            stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
+                                                   duration: Double(current.durationSeconds ?? 0),
+                                                   completed: current.completed == true, version: current.version)
+                        } else {
+                            stored.bookmark.clear()
+                        }
+                    case .failed: return
                     }
-                case .failed: continue
+                    guard service.currentItem?.trackID != "podcast_ep_\(episode)",
+                          service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
+                    if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
                 }
-                guard self.currentItem?.trackID != "podcast_ep_\(episode)",
-                      self.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { continue }
-                if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
+                await submission?.value
             }
         }
     }
 
     public func useLocalPodcastProgress() {
-        guard podcastHasConflict, let submit = submitPodcastProgress,
+        guard podcastHasConflict, podcast.blocked, submitPodcastProgress != nil,
               let episode = Self.podcastEpisodeID(currentItem?.trackID ?? "") else { return }
         let oldSession = podcast.sessionId
         Task { @MainActor in
             var version = self.podcastConflictVersion
-            if version == nil { version = await self.loadPodcastProgress?(episode)?.version }
+            if version == nil { version = try? await self.loadPodcastProgress?(episode)?.version }
             guard let version, self.podcast.sessionId == oldSession,
                   self.currentItem?.trackID == "podcast_ep_\(episode)" else { return }
             self.podcast.begin(episodeId: episode, deviceId: self.podcastDeviceID, baseVersion: version, intent: "resume")
             guard let write = self.podcast.next(positionSeconds: Int(self.currentTime.rounded()),
                                                  durationSeconds: Int(self.duration.rounded()), event: "progress",
                                                  nowMs: Self.monotonicMs(), force: true) else { return }
-            let result = await submit(episode, write)
-            guard self.podcast.sessionId == write.sessionId else { return }
-            switch result {
-            case .ok, .completed:
-                if result == .completed { self.podcastKnownCompleted = true }
-                self.podcastStartedOffline = false
-                self.podcastProgressMessage = nil
-                self.podcastConflictVersion = nil
-                self.podcastHasConflict = false
-            case .conflictCurrent(let current):
-                self.podcast.block()
-                self.podcastConflictVersion = current.version
-            case .conflict:
-                self.podcast.block()
-                self.podcastConflictVersion = nil
-            case .failed:
-                self.podcast.block()
+            self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted, event: write.event)
+            self.enqueuePodcastWrite(write, episode: episode) { service, write, result in
+                guard service.podcast.sessionId == write.sessionId else { return }
+                switch result {
+                case .ok, .completed, .accepted:
+                    if result.isCompleted { service.podcastKnownCompleted = true }
+                    service.podcastProgressMessage = nil
+                    service.podcastConflictVersion = nil
+                    service.podcastHasConflict = false
+                case .conflictCurrent(let current):
+                    service.podcast.block()
+                    service.podcastConflictVersion = current.version
+                case .conflict:
+                    service.podcast.block()
+                    service.podcastConflictVersion = nil
+                case .failed:
+                    service.podcast.block()
+                }
+                let version: Int? = if case .accepted(let snapshot) = result { snapshot.version } else { nil }
+                service.saveStoredPodcast(position: service.currentTime, completed: service.podcastKnownCompleted,
+                    pending: !result.succeeded || service.podcast.sequence != write.sequence
+                        || Int(service.currentTime.rounded()) != write.positionSeconds, event: write.event, acceptedVersion: version)
             }
-            self.saveStoredPodcast(position: self.currentTime, completed: self.podcastKnownCompleted,
-                pending: !(result == .ok || result == .completed) || self.podcast.sequence != write.sequence
-                    || Int(self.currentTime.rounded()) != write.positionSeconds, event: write.event)
         }
     }
 

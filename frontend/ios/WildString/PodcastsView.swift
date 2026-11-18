@@ -185,6 +185,7 @@ private struct PodcastDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(displayedEpisodes) { episode in
+                        let current = playback.currentItem?.trackID == "podcast_ep_\(episode.id)"
                         let isQueued = playback.podcastCloud?.isQueued(episodeID: episode.id) ?? false
                         let completed = isCompleted(episode)
                         let isFav = isFavorite(episode)
@@ -198,12 +199,14 @@ private struct PodcastDetailView: View {
                                     }
                                 }
                             } label: {
-                                Image(systemName: isQueued ? "checkmark.circle.fill" : "plus.circle")
+                                Image(systemName: current ? "speaker.wave.2.fill" : (isQueued ? "checkmark.circle.fill" : "plus.circle"))
                                     .font(.title3)
                                     .foregroundStyle(isQueued ? Color.secondary : Color.accentColor)
+                                    .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(isQueued ? L10n("podcasts.removeFromQueue") : L10n("podcasts.addToQueue"))
+                            .disabled(current)
+                            .accessibilityLabel(current ? L10n("nowPlaying.title") : (isQueued ? L10n("podcasts.removeFromQueue") : L10n("podcasts.addToQueue")))
 
                             Button {
                                 choose(episode, in: detail.episodes)

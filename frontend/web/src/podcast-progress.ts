@@ -1,4 +1,4 @@
-import { api, eventId } from './api';
+import { api, ApiError, eventId } from './api';
 import i18n from './i18n';
 
 export type PodcastProgressEvent = 'play' | 'progress' | 'pause' | 'seek' | 'stop' | 'ended';
@@ -24,8 +24,9 @@ export interface EpisodeCheckpoint {
   dirty: boolean;
   conflict: boolean;
   intent?: 'resume' | 'restart';
-  finished_remotely?: boolean;
   offline_start?: boolean;
+  permission_pending?: boolean;
+  superseded_session_id?: string;
 }
 
 export const emptyProgress = (id: string): EpisodeProgress => ({
@@ -89,7 +90,7 @@ export class PodcastProgressStore {
   private volatile = new Map<string, EpisodeCheckpoint>();
   constructor(
     private user: string,
-    private changed: (id: string, problem?: string, finished?: boolean) => void = () => {},
+    private changed: (id: string, problem?: string) => void = () => {},
   ) {
     this.prefix = `wildstring:podcast-progress:${user}:`;
     const key = `wildstring:device:${user}`;
@@ -112,6 +113,7 @@ export class PodcastProgressStore {
     return this.isActive(id) && !!this.read(id)?.conflict;
   }
   adoptManualChange(id: string) {
+    this.volatile.delete(id);
     const record = this.read(id);
     if (!record || this.active?.id !== id) return;
     this.active = { id, session: record.session_id };
@@ -124,26 +126,32 @@ export class PodcastProgressStore {
     if (this.volatile.has(id)) return this.volatile.get(id)!;
     try {
       const record = JSON.parse(localStorage.getItem(this.prefix + id) || 'null');
-      return record?.remote?.episode_id === id && Number.isFinite(record.sequence) ? record : null;
+      if (record?.remote?.episode_id !== id || !Number.isFinite(record.sequence)) return null;
+      this.volatile.set(id, record);
+      return record;
     } catch {
       return null;
     }
   }
   private save(id: string, record: EpisodeCheckpoint) {
+    // Each live player retains its own session even when another tab updates the durable fallback.
+    this.volatile.set(id, record);
     try {
       localStorage.setItem(this.prefix + id, JSON.stringify(record));
-      this.volatile.delete(id);
     } catch {
-      this.volatile.set(id, record);
       this.changed(id, i18n.t('podcastProgress.localStorageError'));
     }
   }
-  private async request(id: string, body?: object) {
+  private async request(id: string, body?: object, timeout = 6000, signal?: AbortSignal) {
     const response = await fetch(`/api/v1/podcasts/episodes/${encodeURIComponent(id)}/progress`, {
       method: body ? 'PUT' : 'GET',
       credentials: 'same-origin',
       keepalive: !!body,
-      signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(6000)]),
+      signal: AbortSignal.any([
+        this.controller.signal,
+        AbortSignal.timeout(timeout),
+        ...(signal ? [signal] : []),
+      ]),
       headers: {
         'Content-Type': 'application/json',
         'X-Wildstring-Client': 'web',
@@ -153,19 +161,24 @@ export class PodcastProgressStore {
     });
     return response;
   }
-  async remote(id: string): Promise<EpisodeProgress> {
-    const response = await this.request(id);
-    if (!response.ok) throw new Error(`progress_${response.status}`);
+  async remote(id: string, timeout = 6000, signal?: AbortSignal): Promise<EpisodeProgress> {
+    const response = await this.request(id, undefined, timeout, signal);
+    if (!response.ok) throw new ApiError(response.status, `progress_${response.status}`);
     return response.json();
   }
-  async inspect(id: string) {
-    // Old outbox entries are historical once a new selection starts.
-    this.leave();
-    await this.flush(id);
-    const local = this.read(id);
+  async inspect(id: string, resume = false, signal?: AbortSignal) {
+    if (!resume) this.leave();
     try {
-      return { remote: await this.remote(id), local, online: true };
-    } catch {
+      const remote = await this.remote(id, 1500, signal);
+      return { remote, local: this.read(id), online: true };
+    } catch (error) {
+      if (
+        signal?.aborted ||
+        this.controller.signal.aborted ||
+        (error instanceof ApiError && error.status < 500)
+      )
+        throw error;
+      const local = this.read(id);
       return { remote: local?.remote || emptyProgress(id), local, online: false };
     }
   }
@@ -176,25 +189,74 @@ export class PodcastProgressStore {
     duration: number,
     intent: 'resume' | 'restart',
     online: boolean,
+    reuse = false,
   ) {
     if (this.controller.signal.aborted) return;
-    const session = eventId();
+    const local = this.read(id);
+    const continuing =
+      reuse && this.isActive(id) && !local?.conflict && local?.intent !== 'restart';
+    const session = continuing ? local!.session_id : eventId();
+    const predecessor =
+      online &&
+      local &&
+      !local.conflict &&
+      (remote.version === local.remote.version ||
+        (remote.session_id === local.session_id && remote.device_id === this.device))
+        ? local
+        : null;
+    const base =
+      predecessor &&
+      predecessor.remote.session_id === predecessor.session_id &&
+      predecessor.remote.version > remote.version
+        ? predecessor.remote
+        : remote;
     this.save(id, {
-      remote,
+      remote: base,
       session_id: session,
-      base_version: remote.version,
-      sequence: 1,
+      base_version: base.version,
+      sequence: continuing ? local!.sequence + 1 : 1,
       position_seconds: Math.max(0, Math.floor(position)),
       duration_seconds: Math.max(0, Math.floor(duration)),
       event: 'play',
       intent,
       offline_start: !online,
+      permission_pending: true,
       dirty: true,
       conflict: false,
+      superseded_session_id: continuing ? undefined : predecessor?.session_id,
     });
     this.active = { id, session };
-    if (online) await this.flush(id);
-    else this.lastSent.set(id, Date.now());
+    this.lastSent.set(id, Date.now());
+  }
+  waitingForPermission(id: string) {
+    return this.isActive(id) && this.read(id)?.permission_pending === true;
+  }
+  activate(id: string) {
+    const record = this.read(id);
+    if (!this.isActive(id) || !record?.permission_pending) return;
+    this.save(id, { ...record, permission_pending: false });
+    if (!record.offline_start) void this.flush(id);
+  }
+  async finish(id: string) {
+    const session = this.active?.id === id ? this.active.session : null;
+    if (!session || this.conflicted(id)) return false;
+    let timer: ReturnType<typeof setTimeout>;
+    await Promise.race([
+      this.flush(id),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 1500);
+      }),
+    ]);
+    clearTimeout(timer!);
+    const record = this.read(id);
+    return (
+      this.active?.session === session &&
+      record?.session_id === session &&
+      !record.conflict &&
+      record.remote.session_id === session &&
+      record.remote.sequence >= record.sequence &&
+      record.remote.completed
+    );
   }
   async takeOver(id: string) {
     const record = this.read(id);
@@ -211,7 +273,7 @@ export class PodcastProgressStore {
       dirty: true,
       conflict: false,
     });
-    await this.flush(id, false);
+    await this.flush(id);
   }
   checkpoint(
     id: string,
@@ -224,7 +286,6 @@ export class PodcastProgressStore {
     if (
       this.controller.signal.aborted ||
       !record ||
-      record.finished_remotely ||
       this.active?.id !== id ||
       this.active.session !== record.session_id
     )
@@ -246,21 +307,21 @@ export class PodcastProgressStore {
             ? Math.floor(duration)
             : record.duration_seconds,
         sequence: record.sequence + 1,
-        event,
+        event: record.permission_pending ? 'play' : event,
         dirty: true,
       });
     }
     if (force || record.offline_start || Date.now() - (this.lastSent.get(id) || 0) >= 10000)
       void this.flush(id);
   }
-  async flush(id: string, allowRetry = true): Promise<void> {
+  async flush(id: string): Promise<void> {
     if (this.controller.signal.aborted) return;
     const previous = this.sending.get(id);
     if (previous) {
       await previous.promise;
-      return this.flush(id, allowRetry);
+      return this.flush(id);
     }
-    const entry = { promise: this.send(id, allowRetry) };
+    const entry = { promise: this.send(id) };
     this.sending.set(id, entry);
     try {
       await entry.promise;
@@ -268,9 +329,9 @@ export class PodcastProgressStore {
       if (this.sending.get(id) === entry) this.sending.delete(id);
     }
   }
-  private async send(id: string, allowRetry: boolean, retry?: EpisodeCheckpoint) {
-    const pending = retry || this.read(id);
-    if (!pending?.dirty || pending.conflict) return;
+  private async send(id: string) {
+    const pending = this.read(id);
+    if (!pending?.dirty || pending.conflict || pending.permission_pending) return;
     this.lastSent.set(id, Date.now());
     try {
       const response = await this.request(id, {
@@ -285,7 +346,32 @@ export class PodcastProgressStore {
       });
       if (this.controller.signal.aborted) return;
       const latest = this.read(id);
-      if (!latest || latest.session_id !== pending.session_id) return;
+      if (!latest) return;
+      if (latest.session_id !== pending.session_id) {
+        if (response.ok) {
+          const remote: EpisodeProgress = await response.json();
+          if (this.controller.signal.aborted) return;
+          const current = this.read(id);
+          // The per-episode send chain keeps this successor unsent until the old request returns.
+          if (
+            current &&
+            !current.conflict &&
+            current.superseded_session_id === pending.session_id &&
+            remote.session_id === pending.session_id &&
+            remote.device_id === this.device &&
+            current.base_version === current.remote.version &&
+            remote.version > current.remote.version
+          ) {
+            this.save(id, {
+              ...current,
+              remote,
+              base_version: remote.version,
+              superseded_session_id: undefined,
+            });
+          }
+        }
+        return;
+      }
       if (response.status === 409) {
         const { detail } = await response.json();
         const remote: EpisodeProgress = detail.current;
@@ -296,25 +382,6 @@ export class PodcastProgressStore {
           window.dispatchEvent(
             new CustomEvent('wildstring:podcast-progress-updated', { detail: remote }),
           );
-        } else if (allowRetry && remote.device_id === this.device) {
-          // Retry this checkpoint once with a fresh session and the observed revision.
-          const session = eventId();
-          this.active = { id, session };
-          const retry = {
-            ...pending,
-            remote,
-            session_id: session,
-            base_version: remote.version,
-            sequence: 1,
-          };
-          this.save(id, {
-            ...current,
-            remote,
-            session_id: session,
-            base_version: remote.version,
-            sequence: current.sequence > pending.sequence ? 2 : 1,
-          });
-          await this.send(id, false, retry);
         } else {
           this.save(id, { ...current, remote, conflict: true });
           this.changed(id, i18n.t('podcastProgress.conflictNotice'));
@@ -324,23 +391,14 @@ export class PodcastProgressStore {
         if (this.controller.signal.aborted) return;
         const current = this.read(id);
         if (!current || current.session_id !== pending.session_id) return;
-        const finished =
-          pending.intent === 'resume' &&
-          !pending.remote.completed &&
-          remote.completed &&
-          ['play', 'progress', 'seek'].includes(pending.event);
         this.save(id, {
           ...current,
           remote,
-          dirty: finished ? false : current.sequence > pending.sequence,
-          finished_remotely: finished,
+          dirty: current.sequence > pending.sequence,
           offline_start: false,
+          superseded_session_id: undefined,
         });
-        this.changed(
-          id,
-          finished ? i18n.t('podcastProgress.completedElsewhere') : undefined,
-          finished,
-        );
+        this.changed(id);
         window.dispatchEvent(
           new CustomEvent('wildstring:podcast-progress-updated', { detail: remote }),
         );

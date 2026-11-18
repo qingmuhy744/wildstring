@@ -25,6 +25,8 @@ xcodebuild -project WildString.xcodeproj -scheme WildString \
 
 ```sh
 make ios-test
+# 在指定的隔离模拟器渲染播放器状态并采样图标动效
+make ios-ui-test IOS_TEST_DESTINATION="platform=iOS Simulator,name=iPhone 17 Pro"
 ```
 
 核心逻辑与单元测试在 `WildStringKit` 包（Swift Testing，`swift test` 可在 macOS 直接跑）；Keychain 与界面行为在模拟器/真机运行时验证。

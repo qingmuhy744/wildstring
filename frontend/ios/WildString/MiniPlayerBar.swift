@@ -34,34 +34,32 @@ struct MiniPlayerBar: View {
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if playback.isBuffering {
-                        ProgressView()
-                    }
                     Button {
                         Haptics.tap()
                         playback.togglePlayPause()
                     } label: {
-                        Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3)
-                            .frame(width: 32, height: 32)
+                        PlaybackTransportGlyph(playing: playback.wantsPlayback, buffering: playback.isBuffering, size: 18)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(playback.wantsPlayback ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
+                    .accessibilityValue(playback.isBuffering ? L10n("nowPlaying.buffering") : "")
                     Button {
                         Haptics.tap()
                         playback.next()
                     } label: {
                         Image(systemName: "forward.fill")
                             .font(.body)
-                            .frame(width: 28, height: 32)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 7)
                 .padding(.bottom, 5)
-                if playback.duration > 0 {
+                Group {
                     ProgressView(
-                        value: min(max(playback.currentTime / playback.duration, 0), 1)
+                        value: playback.duration > 0 ? min(max(playback.currentTime / playback.duration, 0), 1) : 0
                     )
                     .progressViewStyle(.linear)
                     .tint(.wildAccent)

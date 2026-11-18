@@ -167,19 +167,25 @@ public struct PodcastProgressSnapshot: Decodable, Equatable, Sendable {
     public let durationSeconds: Int?
     public let completed: Bool?
     public let deviceId: String?
+    public let sessionId: String?
+    public let sequence: Int?
 
     public init(
         version: Int,
         positionSeconds: Int,
         durationSeconds: Int? = nil,
         completed: Bool? = nil,
-        deviceId: String? = nil
+        deviceId: String? = nil,
+        sessionId: String? = nil,
+        sequence: Int? = nil
     ) {
         self.version = version
         self.positionSeconds = positionSeconds
         self.durationSeconds = durationSeconds
         self.completed = completed
         self.deviceId = deviceId
+        self.sessionId = sessionId
+        self.sequence = sequence
     }
 
     enum CodingKeys: String, CodingKey {
@@ -187,6 +193,8 @@ public struct PodcastProgressSnapshot: Decodable, Equatable, Sendable {
         case positionSeconds = "position_seconds"
         case durationSeconds = "duration_seconds"
         case deviceId = "device_id"
+        case sessionId = "session_id"
+        case sequence
     }
 }
 

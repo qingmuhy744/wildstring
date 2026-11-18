@@ -1,9 +1,11 @@
 package com.wildstring.app.ui
 
 import android.content.Context
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.wildstring.app.R
 import com.wildstring.app.data.*
+import com.wildstring.app.playback.mediaItems
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,7 +71,7 @@ class PodcastQueueController(
     private val deviceId: () -> String,
     private val player: () -> Player?,
     private val prepareAdvance: () -> Unit,
-    private val play: (tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean) -> Unit,
+    private val startPlayback: (tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean, items: List<MediaItem>) -> Unit,
     private val requireOwner: (String?) -> Unit,
     private val positions: () -> Map<String, EpisodeProgress>,
     private val beforeAutomatic: (episodeId: String) -> Unit = {},
@@ -291,6 +293,13 @@ class PodcastQueueController(
         if (!diverged && queueResult.isSuccess) publishQueueRows(queueItems)
     }
 
+    private suspend fun play(tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean) {
+        val owner = repository.session.cacheScope()
+        val items = withContext(Dispatchers.Default) { tracks.mediaItems(repository) }
+        requireOwner(owner)
+        startPlayback(tracks, index, positionMs, autoplay, items)
+    }
+
     /** Show, episode, search, and favorites. Does not rewrite the cloud queue. */
     private suspend fun playShowNow(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long?) {
         val owner = repository.session.cacheScope()
@@ -301,7 +310,9 @@ class PodcastQueueController(
         val detail = repository.cachedPodcastDetail(podcast.id) ?: runCatching { repository.podcastDetail(podcast.id) }.getOrNull()
         val lineup = if (detail == null) listOf(episode) else podcastShowLineup(episode, detail, preferenceFor(podcast.id), positions())
         val summary = detail?.podcast ?: podcast
-        val tracks = lineup.map { item -> repository.rememberPodcastEpisode(if (item.id == episode.id) episode else item, summary) }
+        val tracks = withContext(Dispatchers.IO) {
+            lineup.map { item -> repository.rememberPodcastEpisode(if (item.id == episode.id) episode else item, summary) }
+        }
         currentCoroutineContext().ensureActive()
         requireOwner(owner)
         playbackContext = PodcastPlaybackContext.SHOW

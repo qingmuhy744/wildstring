@@ -30,6 +30,8 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行；打标签前必须在 GitHub Actions 的待发布 main 最终提交手动运行 **Android APK**，勾选 `run_emulator`（默认开启）、`test_classes` 留空。该手动运行仍需全部通过，修复后在新的最终提交重新通过，不将跳过模拟器的日常 CI 记作设备验收。正式签名包的发版安装冒烟仍由 Release 工作流执行。
 
+可下载的 CI Dev 包使用独立固定签名，后续可覆盖升级。首次替换旧临时签名 Dev 包通常需卸载旧 Dev 一次，其本机数据会随卸载清除。Fork / Dependabot 构建没有 Dev 密钥时只做验证，不上传可安装 Dev 包。本地构建如需与 CI 同签名，设置 `ANDROID_DEV_KEYSTORE_PATH` 为备份密钥的绝对路径；密钥、指纹校验与备份约定见[CI/CD 与发布](../../docs/releasing.md)。
+
 `src/test` 中的 `PodcastProgressNetworkTest` 使用 Robolectric、MockWebServer 与内存 Room 数据库，在 JVM 验证完成状态、续听模式、读写次数、冲突接管及离线补传，随 `make android-test` / `make android-ci` 执行，无需启动模拟器。Robolectric 与 Android 37 sandbox SDK 均由 Gradle 锁定并校验 SHA-256；SDK 复用 Gradle 缓存，测试期间禁用 Robolectric 自行下载。`PodcastResumeServiceTest`、`PodcastResumeUiTest` 保留设备上的真实 MediaSession／服务生命周期与交互、截图验证，JVM 通过不能替代这些验收。
 
 准备 JDK 21、Android SDK `platforms;android-37.0` 与 `build-tools;36.1.0`。在仓库根目录执行：

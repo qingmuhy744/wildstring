@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1406,7 +1408,7 @@ private fun PodcastDetailView(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EpisodeRowItem(
+internal fun EpisodeRowItem(
     episode: PodcastEpisode,
     isQueued: Boolean = false,
     isActive: Boolean = false,
@@ -1425,6 +1427,13 @@ private fun EpisodeRowItem(
     val feedback = LocalTactileFeedback.current
     val durationText = formatDuration(episode.durationSeconds)
     val shortDate = formatShortPubDate(episode.pubDate)
+    val queueLabels = listOf(stringResource(R.string.podcast_queue_add), stringResource(R.string.podcast_queue_added), stringResource(R.string.podcast_playing))
+    val queueStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
+    val textMeasurer = rememberTextMeasurer(cacheSize = queueLabels.size)
+    val queueTextWidth = remember(textMeasurer, queueLabels, queueStyle) {
+        queueLabels.maxOf { textMeasurer.measure(it, queueStyle, maxLines = 1, softWrap = false).size.width }
+    }
+    val queueWidth = (with(LocalDensity.current) { queueTextWidth.toDp() } + 16.dp).coerceAtLeast(48.dp)
 
     Surface(
         modifier = Modifier
@@ -1623,53 +1632,20 @@ private fun EpisodeRowItem(
 
                 Spacer(Modifier.width(8.dp))
 
-                if (isActive) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.podcast_playing),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                } else if (isQueued) {
-                    FilledTonalButton(
-                        onClick = { feedback(TactileKind.Tap); onRemoveFromQueue() },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.podcast_queue_added),
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                } else {
-                    FilledTonalButton(
-                        onClick = { feedback(TactileKind.Tap); onAddToQueue() },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.podcast_queue_add),
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
+                FilledTonalButton(
+                    onClick = { feedback(TactileKind.Tap); if (isQueued) onRemoveFromQueue() else onAddToQueue() },
+                    enabled = !isActive,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (isQueued) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = if (isQueued) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                        disabledContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.width(queueWidth).heightIn(min = 48.dp),
+                ) {
+                    Text(queueLabels[if (isActive) 2 else if (isQueued) 1 else 0], style = queueStyle, maxLines = 1, softWrap = false)
                 }
             }
             // Full-width under the metadata: an unsized LinearProgressIndicator defaults to 240dp and

@@ -12,6 +12,7 @@ import {
   saveShowDelivery,
   type NewEpisodeAction,
   type QueuePreferences,
+  type RemoteQueue,
 } from './podcast-remote';
 
 const ACTION_KEYS: { value: NewEpisodeAction; key: string }[] = [
@@ -220,13 +221,15 @@ export function PodcastInboxDialog({
   const [problem, setProblem] = useState('');
   const [queueFull, setQueueFull] = useState(false);
   const pointerDrag = useRef<number | null>(null);
+  const loadGeneration = useRef(0);
 
-  async function load() {
-    setStatus('loading');
+  async function load(savedQueue?: RemoteQueue) {
+    const generation = ++loadGeneration.current;
+    if (!savedQueue) setStatus('loading');
     setProblem('');
     try {
       const [remoteQueue, prefs, followed] = await Promise.all([
-        getPodcastQueue(),
+        savedQueue ?? getPodcastQueue(),
         getQueuePreferences().catch((): QueuePreferences => ({
           default_action: 'queue_last',
           auto_limit: 3,
@@ -288,6 +291,8 @@ export function PodcastInboxDialog({
       const sortedShows = [...followed].sort((a, b) =>
         Boolean(a.followed) === Boolean(b.followed) ? 0 : a.followed ? -1 : 1,
       );
+      // A completed save supersedes an older GET, including its pending row lookups.
+      if (generation !== loadGeneration.current) return;
       setRows(resolvedQueue);
       setQueueVersion(remoteQueue.version);
       setQueueFull(remoteQueue.notice === 'queue_full');
@@ -298,7 +303,7 @@ export function PodcastInboxDialog({
       setShowLimits(nextShowLimits);
       setStatus('ready');
     } catch {
-      setStatus('error');
+      if (generation === loadGeneration.current) setStatus('error');
     }
   }
 
@@ -308,10 +313,7 @@ export function PodcastInboxDialog({
 
   useEffect(() => {
     const synced = (event: Event) => {
-      const saved = (event as CustomEvent<{ version: number }>).detail;
-      if (saved && typeof saved.version === 'number') {
-        setQueueVersion(saved.version);
-      }
+      void load((event as CustomEvent<RemoteQueue>).detail);
     };
     window.addEventListener('wildstring:podcast-queue-saved', synced);
     return () => window.removeEventListener('wildstring:podcast-queue-saved', synced);

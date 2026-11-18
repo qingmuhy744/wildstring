@@ -359,7 +359,7 @@ extension MacAssistantTests {
     }
 
     @discardableResult
-    private func saveScreenshot(host: NSHostingView<some View>, name: String) throws -> Data {
+    func saveScreenshot(host: NSHostingView<some View>, name: String) throws -> Data {
         let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let png = try #require(bitmap.representation(using: .png, properties: [:]))

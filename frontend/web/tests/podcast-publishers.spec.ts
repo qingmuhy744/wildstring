@@ -20,10 +20,10 @@ async function reset(page: Page) {
   await podcastCatalog(page);
 }
 
-async function open(page: Page, title: string) {
+async function open(page: Page, id: string, title: string) {
   const loaded = page.waitForResponse(
     (response) =>
-      /\/api\/v1\/podcasts\/[^/?]+$/.test(response.url()) && response.request().method() === 'GET',
+      response.url().endsWith(`/api/v1/podcasts/${id}`) && response.request().method() === 'GET',
   );
   await page.locator('.podcast-card').filter({ hasText: title }).click();
   const response = await loaded;
@@ -35,7 +35,7 @@ async function open(page: Page, title: string) {
 
 test('手动确认、聚合本服节目、修正与解除归属，保留来源作者', async ({ page }, info) => {
   await reset(page);
-  await open(page, '午后广播测试');
+  await open(page, 'radio-test', '午后广播测试');
   await page.getByRole('button', { name: '确认出品方', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '出品方归属', exact: true });
   await expect(dialog).toContainText('来源作者：野弦测试');
@@ -57,7 +57,7 @@ test('手动确认、聚合本服节目、修正与解除归属，保留来源�
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   await expect(page.locator('.podcast-card')).toHaveCount(1);
   await page.getByRole('button', { name: '← 返回电台列表', exact: true }).click();
-  await open(page, '同出品方节目测试');
+  await open(page, 'publisher-second', '同出品方节目测试');
   await page.getByRole('button', { name: '确认出品方', exact: true }).click();
   await dialog.getByLabel('选择出品方', { exact: true }).selectOption(publisher.id);
   await dialog.getByRole('button', { name: '确认并保存', exact: true }).click();
@@ -75,7 +75,7 @@ test('手动确认、聚合本服节目、修正与解除归属，保留来源�
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await page.screenshot({ path: `../../artifacts/publisher-${theme}-${info.project.name}.png` });
   }
-  await open(page, '同出品方节目测试');
+  await open(page, 'publisher-second', '同出品方节目测试');
   await page.getByRole('button', { name: '修改出品方归属', exact: true }).click();
   await page.screenshot({ path: `../../artifacts/publisher-editor-dark-${info.project.name}.png` });
   await dialog.getByLabel('选择出品方', { exact: true }).selectOption('new');
@@ -97,7 +97,7 @@ test('手动确认、聚合本服节目、修正与解除归属，保留来源�
 
 test('并发修改要求重新读取当前归属', async ({ page }, info) => {
   await reset(page);
-  await open(page, '午后广播测试');
+  await open(page, 'radio-test', '午后广播测试');
   await page.getByRole('button', { name: '确认出品方', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '出品方归属', exact: true });
   const current = await (await page.request.get('/api/v1/podcasts/radio-test')).json();
@@ -159,7 +159,7 @@ test('听众可以查看聚合但没有修改入口', async ({ page }, info) => 
   });
   await page.reload();
   await section(page, '电台 · 播客');
-  await open(page, '午后广播测试');
+  await open(page, 'radio-test', '午后广播测试');
   await expect(page.getByRole('button', { name: '修改出品方归属', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '共享出品方', exact: true }).click();
   await expect(page.locator('.podcast-card')).toHaveCount(1);

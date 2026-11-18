@@ -17,6 +17,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import com.wildstring.app.data.*
 import com.wildstring.app.playback.PlaybackService
 import com.wildstring.app.playback.mediaItem
+import com.wildstring.app.playback.mediaItems
 import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -133,7 +134,7 @@ class MusicViewModel @Inject constructor(
     private val podcastQueues = PodcastQueueController(
         repository, settings, context, viewModelScope, { deviceId() }, { controller },
         { preparePodcastAdvance() },
-        { tracks, index, position, autoplay -> play(tracks, index, autoplay = autoplay, positionMs = position, preserveQueue = false) },
+        { tracks, index, position, autoplay, items -> playPrepared(tracks, index, autoplay, position, false, items) },
         { owner -> requireOwner(owner) },
         { podcastProgress.positions.value },
         { episodeId -> podcastProgress.prepareNextAutomatically(episodeId) },
@@ -891,6 +892,10 @@ class MusicViewModel @Inject constructor(
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
     }
     fun play(tracks: List<Track>, index: Int? = null, autoplay: Boolean = true, positionMs: Long? = null, preserveQueue: Boolean = false) {
+        playPrepared(tracks, index, autoplay, positionMs, preserveQueue, null)
+    }
+
+    private fun playPrepared(tracks: List<Track>, index: Int?, autoplay: Boolean, positionMs: Long?, preserveQueue: Boolean, preparedItems: List<MediaItem>?) {
         val c = controller ?: return
         if (tracks.isEmpty()) return
         val selected = index ?: tracks.indexOfFirst { it.isAvailable }.takeIf { it >= 0 } ?: 0
@@ -900,12 +905,14 @@ class MusicViewModel @Inject constructor(
             return
         }
         val index = tracks.take(selected).count { it.isAvailable }
+        val readyItems = preparedItems?.filterIndexed { i, _ -> tracks[i].isAvailable }
         val tracks = tracks.filter { it.isAvailable }
         require(tracks.size <= 5000) { AppLanguage.string(R.string.vm_queue_limit_exceeded) }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val startPos = (positionMs ?: target.podcast?.resumePositionMs?.takeIf { it > 0L } ?: 0L).coerceAtLeast(0L)
-        val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { original ->
+        val items = (readyItems ?: tracks.mediaItems(repository)).mapIndexed { itemIndex, original ->
+            val track = tracks[itemIndex]
             val item = if (track.podcastEpisodeId == null) original else {
                 val extras = android.os.Bundle(original.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", podcastQueues.followsQueue()) }
                 original.buildUpon().setMediaMetadata(original.mediaMetadata.buildUpon().setExtras(extras).build()).build()
@@ -914,7 +921,7 @@ class MusicViewModel @Inject constructor(
                 val extras = android.os.Bundle(item.mediaMetadata.extras).apply { putLong("podcast_requested_position", positionMs) }
                 item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
             } else item
-        } }
+        }
         val previous = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
         localPlaybackEpoch++
         pendingSeekTargetMs = if (startPos > 0L) startPos else null
@@ -1054,7 +1061,7 @@ class MusicViewModel @Inject constructor(
         if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = AppLanguage.string(R.string.vm_queue_max_limit)) }; return false }
         localPlaybackEpoch++
         tracks.forEach { repository.rememberPlaybackTrack(it) }
-        val items = tracks.map { it.mediaItem(repository) }
+        val items = tracks.mediaItems(repository)
         if (c.mediaItemCount == 0) play(tracks)
         else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
         else c.addMediaItems(items)

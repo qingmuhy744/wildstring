@@ -80,14 +80,10 @@ extension PlaybackService {
             }
             switch type {
             case .began:
-                player.pause()
+                beginAudioInterruption()
             case .ended:
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
-                if options.contains(.shouldResume), intendedPlaying {
-                    resume()
-                } else {
-                    pause()
-                }
+                resumeAfterInterruption(allowed: options.contains(.shouldResume))
             @unknown default:
                 break
             }
