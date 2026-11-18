@@ -2150,4 +2150,6 @@
     <string name="offline_confirm_body">The tracks will be saved to this device.</string>
     <string name="offline_download_count">Download %1$,d tracks</string>
     <string name="offline_save_selection">Save offline (%1$,d)</string>
+    <string name="track_selection_empty">There are no tracks in this list.</string>
+    <string name="track_selection_unavailable">The server is temporarily unavailable.</string>
 </resources>

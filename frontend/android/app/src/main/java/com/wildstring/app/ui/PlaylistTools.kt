@@ -19,6 +19,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.wildstring.app.data.*
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 @Composable
 internal fun PlaylistEditor(vm: MusicViewModel, existing: Playlist?, dismiss: () -> Unit) {
@@ -100,7 +101,10 @@ internal fun MultiSelectPanel(vm: MusicViewModel, initialTrackId: String?, dismi
     val listState = rememberLazyListState()
     var loadAttempt by remember { mutableIntStateOf(0) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    LaunchedEffect(loadAttempt) { action.run {
+    LaunchedEffect(loadAttempt) { action.run(errorMessage = { error ->
+        if (error is HttpException && error.code() == 503) AppLanguage.string(R.string.track_selection_unavailable)
+        else friendlyError(error)
+    }) {
         tracks = vm.repository.collectionTracks(CatalogQuery(original.tab, original.kind, original.title, original.query, collection = original.collection,
             collectionId = original.collectionId, playlist = original.activePlaylist, role = original.role, sort = original.sort, albumFilter = original.albumFilter, order = original.order))
         selected = selected.intersect(tracks.map { it.id }.toSet())
@@ -128,7 +132,7 @@ internal fun MultiSelectPanel(vm: MusicViewModel, initialTrackId: String?, dismi
             }
             if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
             else if (tracks.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (message == DONE_STATUS) Text(stringResource(R.string.catalog_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (message == DONE_STATUS) Text(stringResource(R.string.track_selection_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             else LazyColumn(Modifier.weight(1f), state = listState) { items(tracks, key = { it.id }) { track ->
                 Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {

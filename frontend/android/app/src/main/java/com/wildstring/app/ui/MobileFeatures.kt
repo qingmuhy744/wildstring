@@ -147,12 +147,12 @@ internal val DONE_STATUS get() = AppLanguage.string(R.string.completed)
 internal class FeatureAction {
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
-    suspend fun run(block: suspend () -> Unit) {
+    suspend fun run(errorMessage: (Exception) -> String = ::friendlyError, block: suspend () -> Unit) {
         if (busy) return
         busy = true; message = PROCESSING_STATUS
         try { block(); if (message == PROCESSING_STATUS) message = DONE_STATUS }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { message = friendlyError(e) }
+        catch (e: Exception) { message = errorMessage(e) }
         finally { busy = false }
     }
 }
