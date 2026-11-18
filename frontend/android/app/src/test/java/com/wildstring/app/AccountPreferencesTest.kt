@@ -1,5 +1,6 @@
 package com.wildstring.app
 
+import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.test.platform.app.InstrumentationRegistry
@@ -10,7 +11,12 @@ import com.wildstring.app.data.SongListSize
 import java.util.UUID
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [37], application = Application::class)
 class AccountPreferencesTest {
     private fun isolated(action: (Context) -> Unit) {
         val original = InstrumentationRegistry.getInstrumentation().targetContext

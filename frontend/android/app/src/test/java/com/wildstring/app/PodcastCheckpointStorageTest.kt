@@ -1,5 +1,6 @@
 package com.wildstring.app
 
+import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
@@ -7,7 +8,12 @@ import com.wildstring.app.data.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [37], application = Application::class)
 class PodcastCheckpointStorageTest {
     @Test fun migrationKeepsQueueAndReopenKeepsAccountScopedOutbox() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

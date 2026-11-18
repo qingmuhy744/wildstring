@@ -53,6 +53,7 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../../tests/fixtures/audio"))
+    sourceSets.getByName("test").resources.srcDir(rootProject.file("../../tests/fixtures/audio"))
     // Pure-Kotlin test helpers used by both the JVM unit tests and the instrumented tests.
     sourceSets.getByName("test").kotlin.srcDir("src/sharedTest/kotlin")
     sourceSets.getByName("androidTest").kotlin.srcDir("src/sharedTest/kotlin")
