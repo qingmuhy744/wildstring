@@ -249,7 +249,7 @@ export function usePlayer(userId: string) {
   });
   const [podcastQueueItems, setPodcastQueueItems] = useState<RemoteQueueItem[]>([]);
   const queueLoad = useRef<Promise<void> | null>(null);
-  const commitChain = useRef(Promise.resolve());
+  const queueSave = useRef<Promise<void> | null>(null);
   const preferenceSave = useRef<Promise<unknown>>(Promise.resolve());
   const conflictVersion = useRef<number | null>(null);
   const [podcastSync, setPodcastSync] = useState<'ready' | 'error' | 'conflict'>('ready');
@@ -804,11 +804,13 @@ export function usePlayer(userId: string) {
       setPodcastSync('conflict');
       return;
     }
-    const task = commitChain.current.then(async () => {
-      while (!remoteQueue.current.hold) {
-        const latest = remoteQueue.current.items;
-        const snapshot = JSON.stringify(latest);
-        try {
+    // The active save already drains edits made while a request is in flight.
+    if (queueSave.current) return queueSave.current;
+    queueSave.current = Promise.resolve().then(async () => {
+      try {
+        while (!remoteQueue.current.hold) {
+          const latest = remoteQueue.current.items;
+          const snapshot = JSON.stringify(latest);
           const saved = await putPodcastQueue(remoteQueue.current.version, latest);
           remoteQueue.current.version = saved.version;
           window.dispatchEvent(
@@ -819,23 +821,21 @@ export function usePlayer(userId: string) {
           setPodcastQueueItems(saved.items);
           setPodcastSync('ready');
           return;
-        } catch (error) {
-          const version = queueConflictVersion(error);
-          if (version !== undefined) {
-            conflictVersion.current = version;
-            remoteQueue.current.hold = true;
-            setPodcastSync('conflict');
-            return;
-          }
-          setPodcastSync('error');
+        }
+      } catch (error) {
+        const version = queueConflictVersion(error);
+        if (version !== undefined) {
+          conflictVersion.current = version;
+          remoteQueue.current.hold = true;
+          setPodcastSync('conflict');
           return;
         }
+        setPodcastSync('error');
+      } finally {
+        queueSave.current = null;
       }
     });
-    commitChain.current = task.then(
-      () => undefined,
-      () => undefined,
-    );
+    return queueSave.current;
   }
 
   function audibleFromItems(items: RemoteQueueItem[], tracks: Track[]) {
