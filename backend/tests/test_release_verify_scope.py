@@ -78,6 +78,14 @@ def test_kotlin_or_fixture_change_runs_android_emulator(monkeypatch) -> None:
     run_fixture, _ = scope.needs_android_emulator("v0.8.20")
     assert run_fixture is True
 
+    _mock_git(
+        monkeypatch,
+        tags="v0.8.19\n",
+        changed="scripts/ci_recover_emulator.sh\n",
+    )
+    run_recovery, _ = scope.needs_android_emulator("v0.8.20")
+    assert run_recovery is True
+
 
 def test_missing_previous_tag_or_git_failure_falls_back_to_running_emulator(monkeypatch) -> None:
     _mock_git(monkeypatch, tags="", changed="")
@@ -162,3 +170,114 @@ def test_ci_verify_falls_back_on_failed_run_or_api_error(monkeypatch) -> None:
     monkeypatch.setattr(scope, "fetch_workflow_runs", raise_error)
     assert scope.needs_ci_verify("owner/repo", sha, "tok")[0] is True
     assert scope.needs_ci_verify("", sha, "tok")[0] is True
+
+
+def test_find_previous_tag_skips_unpublished_tags(monkeypatch):
+    def fake_run_git(*args: str) -> str:
+        assert args[:2] == ("tag", "--merged")
+        return "v0.8.21\nv0.8.20\n"
+
+    monkeypatch.setattr(scope, "run_git", fake_run_git)
+    assert scope.find_previous_tag("v0.8.22", published_tags={"v0.8.20"}) == "v0.8.20"
+    assert scope.find_previous_tag("v0.8.22", published_tags=set()) is None
+
+
+def test_needs_android_emulator_uses_published_baseline(monkeypatch):
+    seen_diffs: list[tuple[str, ...]] = []
+
+    def fake_run_git(*args: str) -> str:
+        if args[0] == "tag":
+            return "v0.8.21\nv0.8.20\n"
+        if args[0] == "diff":
+            seen_diffs.append(args)
+            return "frontend/android/app/src/main/java/App.kt\n"
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(scope, "run_git", fake_run_git)
+    run_emu, reason = scope.needs_android_emulator("v0.8.22", published_tags={"v0.8.20"})
+    assert run_emu is True
+    assert "v0.8.20" in reason
+    assert seen_diffs == [("diff", "--name-only", "v0.8.20...HEAD")]
+
+    run_empty, empty_reason = scope.needs_android_emulator("v0.8.22", published_tags=set())
+    assert run_empty is True
+    assert "no previous published release tag found" in empty_reason
+
+
+def test_fetch_published_release_tags_ignores_drafts(monkeypatch):
+    import io
+    import json
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
+    def fake_urlopen(request, timeout: int = 0):
+        captured["url"] = request.full_url
+        captured["auth"] = request.headers.get("Authorization")
+        captured["timeout"] = timeout
+        payload = [
+            {"tag_name": "v0.8.21", "draft": True},
+            {"tag_name": "v0.8.20", "draft": False},
+            {"tag_name": "", "draft": False},
+            {"tag_name": "v0.8.19"},
+        ]
+        return FakeResponse(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(scope.urllib.request, "urlopen", fake_urlopen)
+    tags = scope.fetch_published_release_tags("owner/repo", "secret-token")
+    assert tags == {"v0.8.20", "v0.8.19"}
+    assert captured["url"] == "https://api.github.com/repos/owner/repo/releases?per_page=100"
+    assert captured["auth"] == "Bearer secret-token"
+    assert captured["timeout"] == 15
+
+    assert scope.resolve_published_tags("", "tok")[0] is None
+    assert scope.resolve_published_tags("owner/repo", "")[0] is None
+
+
+def test_main_fails_closed_when_published_lookup_fails(monkeypatch, capsys):
+    monkeypatch.setenv("RELEASE_TAG", "v0.8.22")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GH_TOKEN", "tok")
+
+    monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: (None, "lookup failed"))
+    monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("needs_android_emulator should not run when published lookup failed")
+
+    monkeypatch.setattr(scope, "needs_android_emulator", fail_if_called)
+    assert scope.main() == 0
+    out = capsys.readouterr().out
+    assert "run_android_emulator=true" in out
+    assert "run_ci_verify=false" in out
+
+
+def test_main_forwards_published_tags(monkeypatch, capsys):
+    monkeypatch.setenv("RELEASE_TAG", "v0.8.22")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GH_TOKEN", "tok")
+
+    monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: ({"v0.8.20"}, ""))
+    monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+
+    seen: dict[str, object] = {}
+
+    def fake_needs(release_tag: str, head: str = "HEAD", published_tags=None):
+        seen["release_tag"] = release_tag
+        seen["published_tags"] = published_tags
+        return False, "no android changes since v0.8.20"
+
+    monkeypatch.setattr(scope, "needs_android_emulator", fake_needs)
+    assert scope.main() == 0
+    out = capsys.readouterr().out
+    assert "run_android_emulator=false" in out
+    assert seen == {"release_tag": "v0.8.22", "published_tags": {"v0.8.20"}}

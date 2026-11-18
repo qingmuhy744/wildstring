@@ -179,18 +179,23 @@ def suppress_system_dialogs() -> None:
 
 def device_ready(timeout: float = 60) -> bool:
     """True if the emulator answers; False if it is gone (for example it crashed or hung)."""
+    step_timeout = min(timeout, 30.0)
     try:
         subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
             ["adb", "wait-for-device"], capture_output=True, timeout=timeout, check=False
         )
         state = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
-            ["adb", "get-state"], capture_output=True, text=True, timeout=30, check=False
+            ["adb", "get-state"], capture_output=True, text=True, timeout=step_timeout, check=False
         )
         if state.stdout.strip() != "device":
             return False
         # get-state only asks adbd; a hung system server still fails a real shell command.
         echo = subprocess.run(  # nosec B603 B607 - fixed adb executable, no shell
-            ["adb", "shell", "echo", "ok"], capture_output=True, text=True, timeout=30, check=False
+            ["adb", "shell", "echo", "ok"],
+            capture_output=True,
+            text=True,
+            timeout=step_timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return False
@@ -235,6 +240,7 @@ class ClassRun:
     timed_out: bool
     seconds: float
     device_lost: bool = False
+    recovered: bool = False
 
     @property
     def passed(self) -> bool:
@@ -299,6 +305,8 @@ def run_class(
     parsed = parse_instrumentation(output)
     if not parsed.tests and device_gone(output):
         DEVICE_TROUBLE.append(f"am instrument: {output.strip()[:200]}")
+    if (parsed.crash or timed_out) and not DEVICE_TROUBLE and not device_ready(timeout=5):
+        DEVICE_TROUBLE.append("emulator stopped responding")
     crash = f"Timed out after {options.class_timeout:.0f}s" if timed_out else parsed.crash
     reported = {case.name for case in parsed.tests}
     tests = parsed.tests + [
@@ -361,10 +369,10 @@ def select(classes: dict[str, list[str]], wanted: str) -> dict[str, list[str]]:
 
 
 def shard(classes: dict[str, list[str]], index: int, count: int) -> dict[str, list[str]]:
-    """Split discovered classes into deterministic shards, each class in exactly one.
+    """Split discovered classes into deterministic test-balanced shards, each in exactly one.
 
-    A long single-emulator run can lose the emulator mid-suite on memory-constrained hosts;
-    sharding lets CI give each half a fresh emulator without dropping or skipping a class.
+    Greedy assignment by descending discovered test count spreads heavy UI suites across shards;
+    a long single-emulator run can lose the emulator mid-suite on memory-constrained hosts.
     """
     if count < 1:
         raise SystemExit("--shard-count must be at least 1")
@@ -372,11 +380,14 @@ def shard(classes: dict[str, list[str]], index: int, count: int) -> dict[str, li
         raise SystemExit(f"--shard-index must be between 0 and {count - 1}")
     if count == 1:
         return classes
-    return {
-        klass: classes[klass]
-        for position, klass in enumerate(sorted(classes))
-        if position % count == index
-    }
+    ordered = sorted(classes, key=lambda name: (-len(classes[name]), name))
+    buckets: list[list[str]] = [[] for _ in range(count)]
+    totals = [0] * count
+    for klass in ordered:
+        target = min(range(count), key=lambda idx: (totals[idx], len(buckets[idx]), idx))
+        buckets[target].append(klass)
+        totals[target] += len(classes[klass])
+    return {klass: classes[klass] for klass in sorted(buckets[index])}
 
 
 def summarize(runs: list[ClassRun], options: argparse.Namespace) -> bool:
@@ -408,8 +419,18 @@ def summarize(runs: list[ClassRun], options: argparse.Namespace) -> bool:
             f"| {run.seconds:.0f} | {run.crash.replace('|', '/')[:120]} |"
         )
     lines += ["", f"Passed tests in final attempts: {executed}"]
-    if lost := next((run for run in runs if run.device_lost), None):
-        skipped = sum(1 for run in runs if run.device_lost and run.seconds == 0)
+    recovered_losses = [run for run in runs if run.device_lost and run.recovered]
+    if recovered_losses:
+        recovered_names = ", ".join(
+            run.klass.removeprefix(TEST_PACKAGE_PREFIX) for run in recovered_losses
+        )
+        lines.append(
+            f"Recovered emulator {len(recovered_losses)} time(s) after device loss ({recovered_names})."
+        )
+    if lost := next((run for run in runs if run.device_lost and not run.recovered), None):
+        skipped = sum(
+            1 for run in runs if run.device_lost and not run.recovered and run.seconds == 0
+        )
         lines.append(
             f"Device lost during iteration {lost.iteration} attempt {lost.attempt} at "
             f"{lost.klass.removeprefix(TEST_PACKAGE_PREFIX)}; {skipped} class runs were not "
@@ -476,6 +497,17 @@ def main() -> None:
         default=os.environ.get("ANDROID_TEST_BEFORE_RETRY", ""),
         help="Command run before each retry round (default: $ANDROID_TEST_BEFORE_RETRY)",
     )
+    parser.add_argument(
+        "--recover-device",
+        default=os.environ.get("ANDROID_TEST_RECOVER_DEVICE", ""),
+        help="Command to restart the device after an unexpected disconnect (default: $ANDROID_TEST_RECOVER_DEVICE)",
+    )
+    parser.add_argument(
+        "--max-device-restarts",
+        type=int,
+        default=int(os.environ.get("ANDROID_TEST_MAX_DEVICE_RESTARTS", "2")),
+        help="Maximum automatic device restarts per shard run (default: 2)",
+    )
     parser.add_argument("--class-timeout", type=float, default=900)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
@@ -500,29 +532,13 @@ def main() -> None:
         if not separator or not key:
             raise SystemExit(f"Instrumentation arguments must be KEY=VALUE: {item}")
         options.extras.append((key, value))
-    if options.repeat < 1 or options.retries < 0:
-        raise SystemExit("--repeat must be at least 1 and --retries cannot be negative")
+    if options.repeat < 1 or options.retries < 0 or options.max_device_restarts < 0:
+        raise SystemExit(
+            "--repeat must be at least 1 and --retries / --max-device-restarts cannot be negative"
+        )
     options.output.mkdir(parents=True, exist_ok=True)
 
-    adb("wait-for-device", timeout=300)
-    suppress_system_dialogs()
-    if not options.no_install:
-        for apk in (options.app_apk, options.test_apk):
-            if not apk.is_file():
-                raise SystemExit(f"Missing APK {apk}; build :app:assembleDebugAndroidTest first")
-            # -g matches connectedAndroidTest, which grants runtime permissions on install.
-            adb("install", "-r", "-t", "-g", str(apk), timeout=600)
-    adb(
-        "shell",
-        "cmd",
-        "locale",
-        "set-app-locales",
-        options.app_package,
-        "--locales",
-        "zh",
-        timeout=30,
-        check=False,
-    )
+    prepare_device(options)
     classes = select(discover(options.runner, options.extras), options.classes)
     classes = shard(classes, options.shard_index, options.shard_count)
     if not classes:
@@ -548,10 +564,59 @@ def main() -> None:
         sys.exit(1)
 
 
+def prepare_device(options: argparse.Namespace) -> None:
+    """Wait for the emulator, dismiss dialogs, install APKs, and pin the Chinese app locale."""
+    adb("wait-for-device", timeout=300)
+    suppress_system_dialogs()
+    if not options.no_install:
+        for apk in (options.app_apk, options.test_apk):
+            if not apk.is_file():
+                raise SystemExit(f"Missing APK {apk}; build :app:assembleDebugAndroidTest first")
+            # -g matches connectedAndroidTest, which grants runtime permissions on install.
+            adb("install", "-r", "-t", "-g", str(apk), timeout=600)
+    adb(
+        "shell",
+        "cmd",
+        "locale",
+        "set-app-locales",
+        options.app_package,
+        "--locales",
+        "zh",
+        timeout=30,
+        check=False,
+    )
+
+
+def recover_device(options: argparse.Namespace, label: str, restarts: int) -> bool:
+    """Restart a crashed emulator and re-prepare APKs and app locale."""
+    if not options.recover_device or restarts >= options.max_device_restarts:
+        return False
+    print(
+        f"Recovering device ({restarts + 1}/{options.max_device_restarts}) after {label}: "
+        f"{options.recover_device}",
+        flush=True,
+    )
+    try:
+        completed = subprocess.run(  # nosec B603 - CI-provided hook, split without a shell
+            shlex.split(options.recover_device),
+            check=False,
+            timeout=300,
+        )
+        if completed.returncode != 0 or not device_ready(timeout=60):
+            return False
+        prepare_device(options)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"Device recovery failed after {label}: {error}", flush=True)
+        return False
+    DEVICE_TROUBLE.clear()
+    return True
+
+
 def execute(
     options: argparse.Namespace, classes: dict[str, list[str]], runs: list[ClassRun]
 ) -> None:
     lost = ""
+    restarts = 0
     for iteration in range(1, options.repeat + 1):
         pending = list(classes)
         for attempt in range(1, options.retries + 2):
@@ -565,24 +630,42 @@ def execute(
                     )
             results: list[ClassRun] = []
             for klass in pending:
-                if not lost and not device_ready():
-                    lost = f"Device lost before {klass.removeprefix(TEST_PACKAGE_PREFIX)}"
-                    print(f"::error::{lost}; remaining classes not run", flush=True)
-                if lost:
-                    reason = f"Not run: {lost}"
-                    results.append(not_run(klass, classes[klass], iteration, attempt, reason))
-                    continue
+                short = klass.removeprefix(TEST_PACKAGE_PREFIX)
                 try:
-                    run = run_class(options, klass, classes[klass], iteration, attempt)
+                    if not lost and not device_ready():
+                        if recover_device(options, f"before {short}", restarts):
+                            restarts += 1
+                        else:
+                            lost = f"Device lost before {short}"
+                            print(f"::error::{lost}; remaining classes not run", flush=True)
+                    if lost:
+                        reason = f"Not run: {lost}"
+                        results.append(not_run(klass, classes[klass], iteration, attempt, reason))
+                        continue
+                    try:
+                        run = run_class(options, klass, classes[klass], iteration, attempt)
+                    except DeviceLost as error:
+                        if recover_device(options, f"before {short}", restarts):
+                            restarts += 1
+                            run = run_class(options, klass, classes[klass], iteration, attempt)
+                        else:
+                            lost = f"Device lost before {short} ({error})"
+                            print(f"::error::{lost}; remaining classes not run", flush=True)
+                            results.append(not_run(klass, classes[klass], iteration, attempt, lost))
+                            continue
                 except DeviceLost as error:
-                    lost = f"Device lost before {klass.removeprefix(TEST_PACKAGE_PREFIX)} ({error})"
+                    lost = f"Device lost after recovery before {short} ({error})"
                     print(f"::error::{lost}; remaining classes not run", flush=True)
                     results.append(not_run(klass, classes[klass], iteration, attempt, lost))
                     continue
                 results.append(run)
                 if run.device_lost:
-                    lost = f"Device lost after {klass.removeprefix(TEST_PACKAGE_PREFIX)}"
-                    print(f"::error::{lost}; remaining classes not run", flush=True)
+                    if recover_device(options, f"after {short}", restarts):
+                        restarts += 1
+                        run.recovered = True
+                    else:
+                        lost = f"Device lost after {short}"
+                        print(f"::error::{lost}; remaining classes not run", flush=True)
             runs += results
             pending = [run.klass for run in results if not run.passed]
 

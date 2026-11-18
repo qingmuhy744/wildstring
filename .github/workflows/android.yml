@@ -212,6 +212,7 @@ jobs:
       ANDROID_TEST_SHARD_INDEX: ${{ matrix.shard }}
       ANDROID_TEST_SHARD_COUNT: ${{ (inputs.test_classes || '') != '' && '1' || '4' }}
       ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
+      ANDROID_TEST_RECOVER_DEVICE: bash scripts/ci_recover_emulator.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -223,6 +224,8 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
       - name: Start disposable synthetic API for native integration
         run: |
           uv sync --frozen --project backend
@@ -242,10 +245,10 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_2
-          cores: 2
+          cores: 4
           ram-size: 4096M
           # Use the supported SwiftShader mode. This suite only needs GLES.
-          emulator-options: -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim -no-metrics
           disable-animations: true
           # Wait for boot completion, unlocked owner user, and PackageManager before
           # installing APKs; WildStringTestRunner sets the test locale without restarting

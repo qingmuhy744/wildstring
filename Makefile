@@ -9,6 +9,8 @@ TEST_RUNTIME_IMAGE ?= wildstring:dev
 TEST_BUILDER_IMAGE ?= wildstring-builder:dev
 TEST_IMAGE ?= wildstring-tests:dev
 SKIP_RUNTIME_BUILD ?= 0
+SKIP_WEB_BUILD ?= 0
+WEB_TEST_ARGS ?=
 LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
 PYTEST_ARGS ?=
@@ -96,8 +98,7 @@ android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/andr
 	$(PYTHON) scripts/package_android.py
 
 android-ci: ## Check, test and package the native Android application
-	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug
-	$(ANDROID) :app:assembleRelease :app:lintRelease
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleRelease :app:lintRelease
 	$(PYTHON) scripts/package_android.py
 
 android-release: ## Build and verify a signed release APK (requires ANDROID signing environment)
@@ -200,7 +201,7 @@ test: ## Run backend tests without external services (PYTEST_ARGS="-n auto" runs
 	$(RUN) pytest -c backend/pyproject.toml backend/tests $(PYTEST_ARGS)
 
 build-web: ## Build the versioned Web release input
-	npm --prefix frontend/web run build
+	if [ "$(SKIP_WEB_BUILD)" != "1" ]; then npm --prefix frontend/web run build; fi
 
 icons: ## Regenerate the transparent favicon from its SVG source (requires Chromium)
 	npm --prefix frontend/web run icons
@@ -216,7 +217,7 @@ test-affected-desktop: ## Fast local run of affected backend tests and desktop P
 	$(RUN) python scripts/test_affected.py --fail-on-stale --run --desktop-only
 
 test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
-	npm --prefix frontend/web run test
+	npm --prefix frontend/web run test $(if $(WEB_TEST_ARGS),-- $(WEB_TEST_ARGS))
 
 .PHONY: test-podcast-web
 .PHONY: test-podcast-publishers test-publisher-web
@@ -224,7 +225,7 @@ test-podcast-publishers: ## Verify shared podcast publisher assignments and acco
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_podcast_publishers.py backend/tests/test_podcasts.py backend/tests/test_podcast_progress.py
 
 test-publisher-web: build-web ## Verify publisher confirmation, correction and browsing on desktop/mobile
-	WILDSTRING_TEST_PODCAST=1 WILDSTRING_TEST_PUBLISHERS=1 npm --prefix frontend/web run test -- podcast-publishers.spec.ts
+	WILDSTRING_TEST_PODCAST=1 WILDSTRING_TEST_PUBLISHERS=1 npm --prefix frontend/web run test -- podcast-publishers.spec.ts $(WEB_TEST_ARGS)
 
 .PHONY: test-storage test-multiple-libraries test-libraries-web
 test-storage: ## Verify safe managed-directory migrations and personal podcast resource collection
@@ -234,22 +235,22 @@ test-multiple-libraries: ## Verify grants, cross-library playlists, personal fol
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_multiple_libraries.py backend/tests/test_storage_resources.py backend/tests/test_podcast_follows.py backend/tests/test_podcast_progress.py backend/tests/test_podcast_user_settings.py
 
 test-libraries-web: build-web ## Verify library selection, owner configuration, grants and personal podcast follows
-	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
+	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts $(WEB_TEST_ARGS)
 
 test-podcast-web: build-web ## Verify radio playback, episode downloads, directory search, OPML and identity management
-	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-presentation.spec.ts podcast-episode.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-presentation.spec.ts podcast-episode.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts $(WEB_TEST_ARGS)
 
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
-	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts
+	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts $(WEB_TEST_ARGS)
 
 test-browse-web: build-web ## Verify continuous browsing, pinyin jumps and compact album rows against a real API
-	WILDSTRING_TEST_BROWSE_LIBRARY=1 npm --prefix frontend/web run test -- browse-real.spec.ts
+	WILDSTRING_TEST_BROWSE_LIBRARY=1 npm --prefix frontend/web run test -- browse-real.spec.ts $(WEB_TEST_ARGS)
 
 test-catalog-web: build-web ## Verify sorting, remembered preferences and continuous multi-disc playback
-	WILDSTRING_TEST_DISC_LIBRARY=1 npm --prefix frontend/web run test -- catalog-sort-real.spec.ts
+	WILDSTRING_TEST_DISC_LIBRARY=1 npm --prefix frontend/web run test -- catalog-sort-real.spec.ts $(WEB_TEST_ARGS)
 
 test-transcoding-web: build-web ## Verify real AAC playback and seeking (requires FFmpeg)
-	@if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then WILDSTRING_TEST_TRANSCODING=1 npm --prefix frontend/web run test -- transcoding.spec.ts; else echo "AAC browser tests skipped: install FFmpeg or run on CI."; fi
+	@if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then WILDSTRING_TEST_TRANSCODING=1 npm --prefix frontend/web run test -- transcoding.spec.ts $(WEB_TEST_ARGS); else echo "AAC browser tests skipped: install FFmpeg or run on CI."; fi
 
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
