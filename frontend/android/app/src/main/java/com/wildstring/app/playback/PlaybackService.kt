@@ -44,21 +44,25 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-fun List<Track>.mediaItems(repository: Repository): List<MediaItem> {
+fun List<Track>.mediaItems(repository: Repository, heart: HeartBatch? = null): List<MediaItem> {
+    if (isEmpty()) return emptyList()
+    val endpoint = repository.requireEndpoint()
     val network = if (any { it.podcastEpisodeId != null }) repository.podcastNetwork() else null
-    return map { it.mediaItem(repository, podcastNetwork = network) }
+    return map { it.mediaItem(repository, podcastNetwork = network, endpoint = endpoint, heart = heart) }
 }
 
-fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().toString(), podcastNetwork: String? = null): MediaItem {
-    val original = repository.originalStream(id, podcastNetwork)
+fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().toString(), podcastNetwork: String? = null, endpoint: HttpUrl = repository.requireEndpoint(), heart: HeartBatch? = null): MediaItem {
+    val original = repository.originalStream(id, podcastNetwork, endpoint)
     return MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id, original))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setDurationMs(durationMs.takeIf { it > 0 })
-            .setArtworkUri(if (mayHaveCover) Uri.parse(repository.cover(id)) else null)
+            .setArtworkUri(if (mayHaveCover) Uri.parse(repository.cover(id, endpoint)) else null)
             .setExtras(Bundle().apply {
+                heart?.write(this)
                 putString("profile", repository.session.cacheScope())
                 putString("track_id", id)
                 podcast?.let { putString("podcast_id", it.podcastId) }
@@ -246,6 +250,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
     private var session: MediaSession? = null
+    private val heart by lazy { HeartPlayback(repository, player, sleep, scope) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val saveMutex = Mutex()
     private val executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(2))
@@ -357,6 +362,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                heart.cancel()
                 engine.setPauseAtEndOfMediaItems(podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) != null)
                 gainProcessor.factor = 1f; refreshGain()
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
@@ -387,12 +393,13 @@ class PlaybackService : MediaSessionService() {
                 if (automatic || player.playWhenReady) preparePodcast(automatic = automatic || reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState != Player.STATE_ENDED) heart.cancel()
                 if (playbackState == Player.STATE_IDLE) checkpointPodcast("stop", true)
                 else if (playbackState == Player.STATE_ENDED) {
                     clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, false)
                     checkpointPodcast("ended", true)
                     completeFeedback(); report()
-                    advancePodcast(completedRead = false)
+                    if (player.currentMediaItem.heartBatch() != null) heart.ended() else advancePodcast(completedRead = false)
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -403,6 +410,7 @@ class PlaybackService : MediaSessionService() {
                 report(); persist(force = !isPlaying)
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady) heart.cancel()
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
                     checkpointPodcast("ended", true)
                     advancePodcast(completedRead = false)
@@ -559,6 +567,8 @@ class PlaybackService : MediaSessionService() {
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { /* Sharing failure never interrupts the local queue. */ }
         }
+        val firstItem = if (player.mediaItemCount > 0) player.getMediaItemAt(0) else null
+        val heartBatch = firstItem.heartBatch()
         val position = SavedPosition(endpoint = endpoint, entryId = player.currentMediaItem?.mediaId, positionMs = player.currentPosition.coerceAtLeast(0))
         val podcastQueueEntries = (0 until player.mediaItemCount).mapNotNull { index ->
             player.getMediaItemAt(index).takeIf { it.mediaMetadata.extras?.getBoolean("podcast_queue_context") == true }?.mediaId
@@ -569,7 +579,10 @@ class PlaybackService : MediaSessionService() {
                 if (lastSavedQueue == entries) repository.database.queue().insertPosition(position)
                 else repository.database.queue().save(entries, position)
             }
-            playbackContextPrefs.edit().putStringSet(storageOwner, podcastQueueEntries).apply()
+            playbackContextPrefs.edit().putStringSet(storageOwner, podcastQueueEntries)
+                .putString("heart-anchor:$storageOwner", firstItem?.mediaId.takeIf { heartBatch != null })
+                .putString("heart-library:$storageOwner", heartBatch?.library)
+                .putBoolean("heart-active:$storageOwner", heartBatch?.recommended == true).apply()
             lastSavedQueue = entries
         } }
     }
@@ -585,12 +598,21 @@ class PlaybackService : MediaSessionService() {
             catch (error: IOException) { if (error is javax.net.ssl.SSLException || repository.session.cacheScope() != profile) return; true }
             val items = mutableListOf<MediaItem>()
             val podcastQueueEntries = playbackContextPrefs.getStringSet(storageOwner, emptySet()).orEmpty()
-            for (entry in entries.take(5000)) {
+            val legacyLong = entries.size > MUSIC_QUEUE_LIMIT && entries.none { podcastEpisodeId(it.trackId) != null }
+            val restored = if (legacyLong) entries.drop(entries.indexOfFirst { it.entryId == saved.entryId }.coerceAtLeast(0)).take(MUSIC_QUEUE_LIMIT) else entries.take(5000)
+            val heartLibrary = playbackContextPrefs.getString("heart-library:$storageOwner", null)
+            val heartBatch = when {
+                legacyLong -> HeartBatch(repository.selectedLibraryId)
+                heartLibrary != null && playbackContextPrefs.getString("heart-anchor:$storageOwner", null) == entries.first().entryId ->
+                    HeartBatch(heartLibrary, recommended = playbackContextPrefs.getBoolean("heart-active:$storageOwner", false))
+                else -> null
+            }
+            for (entry in restored) {
                 if (player.mediaItemCount != 0) { return }
                 try {
                     val track = (if (offline) repository.cachedTrack(entry.trackId) else repository.track(entry.trackId)) ?: continue
                     if (track.status == "available") {
-                        val item = track.mediaItem(repository, entry.entryId)
+                        val item = track.mediaItem(repository, entry.entryId, heart = heartBatch)
                         val extras = Bundle(item.mediaMetadata.extras).apply { putBoolean("podcast_queue_context", entry.entryId in podcastQueueEntries) }
                         items += item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
                     }

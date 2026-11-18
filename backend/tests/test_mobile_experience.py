@@ -116,6 +116,7 @@ def test_account_isolation_and_authentication(settings, authenticated_client):
             for path in [
                 "/playback/state",
                 "/recommendations/daily",
+                "/recommendations/daily/cached",
                 "/recommendations/preferences",
             ]:
                 assert user.get(BASE + path).status_code == 401
@@ -128,6 +129,7 @@ def test_account_isolation_and_authentication(settings, authenticated_client):
             assert login(user).status_code == 200
             assert user.get(BASE + "/playback/state").json()["version"] == 0
             assert user.get(BASE + "/recommendations/preferences").json()["use_ai"] is False
+            assert user.get(BASE + "/recommendations/daily/cached").status_code == 204
             own = user.get(BASE + "/recommendations/daily").json()
             assert own["id"] != daily_admin["id"]
             assert items[0]["id"] in [item["track"]["id"] for item in own["items"]]
@@ -145,6 +147,37 @@ def test_account_isolation_and_authentication(settings, authenticated_client):
                 == 1
             )
         assert admin.get(BASE + "/playback/state").json()["device_id"] == "phone-one"
+
+
+def test_read_only_daily_batch_accepts_previous_day_and_never_generates(
+    settings, authenticated_client, monkeypatch
+):
+    seed(settings)
+    with authenticated_client(settings) as client:
+        url = BASE + "/recommendations/daily/cached"
+        assert client.get(url).status_code == 204
+        with Database(settings.data_dir).connect() as db:
+            assert db.execute("SELECT count(*) FROM recommendation_daily").fetchone()[0] == 0
+        previous = client.get(BASE + "/recommendations/daily").json()
+        with Database(settings.data_dir).connect(write=True) as db:
+            db.execute("UPDATE recommendation_daily SET day='2020-01-01'")
+            db.execute(
+                "UPDATE tracks SET status='missing' WHERE id=?",
+                (previous["items"][0]["track"]["id"],),
+            )
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("A cache-only read cannot generate or refresh a recommendation batch")
+
+        monkeypatch.setattr(recommendations.Recommendations, "daily", unexpected)
+        monkeypatch.setattr(recommendations.Recommendations, "model_select", unexpected)
+        monkeypatch.setattr(recommendations.Recommendations, "rank", unexpected)
+        result = client.get(url)
+        assert result.status_code == 200
+        assert result.json()["id"] == previous["id"] and result.json()["date"] == "2020-01-01"
+        assert [item["track"]["id"] for item in result.json()["items"]] == [
+            item["track"]["id"] for item in previous["items"][1:]
+        ]
 
 
 def test_daily_stable_refresh_diverse_and_default_no_network(

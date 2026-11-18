@@ -328,6 +328,7 @@
     <string name="album_save_offline">离线保存专辑</string>
     <string name="album_edit">编辑专辑信息</string>
     <string name="preparing">准备中…</string>
+    <string name="play_from_start">从头播放</string>
     <string name="play_all">播放全部</string>
     <string name="sort_track_name">歌曲名称</string>
     <string name="list_actions">列表操作</string>
@@ -390,6 +391,9 @@
     <string name="sort_plays">播放次数</string>
     <string name="sort_listening_time">收听时长</string>
     <string name="close">关闭</string>
+    <string name="heart_queue_active">心动模式 · %1$d 首</string>
+    <string name="heart_queue_pending">%1$d 首 · 播完进入心动模式</string>
+    <string name="music_queue_capacity">音乐播放队列最多 100 首。</string>
     <string name="queue_title_count">播放队列 · %1$d</string>
     <string name="queue_drag_named">拖动排序：%1$s</string>
     <string name="queue_position">第 %1$d 首，共 %2$d 首</string>
@@ -1974,14 +1978,12 @@
     <string name="vm_playlists_checked">歌单已检查，新歌曲会自动保存；已下载文件保留。</string>
     <string name="vm_podcast_resume_hint">播客请从单集列表继续收听，每集进度独立保存。</string>
     <string name="vm_queue_limit_exceeded">播放队列最多 5000 首。</string>
-    <string name="vm_queue_max_limit">播放队列最多 5000 项。</string>
     <string name="vm_queue_update_failed">队列未能更新，已保留原播放。</string>
     <string name="vm_removed_from_playlist">已从歌单移除</string>
     <string name="vm_server_already_saved">这个服务器已经保存，请直接选择。</string>
     <string name="vm_server_changed">服务器已变化。</string>
     <string name="vm_server_or_account_changed">服务器或账号已变化。</string>
     <string name="vm_session_changed">会话已变化。</string>
-    <string name="vm_shared_queue_limit_exceeded">共享队列超过本机 5000 首上限。</string>
     <string name="vm_syncing_selected_playlists">正在同步已选歌单…</string>
     <string name="vm_title_assistant">AI 助手</string>
     <string name="vm_title_discover">发现</string>

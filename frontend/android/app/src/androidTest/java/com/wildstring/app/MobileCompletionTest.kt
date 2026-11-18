@@ -61,6 +61,10 @@ class MobileCompletionTest {
     private class Fixture(val count: Int = 3) : java.io.Closeable {
         val server = MockWebServer()
         val failPage = AtomicBoolean(false)
+        val dailyTracks = mutableListOf(0)
+        var cachedDailyStatus = 200
+        val holdCollection = AtomicBoolean(false)
+        val releaseCollection = CountDownLatch(1)
         val headCode = AtomicInteger(200)
         val disconnected = AtomicBoolean(false)
         val requests = ConcurrentLinkedQueue<String>()
@@ -123,7 +127,11 @@ class MobileCompletionTest {
                         return response
                     }
                     if (path.endsWith("/recommendations/preferences")) return json("""{"version":1,"use_ai":false,"use_lastfm":false,"count":20}""")
-                    if (path.contains("/recommendations/daily")) return json("""{"id":"daily","date":"2026-10-17","engine":"local","items":[{"track":${track(0)},"reason":"久未重听"}]}""")
+                    if (path.endsWith("/recommendations/daily/cached") && cachedDailyStatus != 200) return MockResponse().setResponseCode(cachedDailyStatus)
+                    if (path.contains("/recommendations/daily")) {
+                        val items = dailyTracks.joinToString(",") { """{"track":${track(it)},"reason":"久未重听"}""" }
+                        return json("""{"id":"daily","date":"${java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"))}","engine":"local","items":[$items]}""")
+                    }
                     if (path.endsWith("/ai/discover")) return json("""{"title":"手机 AI 歌单","mode":"local","warning":"ai_unavailable_local_fallback","items":[{"track":${track(1)},"reason":"本地检索"}]}""")
                     if (path.endsWith("/recommendations/feedback") || path.endsWith("/listening")) return json("{}")
                     if (path.endsWith("/listening/summary")) return json("""{"play_count":8,"listened_ms":120000,"tracks_played":3,"favorites":1}""")
@@ -174,8 +182,11 @@ class MobileCompletionTest {
                     if (path.endsWith("/artists")) return json("""{"items":[{"id":"person","name":"测试艺人","track_count":$count,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
                     if (path.endsWith("/tracks")) {
                         val offset = url.queryParameter("offset")?.toInt() ?: 0
-                        if (offset > 0 && failPage.get()) return MockResponse().setResponseCode(503)
+                        if ((offset > 0 || url.queryParameter("limit") == "100") && failPage.get()) return MockResponse().setResponseCode(503)
                         val limit = url.queryParameter("limit")?.toInt() ?: 50
+                        if (holdCollection.get() && (limit >= 100 || offset > 0)) {
+                            releaseCollection.await(30, TimeUnit.SECONDS)
+                        }
                         return json("""{"items":[${(offset until minOf(count, offset + limit)).joinToString(",") { track(it) }}],"total":$count,"limit":$limit,"offset":$offset}""")
                     }
                     if (path.endsWith("/playlists")) return if (request.method == "POST") json(manual) else json("""{"items":[${if (deletedPlaylist.get()) "" else manual}],"total":${if (deletedPlaylist.get()) 0 else 1},"limit":${url.queryParameter("limit") ?: "50"},"offset":0}""").apply { if (slowCatalog.get()) setBodyDelay(1200, TimeUnit.MILLISECONDS) }
@@ -212,11 +223,16 @@ class MobileCompletionTest {
                 vm.controller?.let { !it.isPlaying && !it.playWhenReady && it.mediaItemCount == 0 } == true
             }
         }
+        InstrumentationRegistry.getArguments().getString("testTheme")?.let { mode ->
+            compose.runOnIdle { vm.settings.appearance(mode) }
+            compose.waitUntil(5000) { vm.settings.state.value.appearance == mode }
+            compose.waitForIdle()
+        }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
 
-    @Test fun collectionFetchesEveryPageAndFailurePreservesPausedQueue() {
+    @Test fun boundedCollectionFailurePreservesPausedQueue() {
         Fixture(257).use { fixture -> val vm = connect(fixture)
             try {
                 val first = gson.fromJson(fixture.track(0), Track::class.java)
@@ -224,16 +240,194 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { !vm.state.value.loading }
                 val oldEntry = compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId }
                 fixture.failPage.set(true)
-                compose.onNodeWithText(uiString(R.string.play_all)).performClick()
+                compose.onNodeWithTag("catalog-play-all").performClick()
                 compose.waitUntil(15_000) { !vm.state.value.collecting && vm.state.value.error != null }
                 assertEquals(oldEntry, compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId })
                 assertEquals(1, compose.runOnIdle { vm.controller!!.mediaItemCount }); assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
                 fixture.failPage.set(false)
-                compose.onNodeWithText(uiString(R.string.play_all)).performClick()
-                compose.waitUntil(20_000) { !vm.state.value.collecting && compose.runOnIdle { vm.controller!!.mediaItemCount == 257 } }
-                assertTrue(fixture.requests.any { it.contains("offset=200") })
+                compose.onNodeWithTag("catalog-play-all").performClick()
+                compose.waitUntil(20_000) { !vm.state.value.collecting && compose.runOnIdle { vm.controller!!.mediaItemCount == 100 } }
+                assertTrue(fixture.requests.any { it.contains("limit=100") })
                 compose.runOnIdle { vm.controller!!.pause(); vm.controller!!.seekTo(0, 11_500); vm.sleep.endOfTrack(vm.controller!!.currentMediaItem!!.mediaId); vm.controller!!.play() }
                 compose.waitUntil(15_000) { vm.sleep.state.value.entryId == null && !vm.state.value.playing }
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun catalogSelectionFollowsLastTapAndReusesEditedQueue() {
+        Fixture(500).use { fixture ->
+            val vm = connect(fixture)
+            try {
+                fixture.holdCollection.set(true)
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                compose.waitUntil(15000) { vm.state.value.total == 500 && !vm.state.value.loading }
+                compose.onNodeWithTag("track-title-1", useUnmergedTree = true).performTouchInput { click() }
+                compose.waitUntil(5000) { vm.state.value.preparingTrackId == "completion-1" }
+                compose.onNodeWithContentDescription(uiString(R.string.preparing), useUnmergedTree = true).assertIsDisplayed()
+                if (InstrumentationRegistry.getArguments().getString("capturePreparing") == "true") capture("catalog-preparing.png")
+                compose.onNodeWithTag("track-title-2", useUnmergedTree = true).performTouchInput { click() }
+                compose.waitUntil(5000) { vm.state.value.preparingTrackId == "completion-2" }
+                fixture.releaseCollection.countDown()
+                compose.waitUntil(20000) { vm.state.value.current?.id == "completion-2" && vm.state.value.playing }
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
+                // A manually inserted duplicate and a removed entry must survive the next selection.
+                val expected = compose.runOnIdle {
+                    val c = vm.controller!!
+                    vm.removeQueue(6)
+                    vm.addToQueue(vm.state.value.tracks[3], next = true)
+                    (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
+                }
+                fixture.requests.clear()
+                compose.onNodeWithTag("track-title-3", useUnmergedTree = true).performTouchInput { click() }
+                compose.waitUntil(10000) { vm.state.value.current?.id == "completion-3" }
+                val actual = compose.runOnIdle { val c = vm.controller!!; (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId } }
+                assertEquals(expected, actual)
+                assertFalse(fixture.requests.any { it.contains("limit=100") || it.contains("limit=200") })
+            } finally { fixture.releaseCollection.countDown(); cleanup(vm) }
+        }
+    }
+
+    @Test fun leavingCatalogDuringSelectionKeepsPausedQueue() {
+        Fixture(201).use { fixture ->
+            val vm = connect(fixture)
+            try {
+                fixture.holdCollection.set(true)
+                val first = gson.fromJson(fixture.track(0), Track::class.java)
+                val oldEntry = compose.runOnIdle {
+                    vm.play(listOf(first), autoplay = false)
+                    vm.navigate("library"); vm.kind("tracks")
+                    vm.controller!!.currentMediaItem!!.mediaId
+                }
+                compose.waitUntil(15000) { vm.state.value.total == 201 && !vm.state.value.loading }
+                compose.onNodeWithTag("track-title-1", useUnmergedTree = true).performTouchInput { click() }
+                compose.waitUntil(5000) { fixture.requests.any { it.contains("limit=100") } }
+                compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+                fixture.releaseCollection.countDown()
+                compose.waitUntil(10000) { !vm.state.value.collecting && vm.state.value.tab != "library" }
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).assertDoesNotExist()
+                assertEquals(oldEntry, compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId })
+                assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
+            } finally { fixture.releaseCollection.countDown(); cleanup(vm) }
+        }
+    }
+
+    @Test fun deepCatalogSelectionContinuesIntoCachedHeartBatchAtNaturalEnd() {
+        Fixture(20000).use { fixture ->
+            fixture.dailyTracks.apply { clear(); addAll(listOf(9999, 7001, 14001)) }
+            val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                compose.waitUntil(15000) { vm.state.value.total == 20000 && !vm.state.value.loading }
+                fixture.requests.clear()
+                compose.runOnIdle { vm.playCollection("completion-9999", 9999) }
+                compose.waitUntil(15000) { vm.state.value.current?.id == "completion-9999" && vm.state.value.playing }
+                val original = compose.runOnIdle { vm.state.value.queue.map { it.trackId } }
+                assertEquals((9999 until 10099).map { "completion-$it" }, original)
+                assertTrue(fixture.requests.any { it.contains("offset=9999") && it.contains("limit=100") })
+                assertFalse(fixture.requests.any { it.contains("limit=200") })
+                compose.runOnIdle { vm.controller!!.seekTo(99, 11500) }
+                compose.waitUntil(20000) { vm.state.value.heartBatch?.recommended == true && vm.state.value.playing }
+                assertEquals(true, vm.state.value.heartBatch?.recommended)
+                assertEquals(setOf("completion-7001", "completion-14001"), vm.state.value.queue.map { it.trackId }.toSet())
+                assertTrue(fixture.requests.any { it.contains("/recommendations/daily/cached") })
+                assertFalse(fixture.requests.any { (it.contains("/recommendations/daily") && !it.contains("/daily/cached")) || it.contains("/ai/discover") })
+                if (InstrumentationRegistry.getArguments().getString("capturePreparing") == "true") {
+                    compose.onNodeWithTag("mini-player-open").performClick()
+                    val title = uiString(R.string.heart_queue_active, 2)
+                    if (compose.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty()) {
+                        compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+                    }
+                    compose.onNodeWithText(title).assertIsDisplayed()
+                    capture("heart-active.png")
+                }
+                val lastId = vm.state.value.queue.last().trackId
+                compose.runOnIdle {
+                    val c = vm.controller!!
+                    c.seekTo(1, 11500)
+                    vm.sleep.endOfTrack(c.currentMediaItem!!.mediaId)
+                }
+                compose.waitUntil(15000) { vm.sleep.state.value.entryId == null && !vm.state.value.playing }
+                assertEquals(lastId, vm.state.value.current?.id)
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun oldServerUsesOnlyPreviouslySavedDailyBatch() {
+        Fixture(101).use { fixture ->
+            fixture.cachedDailyStatus = 404
+            val vm = connect(fixture)
+            try {
+                runBlocking { vm.repository.daily() } // The user had opened Daily Recommendations.
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                compose.waitUntil(15000) { vm.state.value.total == 101 && !vm.state.value.loading }
+                fixture.requests.clear()
+                compose.runOnIdle { vm.playCollection("completion-100", 100) }
+                compose.waitUntil(15000) { vm.state.value.current?.id == "completion-100" && vm.state.value.playing }
+                compose.runOnIdle { vm.controller!!.seekTo(11500) }
+                compose.waitUntil(20000) { vm.state.value.current?.id == "completion-0" && vm.state.value.playing }
+                assertTrue(vm.state.value.heartBatch?.recommended == true)
+                assertEquals(1, fixture.requests.count { it.contains("/recommendations/daily") })
+                assertTrue(fixture.requests.any { it.contains("/recommendations/daily/cached") })
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun lastSongOfLongListStopsWhenDailyHasNoPicks() {
+        Fixture(101).use { fixture ->
+            fixture.cachedDailyStatus = 204
+            val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                compose.waitUntil(15000) { vm.state.value.total == 101 && !vm.state.value.loading }
+                compose.runOnIdle { vm.playCollection("completion-100", 100) }
+                compose.waitUntil(15000) { vm.state.value.current?.id == "completion-100" && vm.state.value.playing }
+                assertEquals(1, vm.state.value.queue.size)
+                compose.runOnIdle { vm.controller!!.seekTo(11500) }
+                compose.waitUntil(15000) { compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_ENDED } }
+                assertEquals(false, vm.state.value.heartBatch?.recommended)
+                assertEquals("completion-100", vm.state.value.current?.id)
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun exactlyOneHundredLeavesNormalQueueAndPreventsOverflow() {
+        Fixture(100).use { fixture ->
+            val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                compose.waitUntil(15000) { vm.state.value.total == 100 && !vm.state.value.loading }
+                compose.runOnIdle { vm.playCollection("completion-1", 1) }
+                compose.waitUntil(15000) { vm.state.value.current?.id == "completion-1" && vm.state.value.playing }
+                assertNull(vm.state.value.heartBatch)
+                assertEquals(100, vm.state.value.queue.size)
+                assertFalse(compose.runOnIdle { vm.addToQueue(vm.state.value.tracks.first()) })
+                assertEquals(100, vm.state.value.queue.size)
+                compose.runOnIdle {
+                    val c = vm.controller!!
+                    val removed = vm.removeQueueEntry(c.getMediaItemAt(0).mediaId)!!
+                    assertTrue(vm.addToQueue(vm.state.value.tracks.first()))
+                    vm.restoreQueueEntry(removed.first, removed.second)
+                    assertEquals(100, c.mediaItemCount)
+                }
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun longSharedQueueResumesAtSavedSongAndPosition() {
+        Fixture(300).use { fixture ->
+            val vm = connect(fixture)
+            try {
+                fixture.snapshot = remotePause(50, ids = (0 until 300).map { "completion-$it" }, index = 198, position = 2500)
+                runBlocking { vm.resumeShared(gson.fromJson(fixture.snapshot, SharedPlayback::class.java)) }
+                compose.waitUntil(15000) { vm.state.value.current?.id == "completion-198" }
+                compose.runOnIdle {
+                    val c = vm.controller!!
+                    assertEquals(100, c.mediaItemCount)
+                    assertEquals("completion-297", c.getMediaItemAt(99).mediaMetadata.extras?.getString("track_id"))
+                    assertEquals(2500L, c.currentPosition)
+                    assertFalse(c.playWhenReady)
+                    assertNull(vm.state.value.heartBatch)
+                }
             } finally { cleanup(vm) }
         }
     }

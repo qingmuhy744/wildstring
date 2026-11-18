@@ -797,6 +797,15 @@ class Recommendations(ExternalRecommendations):
             "generated_at": details.get("generated_at"),
         }
 
+    def cached_daily(self, repository):
+        """Read the latest existing batch, even from a prior day, without generating one."""
+        with repository.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM recommendation_daily WHERE user_id=? AND library_id=?",
+                (repository.database.user_id, repository.library_id()),
+            ).fetchone()
+        return self.materialize(repository, dict(row)) if row else None
+
     def daily(self, repository, refresh=False, body=None):
         options = self.options(repository, body)
         library_id = repository.library_id(create=True)

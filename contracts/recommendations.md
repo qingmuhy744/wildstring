@@ -22,6 +22,8 @@
 
 `POST /ai/discover`：`{prompt,limit?,connection_id?,sources?}`。`GET /recommendations/daily` 使用保存偏好和今日缓存；`POST /recommendations/daily/refresh` 可无 body，或 `{connection_id?,sources?}` 临时覆盖，数量仍来自保存偏好。一次性参数不修改偏好。未显式传 connection_id 时，已保存连接后续被删除、禁用、撤销共享或端点权限取消，返回 local 结果及 `warnings:[{source:"ai",code:"saved_ai_connection_unavailable"}]`、degraded=true；保留偏好原 ID 供用户修复。显式请求无权/失效连接仍返回 403/404，不更换其他付费连接。此警告同样合并到今日缓存与外部关闭/缓存/刷新响应。
 
+`GET /recommendations/daily/cached` 只读取当前用户、当前曲库最近一次已生成的每日推荐。允许返回前一天或更早的批次，照常过滤已失效与不感兴趣的曲目；从未生成时返回 204。此读取不会生成、刷新、调用模型或联网补充候选。Android 心动模式随机使用该批次，旧服务器缺少这个接口时可使用同账号和曲库已有的手机缓存。
+
 每日推荐保留 `id,date,engine,items`，发现保留 `title,mode,items`。两者新增 `connection_id,source_status,warnings,degraded`；item 是 `{track,reason,source_ids,signals:[{source,reason}]}`。每日批次有 `generated_at`。`warnings` 是 `{source,code}`，来源/模型失败返回本地结果和真实降级信息。
 
 `source_status`：`{id,status,matched,candidate_count?,unmatched?,cached?,error_code?}`。状态是 `ok|disabled|empty|unavailable`。本库来源有本地命中才 ok；库外来源有真实外部候选即 ok，未匹配本库不等于来源失败。`community` 只指本实例用户汇总，不是 Last.fm 全球用户。

@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.CookieJar
 import okhttp3.Request
@@ -139,16 +140,19 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         }
         return checkNotNull(cachedAgentApi)
     }
-    fun url(vararg segments: String): String {
-        val builder = (session.endpoint ?: throw IOException(AppLanguage.string(R.string.repo_connect_server_first))).newBuilder()
+    internal fun requireEndpoint(): HttpUrl = session.endpoint ?: throw IOException(AppLanguage.string(R.string.repo_connect_server_first))
+    fun url(vararg segments: String): String = url(requireEndpoint(), *segments)
+    private fun url(endpoint: HttpUrl, vararg segments: String): String {
+        val builder = endpoint.newBuilder()
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
     fun podcastDirectoryArtwork(item: PodcastDirectoryResult): String? = item.catalogPodcastId?.let { podcastArtwork(it) }
         ?: item.artworkKey?.let { url("api", "v1", "podcasts", "directory-cover", it) }
     fun podcastArtwork(id: String): String = url("api", "v1", "podcasts", id, "cover")
-    fun cover(id: String): String = knownTracks[id]?.podcast?.let { podcastArtwork(it.podcastId) }
-        ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
+    fun cover(id: String, endpoint: HttpUrl = requireEndpoint()): String = knownTracks[id]?.podcast?.let {
+        url(endpoint, "api", "v1", "podcasts", it.podcastId, "cover")
+    } ?: (url(endpoint, "api", "v1", "tracks", id, "cover") + "?size=768")
     suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
         val owner = session.cacheScope(); requireProfile(owner)
         val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->
@@ -177,11 +181,11 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
             else -> "unknown"
         }
     }
-    fun originalStream(id: String, podcastNetwork: String? = null): String =
+    fun originalStream(id: String, podcastNetwork: String? = null, endpoint: HttpUrl = requireEndpoint()): String =
         if (id.startsWith("podcast_ep_")) {
-            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1&cache=1&network=${podcastNetwork ?: podcastNetwork()}"
+            url(endpoint, "api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1&cache=1&network=${podcastNetwork ?: podcastNetwork()}"
         } else {
-            url("api", "v1", "tracks", id, "stream")
+            url(endpoint, "api", "v1", "tracks", id, "stream")
         }
     fun stream(id: String, original: String = originalStream(id)): String = PlaybackRequest.url(original, if (podcastEpisodeId(id) != null || downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
 
@@ -248,9 +252,12 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     /** Daily picks depend on the selected library, so each library keeps its own cached batch. */
     suspend fun daily(refresh: Boolean = false): DailyRecommendations {
         val owner = session.cacheScope(); requireProfile(owner)
-        val key = "recommendations:daily:$selectedLibraryId"
+        val library = selectedLibraryId
+        val key = "recommendations:daily:$library"
         return agentApi().run { if (refresh) refreshDaily() else daily() }.also { daily ->
-            requireProfile(owner); save(key, daily, owner)
+            requireProfile(owner)
+            if (selectedLibraryId != library) throw CancellationException(AppLanguage.string(R.string.repo_library_or_permission_changed))
+            save(key, daily, owner)
         }
     }
     suspend fun cachedDaily(): DailyRecommendations? = saved("recommendations:daily:$selectedLibraryId", DailyRecommendations::class.java)
@@ -570,6 +577,10 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         require(result.groups.all { it.count >= 0 && (it.offset == null || it.offset in 0 until result.total) })
         return result
     }
+    suspend fun playbackPage(query: CatalogQuery, offset: Int, limit: Int) =
+        tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent",
+            query.role, query.sort, limit, query.albumFilter, query.order)
+
     /** Build the complete snapshot before touching playback. Any failed page preserves the old queue. */
     suspend fun collectionTracks(query: CatalogQuery): List<Track> {
         val owner = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
@@ -579,7 +590,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         var offset = 0
         var expected = -1
         while (true) {
-            val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter, query.order)
+            val page = playbackPage(query, offset, 200)
             requireProfile(owner)
             if (library != selectedLibraryId || revision != cache.catalogRevision) throw CancellationException(AppLanguage.string(R.string.repo_library_or_permission_changed))
             if (expected == -1) { expected = page.total; require(expected <= 5000) { AppLanguage.string(R.string.repo_collection_limit_exceeded) } }
