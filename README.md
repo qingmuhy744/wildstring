@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **版本 [v0.8.21](docs/releases/v0.8.21.md)** · 修复 Android 批量离线下载时的界面无响应。歌曲页支持原地多选，手动离线保存实际新增或恢复超过 100 首时先确认。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
+- **版本 [v0.8.22](docs/releases/v0.8.22.md)** · 修复 Android 批量离线下载时的界面无响应。歌曲页支持原地多选，手动离线保存实际新增或恢复超过 100 首时先确认。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 
