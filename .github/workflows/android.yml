@@ -193,6 +193,8 @@ jobs:
           profile: pixel_2
           cores: 2
           ram-size: 4096M
+          # Use the supported SwiftShader mode. This suite only needs GLES.
+          emulator-options: &emulator-options -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           # The instrumented suite asserts Chinese copy, so pin the emulator to
           # zh-CN before running it; otherwise resource lookups follow the
@@ -223,6 +225,7 @@ jobs:
           profile: pixel_2
           cores: 2
           ram-size: 4096M
+          emulator-options: *emulator-options
           disable-animations: true
           script: |
             adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
