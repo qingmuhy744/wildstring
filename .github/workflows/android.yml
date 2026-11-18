@@ -198,12 +198,13 @@ jobs:
           disable-animations: true
           # The instrumented suite asserts Chinese copy, so pin the emulator to
           # zh-CN. Restart the Android framework to apply it; rebooting the
-          # guest can shut down the emulator and disconnect adb entirely.
+          # guest can shut down the emulator and disconnect adb entirely. Wait
+          # for the owner to unlock before installing APKs or accessing app data.
           script: &instrumented-tests |
             adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
             timeout 60 adb wait-for-device
             adb shell 'setprop persist.sys.locale zh-CN && stop && sleep 5 && start'
-            timeout 120 adb shell 'until am get-config 2>/dev/null | grep -qE "zh-rCN|b[+]zh([+]Hans)?[+]CN"; do sleep 2; done'
+            timeout 120 adb shell 'until am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && am get-config 2>/dev/null | grep -qE "zh-rCN|b[+]zh([+]Hans)?[+]CN"; do sleep 2; done'
             python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
       - name: Native instrumented tests (shard 2 of 2)
         if: ${{ env.RUN_EMULATOR == 'true' }}
