@@ -197,18 +197,13 @@ jobs:
           emulator-options: &emulator-options -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           # The instrumented suite asserts Chinese copy, so pin the emulator to
-          # zh-CN before running it; otherwise resource lookups follow the
-          # runner's default locale and every copy assertion misses.
-          # android-emulator-runner runs each script line in its own shell, so
-          # the post-reboot wait must stay on one line. adbd sometimes refuses
-          # the root restart right after boot ("unable to connect for root").
-          script: |
+          # zh-CN. Restart the Android framework to apply it; rebooting the
+          # guest can shut down the emulator and disconnect adb entirely.
+          script: &instrumented-tests |
             adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
             timeout 60 adb wait-for-device
-            adb shell setprop persist.sys.locale zh-CN
-            adb reboot
-            timeout 120 adb wait-for-device
-            timeout 120 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+            adb shell 'setprop persist.sys.locale zh-CN && stop && sleep 5 && start'
+            timeout 120 adb shell 'until am get-config 2>/dev/null | grep -qE "zh-rCN|b[+]zh([+]Hans)?[+]CN"; do sleep 2; done'
             python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
       - name: Native instrumented tests (shard 2 of 2)
         if: ${{ env.RUN_EMULATOR == 'true' }}
@@ -227,14 +222,7 @@ jobs:
           ram-size: 4096M
           emulator-options: *emulator-options
           disable-animations: true
-          script: |
-            adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
-            timeout 60 adb wait-for-device
-            adb shell setprop persist.sys.locale zh-CN
-            adb reboot
-            timeout 120 adb wait-for-device
-            timeout 120 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
-            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
+          script: *instrumented-tests
       - name: Stop synthetic API
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}
         run: bash scripts/ci_synthetic_api.sh stop
