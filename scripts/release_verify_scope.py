@@ -38,7 +38,55 @@ def run_git(*args: str) -> str:
     return completed.stdout
 
 
-def find_previous_tag(release_tag: str, ref: str = "HEAD~1") -> str | None:
+def fetch_published_release_tags(repo: str, token: str) -> set[str]:
+    if not REPO_PATTERN.fullmatch(repo):
+        raise ValueError(f"invalid GitHub repository slug: {repo!r}")
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc != "api.github.com":
+        raise ValueError(f"unexpected GitHub API URL: {url!r}")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "wildstring-release-verify-scope",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310 - fixed https://api.github.com
+        payload = json.load(response)
+    if not isinstance(payload, list):
+        raise ValueError("unexpected GitHub releases payload")
+    tags: set[str] = set()
+    for release in payload:
+        if not isinstance(release, dict) or release.get("draft"):
+            continue
+        tag_name = release.get("tag_name")
+        if isinstance(tag_name, str) and tag_name:
+            tags.add(tag_name)
+    return tags
+
+
+def resolve_published_tags(repo: str, token: str) -> tuple[set[str] | None, str]:
+    if not repo or not token:
+        return (
+            None,
+            "missing GITHUB_REPOSITORY or GH_TOKEN for published release lookup; running full Android emulator suite",
+        )
+    try:
+        return fetch_published_release_tags(repo, token), ""
+    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
+        return (
+            None,
+            f"failed to query published releases ({exc}); running full Android emulator suite",
+        )
+
+
+def find_previous_tag(
+    release_tag: str,
+    ref: str = "HEAD~1",
+    published_tags: set[str] | None = None,
+) -> str | None:
     try:
         output = run_git("tag", "--merged", ref, "--list", "v[0-9]*", "--sort=-v:refname")
     except subprocess.CalledProcessError:
@@ -49,6 +97,8 @@ def find_previous_tag(release_tag: str, ref: str = "HEAD~1") -> str | None:
         if not tag or tag == release_tag:
             continue
         if not is_prerelease and "-" in tag:
+            continue
+        if published_tags is not None and tag not in published_tags:
             continue
         return tag
     return None
@@ -74,10 +124,14 @@ def is_pure_android_version_bump(prev_tag: str, head: str = "HEAD") -> bool:
     return bool(changed_lines) and all(VERSION_BUMP_LINE.match(line) for line in changed_lines)
 
 
-def needs_android_emulator(release_tag: str, head: str = "HEAD") -> tuple[bool, str]:
-    prev_tag = find_previous_tag(release_tag)
+def needs_android_emulator(
+    release_tag: str,
+    head: str = "HEAD",
+    published_tags: set[str] | None = None,
+) -> tuple[bool, str]:
+    prev_tag = find_previous_tag(release_tag, published_tags=published_tags)
     if not prev_tag:
-        return True, "no previous release tag found; running full Android emulator suite"
+        return True, "no previous published release tag found; running full Android emulator suite"
     try:
         changed = [
             line.strip()
@@ -151,7 +205,14 @@ def main() -> int:
     head_sha = os.environ.get("GITHUB_SHA", "")
     token = os.environ.get("GH_TOKEN", "")
 
-    run_emulator, emulator_reason = needs_android_emulator(release_tag)
+    published_tags, lookup_reason = resolve_published_tags(repo, token)
+    if published_tags is None:
+        run_emulator, emulator_reason = True, lookup_reason
+    else:
+        run_emulator, emulator_reason = needs_android_emulator(
+            release_tag,
+            published_tags=published_tags,
+        )
     run_ci, ci_reason = needs_ci_verify(repo, head_sha, token)
 
     print(f"[release-scope] {emulator_reason}", file=sys.stderr)

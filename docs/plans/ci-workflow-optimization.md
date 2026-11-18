@@ -29,6 +29,7 @@
    - [Makefile](../../Makefile) 将 `android-ci` 的两次 Gradle 调用合并为单次任务图调度，让 `--parallel` 同时调度单测、androidTest 编译、R8 与 Lint。
    - `scripts/run_android_instrumented.py` 将分片算法改为按类内用例数降序贪心分配，避免重量级长测试集中落入同一分片；遇到异常退出的类时先做 5 秒 `device_ready(timeout=5)` 探活，掉线时免等 120 秒 `logcat` 超时；新增 `--recover-device` 钩子与 `--max-device-restarts`，调用 `scripts/ci_recover_emulator.sh` 自动拉起崩溃的 `test` AVD、重新部署包与中文设置后续跑剩余类并在下一轮重试被中断的类。
    - [android.yml](../../.github/workflows/android.yml) 将模拟器核数从 `2` 调高至 `4` 并添加 `-no-metrics`，在 `emulator`、`quality`、`backend`、`web_shard` 启用 `setup-uv` 缓存。
+   - [release_verify_scope.py](../../scripts/release_verify_scope.py) 与 [release.yml](../../.github/workflows/release.yml) 兼容新版发版机制：对比基准自动过滤 GitHub 未发布或草稿标签（避免未成功发版的残留标签导致替补发版漏跑全量 Android 回归），并将正式版 R8 APK 冒烟模拟器对齐为 `cores: 4` 与 `-no-metrics`。
 
 ## 验收
 

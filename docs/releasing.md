@@ -45,7 +45,7 @@ python3 scripts/package_release.py --tag vX.Y.Z --check-only
 1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。在推送或发起发布前，先在本地运行 `make check` 与 `make test-affected`（或完整 `make ci`），确保没有因界面文案调整或重构遗留的过期测试断言。
 2. 通过 PR 合并进入 main，确认主线 **CI** 与 **Android APK** 工作流均已在该最终提交上通过。
 3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
-4. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一版本标签存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
+4. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一个已发布版本标签（跳过失败未发布的草稿/残留标签）存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
 5. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。
