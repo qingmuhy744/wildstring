@@ -3,6 +3,7 @@ package com.wildstring.app.ui
 import androidx.compose.ui.res.stringResource
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
