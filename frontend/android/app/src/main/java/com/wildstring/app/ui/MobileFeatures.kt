@@ -69,7 +69,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         "drafts" -> stringResource(R.string.playlist_drafts)
         "connections" -> stringResource(R.string.model_connections); "research" -> stringResource(R.string.settings_research); "channels" -> stringResource(R.string.settings_notifications)
         "external" -> stringResource(R.string.discover_new_music); "rankings" -> stringResource(R.string.listening_rankings); "daily" -> stringResource(R.string.daily_recommendations); "ai" -> stringResource(R.string.ai_music_playlists); "offline" -> stringResource(R.string.offline_save); "statistics" -> stringResource(R.string.listening_statistics); "devices" -> stringResource(R.string.settings_music_handoff)
-        "playlist" -> if (playlist == null) stringResource(R.string.playlist_new) else stringResource(R.string.playlist_edit); "order" -> stringResource(R.string.playlist_order); "multi" -> stringResource(R.string.playlist_multi_add)
+        "playlist" -> if (playlist == null) stringResource(R.string.playlist_new) else stringResource(R.string.playlist_edit); "order" -> stringResource(R.string.playlist_order); "multi" -> stringResource(R.string.track_select_multiple)
         "lyric-scans" -> stringResource(R.string.lyrics_scan); "gain" -> stringResource(R.string.playback_gain); "source-plugins" -> stringResource(R.string.source_zip_plugins); "management" -> stringResource(R.string.library_management); "album-edit" -> stringResource(R.string.album_edit)
         "metadata" -> stringResource(R.string.track_edit); "lyrics" -> stringResource(R.string.lyrics_edit); "suggestions" -> stringResource(R.string.metadata_suggestions); else -> stringResource(R.string.library_management)
     }
@@ -108,7 +108,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "devices" -> DevicesPanel(vm)
                         "playlist" -> PlaylistEditor(vm, playlist, dismiss)
                         "order" -> playlist?.let { PlaylistOrder(vm, it, dismiss) }
-                        "multi" -> MultiSelectPanel(vm, dismiss)
+                        "multi" -> MultiSelectPanel(vm, track?.id, dismiss)
                         "gain" -> track?.let { PlaybackGainPanel(vm, it) }
                         else -> if (account.account?.profile in listOf("owner", "librarian", "editor")) when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
@@ -181,8 +181,8 @@ private fun OfflinePanel(vm: MusicViewModel) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text(stringResource(R.string.download_summary, items.count { it.state == "complete" }, items.sumOf { it.bytes } / 1024 / 1024), style = MaterialTheme.typography.titleMedium)
         Row {
-            TextButton({ vm.repository.downloads.pauseAll() }, enabled = items.any { it.state in listOf("queued", "downloading") }) { Text(stringResource(R.string.download_pause_all)) }
-            TextButton({ vm.repository.downloads.resumeAll(); vm.startDownloads() }, enabled = items.any { it.state in listOf("paused", "failed") }) { Text(stringResource(R.string.download_resume_all)) }
+            TextButton({ vm.changeOfflineQueue { pauseAll(it) } }, enabled = items.any { it.state in listOf("queued", "downloading") }) { Text(stringResource(R.string.download_pause_all)) }
+            TextButton({ vm.changeOfflineQueue(restart = true) { resumeAll(it) } }, enabled = items.any { it.state in listOf("paused", "failed") }) { Text(stringResource(R.string.download_resume_all)) }
         }
         TextButton({ downloadOptions = !downloadOptions }) { Text(if (downloadOptions) stringResource(R.string.download_settings_collapse) else stringResource(R.string.download_settings_expand)) }
         if (downloadOptions) Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) { OfflineSettings(vm) }
@@ -202,15 +202,15 @@ private fun OfflinePanel(vm: MusicViewModel) {
                 if (item.state == "downloading" && item.total > 0) LinearProgressIndicator(progress = { (item.bytes.toFloat() / item.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 Row {
                     if (item.state == "complete") TextButton({ vm.play(listOf(item.track)) }) { Text(stringResource(R.string.play)) }
-                    else if (item.state in listOf("queued", "downloading")) TextButton({ vm.repository.downloads.pause(item.track.id) }) { Text(stringResource(R.string.pause)) }
-                    else TextButton({ vm.repository.downloads.resume(item.track.id); vm.startDownloads() }) { Text(stringResource(R.string.resume_retry)) }
+                    else if (item.state in listOf("queued", "downloading")) TextButton({ vm.changeOfflineQueue { pause(item.track.id, it) } }) { Text(stringResource(R.string.pause)) }
+                    else TextButton({ vm.changeOfflineQueue(restart = true) { resume(item.track.id, it) } }) { Text(stringResource(R.string.resume_retry)) }
                     TextButton({ confirm = item }) { Text(stringResource(R.string.delete)) }
                 }
             }
         } }
         if (items.isEmpty()) Text(stringResource(R.string.offline_empty_hint), Modifier.padding(vertical = 24.dp))
     }
-    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text(stringResource(R.string.offline_delete_title)) }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.repository.downloads.remove(item.track.id); confirm = null }) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } }) }
+    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text(stringResource(R.string.offline_delete_title)) }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.changeOfflineQueue { remove(item.track.id, it) }; confirm = null }) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } }) }
 }
 
 @Composable

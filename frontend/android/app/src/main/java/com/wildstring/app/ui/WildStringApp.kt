@@ -17,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -445,6 +446,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var albumActions by remember { mutableStateOf<Album?>(null) }
     val playlistAction = remember { FeatureAction() }
     var actions by remember { mutableStateOf<Track?>(null) }
+    val offlineConfirmation by vm.offlineConfirmation.collectAsStateWithLifecycle()
+    fun selectTracks(track: Track? = null) {
+        featureTrack = track
+        feature = "multi"
+        actions = null
+    }
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
     var albumPlaylistTracks by remember { mutableStateOf<List<Track>?>(null) }
     var featureAlbumId by remember { mutableStateOf<String?>(null) }
@@ -751,7 +758,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     }
                                     if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
                                         play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
-                                        multi = { feature = "multi" }, download = { vm.downloadCollection() },
+                                        multi = { selectTracks() }, download = { vm.downloadCollection() },
                                         edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                         order = { featurePlaylist = state.activePlaylist; feature = "order" },
                                         delete = { deletingPlaylist = state.activePlaylist },
@@ -778,7 +785,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             albumActions = { albumActions = it })
                                         else CatalogBrowser(vm, state, header,
                                             play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                            actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                                            actions = { actions = it }, select = ::selectTracks, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
                                     }
                                 }
                             }
@@ -969,6 +976,19 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, albumId = featureAlbumId, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null; featureAlbumId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }
+    offlineConfirmation?.let { request ->
+        AlertDialog(
+            onDismissRequest = { vm.respondToOfflineConfirmation(request, false) },
+            title = { Text(stringResource(R.string.offline_confirm_title, request.count)) },
+            text = { Text(stringResource(R.string.offline_confirm_body)) },
+            confirmButton = {
+                TextButton({ vm.respondToOfflineConfirmation(request, true) }) {
+                    Text(stringResource(R.string.offline_download_count, request.count))
+                }
+            },
+            dismissButton = { TextButton({ vm.respondToOfflineConfirmation(request, false) }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
         SongAction(stringResource(R.string.playlist_open), Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
@@ -1052,6 +1072,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
         }
         SongAction(stringResource(R.string.ws_app_offline_save), Icons.Default.Download) { vm.download(listOf(track)); actions = null }
+        if (state.kind in listOf("tracks", "recent")) {
+            SongAction(stringResource(R.string.track_select_multiple), Icons.AutoMirrored.Filled.QueueMusic) { selectTracks(track) }
+        }
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction(stringResource(R.string.playlist_remove_track), Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
         if (state.account?.profile in listOf("owner", "librarian", "editor")) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -1228,7 +1251,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
 @Composable
-internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false) {
+internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false, select: (() -> Unit)? = null) {
     val current = state.current?.id == track.id
     val album = state.collection == "albums" || state.albumFilter != null
     val size = LocalSongListSize.current
@@ -1240,7 +1263,11 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
     }
     Row(Modifier.fillMaxWidth().heightIn(min = size.rowDp.dp).testTag("catalog-item-$index")
         .background(if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-        .semantics { selected = current }.clickable(onClick = tactile(play))
+        .semantics { selected = current }.combinedClickable(
+            onClick = tactile(play),
+            onLongClickLabel = select?.let { stringResource(R.string.track_select_multiple) },
+            onLongClick = select,
+        )
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (current) Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(1.5.dp)).background(MaterialTheme.colorScheme.primary).padding(end = 6.dp))
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
@@ -1257,7 +1284,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (columns) {
-            TrackMetadataColumns(vm, track, "track", index.toString())
+            TrackMetadataColumns(vm, track, "track", index.toString(), select)
             Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
@@ -1267,15 +1294,17 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
 }
 
 @Composable
-internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tagPrefix: String, index: String) {
+internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tagPrefix: String, index: String, select: (() -> Unit)? = null) {
     var artistMenu by remember(track.id) { mutableStateOf(false) }
     val artists = track.artists.filter { it.isNotBlank() }
     val artistLabel = stringResource(R.string.open_artist_named, track.artist)
+    val selectLabel = select?.let { stringResource(R.string.track_select_multiple) }
     Box(Modifier.weight(1.4f)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("$tagPrefix-artist-$index")
-            .clickable(enabled = artists.isNotEmpty(), role = Role.Button) {
-                if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true
-            }.semantics { contentDescription = artistLabel }.padding(end = 12.dp),
+            .combinedClickable(enabled = artists.isNotEmpty(), role = Role.Button,
+                onLongClick = select, onLongClickLabel = selectLabel,
+                onClick = { if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true }
+            ).semantics { contentDescription = artistLabel }.padding(end = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (artists.isNotEmpty()) Icon(Icons.Default.Person, null, Modifier.size(18.dp), tint = Muted)
             Text(track.artist, color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1289,7 +1318,8 @@ internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tag
     }
     val albumLabel = listOfNotNull(stringResource(R.string.open_album), track.album?.takeIf { it.isNotBlank() }).joinToString(" · ")
     Row(Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("$tagPrefix-album-$index")
-        .clickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button) { vm.openTrackAlbum(track) }
+        .combinedClickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button,
+            onLongClick = select, onLongClickLabel = selectLabel, onClick = { vm.openTrackAlbum(track) })
         .semantics { contentDescription = albumLabel }.padding(end = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!track.album.isNullOrBlank() || !track.albumId.isNullOrBlank()) Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = Muted)
@@ -1302,6 +1332,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
     download: () -> Unit, edit: () -> Unit, order: () -> Unit, delete: () -> Unit,
     albumLyrics: (() -> Unit)? = null, albumRefresh: (() -> Unit)? = null) {
     var more by remember { mutableStateOf(false) }
+    val showMore = state.collection != null || state.albumFilter != null || albumLyrics != null || albumRefresh != null
     BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp).testTag("catalog-toolbar")) {
         // Measure the current labels with the actual font scale. Use one row
         // whenever all controls and the full count fit, including the rail gutter.
@@ -1315,7 +1346,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
         val sortContext = catalogSortContext(state.kind, state.collection, state.albumFilter)
         val sortLabel = sortContext?.let { stringResource(catalogSortLabel(state.sort, it)) }
         val requiredWidth = maxOf(64.dp, textWidth(playLabel, MaterialTheme.typography.labelLarge) + 50.dp) +
-            textWidth(countLabel, MaterialTheme.typography.labelMedium) + 8.dp + 48.dp + 8.dp +
+            textWidth(countLabel, MaterialTheme.typography.labelMedium) + (if (showMore) 64.dp else 16.dp) +
             (if (state.collection != "playlists" && sortLabel != null) maxOf(64.dp, textWidth(sortLabel, MaterialTheme.typography.labelLarge) + 36.dp) else 0.dp)
         val stacked = maxWidth < requiredWidth
         val playback: @Composable RowScope.() -> Unit = {
@@ -1328,7 +1359,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
         }
         val actions: @Composable RowScope.() -> Unit = {
             if (state.collection != "playlists") CatalogSortControls(state, sort, reverse, if (stacked) Modifier.weight(1f) else Modifier)
-            Box {
+            if (showMore) Box {
                 IconButton({ more = true }, Modifier.testTag("catalog-more")) { Icon(Icons.Default.MoreVert, stringResource(R.string.list_actions)) }
                 DropdownMenu(more, { more = false }) {
                     albumLyrics?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.lyrics_scan)) }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { more = false; open() }) }

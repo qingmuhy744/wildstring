@@ -124,4 +124,67 @@ class ServerSessionTest {
             } finally { session.invalidate(); client.dispatcher.cancelAll(); client.connectionPool.evictAll(); context.cacheDir.deleteRecursively(); context.filesDir.deleteRecursively() }
         } }
     }
+
+    @Test fun offlineConfirmationCountsOnlyNewAndRestartableTracks() = runBlocking {
+        val context = isolated()
+        val session = SessionStore(context)
+        MockWebServer().use { server ->
+            server.start()
+            session.configure(server.url("/").toString(), true)
+            session.write("wildstring_session=test; Path=/; Max-Age=3600")
+            session.bindAccount(Account("listener", "listener", "owner"))
+            val downloads = OfflineDownloads(context, session, OkHttpClient())
+            val owner = session.cacheScope()!!
+            val tracks = (0..101).map { Track("song-$it", "Song $it", emptyList(), null, 1000) }
+            try {
+                assertEquals(OfflineDownloads.ManualEnqueue.Submitted, downloads.enqueueManual(tracks.take(100), owner, 100))
+                assertEquals(100, downloads.entries.value.size)
+                assertEquals(OfflineDownloads.ManualEnqueue.Unchanged, downloads.enqueueManual(tracks.take(100), owner, 100))
+                downloads.pauseAll()
+                val request = tracks.take(101) + tracks.first()
+                assertEquals(OfflineDownloads.ManualEnqueue.Confirm(101), downloads.enqueueManual(request, owner, 100))
+                assertTrue(downloads.entries.value.all { it.state == "paused" })
+                assertEquals(100, downloads.entries.value.size)
+                assertEquals(OfflineDownloads.ManualEnqueue.Submitted, downloads.enqueueManual(request, owner, 101))
+                assertTrue(downloads.entries.value.all { it.state == "queued" })
+                downloads.removeMatching(owner) { it.id != tracks.first().id }
+                assertEquals(listOf(tracks.first().id), downloads.entries.value.map { it.track.id })
+                assertEquals(listOf(tracks.first().id), OfflineDownloads(context, session, OkHttpClient()).entries.value.map { it.track.id })
+            } finally {
+                session.invalidate()
+                context.filesDir.deleteRecursively()
+            }
+        }
+    }
+
+    @Test fun failedAacSourceCheckMovesOnToNextTrack() = runBlocking {
+        val context = isolated()
+        val session = SessionStore(context)
+        MockWebServer().use { server ->
+            val audio = ServerSessionTest::class.java.classLoader!!.getResourceAsStream("playback.mp3")!!.use { it.readBytes() }
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    return if (request.requestUrl!!.encodedPath.contains("/failed/")) MockResponse().setResponseCode(503)
+                    else audioStreamFixture(request, audio, "audio/mpeg", "\"offline-v1\"")
+                }
+            }
+            server.start()
+            session.configure(server.url("/").toString(), true)
+            session.write("wildstring_session=test; Path=/; Max-Age=3600")
+            session.bindAccount(Account("listener", "listener", "owner"))
+            val downloads = OfflineDownloads(context, session, OkHttpClient())
+            try {
+                downloads.wifiOnly = false
+                downloads.bitrate = 192
+                val first = Track("failed", "Failed", emptyList(), null, 1000)
+                downloads.enqueue(listOf(first, first.copy(id = "next")))
+                kotlinx.coroutines.withTimeout(5_000) { downloads.run {} }
+                assertEquals(listOf("failed", "complete"), downloads.entries.value.map { it.state })
+                assertEquals(3, server.requestCount)
+            } finally {
+                session.invalidate()
+                context.filesDir.deleteRecursively()
+            }
+        }
+    }
 }

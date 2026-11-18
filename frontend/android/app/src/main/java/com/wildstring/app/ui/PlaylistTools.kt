@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -91,26 +92,57 @@ internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -
 }
 
 @Composable
-internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
+internal fun MultiSelectPanel(vm: MusicViewModel, initialTrackId: String?, dismiss: () -> Unit) {
     val original = remember { vm.state.value }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var selected by remember { mutableStateOf(setOf<String>()) }
+    var selected by remember(initialTrackId) { mutableStateOf(setOfNotNull(initialTrackId)) }
     var choices by remember { mutableStateOf<List<Playlist>?>(null) }
+    val listState = rememberLazyListState()
+    var loadAttempt by remember { mutableIntStateOf(0) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { action.run {
+    LaunchedEffect(loadAttempt) { action.run {
         tracks = vm.repository.collectionTracks(CatalogQuery(original.tab, original.kind, original.title, original.query, collection = original.collection,
-            collectionId = original.collectionId, playlist = original.activePlaylist, role = original.role, sort = original.sort, albumFilter = original.albumFilter))
+            collectionId = original.collectionId, playlist = original.activePlaylist, role = original.role, sort = original.sort, albumFilter = original.albumFilter, order = original.order))
+        selected = selected.intersect(tracks.map { it.id }.toSet())
+        val initialIndex = tracks.indexOfFirst { it.id == initialTrackId }
+        if (initialIndex >= 0) listState.requestScrollToItem(initialIndex)
     } }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        ActionStatus(action)
-        Row { TextButton({ selected = tracks.map { it.id }.toSet() }) { Text(stringResource(R.string.pl_tools_select_all)) }; TextButton({ selected = emptySet() }) { Text(stringResource(R.string.pl_tools_clear_selection)) }; Text(stringResource(R.string.pl_tools_selected_count, selected.size), Modifier.padding(12.dp)) }
-        if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
-        else LazyColumn(Modifier.weight(1f)) { items(tracks, key = { it.id }) { track ->
-            Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(track.id in selected, null); Column(Modifier.padding(12.dp)) { Text(track.title); Text(track.artist, style = MaterialTheme.typography.bodySmall) }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 760.dp).fillMaxSize().padding(horizontal = 16.dp)) {
+            val message = action.message
+            if (!action.busy && message != null && message != DONE_STATUS) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    if (tracks.isEmpty()) TextButton({ loadAttempt++ }) { Text(stringResource(R.string.retry)) }
+                }
             }
-        } }
-        Button({ scope.launch { action.run { choices = vm.playlistsForAdd() } } }, enabled = !action.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pl_tools_add_to_playlist)) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton({ selected = tracks.map { it.id }.toSet() }, enabled = !action.busy && tracks.isNotEmpty()) {
+                    Text(stringResource(R.string.pl_tools_select_all))
+                }
+                TextButton({ selected = emptySet() }, enabled = !action.busy && selected.isNotEmpty()) {
+                    Text(stringResource(R.string.pl_tools_clear_selection))
+                }
+                Text(stringResource(R.string.pl_tools_selected_count, selected.size), Modifier.padding(horizontal = 12.dp),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"))
+            }
+            if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
+            else if (tracks.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                if (message == DONE_STATUS) Text(stringResource(R.string.catalog_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            else LazyColumn(Modifier.weight(1f), state = listState) { items(tracks, key = { it.id }) { track ->
+                Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(track.id in selected, null); Column(Modifier.padding(12.dp)) { Text(track.title); Text(track.artist, style = MaterialTheme.typography.bodySmall) }
+                }
+            } }
+            val canApply = !action.busy && selected.isNotEmpty() && tracks.isNotEmpty()
+            Button({ vm.download(tracks.filter { it.id in selected }); dismiss() }, enabled = canApply, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.offline_save_selection, selected.size))
+            }
+            OutlinedButton({ scope.launch { action.run { choices = vm.playlistsForAdd() } } }, enabled = canApply, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.pl_tools_add_to_playlist))
+            }
+        }
     }
     choices?.let { playlists -> AlertDialog(onDismissRequest = { choices = null }, title = { Text(stringResource(R.string.pl_tools_choose_playlist_title)) }, text = {
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {

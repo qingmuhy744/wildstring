@@ -2145,4 +2145,9 @@
     <string name="podcast_use_local_progress">Use this device’s progress</string>
     <string name="podcast_resume_question">Continue from the saved position?</string>
     <string name="podcast_already_completed">Already played</string>
+    <string name="track_select_multiple">Select tracks</string>
+    <string name="offline_confirm_title">Download %1$,d tracks?</string>
+    <string name="offline_confirm_body">The tracks will be saved to this device.</string>
+    <string name="offline_download_count">Download %1$,d tracks</string>
+    <string name="offline_save_selection">Save offline (%1$,d)</string>
 </resources>

@@ -59,7 +59,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
 /** One absolute slot per server result. Placeholders cannot start playback or open an item. */
 @Composable internal fun CatalogBrowser(
     vm: MusicViewModel, state: MusicState, header: @Composable () -> Unit,
-    play: (Track) -> Unit, actions: (Track) -> Unit,
+    play: (Track) -> Unit, actions: (Track) -> Unit, select: (Track) -> Unit,
     playlistActions: (Playlist) -> Unit = {},
     albumActions: (Album) -> Unit = {},
 ) {
@@ -164,7 +164,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
                                         DiscHeading(disc)
                                     }
                                 }
-                                TrackRow(vm, display, state, index, { play(display) }, { actions(display) }, columns = trackColumns)
+                                TrackRow(vm, display, state, index, { play(display) }, { actions(display) }, columns = trackColumns, select = { select(display) })
                             }
                         } ?: CatalogPlaceholder(vm, state, index)
                     }

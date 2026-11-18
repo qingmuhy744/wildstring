@@ -497,4 +497,47 @@ class ContinuousCatalogTest {
             } finally { compose.runOnIdle { vm.settings.appearance("light"); vm.repository.session.invalidate() } }
         }
     }
+
+    @Test fun songSelectionConfirmsLargeOfflineRequestsBeforeEnqueue() {
+        MockWebServer().use { server ->
+            fixture(server)
+            val vm = connect(server)
+            val downloads = vm.repository.downloads
+            try {
+                compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
+                ready(vm)
+                compose.onNodeWithTag("catalog-more").assertDoesNotExist()
+                capture("offline-songs-light.png")
+                compose.onNodeWithTag("catalog-item-0").performTouchInput { longClick() }
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasText(uiString(R.string.offline_save_selection, 1)) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                }
+                capture("offline-selection-light.png")
+                compose.onNodeWithText(uiString(R.string.pl_tools_select_all)).performClick()
+                compose.onNodeWithText(uiString(R.string.offline_save_selection, 257)).performClick()
+                compose.onNodeWithText(uiString(R.string.offline_confirm_title, 257)).assertIsDisplayed()
+                assertTrue(downloads.entries.value.isEmpty())
+                capture("offline-confirm-light.png")
+                compose.onNodeWithText(uiString(R.string.cancel)).performClick()
+                assertTrue(downloads.entries.value.isEmpty())
+
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("offline-songs-dark.png")
+                compose.onNodeWithTag("track-action-0").performClick()
+                compose.onNodeWithText(uiString(R.string.track_select_multiple)).performScrollTo().performClick()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasText(uiString(R.string.offline_save_selection, 1)) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                }
+                capture("offline-selection-dark.png")
+                compose.onNodeWithText(uiString(R.string.pl_tools_select_all)).performClick()
+                compose.onNodeWithText(uiString(R.string.offline_save_selection, 257)).performClick()
+                compose.onNodeWithText(uiString(R.string.offline_confirm_title, 257)).assertIsDisplayed()
+                capture("offline-confirm-dark.png")
+                compose.onNodeWithText(uiString(R.string.offline_download_count, 257)).performClick()
+                compose.waitUntil(15_000) { downloads.entries.value.size == 257 }
+            } finally {
+                compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system") }
+            }
+        }
+    }
 }
