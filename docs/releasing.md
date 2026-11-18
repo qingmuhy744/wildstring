@@ -8,7 +8,7 @@
 
 `.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用独立固定签名，可与正式版共存，同签名 Dev 包之间可覆盖安装；正式安装包从 Releases 下载。Fork / Dependabot 的无密钥构建继续检查，但不上传可安装的 Dev 附件。
 
-完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。发版前手动运行 **Android APK**，选择待发布提交所在分支并勾选 `run_emulator`。该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
+完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。除每周定时基准与按需手动触发 **Android APK**（`run_emulator=true`）外，打标签触发 **Release** 时会自动对比上一版本标签，在存在功能性 Android 改动时并行运行完整模拟器回归；该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
 
 PR 工作流只有仓库读取权限，不读取发布私钥。
 
@@ -16,7 +16,7 @@ Dev 签名使用专用 Actions secret `ANDROID_DEV_KEYSTORE_BASE64`，只在同�
 
 Dev 密钥备份在主工作区未跟踪的 `.env.android-dev.keystore`（0600），与正式密钥分开保存，不进入 Git、Gradle 缓存或附件。本地需要生成与 CI 同签名的 Dev 包时，设置 `ANDROID_DEV_KEYSTORE_PATH` 为该文件的绝对路径后执行既有 Android 构建命令；未设置时仍使用开发机自己的调试密钥。本机默认调试包与 CI Dev 包也可能不能互相覆盖。
 
-CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包安装检查保持一致。应用不依赖 Google Play 服务；Google APIs 镜像中的 Pixel Launcher 曾在回归中弹出无响应窗口、抢走焦点并导致后续用例连锁失败。回归仍保留全部窗口焦点、输入法及布局断言，不跳过失败用例。仪器化套件按发现到的测试类分成两个 shard，各自使用全新模拟器运行；两部分合起来覆盖每个类恰好一次，避免单个长会话在后半程丢失模拟器时把剩余类记为未运行。
+CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包安装检查保持一致。应用不依赖 Google Play 服务；Google APIs 镜像中的 Pixel Launcher 曾在回归中弹出无响应窗口、抢走焦点并导致后续用例连锁失败。回归仍保留全部窗口焦点、输入法及布局断言，不跳过失败用例。仪器化套件按发现到的测试类拆成 4 个并行 shard（指定 `test_classes` 时为单 shard），各自使用全新模拟器运行，合起来覆盖每个类恰好一次；测试运行器 `WildStringTestRunner` 与 `cmd locale set-app-locales` 直接设置应用中文语言，避免重开系统框架引起的竞态。
 
 ## 版本要求与签名
 
@@ -43,9 +43,9 @@ python3 scripts/package_release.py --tag vX.Y.Z --check-only
 ## 发布顺序
 
 1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。在推送或发起发布前，先在本地运行 `make check` 与 `make test-affected`（或完整 `make ci`），确保没有因界面文案调整或重构遗留的过期测试断言。
-2. 通过 PR 合并进入 main，确认主线 CI 与 Android APK 工作流成功，并在待发布的最终提交手动运行 **Android APK**（`run_emulator=true`，`test_classes` 留空），确认完整设备回归实际通过。修复后必须在新的最终提交重新通过，才能打标签；不以标签流水线首次发现失败来代替此门槛。
+2. 通过 PR 合并进入 main，确认主线 **CI** 与 **Android APK** 工作流均已在该最终提交上通过。
 3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
-4. **Release** 工作流核对标签、三个端版本及 main 祖先关系，重新执行完整 CI 与 Android 构建、单元测试和 Lint，构建固定签名 APK，并在模拟器实际安装 R8 正式包、检查连接页。
+4. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一版本标签存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
 5. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。

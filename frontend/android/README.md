@@ -28,7 +28,7 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 ## 构建
 
-日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行；打标签前必须在 GitHub Actions 的待发布 main 最终提交手动运行 **Android APK**，勾选 `run_emulator`（默认开启）、`test_classes` 留空。该手动运行仍需全部通过，修复后在新的最终提交重新通过，不将跳过模拟器的日常 CI 记作设备验收。正式签名包的发版安装冒烟仍由 Release 工作流执行。
+日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行，也支持在 GitHub Actions 手动按 `test_classes` 或全量 4 分片并行触发 **Android APK**（`run_emulator=true`）；打标签发版时由 **Release** 工作流按距上一版本标签的改动自动决定是否执行并行设备回归，并始终在模拟器安装验证正式签名 R8 APK。日常跳过模拟器的构建不代替设备验收。
 
 可下载的 CI Dev 包使用独立固定签名，后续可覆盖升级。首次替换旧临时签名 Dev 包通常需卸载旧 Dev 一次，其本机数据会随卸载清除。Fork / Dependabot 构建没有 Dev 密钥时只做验证，不上传可安装 Dev 包。本地构建如需与 CI 同签名，设置 `ANDROID_DEV_KEYSTORE_PATH` 为备份密钥的绝对路径；密钥、指纹校验与备份约定见[CI/CD 与发布](../../docs/releasing.md)。
 
@@ -46,7 +46,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
-本地完整回归先启动手机模拟器，在一个终端运行 `make android-test-api`，另一个终端运行 `make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19885/`。设备测试断言中文界面文案，模拟器系统语言需为 `zh-CN`：本地英文镜像先执行 `adb root && adb shell setprop persist.sys.locale zh-CN && adb reboot`，CI 在运行前自动设置。连接多个设备时用 `ANDROID_SERIAL` 指定模拟器；测试结束后在 API 终端按 Ctrl-C 停止。设备测试显式固定 Espresso 3.7，以兼容 API 37 的输入接口。
+本地完整回归先启动手机模拟器，在一个终端运行 `make android-test-api`，另一个终端运行 `make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19885/`。设备测试断言中文界面文案，`WildStringTestRunner` 与 `scripts/run_android_instrumented.py`（通过 `cmd locale set-app-locales`）会自动为被测应用配置中文语言，无需 `adb root` 或 `adb reboot`。连接多个设备时用 `ANDROID_SERIAL` 指定模拟器；测试结束后在 API 终端按 Ctrl-C 停止。设备测试显式固定 Espresso 3.7，以兼容 API 37 的输入接口。
 
 手动模拟器 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
