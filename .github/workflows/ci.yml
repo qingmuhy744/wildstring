@@ -59,6 +59,8 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
       - run: make setup
       - name: Run code checks, source plugins and dependency audit
         run: |
@@ -82,6 +84,8 @@ jobs:
         if: needs.changes.outputs.backend == 'true'
         with:
           version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
       - name: Cache apt packages
         if: needs.changes.outputs.backend == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -98,52 +102,98 @@ jobs:
           uv sync --frozen --project backend --extra community-sources
           make test PYTEST_ARGS="-n auto"
 
-  web:
-    name: Web E2E Tests
+  web_shard:
+    name: Web E2E Shard (${{ matrix.shard }})
     needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     steps:
-      - name: Web suite not needed for this change
-        if: needs.changes.outputs.web != 'true'
-        run: echo "No Web, backend, script or shared-input changes; the browser suites are skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.web == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: needs.changes.outputs.web == 'true'
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/web/package-lock.json
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        if: needs.changes.outputs.web == 'true'
         with:
           version: "0.13.1"
-      - run: make setup
-        if: needs.changes.outputs.web == 'true'
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+      - name: Sync Python and Web dependencies
+        run: |
+          python3 scripts/setup.py
+          uv sync --frozen --project backend --extra community-sources
+          npm --prefix frontend/web ci
+      - name: Read Playwright version
+        id: pw
+        run: |
+          ver=$(node -p "require('./frontend/web/package-lock.json').packages['node_modules/@playwright/test'].version")
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: Cache apt packages
-        if: needs.changes.outputs.web == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-archives
-          key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
-          restore-keys: apt-audio-${{ runner.os }}-
+          key: apt-web-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: |
+            apt-web-${{ runner.os }}-${{ steps.pw.outputs.version }}-
+            apt-web-${{ runner.os }}-
+            apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
-        if: needs.changes.outputs.web == 'true'
         run: scripts/install_audio_deps.sh
       - name: Cache Playwright browser
-        if: needs.changes.outputs.web == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/web/package-lock.json') }}
-      - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
-        if: needs.changes.outputs.web == 'true'
-      - name: Run Web tests and browser regressions
-        if: needs.changes.outputs.web == 'true'
-        run: make test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          restore-keys: playwright-${{ runner.os }}-
+      - name: Install Playwright Chromium and dependencies
+        run: bash scripts/install_playwright_chromium.sh
+      - name: Run Web E2E shard
+        env:
+          WEB_SHARD: ${{ matrix.shard }}
+        run: python3 scripts/run_web_ci_shard.py --shard "$WEB_SHARD"
+      - name: Upload shard visual evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-visual-shard-${{ matrix.shard }}
+          path: |
+            artifacts/*.png
+            artifacts/browser-tests/
+            artifacts/*-verification/
+            artifacts/player-audit/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  web:
+    name: Web E2E Tests
+    needs: [changes, web_shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify change detection succeeded
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: test "$CHANGES_RESULT" = "success"
+      - name: Web suite not needed for this change
+        if: needs.changes.outputs.web != 'true'
+        run: echo "No Web, backend, script or shared-input changes; the browser suites are skipped."
+      - name: Download shard visual evidence
+        if: always() && needs.changes.outputs.web == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: browser-visual-shard-*
+          path: artifacts
+          merge-multiple: true
       - name: Upload browser visual evidence
         id: visual
         if: always() && needs.changes.outputs.web == 'true'
@@ -154,6 +204,7 @@ jobs:
             artifacts/*.png
             artifacts/browser-tests/
             artifacts/*-verification/
+            artifacts/player-audit/
           if-no-files-found: ignore
           retention-days: 7
       - name: Link the screenshots in the job summary
@@ -162,7 +213,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.visual.outputs.artifact-url }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          count=$(find artifacts -name '*.png' | wc -l | tr -d ' ')
+          count=$([ -d artifacts ] && find artifacts -name '*.png' | wc -l | tr -d ' ' || echo 0)
           {
             echo "### Browser screenshots"
             echo
@@ -170,6 +221,13 @@ jobs:
             echo
             echo "Download: \`gh run download ${RUN_ID} -n browser-visual-evidence -D <empty-dir>\`"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Require all Web E2E shards to pass
+        if: always() && needs.changes.outputs.web == 'true'
+        env:
+          SHARD_RESULT: ${{ needs.web_shard.result }}
+        run: |
+          echo "web_shard result: $SHARD_RESULT"
+          test "$SHARD_RESULT" = "success"
 
   container:
     # Runs only when the backend, scripts or deploy inputs changed. History shows the suite

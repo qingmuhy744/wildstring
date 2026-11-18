@@ -78,6 +78,14 @@ def test_kotlin_or_fixture_change_runs_android_emulator(monkeypatch) -> None:
     run_fixture, _ = scope.needs_android_emulator("v0.8.20")
     assert run_fixture is True
 
+    _mock_git(
+        monkeypatch,
+        tags="v0.8.19\n",
+        changed="scripts/ci_recover_emulator.sh\n",
+    )
+    run_recovery, _ = scope.needs_android_emulator("v0.8.20")
+    assert run_recovery is True
+
 
 def test_missing_previous_tag_or_git_failure_falls_back_to_running_emulator(monkeypatch) -> None:
     _mock_git(monkeypatch, tags="", changed="")

@@ -16,6 +16,7 @@ ANDROID_EMULATOR_INPUTS = (
     "frontend/android/",
     "tests/fixtures/audio/",
     "scripts/run_android_instrumented.py",
+    "scripts/ci_recover_emulator.sh",
     "scripts/ci_synthetic_api.sh",
     "scripts/serve_web_tests.py",
     ".github/workflows/android.yml",

@@ -16,7 +16,7 @@ Dev 签名使用专用 Actions secret `ANDROID_DEV_KEYSTORE_BASE64`，只在同�
 
 Dev 密钥备份在主工作区未跟踪的 `.env.android-dev.keystore`（0600），与正式密钥分开保存，不进入 Git、Gradle 缓存或附件。本地需要生成与 CI 同签名的 Dev 包时，设置 `ANDROID_DEV_KEYSTORE_PATH` 为该文件的绝对路径后执行既有 Android 构建命令；未设置时仍使用开发机自己的调试密钥。本机默认调试包与 CI Dev 包也可能不能互相覆盖。
 
-CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包安装检查保持一致。应用不依赖 Google Play 服务；Google APIs 镜像中的 Pixel Launcher 曾在回归中弹出无响应窗口、抢走焦点并导致后续用例连锁失败。回归仍保留全部窗口焦点、输入法及布局断言，不跳过失败用例。仪器化套件按发现到的测试类拆成 4 个并行 shard（指定 `test_classes` 时为单 shard），各自使用全新模拟器运行，合起来覆盖每个类恰好一次；测试运行器 `WildStringTestRunner` 与 `cmd locale set-app-locales` 直接设置应用中文语言，避免重开系统框架引起的竞态。
+CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包安装检查保持一致。应用不依赖 Google Play 服务；Google APIs 镜像中的 Pixel Launcher 曾在回归中弹出无响应窗口、抢走焦点并导致后续用例连锁失败。回归仍保留全部窗口焦点、输入法及布局断言，不跳过失败用例。仪器化套件按已发现的用例数均衡拆成 4 个并行 shard（指定 `test_classes` 时为单 shard），各自使用全新 4 核模拟器运行，合起来覆盖每个类恰好一次；若单个模拟器进程中途掉线，会先短超时探活再自动拉起恢复并继续完成剩余与被中断测试类；测试运行器 `WildStringTestRunner` 与 `cmd locale set-app-locales` 直接设置应用中文语言，避免重开系统框架引起的竞态。
 
 ## 版本要求与签名
 
