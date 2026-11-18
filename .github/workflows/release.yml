@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -24,6 +25,9 @@ jobs:
   source:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      run_android_emulator: ${{ steps.scope.outputs.run_android_emulator }}
+      run_ci_verify: ${{ steps.scope.outputs.run_ci_verify }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,16 +41,27 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -f "docs/releases/$RELEASE_TAG.md"
           git merge-base --is-ancestor HEAD origin/main
+      - name: Determine verification scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: python3 scripts/release_verify_scope.py | tee -a "$GITHUB_OUTPUT"
 
   verify:
+    needs: source
+    if: needs.source.outputs.run_ci_verify == 'true'
     uses: ./.github/workflows/ci.yml
 
   verify_android:
+    needs: source
     uses: ./.github/workflows/android.yml
     secrets:
       ANDROID_DEV_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEV_KEYSTORE_BASE64 }}
     with:
-      run_emulator: true
+      run_emulator: ${{ needs.source.outputs.run_android_emulator == 'true' }}
 
   android:
     needs: source
@@ -173,6 +188,13 @@ jobs:
 
   publish:
     needs: [source, verify, verify_android, android, macos]
+    if: >-
+      !failure() && !cancelled() &&
+      needs.source.result == 'success' &&
+      (needs.verify.result == 'success' || needs.verify.result == 'skipped') &&
+      needs.verify_android.result == 'success' &&
+      needs.android.result == 'success' &&
+      needs.macos.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

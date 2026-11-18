@@ -19,7 +19,7 @@ android {
         targetSdk = 36
         versionCode = 56
         versionName = "0.8.20"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.wildstring.app.WildStringTestRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
         .map { providers.environmentVariable(it).orNull }

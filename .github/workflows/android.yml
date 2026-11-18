@@ -73,14 +73,10 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 30
     env:
       # The scheduled run doubles as the weekly emulator baseline on main.
       RUN_EMULATOR: ${{ inputs.run_emulator == true || github.event_name == 'schedule' }}
-      ANDROID_TEST_CLASSES: ${{ inputs.test_classes || '' }}
-      ANDROID_TEST_REPEAT: ${{ inputs.test_repeat || '1' }}
-      ANDROID_TEST_RETRIES: ${{ inputs.test_retries || '1' }}
-      ANDROID_TEST_ARGUMENTS: ${{ inputs.test_arguments || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -154,79 +150,21 @@ jobs:
       - name: Check, test and package APK
         if: steps.areas.outputs.android == 'true'
         run: make android-ci
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        if: ${{ env.RUN_EMULATOR == 'true' }}
-        with:
-          version: "0.13.1"
-      - name: Build the instrumented test APK
-        if: ${{ env.RUN_EMULATOR == 'true' }}
-        run: ./frontend/android/gradlew -p frontend/android --console=plain :app:assembleDebugAndroidTest
-      - name: Start disposable synthetic API for native integration
+      - name: Build and stage instrumented test APKs
         if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |
-          uv sync --frozen --project backend
-          bash scripts/ci_synthetic_api.sh start artifacts/android-synthetic-api.log
-      - name: Enable emulator acceleration
+          ./frontend/android/gradlew -p frontend/android --console=plain :app:assembleDebugAndroidTest
+          mkdir -p artifacts/test-apks
+          cp frontend/android/app/build/outputs/apk/debug/app-debug.apk artifacts/test-apks/
+          cp frontend/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk artifacts/test-apks/
+      - name: Upload instrumented test APKs
         if: ${{ env.RUN_EMULATOR == 'true' }}
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Native instrumented tests (shard 1 of 2)
-        if: ${{ env.RUN_EMULATOR == 'true' }}
-        # A single long emulator session can lose the emulator partway through the suite on
-        # memory-constrained hosts, which fails every remaining class as "not run". Each shard
-        # gets a fresh emulator and runs half the discovered classes; together they still cover
-        # every class exactly once.
-        timeout-minutes: 40
-        env:
-          ANDROID_TEST_SHARD_INDEX: "0"
-          ANDROID_TEST_SHARD_COUNT: "2"
-          ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          api-level: 35
-          # The app has no Play Services dependency; avoid Pixel Launcher's
-          # background ANR dialogs stealing focus during window-resize tests.
-          target: default
-          arch: x86_64
-          profile: pixel_2
-          cores: 2
-          ram-size: 4096M
-          # Use the supported SwiftShader mode. This suite only needs GLES.
-          emulator-options: &emulator-options -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
-          disable-animations: true
-          # The instrumented suite asserts Chinese copy, so pin the emulator to
-          # zh-CN. Restart the Android framework to apply it; rebooting the
-          # guest can shut down the emulator and disconnect adb entirely. Wait
-          # for the owner to unlock before installing APKs or accessing app data.
-          script: &instrumented-tests |
-            adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
-            timeout 60 adb wait-for-device
-            adb shell 'setprop persist.sys.locale zh-CN && stop && sleep 5 && start'
-            timeout 120 adb shell 'until am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && am get-config 2>/dev/null | grep -qE "zh-rCN|b[+]zh([+]Hans)?[+]CN"; do sleep 2; done'
-            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES --shard-index=$ANDROID_TEST_SHARD_INDEX --shard-count=$ANDROID_TEST_SHARD_COUNT --output artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX
-      - name: Native instrumented tests (shard 2 of 2)
-        if: ${{ env.RUN_EMULATOR == 'true' }}
-        timeout-minutes: 40
-        env:
-          ANDROID_TEST_SHARD_INDEX: "1"
-          ANDROID_TEST_SHARD_COUNT: "2"
-          ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
-        with:
-          api-level: 35
-          target: default
-          arch: x86_64
-          profile: pixel_2
-          cores: 2
-          ram-size: 4096M
-          emulator-options: *emulator-options
-          disable-animations: true
-          script: *instrumented-tests
-      - name: Stop synthetic API
-        if: ${{ always() && env.RUN_EMULATOR == 'true' }}
-        run: bash scripts/ci_synthetic_api.sh stop
+          name: android-instrumented-apks
+          path: artifacts/test-apks/*.apk
+          if-no-files-found: error
+          retention-days: 1
       - name: Remove temporary Dev signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/wildstring-dev.keystore"
@@ -252,12 +190,81 @@ jobs:
         with:
           name: android-test-reports
           path: |
+            frontend/android/build/reports/
+            frontend/android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  emulator:
+    needs: apk
+    if: ${{ inputs.run_emulator == true || github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON((inputs.test_classes || '') != '' && '[0]' || '[0, 1, 2, 3]') }}
+    env:
+      ANDROID_TEST_CLASSES: ${{ inputs.test_classes || '' }}
+      ANDROID_TEST_REPEAT: ${{ inputs.test_repeat || '1' }}
+      ANDROID_TEST_RETRIES: ${{ inputs.test_retries || '1' }}
+      ANDROID_TEST_ARGUMENTS: ${{ inputs.test_arguments || '' }}
+      ANDROID_TEST_SHARD_INDEX: ${{ matrix.shard }}
+      ANDROID_TEST_SHARD_COUNT: ${{ (inputs.test_classes || '') != '' && '1' || '4' }}
+      ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-instrumented-apks
+          path: artifacts/test-apks
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.1"
+      - name: Start disposable synthetic API for native integration
+        run: |
+          uv sync --frozen --project backend
+          bash scripts/ci_synthetic_api.sh start artifacts/android-synthetic-api.log
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Native instrumented tests (shard ${{ matrix.shard }})
+        timeout-minutes: 30
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          # The app has no Play Services dependency; avoid Pixel Launcher's
+          # background ANR dialogs stealing focus during window-resize tests.
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 4096M
+          # Use the supported SwiftShader mode. This suite only needs GLES.
+          emulator-options: -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          # Wait for boot completion, unlocked owner user, and PackageManager before
+          # installing APKs; WildStringTestRunner sets the test locale without restarting
+          # system_server.
+          script: |
+            timeout 120 adb wait-for-device
+            timeout 120 adb shell 'until [ "$(getprop sys.boot_completed)" = "1" ] && am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && pm path android >/dev/null 2>&1; do sleep 2; done'
+            python3 scripts/run_android_instrumented.py --app-apk artifacts/test-apks/app-debug.apk --test-apk artifacts/test-apks/app-debug-androidTest.apk --arg realBackend=http://10.0.2.2:19882/ --classes="$ANDROID_TEST_CLASSES" --repeat="$ANDROID_TEST_REPEAT" --retries="$ANDROID_TEST_RETRIES" --shard-index="$ANDROID_TEST_SHARD_INDEX" --shard-count="$ANDROID_TEST_SHARD_COUNT" --output "artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX"
+      - name: Stop synthetic API
+        if: always()
+        run: bash scripts/ci_synthetic_api.sh stop
+      - name: Upload shard reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-test-reports-shard-${{ matrix.shard }}
+          path: |
             artifacts/android-synthetic-api.log
             artifacts/android-synthetic-api-retry.log
             artifacts/android-instrumented/
-            frontend/android/build/reports/
-            frontend/android/app/build/reports/
-            frontend/android/app/build/outputs/androidTest-results/
-            frontend/android/app/build/outputs/connected_android_test_additional_output/
           if-no-files-found: ignore
           retention-days: 14
