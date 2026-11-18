@@ -1007,11 +1007,16 @@ for (const lateRead of [false, true]) {
     });
     let holdSave = true;
     let holdRead = true;
+    const writtenQueues: string[][] = [];
     await page.route('**/api/v1/podcasts/queue', async (route) => {
-      if (route.request().method() === 'PUT' && holdSave) {
-        holdSave = false;
-        saveStarted();
-        await saveGate;
+      if (route.request().method() === 'PUT') {
+        const { items } = route.request().postDataJSON();
+        writtenQueues.push(items.map((item: { episode_id: string }) => item.episode_id));
+        if (holdSave) {
+          holdSave = false;
+          saveStarted();
+          await saveGate;
+        }
       } else if (route.request().method() === 'GET' && holdRead) {
         holdRead = false;
         // Capture the real old server snapshot, rather than inventing a mock response.
@@ -1090,6 +1095,12 @@ for (const lateRead of [false, true]) {
         .getByRole('button', { name: '移除', exact: true })
         .click();
       await expect(titles).toHaveText([expected[1]]);
+      expect(writtenQueues).toEqual([
+        ['radio-6'],
+        ['radio-6', 'radio-4'],
+        ['radio-4', 'radio-6'],
+        ['radio-4'],
+      ]);
       await dialog.getByRole('button', { name: '关闭', exact: true }).click();
       await expect(dialog).toBeHidden();
     } finally {

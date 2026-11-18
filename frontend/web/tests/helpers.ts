@@ -42,7 +42,14 @@ export async function login(page: Page, options: { automaticSync?: boolean } = {
   await page.goto('/');
   await page.getByLabel('账号', { exact: true }).fill('admin');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
-  await page.getByRole('button', { name: '进入曲库' }).click();
+  const [signedIn] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/v1/auth/login') && response.request().method() === 'POST',
+    ),
+    page.getByRole('button', { name: '进入曲库' }).click(),
+  ]);
+  expect(signedIn.ok()).toBeTruthy();
   await expect(page.getByRole('table', { name: '歌曲列表' }).getByRole('row')).toHaveCount(3);
 }
 
