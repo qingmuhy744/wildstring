@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install Playwright Chromium and its Ubuntu libraries using cached browser
 # binaries (~/.cache/ms-playwright) and cached .deb archives (~/.cache/apt-archives),
-# falling back to network apt only when packages are missing.
+# relying solely on apt-get so incompatible .deb files are never force-unpacked.
 set -euo pipefail
 
 CACHE_DIR="${APT_ARCHIVE_CACHE:-$HOME/.cache/apt-archives}"
@@ -32,9 +32,13 @@ sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.
 
 if compgen -G "$CACHE_DIR/*.deb" >/dev/null; then
   sudo cp -n "$CACHE_DIR"/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-  sudo dpkg -i --skip-same-version "$CACHE_DIR"/*.deb >/dev/null 2>&1 || true
-  sudo apt-get install -f -y --no-install-recommends --no-download >/dev/null 2>&1 || true
-  if have_deps; then
+  mapfile -t missing < <(
+    npm --prefix frontend/web exec -- playwright install-deps --dry-run chromium 2>/dev/null \
+      | sed -n 's/^  \([a-z0-9][a-z0-9.+:-]*\)$/\1/p'
+  )
+  if [ "${#missing[@]}" -gt 0 ] \
+    && sudo apt-get install -y --no-install-recommends --no-download "${missing[@]}" \
+    && have_deps; then
     echo "Installed Playwright Chromium dependencies offline from cached .deb archives."
     save_cache
     exit 0

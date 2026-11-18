@@ -86,13 +86,19 @@ jobs:
           version: "0.13.1"
           enable-cache: true
           cache-dependency-glob: "backend/uv.lock"
+      - name: Read OS version
+        id: os
+        if: needs.changes.outputs.backend == 'true'
+        run: |
+          os_ver=$(. /etc/os-release && printf '%s' "${VERSION_ID:-unknown}")
+          echo "version=$os_ver" >> "$GITHUB_OUTPUT"
       - name: Cache apt packages
         if: needs.changes.outputs.backend == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-archives
-          key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
-          restore-keys: apt-audio-${{ runner.os }}-
+          key: apt-audio-${{ runner.os }}-${{ steps.os.outputs.version }}-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: apt-audio-${{ runner.os }}-${{ steps.os.outputs.version }}-
       - name: Install system dependencies for audio decoding
         if: needs.changes.outputs.backend == 'true'
         run: scripts/install_audio_deps.sh
@@ -131,28 +137,31 @@ jobs:
           python3 scripts/setup.py
           uv sync --frozen --project backend --extra community-sources
           npm --prefix frontend/web ci
-      - name: Read Playwright version
-        id: pw
+      - name: Read OS and Playwright versions
+        id: meta
         run: |
-          ver=$(node -p "require('./frontend/web/package-lock.json').packages['node_modules/@playwright/test'].version")
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          os_ver=$(. /etc/os-release && printf '%s' "${VERSION_ID:-unknown}")
+          pw_ver=$(node -p "require('./frontend/web/package-lock.json').packages['node_modules/@playwright/test'].version")
+          echo "os_version=$os_ver" >> "$GITHUB_OUTPUT"
+          echo "pw_version=$pw_ver" >> "$GITHUB_OUTPUT"
       - name: Cache apt packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-archives
-          key: apt-web-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ hashFiles('backend/pyproject.toml') }}
+          key: apt-web-${{ runner.os }}-${{ steps.meta.outputs.os_version }}-${{ steps.meta.outputs.pw_version }}-${{ hashFiles('backend/pyproject.toml') }}
           restore-keys: |
-            apt-web-${{ runner.os }}-${{ steps.pw.outputs.version }}-
-            apt-web-${{ runner.os }}-
-            apt-audio-${{ runner.os }}-
+            apt-web-${{ runner.os }}-${{ steps.meta.outputs.os_version }}-${{ steps.meta.outputs.pw_version }}-
+            apt-web-${{ runner.os }}-${{ steps.meta.outputs.os_version }}-
       - name: Install system dependencies for audio decoding
         run: scripts/install_audio_deps.sh
       - name: Cache Playwright browser
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-          restore-keys: playwright-${{ runner.os }}-
+          key: playwright-${{ runner.os }}-${{ steps.meta.outputs.os_version }}-${{ steps.meta.outputs.pw_version }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ steps.meta.outputs.os_version }}-
+            playwright-${{ runner.os }}-
       - name: Install Playwright Chromium and dependencies
         run: bash scripts/install_playwright_chromium.sh
       - name: Run Web E2E shard
