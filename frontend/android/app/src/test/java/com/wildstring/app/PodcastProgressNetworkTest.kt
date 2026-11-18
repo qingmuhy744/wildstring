@@ -233,8 +233,10 @@ class PodcastProgressNetworkTest {
     /** Replace only the hardware-backed key; SessionStore still encrypts and decrypts real credentials. */
     @Implements(value = SessionStore::class, isInAndroidSdk = false)
     class MemorySessionKey {
-        private val secret = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         @Implementation protected fun key(): SecretKey = secret
+        companion object {
+            private val secret: SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        }
     }
 
     @Test fun otherDeviceConflictStopsWritesUntilExplicitResumeTakeover() = ProgressFixture().use { fixture ->

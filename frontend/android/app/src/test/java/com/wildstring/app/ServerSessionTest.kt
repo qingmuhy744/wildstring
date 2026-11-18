@@ -1,5 +1,6 @@
 package com.wildstring.app
 
+import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.test.platform.app.InstrumentationRegistry
@@ -15,7 +16,17 @@ import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(
+    sdk = [37],
+    application = Application::class,
+    instrumentedPackages = ["com.wildstring.app.data.SessionStore"],
+    shadows = [PodcastProgressNetworkTest.MemorySessionKey::class],
+)
 class ServerSessionTest {
     private fun isolated(): Context {
         val original = InstrumentationRegistry.getInstrumentation().targetContext
@@ -76,7 +87,7 @@ class ServerSessionTest {
         val client = OkHttpClient.Builder().addInterceptor(OriginGuard({ session.endpoint }, profile = session::cacheScope, unauthorized = session::invalidate))
             .addInterceptor(ScopedSessionInterceptor(session::requestState, session::cookieFor, session::cookieFrom)).build()
         val cache = ClientCache(context, session, settings); val downloads = OfflineDownloads(context, session, client)
-        val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
+        val audio = ServerSessionTest::class.java.classLoader!!.getResourceAsStream("playback.mp3")!!.use { it.readBytes() }
         MockWebServer().use { a -> MockWebServer().use { b ->
             val dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = audioStreamFixture(request, audio, "audio/mpeg", "\"owner-original\"") }
             a.dispatcher = dispatcher; b.dispatcher = dispatcher; a.start(); b.start()
