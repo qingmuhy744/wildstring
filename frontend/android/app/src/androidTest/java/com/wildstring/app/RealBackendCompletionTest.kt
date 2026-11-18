@@ -26,8 +26,15 @@ class RealBackendCompletionTest {
         val endpoint = InstrumentationRegistry.getArguments().getString("realBackend")
         assumeTrue("Pass realBackend for an isolated synthetic server", endpoint != null)
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true) }
-        compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
+        val connection = compose.runOnIdle {
+            vm.repository.session.invalidate()
+            vm.settings.quality(0)
+            vm.sharing.mode("off")
+            vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true)
+        }
+        compose.waitUntil(20_000) {
+            connection.isCompleted && vm.state.value.connected && !vm.state.value.loading
+        }
         var step = "login"
         try {
             val api = vm.repository.api(); val repo = vm.repository
