@@ -2158,6 +2158,5 @@
     <string name="offline_confirm_body">所选歌曲将保存到此设备。</string>
     <string name="offline_download_count">下载 %1$,d 首</string>
     <string name="offline_save_selection">离线保存（%1$,d 首）</string>
-    <string name="track_selection_empty">当前列表没有可选择的歌曲。</string>
-    <string name="track_selection_unavailable">服务器暂时无法读取歌曲列表。</string>
+    <string name="catalog_select_all_tracks">全选当前列表</string>
 </resources>

@@ -38,7 +38,7 @@ class ContinuousCatalogTest {
     private val failAlbum = AtomicBoolean(false)
     private val multiDisc = AtomicBoolean(false)
 
-    private fun fixture(server: MockWebServer) {
+    private fun fixture(server: MockWebServer, selectionAdds: MutableList<String>? = null) {
         val login = AtomicBoolean(false)
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         server.dispatcher = object : Dispatcher() {
@@ -52,6 +52,12 @@ class ContinuousCatalogTest {
                     return json(mapOf("items" to items.drop(offset).take(limit), "total" to items.size, "limit" to limit, "offset" to offset))
                 }
                 return when {
+                    selectionAdds != null && path == "/api/v1/playlists" ->
+                        page(listOf(Playlist("selection-dest", "多选测试歌单", "manual", 1, 0, null)))
+                    selectionAdds != null && path == "/api/v1/playlists/selection-dest/tracks" && request.method == "POST" -> {
+                        selectionAdds.addAll(gson.fromJson(request.body.readUtf8(), AddTracks::class.java).trackIds)
+                        json(emptyMap<String, String>())
+                    }
                     path == "/api/v1/auth/status" -> json(mapOf("configured" to true, "authenticated" to login.get(), "user" to if (login.get()) Account("browse-user", "listener", "owner") else null))
                     path == "/api/v1/auth/login" -> { login.set(true); json(emptyMap<String, String>()).setHeader("Set-Cookie", "wildstring_session=browse-test; Path=/; HttpOnly") }
                     path == "/api/v1/browse-index" -> {
@@ -500,39 +506,61 @@ class ContinuousCatalogTest {
 
     @Test fun songSelectionConfirmsLargeOfflineRequestsBeforeEnqueue() {
         MockWebServer().use { server ->
-            fixture(server)
+            val added = CopyOnWriteArrayList<String>()
+            fixture(server, selectionAdds = added)
             val vm = connect(server)
             val downloads = vm.repository.downloads
             try {
                 compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }
                 ready(vm)
                 compose.onNodeWithTag("catalog-more").assertDoesNotExist()
-                capture("offline-songs-light.png")
-                compose.onNodeWithTag("catalog-item-0").performTouchInput { longClick() }
+                compose.onNodeWithTag("alphabet-M").performClick()
                 compose.waitUntil(10_000) {
-                    compose.onAllNodes(hasText(uiString(R.string.offline_save_selection, 1)) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithTag("track-title-110", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
                 }
-                capture("offline-selection-light.png")
-                compose.onNodeWithText(uiString(R.string.pl_tools_select_all)).performClick()
-                compose.onNodeWithText(uiString(R.string.offline_save_selection, 257)).performClick()
+                val first = compose.onNodeWithTag("catalog-item-110")
+                val before = first.fetchSemanticsNode().boundsInRoot
+                capture("inline-selection-before-light.png")
+                first.performTouchInput { longClick() }
+                first.assertIsOn()
+                assertEquals(before, first.fetchSemanticsNode().boundsInRoot)
+                capture("inline-selection-light.png")
+
+                compose.onNodeWithTag("alphabet-Z").performClick()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithTag("track-title-160", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                }
+                val later = compose.onNodeWithTag("catalog-item-160")
+                later.performClick().assertIsOn()
+                compose.onNodeWithText(uiString(R.string.pl_tools_selected_count, 2)).assertIsDisplayed()
+                val afterJump = later.fetchSemanticsNode().boundsInRoot
+                compose.onNodeWithTag("catalog-select-all").performClick()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithText(uiString(R.string.pl_tools_selected_count, 257)).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithTag("catalog-download-selection").performClick()
                 compose.onNodeWithText(uiString(R.string.offline_confirm_title, 257)).assertIsDisplayed()
                 assertTrue(downloads.entries.value.isEmpty())
-                capture("offline-confirm-light.png")
                 compose.onNodeWithText(uiString(R.string.cancel)).performClick()
                 assertTrue(downloads.entries.value.isEmpty())
+                later.assertIsOn()
+                assertEquals(afterJump, later.fetchSemanticsNode().boundsInRoot)
+                compose.onNodeWithTag("catalog-exit-selection").performClick()
+                assertEquals(afterJump, later.fetchSemanticsNode().boundsInRoot)
 
                 compose.runOnIdle { vm.settings.appearance("dark") }
-                capture("offline-songs-dark.png")
-                compose.onNodeWithTag("track-action-0").performClick()
+                compose.onNodeWithTag("track-action-160").performClick()
                 compose.onNodeWithText(uiString(R.string.track_select_multiple)).performScrollTo().performClick()
+                later.assertIsOn()
+                capture("inline-selection-dark.png")
+                compose.onNodeWithContentDescription(uiString(R.string.playlist_add)).performClick()
+                compose.onNodeWithText("多选测试歌单").performClick()
+                compose.waitUntil(10_000) { added == listOf("song-160") && !vm.state.value.loading }
+                compose.onNodeWithTag("catalog-select-all").performClick()
                 compose.waitUntil(10_000) {
-                    compose.onAllNodes(hasText(uiString(R.string.offline_save_selection, 1)) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithText(uiString(R.string.pl_tools_selected_count, 257)).fetchSemanticsNodes().isNotEmpty()
                 }
-                capture("offline-selection-dark.png")
-                compose.onNodeWithText(uiString(R.string.pl_tools_select_all)).performClick()
-                compose.onNodeWithText(uiString(R.string.offline_save_selection, 257)).performClick()
-                compose.onNodeWithText(uiString(R.string.offline_confirm_title, 257)).assertIsDisplayed()
-                capture("offline-confirm-dark.png")
+                compose.onNodeWithTag("catalog-download-selection").performClick()
                 compose.onNodeWithText(uiString(R.string.offline_download_count, 257)).performClick()
                 compose.waitUntil(15_000) { downloads.entries.value.size == 257 }
             } finally {

@@ -69,7 +69,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         "drafts" -> stringResource(R.string.playlist_drafts)
         "connections" -> stringResource(R.string.model_connections); "research" -> stringResource(R.string.settings_research); "channels" -> stringResource(R.string.settings_notifications)
         "external" -> stringResource(R.string.discover_new_music); "rankings" -> stringResource(R.string.listening_rankings); "daily" -> stringResource(R.string.daily_recommendations); "ai" -> stringResource(R.string.ai_music_playlists); "offline" -> stringResource(R.string.offline_save); "statistics" -> stringResource(R.string.listening_statistics); "devices" -> stringResource(R.string.settings_music_handoff)
-        "playlist" -> if (playlist == null) stringResource(R.string.playlist_new) else stringResource(R.string.playlist_edit); "order" -> stringResource(R.string.playlist_order); "multi" -> stringResource(R.string.track_select_multiple)
+        "playlist" -> if (playlist == null) stringResource(R.string.playlist_new) else stringResource(R.string.playlist_edit); "order" -> stringResource(R.string.playlist_order)
         "lyric-scans" -> stringResource(R.string.lyrics_scan); "gain" -> stringResource(R.string.playback_gain); "source-plugins" -> stringResource(R.string.source_zip_plugins); "management" -> stringResource(R.string.library_management); "album-edit" -> stringResource(R.string.album_edit)
         "metadata" -> stringResource(R.string.track_edit); "lyrics" -> stringResource(R.string.lyrics_edit); "suggestions" -> stringResource(R.string.metadata_suggestions); else -> stringResource(R.string.library_management)
     }
@@ -108,7 +108,6 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "devices" -> DevicesPanel(vm)
                         "playlist" -> PlaylistEditor(vm, playlist, dismiss)
                         "order" -> playlist?.let { PlaylistOrder(vm, it, dismiss) }
-                        "multi" -> MultiSelectPanel(vm, track?.id, dismiss)
                         "gain" -> track?.let { PlaybackGainPanel(vm, it) }
                         else -> if (account.account?.profile in listOf("owner", "librarian", "editor")) when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
@@ -147,12 +146,12 @@ internal val DONE_STATUS get() = AppLanguage.string(R.string.completed)
 internal class FeatureAction {
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
-    suspend fun run(errorMessage: (Exception) -> String = ::friendlyError, block: suspend () -> Unit) {
+    suspend fun run(block: suspend () -> Unit) {
         if (busy) return
         busy = true; message = PROCESSING_STATUS
         try { block(); if (message == PROCESSING_STATUS) message = DONE_STATUS }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { message = errorMessage(e) }
+        catch (e: Exception) { message = friendlyError(e) }
         finally { busy = false }
     }
 }

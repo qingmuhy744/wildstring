@@ -975,6 +975,8 @@ class MusicViewModel @Inject constructor(
         catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
         finally { mutable.update { it.copy(collecting = false) } }
     }
+    suspend fun collectTracksForSelection(): List<Track> = repository.collectionTracks(query())
+
     fun download(tracks: List<Track>) = viewModelScope.launch {
         val owner = repository.session.cacheScope() ?: return@launch
         requestOffline(tracks, owner)
