@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Latest release [v0.8.20](docs/releases/v0.8.20.md)** · Unifies podcast resume and cross-device bookmarks across all four clients, fixes self-conflicts on replay, Android start delays and Web queue races, and stabilizes artwork, queue actions and transport feedback. Dev APKs use a fixed signature; database schema remains 54.
+- **Version [v0.8.21](docs/releases/v0.8.21.md)** · Fixes Android UI freezes when saving large batches for offline use. The song list supports inline selection, with confirmation for manual requests that start or resume more than 100 tracks. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 

@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **正式版 [v0.8.20](docs/releases/v0.8.20.md)** · 统一四端播客暂停恢复、回退与跨设备接续，修复本机重播误报冲突、Android 起播卡顿与 Web 待播竞态；稳定封面、待播操作区和播放按钮反馈，Dev 包使用固定签名。数据库 schema 保持 54。
+- **版本 [v0.8.21](docs/releases/v0.8.21.md)** · 修复 Android 批量离线下载时的界面无响应。歌曲页支持原地多选，手动离线保存实际新增或恢复超过 100 首时先确认。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 
