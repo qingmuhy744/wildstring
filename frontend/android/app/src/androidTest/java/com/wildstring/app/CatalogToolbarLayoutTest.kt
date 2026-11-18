@@ -33,7 +33,6 @@ class CatalogToolbarLayoutTest {
     @get:Rule val compose = createComposeRule()
     private val state = mutableStateOf(MusicState(kind = "tracks", sort = "name", total = 28))
     private var played = 0
-    private var selected = false
 
     private fun show(width: Int, scale: Float = 1f) {
         var expectedPixels = 0
@@ -49,7 +48,7 @@ class CatalogToolbarLayoutTest {
                         Surface(Modifier.width(width.dp).testTag("toolbar-preview")) {
                             CatalogToolbar(state.value, play = { played++ }, sort = { state.value = state.value.copy(sort = it) },
                                 reverse = { state.value = state.value.copy(order = if (state.value.order == "asc") "desc" else "asc") },
-                                multi = { selected = true }, download = {}, edit = {}, order = {}, delete = {})
+                                multi = {}, download = {}, edit = {}, order = {}, delete = {})
                         }
                     }
                 }
@@ -73,7 +72,9 @@ class CatalogToolbarLayoutTest {
 
     private fun assertControlsInsideToolbar() {
         val parent = compose.onNodeWithTag("catalog-toolbar").getUnclippedBoundsInRoot()
-        for (tag in listOf("catalog-play-all", "catalog-count", "catalog-sort", "catalog-more")) {
+        val tags = listOf("catalog-play-all", "catalog-count", "catalog-sort") +
+            listOfNotNull("catalog-more".takeIf { state.value.collection != null })
+        for (tag in tags) {
             val node = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
             assertTrue("$tag left edge", node.left >= parent.left)
             assertTrue("$tag right edge", node.right <= parent.right)
@@ -111,12 +112,11 @@ class CatalogToolbarLayoutTest {
         compose.onNodeWithTag("catalog-sort").performClick()
         compose.onNodeWithTag("catalog-sort-order-desc").performClick()
         compose.runOnIdle { assertEquals("Selecting the current direction must not toggle it", "desc", state.value.order) }
-        compose.onNodeWithTag("catalog-more").performClick()
-        compose.onNodeWithText(uiString(R.string.multi_select_add)).performClick(); assertTrue(selected)
+        compose.onNodeWithTag("catalog-more").assertDoesNotExist()
     }
 
     @Test fun veryNarrowViewportUsesSecondRowRatherThanClippingCount() {
-        show(280)
+        show(240)
         assertCountIsComplete(); assertControlsInsideToolbar()
         val play = compose.onNodeWithTag("catalog-play-all").getUnclippedBoundsInRoot()
         val sort = compose.onNodeWithTag("catalog-sort").getUnclippedBoundsInRoot()

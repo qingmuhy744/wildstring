@@ -151,12 +151,23 @@ class MusicViewModel @Inject constructor(
         }
     }
 
+    data class OfflineConfirmation(
+        val count: Int,
+        internal val tracks: List<Track>,
+        internal val owner: String,
+        internal val catalogRevision: Long,
+    )
+    private val mutableOfflineConfirmation = MutableStateFlow<OfflineConfirmation?>(null)
+    val offlineConfirmation = mutableOfflineConfirmation.asStateFlow()
+    private val offlineRequestLock = kotlinx.coroutines.sync.Mutex()
+
     init {
         settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
         viewModelScope.launch { state.map { it.connected to it.account?.id }.distinctUntilChanged().collect { (connected, _) -> if (connected) refreshLibraries() } }
         viewModelScope.launch { podcastProgress.queueChanges.collect { podcastQueues.refresh() } }
         viewModelScope.launch { repository.libraryAccessChanges.collect { refreshLibraries(recheck = true) } }
-        viewModelScope.launch { repository.session.profiles.collect {
+        viewModelScope.launch { repository.session.profiles.collect { owner ->
+            mutableOfflineConfirmation.update { it?.takeIf { request -> request.owner == owner } }
             settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
             agent.reset(); podcastBrowser.reset(); podcastQueues.reset()
         } }
@@ -409,7 +420,9 @@ class MusicViewModel @Inject constructor(
                 }
             }
             repository.knownTracks.keys.removeAll(forbidden)
-            for (entry in repository.downloads.entries.value) if (!permitted(entry.track)) repository.downloads.remove(entry.track.id)
+            if (revoked || changed || forbidden.isNotEmpty()) mutableOfflineConfirmation.value = null
+            withContext(Dispatchers.IO) { repository.downloads.removeMatching(owner) { !permitted(it) } }
+            requireOwner(owner)
             mutable.update { it.copy(libraries = libraries, librariesSupported = true, selectedLibraryId = repository.selectedLibraryId) }
             if (revoked || changed || recheck || !old.librariesSupported) {
                 loadGeneration++; loadJob?.cancel(); albumNavigationJob?.cancel()
@@ -962,9 +975,57 @@ class MusicViewModel @Inject constructor(
         catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
         finally { mutable.update { it.copy(collecting = false) } }
     }
-    fun download(tracks: List<Track>): Boolean = runCatching {
-        repository.downloads.enqueue(tracks); startDownloads(); notify(AppLanguage.string(R.string.vm_download_task_enqueued)); true
-    }.getOrElse { error -> mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) }; false }
+    suspend fun collectTracksForSelection(): List<Track> = repository.collectionTracks(query())
+
+    fun download(tracks: List<Track>) = viewModelScope.launch {
+        val owner = repository.session.cacheScope() ?: return@launch
+        requestOffline(tracks, owner)
+    }
+
+    fun respondToOfflineConfirmation(confirmation: OfflineConfirmation, approved: Boolean) {
+        if (!mutableOfflineConfirmation.compareAndSet(confirmation, null) || !approved) return
+        viewModelScope.launch {
+            requestOffline(confirmation.tracks, confirmation.owner, confirmation.count, confirmation.catalogRevision)
+        }
+    }
+
+    private suspend fun requestOffline(
+        tracks: List<Track>, owner: String, confirmedCount: Int = 100,
+        catalogRevision: Long = repository.cache.catalogRevision,
+    ) {
+        if (!offlineRequestLock.tryLock()) return
+        try {
+            if (mutableOfflineConfirmation.value != null) return
+            requireOwner(owner)
+            val result = withContext(Dispatchers.IO) {
+                check(catalogRevision == repository.cache.catalogRevision) { AppLanguage.string(R.string.repo_catalog_updated) }
+                repository.downloads.enqueueManual(tracks, owner, confirmedCount)
+            }
+            requireOwner(owner)
+            when (result) {
+                is OfflineDownloads.ManualEnqueue.Confirm ->
+                    mutableOfflineConfirmation.value = OfflineConfirmation(result.count, tracks, owner, catalogRevision)
+                OfflineDownloads.ManualEnqueue.Submitted -> {
+                    startDownloads()
+                    notify(AppLanguage.string(R.string.vm_download_task_enqueued))
+                }
+                OfflineDownloads.ManualEnqueue.Unchanged -> Unit
+            }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
+        finally { offlineRequestLock.unlock() }
+    }
+
+    fun changeOfflineQueue(restart: Boolean = false, change: OfflineDownloads.(String) -> Unit) = viewModelScope.launch {
+        val owner = repository.session.cacheScope() ?: return@launch
+        try {
+            withContext(Dispatchers.IO) { repository.downloads.change(owner) }
+            requireOwner(owner)
+            if (restart && repository.downloads.entries.value.any { it.state == "queued" }) startDownloads()
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { notify(friendlyError(error)) }
+    }
+
     fun startDownloads() { ContextCompat.startForegroundService(context, android.content.Intent(context, com.wildstring.app.playback.DownloadService::class.java)) }
     suspend fun allPlaylists(): List<Playlist> {
         val owner = repository.session.cacheScope(); requireOwner(owner)
@@ -985,17 +1046,22 @@ class MusicViewModel @Inject constructor(
         if (!offlineSyncLock.tryLock()) return
         try {
             val owner = repository.session.cacheScope(); requireOwner(owner)
-            if (!repository.downloads.networkAllowed()) {
+            if (!withContext(Dispatchers.IO) { repository.downloads.networkAllowed() }) {
                 mutableOfflineSync.value = AppLanguage.string(R.string.vm_waiting_wifi); return
             }
-            repository.downloads.resumeNetworkWaiting()
-            val selected = repository.downloads.followedPlaylists()
+            val selected = withContext(Dispatchers.IO) {
+                requireOwner(owner)
+                repository.downloads.resumeNetworkWaiting()
+                repository.downloads.followedPlaylists()
+            }
             if (selected.isNotEmpty()) mutableOfflineSync.value = AppLanguage.string(R.string.vm_syncing_selected_playlists)
             for (id in selected) {
                 val tracks = try { repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = id)) }
                     catch (e: HttpException) { if (e.code() == 404) { requireOwner(owner); repository.downloads.followPlaylist(id, false); continue } else throw e }
                 requireOwner(owner)
-                if (id in repository.downloads.followedPlaylists()) repository.downloads.enqueue(tracks, automatic = true)
+                withContext(Dispatchers.IO) {
+                    if (id in repository.downloads.followedPlaylists()) repository.downloads.enqueue(tracks, automatic = true, requestScope = owner)
+                }
             }
             requireOwner(owner)
             if (repository.downloads.entries.value.any { it.state == "queued" }) startDownloads()
@@ -1007,7 +1073,8 @@ class MusicViewModel @Inject constructor(
     fun downloadCollection() = viewModelScope.launch {
         if (mutable.value.collecting) return@launch
         mutable.update { it.copy(collecting = true) }
-        try { download(repository.collectionTracks(query())) }
+        val owner = repository.session.cacheScope()
+        try { if (owner != null) requestOffline(repository.collectionTracks(query()), owner) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
         finally { mutable.update { it.copy(collecting = false) } }
@@ -1059,11 +1126,14 @@ class MusicViewModel @Inject constructor(
             return false
         }
         if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = AppLanguage.string(R.string.vm_queue_max_limit)) }; return false }
+        if (c.mediaItemCount == 0) {
+            play(tracks)
+            return true
+        }
         localPlaybackEpoch++
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val items = tracks.mediaItems(repository)
-        if (c.mediaItemCount == 0) play(tracks)
-        else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
+        if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
         else c.addMediaItems(items)
         return true
     }

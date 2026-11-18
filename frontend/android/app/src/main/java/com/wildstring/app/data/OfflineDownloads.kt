@@ -35,11 +35,23 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     private var activation: String? = null
     private val mutable = MutableStateFlow<List<OfflineEntry>>(emptyList())
     val entries = mutable.asStateFlow()
+    private var lookupSource: List<OfflineEntry> = emptyList()
+    private var lookup: Map<String, OfflineEntry> = emptyMap()
+
+    private fun entry(id: String): OfflineEntry? {
+        val items = mutable.value
+        if (lookupSource !== items) {
+            lookupSource = items
+            lookup = items.associateBy { it.track.id }
+        }
+        return lookup[id]
+    }
     private var active: Call? = null
     private var activeId: String? = null
     private var generation = 0L
     private val prefs = context.getSharedPreferences("offline-options", Context.MODE_PRIVATE)
-    private val personalPrefs get() = AccountPreferences.forAccount(context, "offline-options", session.activeServerId, session.account?.id, setOf("capacity_gb", "wifi_only", "download_bitrate"))
+    private val personalPrefs get() = AccountPreferences.forAccount(context, "offline-options", session.activeServerId,
+        session.account?.id, setOf("capacity_gb", "wifi_only", "download_bitrate"))
     var capacityGb: Int
         get() = personalPrefs.getInt("capacity_gb", 4).coerceIn(1, 64)
         set(value) { require(value in 1..64); personalPrefs.edit().putInt("capacity_gb", value).apply() }
@@ -117,43 +129,107 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         update(value)
     }
     @Synchronized fun switchScope() { ensureOwner() }
-    @Synchronized fun enqueue(tracks: List<Track>, automatic: Boolean = false) {
+    sealed interface ManualEnqueue {
+        data object Unchanged : ManualEnqueue
+        data object Submitted : ManualEnqueue
+        data class Confirm(val count: Int) : ManualEnqueue
+    }
+
+    /** Count and submit under the same lock so confirmations cannot race queue updates. */
+    @Synchronized fun enqueueManual(tracks: List<Track>, requestScope: String, confirmedCount: Int): ManualEnqueue {
+        ensureOwner()
+        requireActive(requestScope)
+        val incoming = tracks.distinctBy { it.id }
+        val existing = mutable.value.associate { it.track.id to it.state }
+        val ready = incoming.filter { existing[it.id] !in listOf("complete", "queued", "downloading") }
+        requireQueueCapacity(existing.keys, ready.map { it.id })
+        if (ready.size > confirmedCount) return ManualEnqueue.Confirm(ready.size)
+        if (ready.isEmpty()) return ManualEnqueue.Unchanged
+        enqueue(ready, requestScope = requestScope)
+        return ManualEnqueue.Submitted
+    }
+
+    private fun requireActive(requestScope: String?) {
+        if (requestScope != null && activation != requestScope) throw CancellationException(AppLanguage.string(R.string.off_dl_session_changed))
+    }
+
+    private fun requireQueueCapacity(existing: Set<String>, incoming: Collection<String>) {
+        require((existing + incoming).size <= 5000) { AppLanguage.string(R.string.off_dl_limit_exceeded) }
+    }
+
+    @Synchronized fun enqueue(tracks: List<Track>, automatic: Boolean = false, requestScope: String? = null) {
         check(ensureOwner() != null) { AppLanguage.string(R.string.off_dl_login_first) }
-        require((tracks.map { it.id } + mutable.value.map { it.track.id }).distinct().size <= 5000) { AppLanguage.string(R.string.off_dl_limit_exceeded) }
+        requireActive(requestScope)
         val previous = mutable.value.associateBy { it.track.id }
         val incoming = tracks.associateBy { it.id }
-        mutable.value = mutable.value.map { entry -> incoming[entry.track.id]?.let { track ->
+        requireQueueCapacity(previous.keys, incoming.keys)
+        val updated = mutable.value.map { entry -> incoming[entry.track.id]?.let { track ->
             if (entry.state in listOf("paused", "failed") && (!automatic || entry.error == AppLanguage.string(R.string.off_dl_waiting_wifi_auto_resume))) entry.copy(track = track, state = "queued", error = null) else entry.copy(track = track)
         } ?: entry }
-        mutable.value = (mutable.value + tracks.distinctBy { it.id }.filter { it.id !in previous }.map { OfflineEntry(it, bitrate = bitrate, automatic = automatic) })
-        persist()
+        val fresh = tracks.distinctBy { it.id }.filter { it.id !in previous }
+        val targetBitrate = if (fresh.isEmpty()) 0 else bitrate
+        val next = updated + fresh.map { OfflineEntry(it, bitrate = targetBitrate, automatic = automatic) }
+        if (next != mutable.value) {
+            mutable.value = next
+            persist()
+        }
     }
-    @Synchronized fun resume(id: String) {
+    @Synchronized fun resume(id: String, requestScope: String? = null) {
         ensureOwner()
+        requireActive(requestScope)
         mutable.value.firstOrNull { it.track.id == id && it.state != "complete" }?.let { update(it.copy(state = "queued", error = null)) }
     }
-    @Synchronized fun pause(id: String) {
+    @Synchronized fun pause(id: String, requestScope: String? = null) {
         ensureOwner()
+        requireActive(requestScope)
         mutable.value.firstOrNull { it.track.id == id && it.state in listOf("queued", "downloading") }?.let { update(it.copy(state = "paused")) }
         if (activeId == id) active?.cancel()
     }
-    @Synchronized fun pauseAll() {
-        ensureOwner(); generation++; active?.cancel()
-        mutable.value = mutable.value.map { if (it.state in listOf("queued", "downloading")) it.copy(state = "paused") else it }; persist()
+    @Synchronized fun pauseAll(requestScope: String? = null) {
+        ensureOwner()
+        requireActive(requestScope)
+        if (mutable.value.none { it.state == "queued" || it.state == "downloading" }) return
+        generation++
+        active?.cancel()
+        active = null
+        activeId = null
+        mutable.value = mutable.value.map { if (it.state == "queued" || it.state == "downloading") it.copy(state = "paused") else it }
+        persist()
     }
-    @Synchronized fun resumeAll() {
-        ensureOwner(); mutable.value = mutable.value.map { if (it.state in listOf("paused", "failed")) it.copy(state = "queued", error = null) else it }; persist()
+    @Synchronized fun resumeAll(requestScope: String? = null) {
+        ensureOwner()
+        requireActive(requestScope)
+        mutable.value = mutable.value.map { if (it.state in listOf("paused", "failed")) it.copy(state = "queued", error = null) else it }; persist()
     }
     @Synchronized fun resumeNetworkWaiting() {
         ensureOwner()
         if (!networkAllowed()) return
-        mutable.value = mutable.value.map { if (it.state == "paused" && it.error == AppLanguage.string(R.string.off_dl_waiting_wifi_auto_resume)) it.copy(state = "queued", error = null) else it }
-        persist()
+        val waiting = AppLanguage.string(R.string.off_dl_waiting_wifi_auto_resume)
+        val next = mutable.value.map { if (it.state == "paused" && it.error == waiting) it.copy(state = "queued", error = null) else it }
+        if (next != mutable.value) {
+            mutable.value = next
+            persist()
+        }
     }
-    @Synchronized fun remove(id: String) {
+    fun remove(id: String, requestScope: String? = null) = removeMatching(requestScope) { it.id == id }
+
+    @Synchronized fun removeMatching(requestScope: String? = null, matches: (Track) -> Boolean) {
         ensureOwner()
-        if (activeId == id) { generation++; active?.cancel() }
-        mutable.value = mutable.value.filter { it.track.id != id }; filename(id).delete(); filename(id, true).delete(); persist()
+        requireActive(requestScope)
+        val (removed, remaining) = mutable.value.partition { matches(it.track) }
+        if (removed.isEmpty()) return
+        mutable.value = remaining
+        if (removed.any { it.track.id == activeId }) {
+            generation++
+            active?.cancel()
+            active = null
+            activeId = null
+        }
+        for (entry in removed) {
+            filename(entry.track.id).delete()
+            filename(entry.track.id, true).delete()
+        }
+        persist()
     }
     @Synchronized fun refreshTrack(track: Track) {
         ensureOwner(); mutable.value.firstOrNull { it.track.id == track.id && it.track != track }?.let {
@@ -162,12 +238,12 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     }
     @Synchronized fun file(id: String): File? {
         if (ensureOwner() == null) return null
-        val entry = mutable.value.firstOrNull { it.track.id == id && it.state == "complete" } ?: return null
+        val entry = entry(id)?.takeIf { it.state == "complete" } ?: return null
         val file = filename(id)
         if (file.isFile && file.length() == entry.bytes) return file
         file.delete(); update(entry.copy(state = "failed", bytes = 0, total = 0, etag = null, error = AppLanguage.string(R.string.off_dl_local_file_incomplete))); return null
     }
-    @Synchronized fun track(id: String): Track? = if (file(id) != null) mutable.value.firstOrNull { it.track.id == id }?.track else null
+    @Synchronized fun track(id: String): Track? = if (file(id) != null) entry(id)?.track else null
     fun fileForStream(uri: String): File? {
         val base = session.endpoint ?: return null
         val target = uri.toHttpUrlOrNull() ?: return null
@@ -181,7 +257,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         val file = fileForStream(uri) ?: return null
         val profile = session.cacheScope() ?: return null
         val id = uri.toHttpUrlOrNull()?.pathSegments?.dropLast(1)?.lastOrNull() ?: return null
-        val expected = synchronized(this) { mutable.value.firstOrNull { it.track.id == id }?.let { it.sourceEtag ?: it.etag.takeIf { _ -> it.bitrate == 0 } } }
+        val expected = synchronized(this) { entry(id)?.let { it.sourceEtag ?: it.etag.takeIf { _ -> it.bitrate == 0 } } }
         try {
             val original = uri.toHttpUrlOrNull()!!.newBuilder().query(null).build()
             client.newCall(Request.Builder().url(original).tag(RequestOwner::class.java, RequestOwner(profile)).head().build()).execute().use { response ->
@@ -200,9 +276,11 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     fun formatForStream(uri: String): String? {
         val target = uri.toHttpUrlOrNull() ?: return null
         val id = target.pathSegments.dropLast(1).lastOrNull() ?: return null
-        return synchronized(this) { if (file(id) != null) mutable.value.firstOrNull { it.track.id == id }?.let { it.audioFormat ?: it.track.format } else null }
+        return synchronized(this) { if (file(id) != null) entry(id)?.let { it.audioFormat ?: it.track.format } else null }
     }
-    fun networkAllowed(): Boolean {
+    fun networkAllowed(): Boolean = networkAllowed(wifiOnly)
+
+    private fun networkAllowed(wifiOnly: Boolean): Boolean {
         if (!wifiOnly) return true
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
@@ -210,6 +288,8 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     }
     /** Called by the dataSync foreground service. A paused/interrupted file can resume with a validator. */
     suspend fun run(onProgress: (OfflineEntry) -> Unit) = withContext(Dispatchers.IO) {
+        var optionsScope: String? = null
+        var options: android.content.SharedPreferences? = null
         while (isActive) {
             val start = synchronized(this@OfflineDownloads) {
                 val current = ensureOwner() ?: return@withContext
@@ -219,21 +299,38 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
             val (profile, epoch, entry) = start.first
             val requestToken = start.second
             val id = entry.track.id
-            if (!networkAllowed()) {
+            if (optionsScope != requestToken) {
+                options = personalPrefs
+                optionsScope = requestToken
+            }
+            val activeOptions = checkNotNull(options)
+            if (!networkAllowed(activeOptions.getBoolean("wifi_only", true))) {
                 synchronized(this@OfflineDownloads) {
                     if (profile == ensureOwner() && epoch == generation && mutable.value.any { it.track.id == id && it.state == "queued" }) update(entry.copy(state = "paused", error = AppLanguage.string(R.string.off_dl_waiting_wifi_auto_resume)))
                 }
                 continue
             }
+            fun capacityBytes() = activeOptions.getInt("capacity_gb", 4).coerceIn(1, 64) * 1024L * 1024 * 1024
             var progress = entry.copy(state = "downloading", error = null)
             val part = filename(id, true, profile)
             try {
                 val base = session.endpoint ?: throw IOException(AppLanguage.string(R.string.off_dl_connection_expired))
                 val original = base.newBuilder().addPathSegments("api/v1/tracks").addPathSegment(id).addPathSegment("stream").build()
                 val target = PlaybackRequest.url(original.toString(), entry.bitrate)
-                if (entry.bitrate > 0) client.newCall(Request.Builder().url(original).tag(RequestOwner::class.java, RequestOwner(requestToken)).head().build()).execute().use { response ->
-                    if (!response.isSuccessful) throw IOException(AppLanguage.string(R.string.off_dl_verify_source_audio_failed))
-                    progress = progress.copy(sourceEtag = response.header("ETag"))
+                synchronized(this@OfflineDownloads) {
+                    updateCurrent(progress, profile, epoch, setOf("queued"))
+                    activeId = id
+                }
+                if (entry.bitrate > 0) {
+                    val checkSource = client.newCall(Request.Builder().url(original).tag(RequestOwner::class.java, RequestOwner(requestToken)).head().build())
+                    synchronized(this@OfflineDownloads) {
+                        if (profile != ensureOwner() || epoch != generation || mutable.value.none { it.track.id == id && it.state == "downloading" }) throw CancellationException()
+                        active = checkSource
+                    }
+                    checkSource.execute().use { response ->
+                        if (!response.isSuccessful) throw IOException(AppLanguage.string(R.string.off_dl_verify_source_audio_failed))
+                        progress = progress.copy(sourceEtag = response.header("ETag"))
+                    }
                 }
                 var offset = if (!entry.etag.isNullOrBlank()) part.length() else 0L
                 if (offset == 0L) part.delete()
@@ -243,7 +340,8 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                 val call = client.newCall(request)
                 synchronized(this@OfflineDownloads) {
                     if (profile != ensureOwner() || epoch != generation) return@withContext
-                    updateCurrent(progress, profile, epoch, setOf("queued")); active = call; activeId = id
+                    if (mutable.value.none { it.track.id == id && it.state == "downloading" }) throw CancellationException()
+                    active = call
                 }
                 call.execute().use { response ->
                     synchronized(this@OfflineDownloads) { if (profile != ensureOwner() || epoch != generation) { throw CancellationException(AppLanguage.string(R.string.off_dl_session_changed)) } }
@@ -264,7 +362,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                     val body = response.body
                     val expected = body.contentLength().takeIf { it >= 0 }?.plus(offset) ?: 0
                     val otherBytes = synchronized(this@OfflineDownloads) { mutable.value.filter { it.track.id != id }.sumOf { it.bytes } }
-                    require(expected == 0L || expected + otherBytes <= capacityGb * 1024L * 1024 * 1024) { AppLanguage.string(R.string.off_dl_capacity_exceeded) }
+                    require(expected == 0L || expected + otherBytes <= capacityBytes()) { AppLanguage.string(R.string.off_dl_capacity_exceeded) }
                     require(expected <= MAX_FILE_BYTES && (expected == 0L || expected - offset + RESERVE < root.usableSpace)) { AppLanguage.string(R.string.off_dl_storage_insufficient_or_too_large) }
                     progress = progress.copy(bytes = offset, total = expected, etag = response.header("ETag"),
                         audioFormat = if (response.header("X-Wildstring-Playback") == "transcode") "m4a" else entry.track.format)
@@ -278,7 +376,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                         body.byteStream().use { input ->
                             val bytes = ByteArray(64 * 1024)
                             var written = offset
-                            var last = 0L
+                            var last = android.os.SystemClock.elapsedRealtime()
                             while (true) {
                                 ensureActive()
                                 synchronized(this@OfflineDownloads) {
@@ -287,17 +385,17 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                                 val count = input.read(bytes)
                                 if (count < 0) break
                                 written += count
-                                if (written > MAX_FILE_BYTES || written + otherBytes > capacityGb * 1024L * 1024 * 1024 || root.usableSpace < RESERVE) throw IOException(AppLanguage.string(R.string.off_dl_storage_insufficient))
+                                if (written > MAX_FILE_BYTES || written + otherBytes > capacityBytes() || root.usableSpace < RESERVE) throw IOException(AppLanguage.string(R.string.off_dl_storage_insufficient))
                                 synchronized(this@OfflineDownloads) {
                                     if (profile != ensureOwner() || epoch != generation || mutable.value.none { it.track.id == id && it.state == "downloading" }) throw CancellationException(AppLanguage.string(R.string.off_dl_download_paused))
                                     output.write(bytes, 0, count)
                                 }
-                                if (System.currentTimeMillis() - last > 500) {
-                                    if (!networkAllowed()) {
+                                if (android.os.SystemClock.elapsedRealtime() - last > 500) {
+                                    if (!networkAllowed(activeOptions.getBoolean("wifi_only", true))) {
                                         synchronized(this@OfflineDownloads) { updateCurrent(progress.copy(state = "paused", bytes = written, error = AppLanguage.string(R.string.off_dl_waiting_wifi_auto_resume)), profile, epoch) }
                                         throw CancellationException(AppLanguage.string(R.string.off_dl_waiting_wifi_cancel))
                                     }
-                                    progress = progress.copy(bytes = written); synchronized(this@OfflineDownloads) { updateCurrent(progress, profile, epoch) }; onProgress(progress); last = System.currentTimeMillis()
+                                    progress = progress.copy(bytes = written); synchronized(this@OfflineDownloads) { updateCurrent(progress, profile, epoch) }; onProgress(progress); last = android.os.SystemClock.elapsedRealtime()
                                 }
                             }
                             if (written == 0L || (expected > 0 && written != expected)) throw IOException(AppLanguage.string(R.string.off_dl_file_incomplete_continue))

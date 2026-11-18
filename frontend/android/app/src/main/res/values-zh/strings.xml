@@ -2153,4 +2153,10 @@
     <string name="podcast_use_local_progress">用本机进度</string>
     <string name="podcast_resume_question">从保存的位置继续收听？</string>
     <string name="podcast_already_completed">已听完</string>
+    <string name="track_select_multiple">选择多首</string>
+    <string name="offline_confirm_title">下载 %1$,d 首歌曲？</string>
+    <string name="offline_confirm_body">所选歌曲将保存到此设备。</string>
+    <string name="offline_download_count">下载 %1$,d 首</string>
+    <string name="offline_save_selection">离线保存（%1$,d 首）</string>
+    <string name="catalog_select_all_tracks">全选当前列表</string>
 </resources>

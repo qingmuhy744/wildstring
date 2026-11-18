@@ -17,6 +17,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -445,8 +447,27 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var albumActions by remember { mutableStateOf<Album?>(null) }
     val playlistAction = remember { FeatureAction() }
     var actions by remember { mutableStateOf<Track?>(null) }
+    val offlineConfirmation by vm.offlineConfirmation.collectAsStateWithLifecycle()
+    var selectedTracks by remember(state.contentKey, state.server, state.account?.id) {
+        mutableStateOf<Map<String, Track>?>(null)
+    }
+    var selectionBusy by remember { mutableStateOf(false) }
+    var selectionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun exitTrackSelection() {
+        selectionJob?.cancel()
+        selectedTracks = null
+    }
+    fun selectTracks(track: Track? = null) {
+        if (selectedTracks == null) selectedTracks = emptyMap()
+        if (track != null) selectedTracks = selectedTracks.orEmpty() + (track.id to track)
+        actions = null
+    }
+    fun toggleTrackSelection(track: Track) {
+        val current = selectedTracks ?: return
+        selectedTracks = if (track.id in current) current - track.id else current + (track.id to track)
+    }
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
-    var albumPlaylistTracks by remember { mutableStateOf<List<Track>?>(null) }
+    var playlistTracksToAdd by remember { mutableStateOf<List<Track>?>(null) }
     var featureAlbumId by remember { mutableStateOf<String?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
     var createAndAddOpen by remember { mutableStateOf(false) }
@@ -632,8 +653,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             wasLandscapeWindow = landscapeWindow
             previousStyle = preferences.playbackStyle
         }
-        BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
-            when { queue -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false; expanded -> collapsePlayer(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+        LaunchedEffect(state.contentKey, state.server, state.account?.id) { selectionJob?.cancel() }
+        BackHandler(enabled = !settings && (expanded || queue || selectedTracks != null || state.canGoBack || state.tab != "search")) {
+            when { queue -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false; expanded -> collapsePlayer(); selectedTracks != null -> exitTrackSelection(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
@@ -649,8 +671,62 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     val showMiniPlayer = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                        topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null || rail)) CatalogTopBar(if (rail && state.tab == "podcast") state.copy(canGoBack = false) else state, vm::back, { settings = true }, compact = true, unread = unread,
-                            notifications = { feature = "notifications" }) },
+                        topBar = {
+                            val selection = selectedTracks
+                            if (selection != null) {
+                                Box {
+                                    TopAppBar(
+                                        title = { Text(stringResource(R.string.pl_tools_selected_count, selection.size),
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum")) },
+                                        navigationIcon = {
+                                            IconButton(::exitTrackSelection, Modifier.testTag("catalog-exit-selection")) {
+                                                Icon(Icons.Default.Close, stringResource(R.string.close))
+                                            }
+                                        },
+                                        actions = {
+                                            val ready = !selectionBusy
+                                            IconButton({
+                                                selectionBusy = true
+                                                selectionJob = scope.launch {
+                                                    try { selectedTracks = vm.collectTracksForSelection().associateBy { it.id } }
+                                                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                                    catch (e: Exception) { localError = friendlyError(e) }
+                                                    finally { selectionBusy = false }
+                                                }
+                                            }, Modifier.testTag("catalog-select-all"), enabled = ready && state.total > 0) {
+                                                Icon(Icons.Default.SelectAll, stringResource(R.string.catalog_select_all_tracks))
+                                            }
+                                            IconButton({
+                                                selectionBusy = true
+                                                selectionJob = scope.launch {
+                                                    try {
+                                                        val choices = vm.playlistsForAdd()
+                                                        playlistTracksToAdd = selection.values.toList()
+                                                        playlistChoices = choices
+                                                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                                    catch (e: Exception) { localError = friendlyError(e) }
+                                                    finally { selectionBusy = false }
+                                                }
+                                            }, enabled = ready && selection.isNotEmpty()) {
+                                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.playlist_add))
+                                            }
+                                            IconButton({ vm.download(selection.values.toList()) },
+                                                Modifier.testTag("catalog-download-selection"),
+                                                enabled = ready && selection.isNotEmpty()) {
+                                                Icon(Icons.Default.Download, stringResource(R.string.offline_save_selection, selection.size))
+                                            }
+                                        },
+                                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                                        windowInsets = WindowInsets(0, 0, 0, 0),
+                                    )
+                                    if (selectionBusy) LinearProgressIndicator(Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+                                }
+                            } else if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null || rail)) {
+                                CatalogTopBar(if (rail && state.tab == "podcast") state.copy(canGoBack = false) else state, vm::back,
+                                    { settings = true }, compact = true, unread = unread, notifications = { feature = "notifications" })
+                            }
+                        },
                         bottomBar = {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -751,7 +827,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     }
                                     if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
                                         play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
-                                        multi = { feature = "multi" }, download = { vm.downloadCollection() },
+                                        multi = { selectTracks() }, download = { vm.downloadCollection() },
                                         edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                         order = { featurePlaylist = state.activePlaylist; feature = "order" },
                                         delete = { deletingPlaylist = state.activePlaylist },
@@ -778,7 +854,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             albumActions = { albumActions = it })
                                         else CatalogBrowser(vm, state, header,
                                             play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                            actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                                            actions = { actions = it }, select = ::selectTracks, selectedIds = selectedTracks?.keys, selectionEnabled = !selectionBusy, toggleSelection = ::toggleTrackSelection, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
                                     }
                                 }
                             }
@@ -969,6 +1045,19 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, albumId = featureAlbumId, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null; featureAlbumId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }
+    offlineConfirmation?.let { request ->
+        AlertDialog(
+            onDismissRequest = { vm.respondToOfflineConfirmation(request, false) },
+            title = { Text(stringResource(R.string.offline_confirm_title, request.count)) },
+            text = { Text(stringResource(R.string.offline_confirm_body)) },
+            confirmButton = {
+                TextButton({ vm.respondToOfflineConfirmation(request, true) }) {
+                    Text(stringResource(R.string.offline_download_count, request.count))
+                }
+            },
+            dismissButton = { TextButton({ vm.respondToOfflineConfirmation(request, false) }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
         SongAction(stringResource(R.string.playlist_open), Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
@@ -988,7 +1077,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         onDismiss = { albumActions = null },
         onAddPlaylist = { tracks ->
             albumActions = null
-            albumPlaylistTracks = tracks
+            playlistTracksToAdd = tracks
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
         },
         onEdit = { albumActions = null; featureAlbumId = album.id; feature = "album-edit" },
@@ -1052,6 +1141,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
         }
         SongAction(stringResource(R.string.ws_app_offline_save), Icons.Default.Download) { vm.download(listOf(track)); actions = null }
+        if (state.kind in listOf("tracks", "recent")) {
+            SongAction(stringResource(R.string.track_select_multiple), Icons.AutoMirrored.Filled.QueueMusic) { selectTracks(track) }
+        }
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction(stringResource(R.string.playlist_remove_track), Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
         if (state.account?.profile in listOf("owner", "librarian", "editor")) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -1065,7 +1157,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         Spacer(Modifier.height(24.dp))
         }
     } }
-    playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null; albumPlaylistTracks = null }, title = { Text(stringResource(R.string.playlist_add)) }, text = {
+    playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null; playlistTracksToAdd = null }, title = { Text(stringResource(R.string.playlist_add)) }, text = {
         Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
             if (choices.isEmpty()) Text(stringResource(R.string.playlist_empty_hint), color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
             choices.forEach { p ->
@@ -1075,8 +1167,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = Muted) },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
-                        val selectedAlbumTracks = albumPlaylistTracks
-                        if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { albumPlaylistTracks = null; playlistChoices = null } }
+                        val selectedAlbumTracks = playlistTracksToAdd
+                        if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { playlistTracksToAdd = null; playlistChoices = null } }
                         else { feedback(TactileKind.Tap); chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }
                     },
                 )
@@ -1088,11 +1180,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.playlist_new))
         }
-    }, confirmButton = { TextButton({ playlistChoices = null; albumPlaylistTracks = null }) { Text(stringResource(R.string.close)) } }) }
+    }, confirmButton = { TextButton({ playlistChoices = null; playlistTracksToAdd = null }) { Text(stringResource(R.string.close)) } }) }
     if (createAndAddOpen) NameDialog(stringResource(R.string.playlist_create_add), "", { createAndAddOpen = false }) { name ->
         createAndAddOpen = false
-        val tracksToAdd = albumPlaylistTracks ?: listOfNotNull(chooseTrack)
-        albumPlaylistTracks = null; playlistChoices = null
+        val tracksToAdd = playlistTracksToAdd ?: listOfNotNull(chooseTrack)
+        playlistTracksToAdd = null; playlistChoices = null
         scope.launch { try { vm.createPlaylistAndAdd(name, tracksToAdd) } catch (e: Exception) { localError = friendlyError(e) } }
     }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text(stringResource(R.string.close)) } }) }
@@ -1228,7 +1320,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
 @Composable
-internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false) {
+internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false, select: (() -> Unit)? = null, checked: Boolean? = null, selectionEnabled: Boolean = true, toggle: () -> Unit = {}) {
     val current = state.current?.id == track.id
     val album = state.collection == "albums" || state.albumFilter != null
     val size = LocalSongListSize.current
@@ -1238,9 +1330,15 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         "last_played_at" -> track.lastPlayedAt?.take(10)
         else -> null
     }
+    val interaction = if (checked != null) Modifier.toggleable(checked, enabled = selectionEnabled, role = Role.Checkbox, onValueChange = { toggle() })
+        else Modifier.semantics { selected = current }.combinedClickable(
+            onClick = tactile(play),
+            onLongClickLabel = select?.let { stringResource(R.string.track_select_multiple) },
+            onLongClick = select,
+        )
     Row(Modifier.fillMaxWidth().heightIn(min = size.rowDp.dp).testTag("catalog-item-$index")
-        .background(if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-        .semantics { selected = current }.clickable(onClick = tactile(play))
+        .background(if (current || checked == true) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+        .then(interaction)
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (current) Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(1.5.dp)).background(MaterialTheme.colorScheme.primary).padding(end = 6.dp))
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
@@ -1257,25 +1355,28 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (columns) {
-            TrackMetadataColumns(vm, track, "track", index.toString())
+            TrackMetadataColumns(vm, track, "track", index.toString(), select, selectionMode = checked != null)
             Text(formatTime(track.durationMs), Modifier.width(52.dp).testTag("track-duration-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"), textAlign = TextAlign.End)
         }
         if (current) Icon(Icons.Default.GraphicEq, null, Modifier.size(18.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
-        IconButton(actions, Modifier.size(48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (checked != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Checkbox(checked, null) }
+        else IconButton(actions, Modifier.size(48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
 @Composable
-internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tagPrefix: String, index: String) {
+internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tagPrefix: String, index: String, select: (() -> Unit)? = null, selectionMode: Boolean = false) {
     var artistMenu by remember(track.id) { mutableStateOf(false) }
     val artists = track.artists.filter { it.isNotBlank() }
     val artistLabel = stringResource(R.string.open_artist_named, track.artist)
+    val selectLabel = select?.let { stringResource(R.string.track_select_multiple) }
     Box(Modifier.weight(1.4f)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("$tagPrefix-artist-$index")
-            .clickable(enabled = artists.isNotEmpty(), role = Role.Button) {
-                if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true
-            }.semantics { contentDescription = artistLabel }.padding(end = 12.dp),
+            .then(if (selectionMode) Modifier else Modifier.combinedClickable(enabled = artists.isNotEmpty(), role = Role.Button,
+                onLongClick = select, onLongClickLabel = selectLabel,
+                onClick = { if (artists.size == 1) vm.openArtistName(artists.single()) else artistMenu = true }
+            )).semantics { contentDescription = artistLabel }.padding(end = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (artists.isNotEmpty()) Icon(Icons.Default.Person, null, Modifier.size(18.dp), tint = Muted)
             Text(track.artist, color = Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1289,7 +1390,8 @@ internal fun RowScope.TrackMetadataColumns(vm: MusicViewModel, track: Track, tag
     }
     val albumLabel = listOfNotNull(stringResource(R.string.open_album), track.album?.takeIf { it.isNotBlank() }).joinToString(" · ")
     Row(Modifier.weight(1.7f).heightIn(min = 48.dp).testTag("$tagPrefix-album-$index")
-        .clickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button) { vm.openTrackAlbum(track) }
+        .then(if (selectionMode) Modifier else Modifier.combinedClickable(enabled = !track.album.isNullOrBlank() || !track.albumId.isNullOrBlank(), role = Role.Button,
+            onLongClick = select, onLongClickLabel = selectLabel, onClick = { vm.openTrackAlbum(track) }))
         .semantics { contentDescription = albumLabel }.padding(end = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!track.album.isNullOrBlank() || !track.albumId.isNullOrBlank()) Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = Muted)
@@ -1302,6 +1404,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
     download: () -> Unit, edit: () -> Unit, order: () -> Unit, delete: () -> Unit,
     albumLyrics: (() -> Unit)? = null, albumRefresh: (() -> Unit)? = null) {
     var more by remember { mutableStateOf(false) }
+    val showMore = state.collection != null || state.albumFilter != null || albumLyrics != null || albumRefresh != null
     BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp).testTag("catalog-toolbar")) {
         // Measure the current labels with the actual font scale. Use one row
         // whenever all controls and the full count fit, including the rail gutter.
@@ -1315,7 +1418,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
         val sortContext = catalogSortContext(state.kind, state.collection, state.albumFilter)
         val sortLabel = sortContext?.let { stringResource(catalogSortLabel(state.sort, it)) }
         val requiredWidth = maxOf(64.dp, textWidth(playLabel, MaterialTheme.typography.labelLarge) + 50.dp) +
-            textWidth(countLabel, MaterialTheme.typography.labelMedium) + 8.dp + 48.dp + 8.dp +
+            textWidth(countLabel, MaterialTheme.typography.labelMedium) + (if (showMore) 64.dp else 16.dp) +
             (if (state.collection != "playlists" && sortLabel != null) maxOf(64.dp, textWidth(sortLabel, MaterialTheme.typography.labelLarge) + 36.dp) else 0.dp)
         val stacked = maxWidth < requiredWidth
         val playback: @Composable RowScope.() -> Unit = {
@@ -1328,7 +1431,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
         }
         val actions: @Composable RowScope.() -> Unit = {
             if (state.collection != "playlists") CatalogSortControls(state, sort, reverse, if (stacked) Modifier.weight(1f) else Modifier)
-            Box {
+            if (showMore) Box {
                 IconButton({ more = true }, Modifier.testTag("catalog-more")) { Icon(Icons.Default.MoreVert, stringResource(R.string.list_actions)) }
                 DropdownMenu(more, { more = false }) {
                     albumLyrics?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.lyrics_scan)) }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { more = false; open() }) }

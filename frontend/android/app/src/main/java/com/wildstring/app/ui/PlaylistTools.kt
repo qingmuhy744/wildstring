@@ -5,8 +5,6 @@ import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -88,43 +86,4 @@ internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -
                 }, onHaptic = feedback, allowRemove = !action.busy, title = stringResource(R.string.pl_tools_drag_to_reorder))
         Button({ scope.launch { action.run { vm.reorderPlaylist(record, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pl_tools_save_order)) }
     }
-}
-
-@Composable
-internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
-    val original = remember { vm.state.value }
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var selected by remember { mutableStateOf(setOf<String>()) }
-    var choices by remember { mutableStateOf<List<Playlist>?>(null) }
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { action.run {
-        tracks = vm.repository.collectionTracks(CatalogQuery(original.tab, original.kind, original.title, original.query, collection = original.collection,
-            collectionId = original.collectionId, playlist = original.activePlaylist, role = original.role, sort = original.sort, albumFilter = original.albumFilter))
-    } }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        ActionStatus(action)
-        Row { TextButton({ selected = tracks.map { it.id }.toSet() }) { Text(stringResource(R.string.pl_tools_select_all)) }; TextButton({ selected = emptySet() }) { Text(stringResource(R.string.pl_tools_clear_selection)) }; Text(stringResource(R.string.pl_tools_selected_count, selected.size), Modifier.padding(12.dp)) }
-        if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
-        else LazyColumn(Modifier.weight(1f)) { items(tracks, key = { it.id }) { track ->
-            Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(track.id in selected, null); Column(Modifier.padding(12.dp)) { Text(track.title); Text(track.artist, style = MaterialTheme.typography.bodySmall) }
-            }
-        } }
-        Button({ scope.launch { action.run { choices = vm.playlistsForAdd() } } }, enabled = !action.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pl_tools_add_to_playlist)) }
-    }
-    choices?.let { playlists -> AlertDialog(onDismissRequest = { choices = null }, title = { Text(stringResource(R.string.pl_tools_choose_playlist_title)) }, text = {
-        Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            if (playlists.isEmpty()) Text(stringResource(R.string.pl_tools_create_manual_first))
-            playlists.forEach { item ->
-                ListItem(
-                    headlineContent = { Text(item.name) },
-                    supportingContent = { Text(stringResource(R.string.pl_tools_track_count, item.trackCount)) },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !action.busy) {
-                        scope.launch { action.run { vm.addTracksToPlaylist(tracks.filter { it.id in selected }, item); choices = null; dismiss() } }
-                    },
-                )
-            }
-        }
-    }, confirmButton = { TextButton({ choices = null }) { Text(stringResource(R.string.pl_tools_close)) } }) }
 }
