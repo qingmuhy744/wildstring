@@ -27,7 +27,7 @@
 | L0 | 文档、注释、不触及 UI 与逻辑的重构 | `make check` |
 | L1 | 单个页面或组件的文案、样式、交互 | L0 + `make test-affected`（或 `make test-affected-desktop`）；渲染受影响页面的桌面与 390px 手机宽度，浅深主题各一次，逐张查看截图；走通该页相关的关键路径 |
 | L2 | 共享样式、令牌、共享组件、导航与播放器 | L1 + 用 `git grep` 找出使用该类名／组件的全部页面并逐一核对；覆盖正常、空、加载、错误、权限不足状态，窄屏、宽屏、浅深主题及长文案；走通播放、切页、返回 |
-| L3 | 发布、依赖升级、跨端改动 | L2 + `make ci`，并按范围补充 `make android-ci`、`make macos-test`、`make ios-test`、`make test-native-plugin`；容器验证用 `make docker-up docker-smoke`；打标签前，待发布的 main 提交必须先通过手动触发的 **Android APK** 完整设备回归（`run_emulator=true`，`test_classes` 留空），修复后在最终提交上重新通过 |
+| L3 | 发布、依赖升级、跨端改动 | L2 + `make ci`，并按范围补充 `make android-ci`、`make macos-test`、`make ios-test`、`make test-native-plugin`；容器验证用 `make docker-up docker-smoke`；打标签前确认待发布的 main 提交已通过主线常规 CI；推送标签后由 Release 工作流自动对比上一版本标签，在存在功能性 Android 改动时并行执行完整设备回归，并始终构建和安装验证正式版 R8 APK |
 
 - 视觉验收：UI 改动（L1 起）必须实际渲染并逐张查看截图，检查按钮间距、对齐、非预期换行、遮挡、溢出、重复信息和异常留白，发现问题后修复并复查。构建、类型检查和自动化功能测试不能替代视觉验收；无法渲染时明确报告验证缺口，不宣称视觉验收通过。
 - Web 截图由 CI 生成：Web E2E 任务上传附件 `browser-visual-evidence`（桌面与手机、浅深主题），任务摘要里有下载链接。本地无法渲染时可下载该附件，逐张查看受影响页面，并写明看了哪些截图、哪些状态没有截到。原生端没有 CI 截图，仍需本地设备或模拟器。
@@ -38,10 +38,10 @@
 ## 4. 环境与命令
 
 - Python 使用 3.12 和 `backend/uv.lock`；Web 与插件运行时使用 Node 22 与对应 `package-lock.json`；Android 使用 JDK 21；macOS / iOS 使用 XcodeGen（`project.yml`）。开发入口统一放入 `Makefile`。
-- 初始化用 `make setup`，日常改动自检用 `make check` 与 `make test-affected`（或 `make test-affected-desktop`），全量检查用 `make ci`。
+- 初始化用 `make setup`，日常改动本机自检用 `make check` 与 `make test-affected`（或 `make test-affected-desktop`），全量回归交由云端 CI 并行跑完（需要本地全量验证时仍可运行 `make ci`）。
 - 本地开发、导入扫描、容器、备份与 TLS 入口见 `docs/development.md`；命令与参数以 `Makefile` 为准。
 - 本地 Android 模拟器测试基准保持极简的两套标准形态（Phone: 1080×1920，Pad: 2560×1600），配置与启动时必须开启物理键盘输入（`hw.keyboard = yes`），确保在 Android Studio 内嵌窗口与独立窗口中均可直接使用电脑键盘输入。
-- Android CI 保持快速反馈：普通 push / pull_request 只执行构建、静态检查和单元测试，不自动启动模拟器。保留既有每周定时模拟器回归和 Release 流程中的自动设备回归、正式包安装冒烟；打标签前必须按 §3 手动通过 `run_emulator=true` 的完整设备回归。调整模拟器资源时保持该触发策略，不将模拟器测试加入常规 CI，也不把常规 CI 通过当作设备回归通过。
+- Android CI 保持快速反馈：普通 push / pull_request 只执行构建、静态检查和单元测试，不自动启动模拟器。保留既有每周定时模拟器回归和 Release 流程中按功能性 Android 改动范围自动触发的并行设备回归、正式包安装冒烟；调整模拟器资源时保持该触发策略，不将模拟器测试加入常规 CI，也不把常规 CI 通过当作设备回归通过。
 - 修改依赖后更新对应锁文件；Gradle 的 `verification-metadata.xml` 在 macOS 上生成时不含 linux 变体（如 aapt2）校验，Android 升级依赖后需从官方 Maven 补齐 linux 条目再推送。
 - Python 使用 Ruff 与 Bandit；pre-commit 工具复用 uv 锁文件，不另维护一套 hook 版本。
 

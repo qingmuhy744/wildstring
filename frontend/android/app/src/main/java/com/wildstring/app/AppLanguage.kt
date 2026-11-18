@@ -23,6 +23,7 @@ object AppLanguage {
     private const val PREFS = "wildstring-language"
     private const val KEY = "language"
     @Volatile private var appContext: Context? = null
+    @Volatile var testAutoLocaleTag: String = ""
 
     fun install(context: Context) {
         appContext = context.applicationContext ?: context
@@ -30,7 +31,7 @@ object AppLanguage {
 
     fun normalize(preference: String?): String = when (preference) { "zh", "en" -> preference; else -> "auto" }
 
-    private fun tag(preference: String): String = if (preference == "auto") "" else preference
+    private fun tag(preference: String): String = if (preference == "auto") testAutoLocaleTag else preference
 
     /** Returns true when the visible language changed and the activity is being recreated. */
     fun apply(activity: Activity, preference: String?): Boolean {

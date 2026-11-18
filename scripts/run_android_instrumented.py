@@ -30,7 +30,7 @@ DEFAULT_APP_APK = APK_DIR / "debug/app-debug.apk"
 DEFAULT_TEST_APK = APK_DIR / "androidTest/debug/app-debug-androidTest.apk"
 DEFAULT_OUTPUT = ROOT / "artifacts/android-instrumented"
 TEST_PACKAGE_PREFIX = "com.wildstring.app."
-RUNNER = "androidx.test.runner.AndroidJUnitRunner"
+RUNNER = "com.wildstring.app.WildStringTestRunner"
 STATUS_PREFIX = "INSTRUMENTATION_STATUS: "
 STATUS_CODE_PREFIX = "INSTRUMENTATION_STATUS_CODE: "
 RESULT_PREFIX = "INSTRUMENTATION_RESULT: "
@@ -512,6 +512,17 @@ def main() -> None:
                 raise SystemExit(f"Missing APK {apk}; build :app:assembleDebugAndroidTest first")
             # -g matches connectedAndroidTest, which grants runtime permissions on install.
             adb("install", "-r", "-t", "-g", str(apk), timeout=600)
+    adb(
+        "shell",
+        "cmd",
+        "locale",
+        "set-app-locales",
+        options.app_package,
+        "--locales",
+        "zh",
+        timeout=30,
+        check=False,
+    )
     classes = select(discover(options.runner, options.extras), options.classes)
     classes = shard(classes, options.shard_index, options.shard_count)
     if not classes:

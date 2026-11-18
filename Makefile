@@ -8,6 +8,7 @@ PROJECT ?= wildstring
 TEST_RUNTIME_IMAGE ?= wildstring:dev
 TEST_BUILDER_IMAGE ?= wildstring-builder:dev
 TEST_IMAGE ?= wildstring-tests:dev
+SKIP_RUNTIME_BUILD ?= 0
 LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
 PYTEST_ARGS ?=
@@ -277,7 +278,7 @@ docker-up: docker-build ## Build and start the local container; wait for health
 	$(DOCKER) up -d --no-build --wait --wait-timeout 60
 
 docker-test: env ## Run all backend tests with the container FFmpeg
-	WILDSTRING_IMAGE=$(TEST_RUNTIME_IMAGE) $(DOCKER) build
+	if [ "$(SKIP_RUNTIME_BUILD)" != "1" ]; then WILDSTRING_IMAGE=$(TEST_RUNTIME_IMAGE) $(DOCKER) build; fi
 	docker build --target builder -f deploy/Dockerfile --build-arg HTTP_PROXY="$(DOCKER_HTTP_PROXY)" --build-arg HTTPS_PROXY="$(DOCKER_HTTPS_PROXY)" -t $(TEST_BUILDER_IMAGE) .
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml build tests
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests

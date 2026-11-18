@@ -192,7 +192,7 @@ jobs:
         run: make docker-up docker-smoke
       - name: Run the backend suite with the container FFmpeg
         if: needs.changes.outputs.backend == 'true'
-        run: make docker-test
+        run: make docker-test SKIP_RUNTIME_BUILD=1
       - if: failure() && needs.changes.outputs.backend == 'true'
         run: make docker-logs LOG_ARGS='--tail=200'
       - if: always() && needs.changes.outputs.backend == 'true'
