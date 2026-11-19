@@ -282,9 +282,9 @@ class MusicViewModel @Inject constructor(
         invalidationMessage = null
         loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear(); pendingPodcastFavorites.value = emptySet(); podcastFavoriteOverrides.value = emptyMap()
         loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear()
-        repository.client.dispatcher.cancelAll(); repository.downloads.pauseAll(); sleep.cancel()
+        repository.client.dispatcher.cancelAll(); sleep.cancel()
         controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
-        withContext(Dispatchers.IO) { repository.database.queue().clear() }
+        withContext(Dispatchers.IO) { repository.downloads.awaitPendingPause(); repository.downloads.pauseAll(); repository.database.queue().clear() }
         if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
         imageLoader.memoryCache?.clear()
     }
@@ -911,21 +911,46 @@ class MusicViewModel @Inject constructor(
         }
         if (latest.version != saved.version) throw IOException(AppLanguage.string(R.string.vm_other_device_updated))
         check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { AppLanguage.string(R.string.vm_local_playback_changed) }
+        val items = withContext(Dispatchers.IO) { tracks.mediaItems(repository) }
+        requireOwner(owner)
+        check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { AppLanguage.string(R.string.vm_local_playback_changed) }
+        if (!playPrepared(tracks, saved.index - start, false, saved.positionMs, false, items)) return@withContext
         sharing.pauseOffered(saved)
         sharing.acceptRemote(saved.version)
-        play(tracks, saved.index - start, autoplay = false, positionMs = saved.positionMs)
         controller?.shuffleModeEnabled = saved.mode == "shuffle"
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
     }
     fun play(tracks: List<Track>, index: Int? = null, autoplay: Boolean = true, positionMs: Long? = null, preserveQueue: Boolean = false) {
+        val batch: List<Track>
+        val selected: Int?
+        val heart: HeartBatch?
         if (!preserveQueue && tracks.size > MUSIC_QUEUE_LIMIT && tracks.none { it.isPodcast }) {
             val first = index ?: tracks.indexOfFirst { it.isAvailable }.coerceAtLeast(0)
             if (first !in tracks.indices) return
-            val batch = tracks.subList(first, minOf(first + MUSIC_QUEUE_LIMIT, tracks.size))
-            playPrepared(batch, 0, autoplay, positionMs, false, batch.mediaItems(repository, HeartBatch(repository.selectedLibraryId)))
-            return
+            batch = tracks.subList(first, minOf(first + MUSIC_QUEUE_LIMIT, tracks.size)).toList()
+            selected = 0
+            heart = HeartBatch(repository.selectedLibraryId)
+        } else {
+            batch = tracks.toList()
+            selected = index
+            heart = null
         }
-        playPrepared(tracks, index, autoplay, positionMs, preserveQueue, null)
+        val owner = repository.session.cacheScope()
+        val library = repository.selectedLibraryId
+        val c = controller ?: return
+        val epoch = ++localPlaybackEpoch
+        viewModelScope.launch {
+            try {
+                val items = withContext(Dispatchers.IO) { batch.mediaItems(repository, heart) }
+                if (owner == null || owner != repository.session.cacheScope() || library != repository.selectedLibraryId ||
+                    epoch != localPlaybackEpoch || c !== controller) return@launch
+                playPrepared(batch, selected, autoplay, positionMs, preserveQueue, items)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == localPlaybackEpoch && owner == repository.session.cacheScope())
+                    mutable.update { it.copy(error = friendlyError(error)) }
+            }
+        }
     }
 
     private fun playPrepared(tracks: List<Track>, index: Int?, autoplay: Boolean, positionMs: Long?, preserveQueue: Boolean, preparedItems: List<MediaItem>?): Boolean {
@@ -1087,6 +1112,7 @@ class MusicViewModel @Inject constructor(
         try {
             if (mutableOfflineConfirmation.value != null) return
             requireOwner(owner)
+            repository.downloads.awaitPendingPause()
             val result = withContext(Dispatchers.IO) {
                 check(catalogRevision == repository.cache.catalogRevision) { AppLanguage.string(R.string.repo_catalog_updated) }
                 repository.downloads.enqueueManual(tracks, owner, confirmedCount)
@@ -1109,6 +1135,7 @@ class MusicViewModel @Inject constructor(
     fun changeOfflineQueue(restart: Boolean = false, change: OfflineDownloads.(String) -> Unit) = viewModelScope.launch {
         val owner = repository.session.cacheScope() ?: return@launch
         try {
+            repository.downloads.awaitPendingPause()
             withContext(Dispatchers.IO) { repository.downloads.change(owner) }
             requireOwner(owner)
             if (restart && repository.downloads.entries.value.any { it.state == "queued" }) startDownloads()
@@ -1127,15 +1154,18 @@ class MusicViewModel @Inject constructor(
         }
         return result
     }
-    fun followPlaylist(playlist: Playlist, enabled: Boolean) {
-        repository.downloads.followPlaylist(playlist.id, enabled)
+    fun followPlaylist(playlist: Playlist, enabled: Boolean) = viewModelScope.launch {
+        val owner = repository.session.cacheScope() ?: return@launch
+        withContext(Dispatchers.IO) { repository.downloads.followPlaylist(playlist.id, enabled, owner) }
+        requireOwner(owner)
         notify(if (enabled) AppLanguage.string(R.string.vm_auto_download_enabled) else AppLanguage.string(R.string.vm_auto_download_disabled))
-        viewModelScope.launch { runCatching { syncOfflinePlaylists() } }
+        runCatching { syncOfflinePlaylists() }
     }
     suspend fun syncOfflinePlaylists() {
         if (!offlineSyncLock.tryLock()) return
         try {
             val owner = repository.session.cacheScope(); requireOwner(owner)
+            repository.downloads.awaitPendingPause()
             if (!withContext(Dispatchers.IO) { repository.downloads.networkAllowed() }) {
                 mutableOfflineSync.value = AppLanguage.string(R.string.vm_waiting_wifi); return
             }
@@ -1147,7 +1177,7 @@ class MusicViewModel @Inject constructor(
             if (selected.isNotEmpty()) mutableOfflineSync.value = AppLanguage.string(R.string.vm_syncing_selected_playlists)
             for (id in selected) {
                 val tracks = try { repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = id)) }
-                    catch (e: HttpException) { if (e.code() == 404) { requireOwner(owner); repository.downloads.followPlaylist(id, false); continue } else throw e }
+                    catch (e: HttpException) { if (e.code() == 404) { requireOwner(owner); withContext(Dispatchers.IO) { repository.downloads.followPlaylist(id, false, owner) }; continue } else throw e }
                 requireOwner(owner)
                 withContext(Dispatchers.IO) {
                     if (id in repository.downloads.followedPlaylists()) repository.downloads.enqueue(tracks, automatic = true, requestScope = owner)
@@ -1387,7 +1417,7 @@ class MusicViewModel @Inject constructor(
     suspend fun deletePlaylist(playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().deletePlaylist(repository.url("api", "v1", "playlists", playlist.id), playlist.version).let { if (!it.isSuccessful) throw HttpException(it) }
-        requireOwner(owner); repository.downloads.followPlaylist(playlist.id, false); invalidateCatalog(owner)
+        requireOwner(owner); withContext(Dispatchers.IO) { repository.downloads.followPlaylist(playlist.id, false, owner) }; invalidateCatalog(owner)
         if (mutable.value.collectionId == playlist.id) back() else load()
         notify(AppLanguage.string(R.string.vm_playlist_deleted))
     }

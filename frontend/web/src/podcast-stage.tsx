@@ -2,6 +2,7 @@ import { useEffect, useRef, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { time } from './api';
 import { Cover } from './cover';
+import { usePlaybackPosition } from './playback-state';
 import { PlaybackGlyph } from './playback-glyph';
 import i18n from './i18n';
 import { readAudioPeak } from './playback-gain';
@@ -21,11 +22,20 @@ function date(value?: string | null) {
     : i18n.t('podcastStage.dateNotProvided');
 }
 
-function Radio({ player, onPreview }: { player: Player; onPreview: () => void }) {
+function Radio({
+  player,
+  active,
+  onPreview,
+}: {
+  player: Player;
+  active: boolean;
+  onPreview: () => void;
+}) {
   const { t } = useTranslation();
   const track = player.current!;
   const live = player.playing && !player.buffering && !player.error;
-  const progress = player.duration > 0 ? player.position / player.duration : 0;
+  const position = usePlaybackPosition(player.position, active);
+  const progress = player.duration > 0 ? position / player.duration : 0;
   const vu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = vu.current;
@@ -122,7 +132,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             </span>
             <strong>{track.album || t('podcastStage.podcastShowDefault')}</strong>
             <span className="retro-time">
-              {time(player.position)}
+              {time(position)}
               <small> / {time(player.duration)}</small>
             </span>
           </span>
@@ -152,8 +162,8 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             max={player.duration || 1}
             step="1"
             disabled={!player.duration}
-            value={Math.min(player.position, player.duration || 0)}
-            aria-valuetext={`${time(player.position)} / ${time(player.duration)}`}
+            value={Math.min(position, player.duration || 0)}
+            aria-valuetext={`${time(position)} / ${time(player.duration)}`}
             onChange={(event) => player.seek(Number(event.target.value))}
           />
         </div>
@@ -443,10 +453,12 @@ function Upcoming({ player }: { player: Player }) {
 
 export function PodcastStage({
   player,
+  active,
   showQueue,
   onPreview,
 }: {
   player: Player;
+  active: boolean;
   showQueue: boolean;
   onPreview: () => void;
 }) {
@@ -460,7 +472,7 @@ export function PodcastStage({
   return (
     <div className="podcast-stage">
       <div className="podcast-device-column">
-        <Radio player={player} onPreview={onPreview} />
+        <Radio player={player} active={active} onPreview={onPreview} />
         {showQueue && <Upcoming player={player} />}
       </div>
       <article className="radio-newspaper" aria-label={t('podcastStage.newspaperAria')}>

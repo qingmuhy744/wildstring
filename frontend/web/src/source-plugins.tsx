@@ -3,6 +3,7 @@ import { HelpLabel } from './desktop-help';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { usePlaybackPosition } from './playback-state';
 import i18n from './i18n';
 import { api, time, type Track } from './api';
 import { Icon } from './icons';
@@ -560,7 +561,8 @@ function InteractiveCandidateAudition({
 }) {
   const { t } = useTranslation();
   const isPlayingThisTrack = player && player.current?.id === trackId;
-  const currentPosMs = isPlayingThisTrack ? player.position * 1000 - offset : null;
+  const position = usePlaybackPosition(player?.position, isPlayingThisTrack);
+  const currentPosMs = isPlayingThisTrack ? position * 1000 - offset : null;
 
   const activeIndex = useMemo(() => {
     if (currentPosMs === null) return -1;
@@ -630,7 +632,7 @@ function InteractiveCandidateAudition({
                   ? t('sourcePlugins.auditionPlaying')
                   : t('sourcePlugins.auditionPaused')}
               </span>
-              <span className="audition-time">({time(player.position)})</span>
+              <span className="audition-time">({time(position)})</span>
               <button
                 type="button"
                 className="text-button audition-ctrl-btn"

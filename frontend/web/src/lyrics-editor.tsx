@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { usePlaybackPosition } from './playback-state';
 import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api, time, type Lyrics, type Track } from './api';
@@ -52,6 +53,7 @@ export function LyricsEditor({
   const workspace = useRef<HTMLDivElement>(null),
     selectedRow = useRef<HTMLLIElement>(null);
   const mine = player.current?.id === track.id;
+  const position = usePlaybackPosition(player.position, active && mine);
   const endpoint = `/manage/tracks/${encodeURIComponent(track.id)}/lyrics`;
   const allTimed = lines.length > 0 && lines.every((line) => line.time_ms !== null);
   const request = useRef<AbortController | null>(null);
@@ -222,7 +224,7 @@ export function LyricsEditor({
   let activeLine = -1;
   if (preview?.kind === 'synced' && mine)
     preview.lines.forEach((line, index) => {
-      if (line.time_ms! <= player.position * 1000) activeLine = index;
+      if (line.time_ms! <= position * 1000) activeLine = index;
     });
   return (
     <section
@@ -286,7 +288,7 @@ export function LyricsEditor({
               {mine && player.playing ? t('lyricsEditor.pauseLabel') : t('lyricsEditor.playLabel')}
             </button>
             <span>
-              {time(mine ? player.position : 0)} /{' '}
+              {time(mine ? position : 0)} /{' '}
               {time(mine ? player.duration : track.duration_ms / 1000)}
             </span>
             <input
@@ -295,7 +297,7 @@ export function LyricsEditor({
               min={0}
               max={mine ? player.duration || 0 : 0}
               step={0.01}
-              value={mine ? player.position : 0}
+              value={mine ? position : 0}
               disabled={!mine || !player.duration}
               onChange={(event) => player.seek(Number(event.target.value))}
             />

@@ -105,11 +105,13 @@ test('普通歌单创建、单曲与整页加入、排序移除和持久化', as
     await editor.getByRole('button', { name: '保存歌单', exact: true }).click();
     await expect(page.getByRole('heading', { name: prefix, exact: true })).toBeVisible();
     await tab(page, '歌曲');
-    await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
+    await expect(page.locator('.track-popover button')).toHaveCount(0);
+    await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).press('Enter');
     await page
       .getByLabel('将 晴天测试曲 加入歌单', { exact: true })
       .selectOption({ label: prefix });
     await expect(page.locator('.toast')).toContainText(`已加入：${prefix}`);
+    await expect(page.locator('.track-popover button')).toHaveCount(0);
     await page.getByText('批量加入歌单', { exact: true }).click();
     await page.getByLabel('已加载歌曲加入歌单', { exact: true }).selectOption({ label: prefix });
     await page.getByRole('button', { name: '加入已加载', exact: true }).click();
@@ -121,6 +123,7 @@ test('普通歌单创建、单曲与整页加入、排序移除和持久化', as
     await page.getByRole('button', { name: '歌曲操作 夜晚测试曲', exact: true }).click();
     await page.getByRole('button', { name: '歌单中上移', exact: true }).click();
     await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('夜晚测试曲');
+    await expect(page.locator('.toast')).toContainText('已调整歌单顺序');
     await page.reload();
     await tab(page, '歌曲');
     await expect(page.getByRole('table')).toBeVisible();

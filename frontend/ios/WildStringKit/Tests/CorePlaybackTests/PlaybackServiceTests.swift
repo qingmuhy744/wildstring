@@ -1414,6 +1414,142 @@ struct PlaybackServiceTests {
         return (service, recorder)
     }
 
+    @Test func legacyPendingIndexRetriesAndKeepsAccountsSeparate() async throws {
+        let suite = "wildstring.pending-index.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        struct Legacy: Encodable {
+            var bookmark: PodcastBookmark
+            var position = 30.0
+            var duration = 600.0
+            var completed = false
+            var version = 1
+            var conflict = false
+            var pending: Bool?
+        }
+        func saveLegacy(account: String, episode: String, pending: Bool?) throws {
+            var bookmark = PodcastBookmark()
+            bookmark.begin(episodeId: episode, deviceId: "local", baseVersion: 1)
+            let data = try JSONEncoder().encode(Legacy(bookmark: bookmark, pending: pending))
+            defaults.set(data, forKey: "wildstring.podcast.progress.\(account).\(episode)")
+        }
+        try saveLegacy(account: "account", episode: "old-a", pending: nil)
+        try saveLegacy(account: "account", episode: "ack", pending: false)
+        try saveLegacy(account: "account.other", episode: "old-b", pending: true)
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
+        let first = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        let second = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account.other", defaults: defaults)
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = first
+        service.loadPodcastProgress = { _ in nil }
+        actor Recorder {
+            var writes: [String] = []
+            var fail = true
+            func submit(_ id: String) -> PodcastSubmitResult {
+                writes.append(id)
+                return fail ? .failed : .ok
+            }
+            func reconnect() { fail = false }
+        }
+        let recorder = Recorder()
+        service.submitPodcastProgress = { id, _ in await recorder.submit(id) }
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_current", title: "Current", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect(defaults.bool(forKey: "wildstring.podcast.pendingMigrated.account"))
+        #expect((defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains("old-a"))
+        #expect(!(await recorder.writes).contains("old-b"))
+        #expect(!(await recorder.writes).contains("ack"))
+        await recorder.reconnect()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect((await recorder.writes).filter { $0 == "old-a" }.count >= 2)
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains("old-a"))
+        service.podcastCloud = second
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_other", title: "Other", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect((await recorder.writes).contains("old-b"))
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account.other") ?? []).contains("old-b"))
+    }
+
+    @Test func acknowledgedHistoryDoesNotEnterPendingIndex() async throws {
+        let suite = "wildstring.pending-performance.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        struct Legacy: Codable {
+            var bookmark: PodcastBookmark
+            var position = 30.0
+            var duration = 600.0
+            var completed = false
+            var version = 1
+            var conflict = false
+            var conflictVersion: Int? = nil
+            var pending = false
+            var pendingEvent: String? = nil
+        }
+        var bookmark = PodcastBookmark()
+        bookmark.begin(episodeId: "old", deviceId: "local", baseVersion: 1)
+        let acknowledged = try JSONEncoder().encode(Legacy(bookmark: bookmark))
+        for index in 0..<5000 {
+            defaults.set(acknowledged, forKey: "wildstring.podcast.progress.account.ack-\(index)")
+        }
+        var legacySamples: [Double] = []
+        let prefix = "wildstring.podcast.progress.account."
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            let keys = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }
+            for key in keys {
+                guard let data = defaults.data(forKey: key) else { continue }
+                _ = try? JSONDecoder().decode(Legacy.self, from: data)
+            }
+            legacySamples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+        }
+        legacySamples.sort()
+        print("Legacy history scan, 5000 acknowledged: median \(legacySamples[3]) ms; range \(legacySamples[0])–\(legacySamples[6]) ms")
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        service.loadPodcastProgress = { _ in nil }
+        service.submitPodcastProgress = { _, _ in .ok }
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_current", title: "Current", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        let firstStart = DispatchTime.now().uptimeNanoseconds
+        service.pause()
+        let firstCheckpoint = Double(DispatchTime.now().uptimeNanoseconds - firstStart) / 1_000_000
+        await service.waitForPodcastTasks()
+        let migrationElapsed = Double(DispatchTime.now().uptimeNanoseconds - firstStart) / 1_000_000
+        print("First checkpoint with migration: main \(firstCheckpoint) ms, completed \(migrationElapsed) ms")
+        #expect(defaults.bool(forKey: "wildstring.podcast.pendingMigrated.account"))
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains { $0.hasPrefix("ack-") })
+        var samples: [Double] = []
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            service.flushHistoricalPodcastProgress(force: true)
+            samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            await service.waitForPodcastTasks()
+        }
+        samples.sort()
+        print("Podcast history flush entry, 5000 acknowledged: median \(samples[3]) ms; range \(samples[0])–\(samples[6]) ms")
+        var checkpointSamples: [Double] = []
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            service.pause()
+            checkpointSamples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            await service.waitForPodcastTasks()
+        }
+        checkpointSamples.sort()
+        print("Steady checkpoint, 5000 acknowledged: median \(checkpointSamples[3]) ms; range \(checkpointSamples[0])–\(checkpointSamples[6]) ms")
+    }
+
     @Test func explicitSelectionReadsCurrentBookmarkWithoutFlushingOldSession() async throws {
         let suite = "wildstring.pending-start.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

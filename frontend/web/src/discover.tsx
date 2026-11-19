@@ -950,7 +950,7 @@ export function Devices({ player, user }: { player: Player; user: User }) {
                     device_id: deviceId.current,
                     track_ids: player.queue.map((t) => t.id),
                     index: player.index,
-                    position_ms: Math.round(player.position * 1000),
+                    position_ms: Math.round(player.position.read() * 1000),
                     mode: player.mode,
                     ...(snapshot?.handoff_supported
                       ? {

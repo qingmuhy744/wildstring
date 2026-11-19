@@ -188,7 +188,7 @@ public final class PlaybackService {
     @ObservationIgnored private var podcastConflictVersion: Int?
     @ObservationIgnored private var podcastHasConflict = false
     @ObservationIgnored private var podcastKnownCompleted = false
-    private struct StoredPodcast: Codable {
+    private struct StoredPodcast: Codable, Sendable {
         var bookmark: PodcastBookmark
         var position: Double
         var duration: Double
@@ -1784,7 +1784,7 @@ public final class PlaybackService {
                                            position: Double(snapshot.positionSeconds),
                                            duration: Double(snapshot.durationSeconds ?? 0),
                                            completed: true, version: snapshot.version)
-                if let data = try? JSONEncoder().encode(record) { podcastCloud?.defaults.set(data, forKey: key) }
+                storePodcast(record, episode: episode, key: key)
             }
             isBuffering = false
             if podcastCloud != nil {
@@ -1879,7 +1879,20 @@ public final class PlaybackService {
                                    completed: completed, version: acceptedVersion ?? (previous?.bookmark.sessionId == podcast.sessionId ? previous!.version : podcast.baseVersion),
                                    conflict: podcastHasConflict, conflictVersion: podcastConflictVersion,
                                    pending: pending, pendingEvent: pendingEvent)
-        if let data = try? JSONEncoder().encode(stored) { podcastCloud?.defaults.set(data, forKey: key) }
+        storePodcast(stored, episode: podcast.episodeId, key: key)
+    }
+
+    private func storePodcast(_ stored: StoredPodcast, episode: String, key: String) {
+        guard let cloud = podcastCloud, let account = cloud.accountKey,
+              let data = try? JSONEncoder().encode(stored) else { return }
+        cloud.defaults.set(data, forKey: key)
+        let indexKey = "wildstring.podcast.pending.\(account)"
+        var pending = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+        let shouldKeep = stored.pending != false && stored.bookmark.ready && !stored.bookmark.blocked
+        if shouldKeep != pending.contains(episode) {
+            if shouldKeep { pending.insert(episode) } else { pending.remove(episode) }
+            cloud.defaults.set(Array(pending), forKey: indexKey)
+        }
     }
 
     private func checkpointListening(state: String) {
@@ -1894,14 +1907,16 @@ public final class PlaybackService {
 
     private func checkpointPodcast(event: String, force: Bool) {
         if event == "ended" { podcastKnownCompleted = true }
-        saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
         guard let write = podcast.next(
             positionSeconds: Int(currentTime.rounded()),
             durationSeconds: Int(duration.rounded()),
             event: event,
             nowMs: Self.monotonicMs(),
             force: force
-        ) else { return }
+        ) else {
+            saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
+            return
+        }
         flushHistoricalPodcastProgress(force: force)
         saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
         let episode = podcast.episodeId
@@ -1915,7 +1930,7 @@ public final class PlaybackService {
                     let stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
                                                duration: Double(current.durationSeconds ?? 0),
                                                completed: current.completed == true, version: current.version)
-                    if let data = try? JSONEncoder().encode(stored) { service.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                    service.storePodcast(stored, episode: episode, key: storageKey)
                 }
                 return
             }
@@ -1984,7 +1999,7 @@ public final class PlaybackService {
                     } else if var stored = self.loadStoredPodcast(episode), stored.bookmark.sessionId == write.sessionId,
                               let storageKey {
                         stored.version = snapshot.version
-                        if let data = try? JSONEncoder().encode(stored) { self.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                        self.storePodcast(stored, episode: episode, key: storageKey)
                     }
                 }
             }
@@ -1994,25 +2009,53 @@ public final class PlaybackService {
         return task
     }
 
-    private func flushHistoricalPodcastProgress(force: Bool) {
+    func flushHistoricalPodcastProgress(force: Bool) {
         guard podcastHistoryFlush == nil, let cloud = podcastCloud, let account = cloud.accountKey,
               submitPodcastProgress != nil else { return }
         let prefix = "wildstring.podcast.progress.\(account)."
-        let keys = cloud.defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }
+        let indexKey = "wildstring.podcast.pending.\(account)"
+        let migrationKey = "wildstring.podcast.pendingMigrated.\(account)"
         podcastHistoryFlush = Task { @MainActor [weak self] in
             defer { self?.podcastHistoryFlush = nil }
-            for key in keys {
-                guard let self else { return }
-                let episode = String(key.dropFirst(prefix.count))
-                guard self.currentItem?.trackID != "podcast_ep_\(episode)",
-                      var stored = self.loadStoredPodcast(episode), stored.pending != false,
-                      stored.bookmark.ready, !stored.bookmark.blocked,
-                      let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
+            guard let self else { return }
+            if !cloud.defaults.bool(forKey: migrationKey) {
+                let defaults = PodcastDefaultsBox(cloud.defaults)
+                let legacy = await Task.detached(priority: .utility) {
+                    let values = defaults.value.dictionaryRepresentation()
+                    return Set(values.compactMap { key, value -> String? in
+                        guard key.hasPrefix(prefix), let data = value as? Data,
+                              let stored = try? JSONDecoder().decode(StoredPodcast.self, from: data),
+                              stored.pending != false, stored.bookmark.ready, !stored.bookmark.blocked else { return nil }
+                        let episode = String(key.dropFirst(prefix.count))
+                        return stored.bookmark.episodeId == episode ? episode : nil
+                    })
+                }.value
+                guard self.podcastCloud === cloud else { return }
+                let current = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+                cloud.defaults.set(Array(current.union(legacy)), forKey: indexKey)
+                cloud.defaults.set(true, forKey: migrationKey)
+            }
+            let episodes = cloud.defaults.stringArray(forKey: indexKey) ?? []
+            for episode in episodes {
+                guard self.podcastCloud === cloud else { return }
+                let key = prefix + episode
+                guard self.currentItem?.trackID != "podcast_ep_\(episode)" else { continue }
+                guard var stored = self.loadStoredPodcast(episode) else {
+                    var pending = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+                    pending.remove(episode)
+                    cloud.defaults.set(Array(pending), forKey: indexKey)
+                    continue
+                }
+                guard stored.pending != false, stored.bookmark.ready, !stored.bookmark.blocked else {
+                    self.storePodcast(stored, episode: episode, key: key)
+                    continue
+                }
+                guard let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
                                                        durationSeconds: Int(stored.duration.rounded()),
                                                        event: stored.completed ? "ended" : (stored.pendingEvent ?? "stop"),
                                                        nowMs: Self.monotonicMs(), force: force)
                 else { continue }
-                if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
+                self.storePodcast(stored, episode: episode, key: key)
                 let submission = self.enqueuePodcastWrite(write, episode: episode) { service, write, result in
                     guard service.currentItem?.trackID != "podcast_ep_\(episode)",
                           service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
@@ -2038,7 +2081,7 @@ public final class PlaybackService {
                     }
                     guard service.currentItem?.trackID != "podcast_ep_\(episode)",
                           service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
-                    if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
+                    service.storePodcast(stored, episode: episode, key: key)
                 }
                 await submission?.value
             }
@@ -2125,6 +2168,11 @@ public final class PlaybackService {
 #endif
 
 /// Holds the player service for callbacks AVFoundation makes off the main actor.
+private struct PodcastDefaultsBox: @unchecked Sendable {
+    let value: UserDefaults
+    init(_ value: UserDefaults) { self.value = value }
+}
+
 final class PlaybackServiceBox: @unchecked Sendable {
     nonisolated(unsafe) weak var service: PlaybackService?
 

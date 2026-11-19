@@ -35,6 +35,8 @@ import {
   MUSIC_QUEUE_LIMIT,
   type HeartBatch,
   PLAYBACK_RATES,
+  playbackPosition,
+  usePlaybackPosition,
   normalizePlaybackRate,
   type PlaybackRate,
   type PlaybackMode,
@@ -106,7 +108,9 @@ export function usePlayer(userId: string) {
   accessQueue.current = { queue, index };
   const accessValidated = useRef(false);
   const [playing, setPlaying] = useState(false);
-  const [position, setPosition] = useState(saved?.position || 0);
+  // The catalog renders independently of the media clock. Only the transport,
+  // artwork and timed lyrics subscribe to progress.
+  const [position] = useState(() => playbackPosition(saved?.position || 0));
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(saved?.volume ?? 0.8);
   const [podcastPlaybackRate, setPlaybackRateState] = useState<PlaybackRate>(
@@ -366,7 +370,9 @@ export function usePlayer(userId: string) {
               0,
               tracks.findIndex((track) => track.id === current?.id),
             ),
-        position: offset.current + (audio.current?.currentTime || position),
+        position: audio.current?.currentTime
+          ? offset.current + audio.current.currentTime
+          : position.read(),
         quality,
         volume,
         playbackRate: podcastPlaybackRate,
@@ -414,8 +420,11 @@ export function usePlayer(userId: string) {
   useEffect(() => {
     if (sleep === null || sleep === 'track') return;
     const check = () => {
-      setClock(Date.now());
-      if (Date.now() >= sleep) {
+      const now = Date.now();
+      setClock((previous) =>
+        Math.ceil((sleep - previous) / 60000) === Math.ceil((sleep - now) / 60000) ? previous : now,
+      );
+      if (now >= sleep) {
         desiredPlay.current = false;
         audio.current?.pause();
         setSleep(null);
@@ -531,7 +540,7 @@ export function usePlayer(userId: string) {
     setError('');
     setPlaying(false);
     setBuffering(true);
-    setPosition(seconds);
+    position.set(seconds);
     try {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       if (controller.signal.aborted || attempt !== generation.current) return;
@@ -751,7 +760,7 @@ export function usePlayer(userId: string) {
         pendingSeek.current ??
         (store.isActive(id) && element.readyState >= 1
           ? offset.current + element.currentTime
-          : (local?.position_seconds ?? position));
+          : (local?.position_seconds ?? position.read()));
       const target =
         explicit ??
         (!online ||
@@ -782,7 +791,7 @@ export function usePlayer(userId: string) {
       } else {
         if (element.readyState >= 1) element.currentTime = target;
         else pendingSeek.current = target;
-        setPosition(target);
+        position.set(target);
         playLocal();
       }
     })()
@@ -1188,11 +1197,11 @@ export function usePlayer(userId: string) {
       );
     } else if (audio.current.readyState < 1 || pendingSeek.current !== null) {
       pendingSeek.current = target;
-      setPosition(target);
+      position.set(target);
     } else {
       tracker.current.beforeSeek(audio.current);
       audio.current.currentTime = target;
-      setPosition(target);
+      position.set(target);
     }
     if (restartingRead) {
       desiredPlay.current = false;
@@ -1241,7 +1250,7 @@ export function usePlayer(userId: string) {
           : audio.current.currentTime;
       void loadSource(
         current,
-        loading.current ? position : seconds,
+        loading.current ? position.read() : seconds,
         loading.current ? desiredPlay.current : !audio.current.paused,
       );
     }
@@ -1640,7 +1649,7 @@ export function usePlayer(userId: string) {
           setSleep(null);
         }
         if (audio.current) tracker.current.sample(audio.current);
-        setPosition(offset.current + (audio.current?.currentTime || 0));
+        position.set(offset.current + (audio.current?.currentTime || 0));
       },
       onDurationChange: () => {
         if (loading.current || planRef.current?.mode === 'transcode') return;
@@ -1825,9 +1834,10 @@ export function PodcastSkipButton({
   );
 }
 
-export function PlaybackControls({ player }: { player: Player }) {
+export function PlaybackControls({ player, active = true }: { player: Player; active?: boolean }) {
   const { t } = useTranslation();
-  const { current, playing, index, queue, duration, position } = player;
+  const { current, playing, index, queue, duration } = player;
+  const position = usePlaybackPosition(player.position, active);
   const podcast = !!current?.podcast_id;
   return (
     <div className="transport">

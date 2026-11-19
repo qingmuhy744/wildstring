@@ -8,6 +8,8 @@ import com.wildstring.app.data.*
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -150,6 +152,36 @@ class ServerSessionTest {
                 downloads.removeMatching(owner) { it.id != tracks.first().id }
                 assertEquals(listOf(tracks.first().id), downloads.entries.value.map { it.track.id })
                 assertEquals(listOf(tracks.first().id), OfflineDownloads(context, session, OkHttpClient()).entries.value.map { it.track.id })
+            } finally {
+                session.invalidate()
+                context.filesDir.deleteRecursively()
+            }
+        }
+    }
+
+    @Test fun notificationPauseCompletesBeforeFollowingResume() = runBlocking {
+        val context = isolated()
+        val session = SessionStore(context)
+        MockWebServer().use { server ->
+            server.start()
+            session.configure(server.url("/").toString(), true)
+            session.write("wildstring_session=test; Path=/; Max-Age=3600")
+            session.bindAccount(Account("listener", "listener", "owner"))
+            val downloads = OfflineDownloads(context, session, OkHttpClient())
+            val owner = session.cacheScope()!!
+            val track = Track("song", "Song", emptyList(), null, 1000)
+            try {
+                downloads.enqueue(listOf(track), requestScope = owner)
+                val resumed = synchronized(downloads) {
+                    val pause = downloads.schedulePause(owner)
+                    assertFalse(pause.isCompleted)
+                    async(Dispatchers.IO) {
+                        downloads.awaitPendingPause()
+                        downloads.resumeAll(owner)
+                    }
+                }
+                resumed.await()
+                assertEquals("queued", downloads.entries.value.single().state)
             } finally {
                 session.invalidate()
                 context.filesDir.deleteRecursively()

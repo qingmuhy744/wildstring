@@ -471,21 +471,28 @@ class PlaybackService : MediaSessionService() {
             sleep.cancel(); player.stop(); player.clearMediaItems()
             saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
         } }
-        scope.launch { repository.connectionRoutes.changes.collect {
+        scope.launch { repository.connectionRoutes.changes.collectLatest {
             val owner = repository.session.cacheScope()
-            if (owner == null || queueOwner != owner) return@collect
-            repository.downloads.pauseAll()
-            val index = player.currentMediaItemIndex
-            val position = player.currentPosition
-            val autoplay = player.playWhenReady
-            val items = (0 until player.mediaItemCount).map { itemIndex ->
-                val old = player.getMediaItemAt(itemIndex)
-                val id = old.mediaMetadata.extras?.getString("track_id").orEmpty()
-                val extras = Bundle(old.mediaMetadata.extras).apply { putString("original_stream", repository.originalStream(id)) }
-                old.buildUpon().setUri(repository.stream(id))
-                    .setMediaMetadata(old.mediaMetadata.buildUpon().setExtras(extras).build()).build()
-            }
+            if (owner == null || queueOwner != owner) return@collectLatest
+            val previous = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+            val pause = repository.downloads.schedulePause(owner)
+            val items = withContext(Dispatchers.IO) {
+                pause.join()
+                if (owner != repository.session.cacheScope()) return@withContext null
+                previous.map { old ->
+                    val id = old.mediaMetadata.extras?.getString("track_id").orEmpty()
+                    val original = repository.originalStream(id)
+                    val extras = Bundle(old.mediaMetadata.extras).apply { putString("original_stream", original) }
+                    old.buildUpon().setUri(repository.stream(id, original))
+                        .setMediaMetadata(old.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+                }
+            } ?: return@collectLatest
+            if (owner != repository.session.cacheScope() || queueOwner != owner ||
+                previous != (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }) return@collectLatest
             if (items.isNotEmpty()) {
+                val index = player.currentMediaItemIndex
+                val position = player.currentPosition
+                val autoplay = player.playWhenReady
                 player.setMediaItems(items, index.coerceIn(items.indices), position)
                 player.prepare(); player.playWhenReady = autoplay
             }

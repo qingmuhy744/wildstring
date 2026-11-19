@@ -100,6 +100,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 private val Accent: Color @Composable get() = MaterialTheme.colorScheme.primary
@@ -1065,10 +1067,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         )
     }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
+        val followed by produceState<Boolean?>(null, playlist.id, state.serverSelection) {
+            value = withContext(Dispatchers.IO) { playlist.id in vm.repository.downloads.followedPlaylists() }
+        }
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
         SongAction(stringResource(R.string.playlist_open), Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
-        SongAction(if (playlist.id in vm.repository.downloads.followedPlaylists()) stringResource(R.string.auto_download_off) else stringResource(R.string.playlist_auto_download), Icons.Default.Download) {
-            vm.followPlaylist(playlist, playlist.id !in vm.repository.downloads.followedPlaylists()); playlistActions = null
+        followed?.let { enabled -> SongAction(if (enabled) stringResource(R.string.auto_download_off) else stringResource(R.string.playlist_auto_download), Icons.Default.Download) {
+            vm.followPlaylist(playlist, !enabled); playlistActions = null
+        }
         }
         if (playlist.kind != "favorites") {
             SongAction(stringResource(R.string.playlist_edit), Icons.Default.Edit) { featurePlaylist = playlist; feature = "playlist"; playlistActions = null }

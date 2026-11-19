@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { api, type Track, type TrackPage } from './api';
 import i18n from './i18n';
 import { selectedLibrary } from './library-context';
@@ -19,6 +20,33 @@ export const modeNames: Record<PlaybackMode, string> = {
 };
 export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+export function playbackPosition(initial: number) {
+  let seconds = initial;
+  const listeners = new Set<() => void>();
+  return {
+    read: () => seconds,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set(value: number) {
+      if (seconds === value) return;
+      seconds = value;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+export type PlaybackPosition = ReturnType<typeof playbackPosition>;
+const idlePosition = playbackPosition(0);
+
+export function usePlaybackPosition(position = idlePosition, enabled = true) {
+  const source = enabled ? position : idlePosition;
+  return useSyncExternalStore(source.subscribe, source.read);
+}
+
 export function normalizePlaybackRate(value: unknown): PlaybackRate {
   const rate = Number(value);
   return PLAYBACK_RATES.includes(rate as PlaybackRate) ? (rate as PlaybackRate) : 1;

@@ -13,6 +13,8 @@ import com.wildstring.app.data.*
 import com.wildstring.app.ui.MusicViewModel
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.mockwebserver.*
 import org.junit.Assert.*
@@ -115,6 +117,34 @@ class ContinuousCatalogTest {
         directory.mkdirs(); File(directory, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
     }
 
+    @Test fun rapidPlayDoesNotBlockMainOnOfflineIndexAndKeepsLatestSelection() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            compose.waitUntil(10_000) { vm.controller != null }
+            val locked = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val holder = Thread {
+                synchronized(vm.repository.downloads) {
+                    locked.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                }
+            }
+            try {
+                holder.start()
+                assertTrue(locked.await(5, TimeUnit.SECONDS))
+                val start = android.os.SystemClock.elapsedRealtime()
+                compose.runOnIdle { vm.play(songs, 0); vm.play(songs, 160) }
+                assertTrue("Play blocked on offline index", android.os.SystemClock.elapsedRealtime() - start < 3000)
+                release.countDown()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "song-160" }
+                assertEquals(97, vm.state.value.queue.size)
+            } finally {
+                release.countDown(); holder.join(5000)
+                compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() }
+            }
+        }
+    }
+
     @Test fun discoverySeparatesNewArrivalsFromListeningHistory() {
         MockWebServer().use { server ->
             fixture(server); val vm = connect(server)
@@ -140,8 +170,9 @@ class ContinuousCatalogTest {
             try {
                 compose.runOnIdle { vm.navigate("search"); vm.search("步步") }
                 ready(vm)
-                compose.runOnIdle { vm.play(songs, 0); vm.controller!!.pause() }
+                compose.runOnIdle { vm.play(songs, 0) }
                 compose.waitUntil(10_000) { vm.state.value.current?.id == songs.first().id }
+                compose.runOnIdle { vm.controller!!.pause() }
                 val samples = mutableListOf<Map<String, Any>>()
                 fun sample(name: String) {
                     compose.onNodeWithTag("catalog-list").performScrollToIndex(0)
@@ -291,8 +322,9 @@ class ContinuousCatalogTest {
             try {
                 compose.runOnIdle { vm.openAlbum(Album("album-v", "V", listOf("演唱者"), 12, null)) }
                 compose.waitUntil(10_000) { vm.state.value.collectionId == "album-v" && !vm.state.value.loading && vm.controller != null }
-                compose.runOnIdle { vm.play(albumSongs, 0); vm.controller!!.pause() }
+                compose.runOnIdle { vm.play(albumSongs, 0) }
                 compose.waitUntil(10_000) { vm.state.value.current?.id == albumSongs.first().id }
+                compose.runOnIdle { vm.controller!!.pause() }
                 compose.onNodeWithText("0 次 · 0 分钟").assertDoesNotExist()
                 val mini = compose.onNodeWithTag("mini-player").fetchSemanticsNode().boundsInRoot
                 val listTop = compose.onNodeWithTag("catalog-list").fetchSemanticsNode().boundsInRoot.top
@@ -345,9 +377,9 @@ class ContinuousCatalogTest {
             try {
                 compose.runOnIdle { vm.navigate("library"); vm.kind("tracks") }; ready(vm)
                 compose.waitUntil(10_000) { vm.controller != null }
-                compose.runOnIdle { vm.play(songs.take(3), 0); vm.controller!!.pause() }
+                compose.runOnIdle { vm.play(songs.take(3), 0) }
                 compose.waitUntil(10_000) { vm.state.value.current?.id == songs.first().id && vm.state.value.queue.size == 3 && compose.runOnIdle { vm.controller!!.playbackState == androidx.media3.common.Player.STATE_READY } }
-                compose.runOnIdle { vm.controller!!.seekTo(1500) }
+                compose.runOnIdle { vm.controller!!.pause(); vm.controller!!.seekTo(1500) }
                 compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition >= 1500 } }
                 val baseline = compose.runOnIdle { vm.controller!!.currentPosition }
                 val queue = vm.state.value.queue.map { it.entryId }
