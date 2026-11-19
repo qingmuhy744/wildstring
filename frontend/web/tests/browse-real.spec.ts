@@ -215,13 +215,21 @@ test('远跳失败重试替换窗口，快速搜索不会回填过期结果', as
   await expect(page.getByRole('table')).not.toContainText('北京歌曲');
 });
 
-test('加载第二批歌曲后跨标签页切换小大中，保留首个完整可见歌曲及其位置', async ({ page }) => {
+test('在虚拟列表中跨标签页切换小大中，保留首个完整可见歌曲及其位置', async ({ page }) => {
   await login(page);
-  await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
-  await expect.poll(() => page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
-  await page
-    .locator('.track-row')
-    .nth(72)
+  const table = page.getByRole('table', { name: '歌曲列表' });
+  for (const offset of [75, 125, 175]) {
+    const block = table.locator(`[data-track-offset="${offset}"]`);
+    if (!(await block.count()))
+      await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
+    await expect(block).toBeAttached();
+  }
+  const lastBlock = table.locator('[data-track-offset]').last();
+  const loadedThrough = Number(await lastBlock.getAttribute('data-track-offset'));
+  await table.locator('[data-track-offset="75"]').scrollIntoViewIfNeeded();
+  await table
+    .getByRole('row')
+    .and(table.locator('[aria-rowindex="87"]'))
     .evaluate((row) => window.scrollTo(0, row.getBoundingClientRect().top + scrollY - 8));
   async function firstVisible() {
     return page.locator('.track-row').evaluateAll((rows) => {
@@ -252,5 +260,7 @@ test('加载第二批歌曲后跨标签页切换小大中，保留首个完整�
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
     await expect.poll(firstVisible).toEqual(before);
   }
-  expect(await page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
+  expect(Number(await lastBlock.getAttribute('data-track-offset'))).toBeGreaterThanOrEqual(
+    loadedThrough,
+  );
 });
