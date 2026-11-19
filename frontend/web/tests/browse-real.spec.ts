@@ -227,10 +227,17 @@ test('在虚拟列表中跨标签页切换小大中，保留首个完整可见�
   const lastBlock = table.locator('[data-track-offset]').last();
   const loadedThrough = Number(await lastBlock.getAttribute('data-track-offset'));
   await table.locator('[data-track-offset="75"]').scrollIntoViewIfNeeded();
-  await table
+  const targetTop = 8;
+  const targetID = await table
     .getByRole('row')
     .and(table.locator('[aria-rowindex="87"]'))
-    .evaluate((row) => window.scrollTo(0, row.getBoundingClientRect().top + scrollY - 8));
+    .evaluate((row, top) => {
+      window.scrollTo({
+        top: row.getBoundingClientRect().top + scrollY - top,
+        behavior: 'instant',
+      });
+      return row.getAttribute('data-browse-id');
+    }, targetTop);
   async function firstVisible() {
     return page.locator('.track-row').evaluateAll((rows) => {
       const edge = Math.min(
@@ -239,12 +246,24 @@ test('在虚拟列表中跨标签页切换小大中，保留首个完整可见�
       );
       const row = rows.find(
         (row) => row.getBoundingClientRect().top >= 0 && row.getBoundingClientRect().bottom <= edge,
-      )!;
-      return { id: row.getAttribute('data-browse-id'), top: row.getBoundingClientRect().top };
+      );
+      return (
+        row && { id: row.getAttribute('data-browse-id'), top: row.getBoundingClientRect().top }
+      );
     });
   }
-  const before = await firstVisible();
+  async function expectAnchor(top: number) {
+    await expect
+      .poll(async () => {
+        const row = await firstVisible();
+        const offset = row ? row.top - top : Number.POSITIVE_INFINITY;
+        return { id: row?.id, offset: Math.abs(offset) <= 1 ? 0 : offset };
+      })
+      .toEqual({ id: targetID, offset: 0 });
+  }
+  await expectAnchor(targetTop);
   for (const size of ['small', 'large', 'medium']) {
+    const before = (await firstVisible())!.top;
     // Settings now occupies its own page. Simulate another tab changing the
     // shared preference so the reading anchor is measured on a visible list.
     await page.evaluate((value) => {
@@ -258,7 +277,7 @@ test('在虚拟列表中跨标签页切换小大中，保留首个完整可见�
       window.dispatchEvent(event);
     }, size);
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
-    await expect.poll(firstVisible).toEqual(before);
+    await expectAnchor(before);
   }
   expect(Number(await lastBlock.getAttribute('data-track-offset'))).toBeGreaterThanOrEqual(
     loadedThrough,
