@@ -40,14 +40,24 @@ test('真实257首专辑：从第201首装入末尾57首，播完使用已有推
       .click();
   await page.getByRole('button', { name: '打开专辑 跨页连续专辑', exact: true }).click();
   await expect(page.locator('.pagination')).toHaveCount(0);
-  const albumTracks = page.locator('.track-row');
+  const table = page.getByRole('table', { name: '歌曲列表' });
+  const lastBlock = table.locator('[data-track-offset]').last();
   for (let attempt = 0; attempt < 6; attempt++) {
-    const loaded = await albumTracks.count();
-    if (loaded === 257) break;
+    const lastOffset = await lastBlock.getAttribute('data-track-offset');
+    if (lastOffset === '250') break;
     await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
-    await expect.poll(() => albumTracks.count()).toBeGreaterThan(loaded);
+    await expect(lastBlock).not.toHaveAttribute('data-track-offset', lastOffset!);
   }
-  await expect(albumTracks).toHaveCount(257);
+  await expect(lastBlock).toHaveAttribute('data-track-offset', '250');
+  await expect(table).toHaveAttribute('aria-rowcount', '258');
+  await table.locator('[data-track-offset="200"]').scrollIntoViewIfNeeded();
+  const endOfBlock = table.getByRole('row').filter({ hasText: '跨页测试曲 225' });
+  await endOfBlock.getByRole('button').last().focus();
+  await page.keyboard.press('Tab');
+  await expect(
+    table.getByRole('button', { name: '播放 跨页测试曲 226', exact: true }),
+  ).toBeFocused();
+  await expect.poll(() => table.locator('.track-row').count()).toBeLessThan(125);
   const requests: number[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());

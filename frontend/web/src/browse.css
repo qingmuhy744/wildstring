@@ -305,6 +305,7 @@
 .track-list[data-list-size] {
   overflow-anchor: none;
   --track-row-height: 68px;
+  --track-disc-height: 46px;
   --track-cover-size: 44px;
   --track-title-size: 15px;
   --track-artist-size: 12px;
@@ -398,7 +399,7 @@
   white-space: nowrap;
 }
 .disc-heading {
-  padding: 18px 0 4px;
+  padding: calc(var(--track-disc-height) - 28px) 0 4px;
 }
 .disc-heading-content {
   display: flex;
@@ -433,8 +434,8 @@
   white-space: nowrap;
 }
 @media (max-width: 760px) {
-  .disc-heading {
-    padding-top: 14px;
+  .track-list[data-list-size] {
+    --track-disc-height: 42px;
   }
   .catalog-sort-control select {
     max-width: 130px;
