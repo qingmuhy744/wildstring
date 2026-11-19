@@ -40,14 +40,14 @@ test('真实257首专辑：从第201首装入末尾57首，播完使用已有推
       .click();
   await page.getByRole('button', { name: '打开专辑 跨页连续专辑', exact: true }).click();
   await expect(page.locator('.pagination')).toHaveCount(0);
+  const albumTracks = page.locator('.track-row');
   for (let attempt = 0; attempt < 6; attempt++) {
-    if (await page.getByRole('button', { name: '播放 跨页测试曲 257', exact: true }).count()) break;
-    const before = await page.getByRole('table').getByRole('row').count();
+    const loaded = await albumTracks.count();
+    if (loaded === 257) break;
     await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
-    await expect
-      .poll(async () => await page.getByRole('table').getByRole('row').count())
-      .toBeGreaterThan(before);
+    await expect.poll(() => albumTracks.count()).toBeGreaterThan(loaded);
   }
+  await expect(albumTracks).toHaveCount(257);
   const requests: number[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
