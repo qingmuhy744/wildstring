@@ -1783,7 +1783,9 @@ struct PlaybackServiceTests {
         let suite = "wildstring.offline-progress.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let client = WildstringClient(server: try ServerAddress(input: "offline.example.invalid"), store: InMemorySessionStore())
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "offline.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
         let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
         let store = InMemoryQueueStore()
         let first = try makeService(store: store)
