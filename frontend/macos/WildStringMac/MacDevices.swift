@@ -9,6 +9,7 @@ final class MacPlaybackSync {
         var state: RemotePlaybackState
         var tracks: [Track]
         var title: String
+        var index: Int
     }
 
     private let client: WildstringClient
@@ -86,10 +87,11 @@ final class MacPlaybackSync {
         busy = true
         defer { busy = false }
         do {
-            let tracks = try await resolve(snapshot.trackIds)
+            let window = PlaybackQueue.musicWindow(trackIDs: snapshot.trackIds, index: snapshot.index)
+            let tracks = try await resolve(window.trackIDs)
             playback.adopt(
                 items: tracks.map(MacPlayback.item),
-                startingAt: snapshot.index,
+                startingAt: window.index,
                 position: Double(snapshot.positionMs) / 1000,
                 mode: snapshot.mode
             )
@@ -103,7 +105,7 @@ final class MacPlaybackSync {
         guard let handoff else { return }
         playback.adopt(
             items: handoff.tracks.map(MacPlayback.item),
-            startingAt: handoff.state.index,
+            startingAt: handoff.index,
             position: Double(handoff.state.positionMs) / 1000,
             mode: handoff.state.mode
         )
@@ -111,7 +113,7 @@ final class MacPlaybackSync {
         message = L10n("macDevices.connectedPausePosition")
     }
 
-    private func poll() async {
+    func poll() async {
         guard !playback.isPlaying, handoff == nil else { return }
         guard let remote = try? await client.playbackState() else { return }
         snapshot = remote
@@ -122,9 +124,9 @@ final class MacPlaybackSync {
             remote.version != dismissedVersion,
             !remote.trackIds.isEmpty
         else { return }
-        guard let tracks = try? await resolve(remote.trackIds), !tracks.isEmpty else { return }
-        let index = min(max(0, remote.index), tracks.count - 1)
-        handoff = Offer(state: remote, tracks: tracks, title: tracks[index].title)
+        let window = PlaybackQueue.musicWindow(trackIDs: remote.trackIds, index: remote.index)
+        guard let tracks = try? await resolve(window.trackIDs), !tracks.isEmpty else { return }
+        handoff = Offer(state: remote, tracks: tracks, title: tracks[window.index].title, index: window.index)
     }
 
     private func save(_ snap: PlaybackSnapshot, version: Int) async -> Bool {
@@ -152,7 +154,6 @@ final class MacPlaybackSync {
     }
 
     private func resolve(_ ids: [String]) async throws -> [Track] {
-        let ids = Array(ids.prefix(200))
         var tracks: [Track] = []
         tracks.reserveCapacity(ids.count)
         var index = 0

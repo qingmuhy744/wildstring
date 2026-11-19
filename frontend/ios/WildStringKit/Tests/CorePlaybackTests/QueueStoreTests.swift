@@ -31,13 +31,15 @@ struct QueueStoreTests {
     @Test func swiftDataStoreRoundTripsQueueAndProgress() async throws {
         let store = try SwiftDataQueueStore.inMemory()
         let items = [queueItem("a", hasCover: true), queueItem("b"), queueItem("a")]
-        try await store.saveQueue(items, currentIndex: 2)
+        let continuation = QueueContinuation(scope: "alice|library", active: true)
+        try await store.saveQueue(items, currentIndex: 2, continuation: continuation)
         try await store.saveProgress(QueueProgress(index: 2, position: 12.25))
         let loaded = try #require(try await store.load())
         #expect(loaded.items == items)
         #expect(loaded.items[0].hasCover)
         #expect(loaded.currentIndex == 2)
         #expect(loaded.position == 12.25)
+        #expect(loaded.continuation == continuation)
     }
 
     @Test func swiftDataStoreSharesStateAcrossInstances() async throws {

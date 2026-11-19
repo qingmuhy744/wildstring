@@ -4665,13 +4665,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Playback queue is limited to 5,000 tracks."
+            "value": "Playback queue is limited to 100 tracks."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "播放队列最多 5000 首。"
+            "value": "播放队列最多 100 首。"
           }
         }
       }
@@ -13486,6 +13486,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在缓冲"
+          }
+        }
+      }
+    },
+    "playback.heartPending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heart mode follows this queue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播完进入心动模式"
+          }
+        }
+      }
+    },
+    "playback.heartActive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heart mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "心动模式"
+          }
+        }
+      }
+    },
+    "playback.collectionChanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This list changed. Refresh it and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表已变化，请刷新后重试。"
           }
         }
       }

@@ -20,7 +20,7 @@ struct FavoritesView: View {
                 ) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
-                            playTracks(loader.items, startingAt: track, using: playback)
+                            loader.play(track, using: playback)
                         } label: {
                             TrackRow(
                                 client: client,
@@ -43,6 +43,7 @@ struct FavoritesView: View {
         }
         .navigationTitle(L10n("favoritesView.title"))
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear { playback.cancelMusicSelection() }
         .miniPlayer(playback, client: client)
         .task { await load() }
     }

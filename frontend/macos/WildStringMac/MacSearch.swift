@@ -11,6 +11,7 @@ final class MacSearchModel {
 
   private(set) var query = ""
   private(set) var tracks: [Track] = []
+  private(set) var trackTotal = 0
   private(set) var albums: [Album] = []
   private(set) var artists: [Artist] = []
   private(set) var loading = false
@@ -58,6 +59,7 @@ final class MacSearchModel {
         return
       }
       tracks = results.0.items
+      trackTotal = results.0.total
       albums = results.1.items
       artists = results.2.items
       error = nil
@@ -133,7 +135,8 @@ struct MacSearchView: View {
     .sheet(item: $lyricTrack) { track in
       MacLyricsPreview(client: client, track: track)
     }
-    .onChange(of: query) { _, value in model.update(query: value) }
+    .onChange(of: query) { _, value in playback.cancelMusicSelection(); model.update(query: value) }
+    .onDisappear { playback.cancelMusicSelection() }
     .onChange(of: focusSearch) { _, requested in
       guard requested else { return }
       searchFocused = true
@@ -160,7 +163,7 @@ struct MacSearchView: View {
         Spacer()
         if !model.tracks.isEmpty, let first = model.tracks.first(where: \.isAvailable) ?? model.tracks.first {
           Button {
-            MacPlayback.play(model.tracks, startingAt: first, playback: playback)
+            play(first)
           } label: {
             Label(L10n("macSearch.playTracks"), systemImage: "play.fill")
               .font(MacTheme.section(12))
@@ -370,11 +373,19 @@ struct MacSearchView: View {
     }
   }
 
+  private func play(_ track: Track) {
+    let text = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+    MacPlayback.playPaged(model.tracks, startingAt: track, total: model.trackTotal, client: client, playback: playback) { limit, offset in
+      let page = try await client.tracks(limit: limit, offset: offset, query: text)
+      return (page.items, page.total)
+    } onError: { notice = $0 }
+  }
+
   private func searchTrackRow(_ track: Track) -> some View {
     let current = playback.currentItem?.trackID == track.id
     return HStack(spacing: 14) {
       Button {
-        MacPlayback.play(model.tracks, startingAt: track, playback: playback)
+        play(track)
       } label: {
         MacCover(
           client: client,
@@ -387,7 +398,7 @@ struct MacSearchView: View {
 
       VStack(alignment: .leading, spacing: 3) {
         Button {
-          MacPlayback.play(model.tracks, startingAt: track, playback: playback)
+          play(track)
         } label: {
           Text(track.title)
             .font(.system(size: 13, weight: current ? .semibold : .regular))

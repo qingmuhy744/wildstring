@@ -41,6 +41,8 @@ final class StoredQueueState {
     var space: String?
     var currentIndex: Int
     var position: Double
+    var heartScope: String?
+    var heartActive: Bool?
 
     init(space: String?, currentIndex: Int, position: Double) {
         self.space = space
@@ -108,11 +110,12 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                 )
             },
             currentIndex: state.flatMap { $0.currentIndex >= 0 ? $0.currentIndex : nil },
-            position: state?.position ?? 0
+            position: state?.position ?? 0,
+            continuation: state?.heartScope.map { QueueContinuation(scope: $0, active: state?.heartActive ?? false) }
         )
     }
 
-    public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws {
+    public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?, continuation: QueueContinuation?) async throws {
         let context = ModelContext(container)
         let localSpace: String? = space
         try context.delete(
@@ -138,9 +141,10 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                 )
             )
         }
-        context.insert(
-            StoredQueueState(space: space, currentIndex: currentIndex ?? -1, position: 0)
-        )
+        let state = StoredQueueState(space: space, currentIndex: currentIndex ?? -1, position: 0)
+        state.heartScope = continuation?.scope
+        state.heartActive = continuation?.active
+        context.insert(state)
         try context.save()
     }
 

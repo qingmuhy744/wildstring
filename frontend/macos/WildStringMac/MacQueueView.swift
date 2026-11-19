@@ -56,6 +56,10 @@ struct MacQueueView: View {
                         }
                     }
                 }
+                if !podcastsOnly, playback.heartContinuationEnabled {
+                    Text(L10n(playback.isHeartContinuation ? "playback.heartActive" : "playback.heartPending"))
+                        .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
+                }
                 Text(playback.isShuffled ? L10n("macQueue.dragToReorderShuffle") : L10n("macQueue.dragToReorder"))
                     .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
                 // No native List selection: its square grey highlight ignores the row's rounded shape.

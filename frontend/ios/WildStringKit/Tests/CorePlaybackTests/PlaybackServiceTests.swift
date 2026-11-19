@@ -7,6 +7,138 @@ import Testing
 @Suite("PlaybackService", .serialized)
 @MainActor
 struct PlaybackServiceTests {
+    @Test func musicQueueWindowsCapacityAndSnapshotRestore() throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let items = (0..<150).map { PlaybackService.Item(trackID: "\($0)", title: "\($0)", artist: "A", streamPath: "unused") }
+        service.play(items: Array(items.prefix(100)), startingAt: 20)
+        #expect(service.items.count == 100)
+        #expect(service.currentIndex == 20)
+        #expect(!service.heartContinuationEnabled)
+        service.play(items: items, startingAt: 75)
+        #expect(service.items.map(\.trackID) == Array(items[75...]).map(\.trackID))
+        #expect(service.currentIndex == 0)
+        #expect(service.heartContinuationEnabled)
+        #expect(!service.enqueue(items: Array(items.prefix(26))))
+        #expect(service.items.count == 75)
+        service.adopt(items: items, startingAt: 60, position: 12, mode: "sequential")
+        #expect(service.items.count == 90)
+        #expect(service.currentItem?.trackID == "60")
+        #expect(service.currentTime == 12)
+        #expect(!service.heartContinuationEnabled)
+    }
+
+    @Test func heartContinuationReplacesBatchAndHonorsPause() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let old = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        let fresh = PlaybackService.Item(trackID: "fresh", title: "Fresh", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [old, fresh] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.items.map(\.trackID) == ["fresh"])
+        #expect(service.isHeartContinuation)
+        service.loadCachedRecommendations = {
+            try await Task.sleep(for: .milliseconds(100))
+            return [old]
+        }
+        service.handleItemEnded()
+        service.pause()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(service.currentItem?.trackID == "fresh")
+        #expect(!service.wantsPlayback)
+    }
+
+    @Test func heartContinuationRestoresOnlyForSameAccountAndLibrary() async throws {
+        let store = InMemoryQueueStore()
+        let service = try makeService(store: store)
+        service.musicContinuationScope = { "user|library-a" }
+        let item = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.pause()
+        await service.flushPersistence()
+        let restored = try makeService(store: store)
+        restored.musicContinuationScope = { "user|library-a" }
+        await restored.restore()
+        #expect(restored.heartContinuationEnabled)
+        #expect(!restored.isHeartContinuation)
+        #expect(!restored.wantsPlayback)
+        let other = try makeService(store: store)
+        other.musicContinuationScope = { "user|library-b" }
+        await other.restore()
+        #expect(!other.heartContinuationEnabled)
+        service.shutdown(preservingQueue: true)
+        restored.shutdown(preservingQueue: true)
+        other.shutdown(preservingQueue: true)
+    }
+
+    @Test func routeTransferPreservesHeartForSameAccountAndLibrary() async throws {
+        let store = InMemoryQueueStore()
+        let original = try makeService(store: store)
+        original.musicContinuationScope = { "alice|library" }
+        let item = PlaybackService.Item(trackID: "a", title: "A", artist: "A", streamPath: "unused")
+        original.play(items: [item], startingAt: 0, sourceCount: 101)
+        let snapshot = original.queue
+        original.shutdown(preservingQueue: true)
+        await original.flushPersistence()
+        let restored = try makeService(store: store)
+        restored.musicContinuationScope = { "alice|library" }
+        await restored.restore()
+        restored.restoreRouteQueue(snapshot, position: 9)
+        #expect(restored.heartContinuationEnabled)
+        #expect(!restored.wantsPlayback)
+        #expect(restored.currentTime == 9)
+        let other = try makeService(store: store)
+        other.musicContinuationScope = { "bob|library" }
+        await other.restore()
+        other.restoreRouteQueue(snapshot, position: 9)
+        #expect(!other.heartContinuationEnabled)
+        restored.shutdown(preservingQueue: true)
+        other.shutdown(preservingQueue: true)
+    }
+
+    @Test func heartModeRepeatsWholeBatchAndStopsSingleTrack() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let old = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        let fresh = PlaybackService.Item(trackID: "fresh", title: "Fresh", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [old, fresh] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.items.map(\.trackID) == ["fresh"])
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(Set(service.items.map(\.trackID)) == Set(["old", "fresh"]))
+        #expect(service.currentItem?.trackID == "old")
+        service.loadCachedRecommendations = { [old] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.didFinishQueue)
+        #expect(!service.wantsPlayback)
+    }
+
+    @Test func heartContinuationStopsWhenEmptyAndSleepWins() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let item = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [] }
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.didFinishQueue)
+        #expect(!service.wantsPlayback)
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.sleepAfterCurrentTrack()
+        service.loadCachedRecommendations = { [PlaybackService.Item(trackID: "new", title: "New", artist: "A", streamPath: "unused")] }
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.currentItem?.trackID == "old")
+        #expect(!service.wantsPlayback)
+    }
+
     @Test func missingItemsAreSkippedWithoutChangingManualSelectionOrPreviousQueue() throws {
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }

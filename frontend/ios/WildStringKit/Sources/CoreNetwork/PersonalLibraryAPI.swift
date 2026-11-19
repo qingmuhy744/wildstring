@@ -221,6 +221,12 @@ extension WildstringClient {
         return try JSONDecoder().decode(DailyRecommendations.self, from: data)
     }
 
+    public func cachedDailyRecommendations() async throws -> DailyRecommendations? {
+        let data = try await perform(Request(method: "GET", path: "api/v1/recommendations/daily/cached"))
+        guard !data.isEmpty else { return nil }
+        return try JSONDecoder().decode(DailyRecommendations.self, from: data)
+    }
+
     public func recommendationFeedback(trackID: String, action: String) async throws {
         struct Body: Encodable {
             let event_id: String

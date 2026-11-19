@@ -418,6 +418,7 @@ final class MacSession {
     }
 
     func selectLibrary(_ id: String?) {
+        if client?.selectedLibrary() != id { playback?.clearMusicContinuation() }
         client?.selectLibrary(id)
         selectedLibraryID = id
         let favorites = favorites
@@ -487,6 +488,14 @@ final class MacSession {
             selectedLibraryID = library
         } else {
             selectedLibraryID = nil
+        }
+        playback.musicContinuationScope = { [weak client] in "\(username)|\(client?.selectedLibrary() ?? "")" }
+        playback.loadCachedRecommendations = { [weak client] in
+            guard let client else { return [] }
+            let library = client.selectedLibrary()
+            let daily = try await client.cachedDailyRecommendations()
+            guard library == client.selectedLibrary() else { return [] }
+            return await MainActor.run { (daily?.items ?? []).map { MacPlayback.item($0.track) } }
         }
         playback.submitListening = { [weak client] report in
             guard let client else { return false }

@@ -11,6 +11,7 @@ final class PlaybackSharingModel {
     struct Handoff: Equatable {
         var state: RemotePlaybackState
         var tracks: [Track]
+        var index: Int
     }
 
     private(set) var handoff: Handoff?
@@ -162,7 +163,7 @@ final class PlaybackSharingModel {
             offeredPauseKey = pauseEvent(latest) ?? ""
             playback.adopt(
                 items: items,
-                startingAt: min(handoff.state.index, items.count - 1),
+                startingAt: handoff.index,
                 position: Double(handoff.state.positionMs) / 1000,
                 mode: handoff.state.mode
             )
@@ -188,7 +189,7 @@ final class PlaybackSharingModel {
         handoff = nil
     }
 
-    private func poll() async {
+    func poll() async {
         guard mode != "off", !playback.isPlaying, !isWorking else { return }
         guard let remote = try? await client.playbackState() else { return }
         if let current = handoff,
@@ -203,10 +204,11 @@ final class PlaybackSharingModel {
             remote.version != dismissedVersion,
             pauseEvent(remote) != offeredPauseKey
         else { return }
-        guard let tracks = try? await resolveTracks(remote.trackIds), !tracks.isEmpty else {
+        let window = PlaybackQueue.musicWindow(trackIDs: remote.trackIds, index: remote.index)
+        guard let tracks = try? await resolveTracks(window.trackIDs), !tracks.isEmpty else {
             return
         }
-        let candidate = Handoff(state: remote, tracks: tracks)
+        let candidate = Handoff(state: remote, tracks: tracks, index: window.index)
         if mode == "auto" {
             offeredPauseKey = pauseEvent(remote) ?? ""
             await accept(candidate)

@@ -53,6 +53,10 @@ struct QueueView: View {
 
     private var musicQueueList: some View {
         List {
+            if playback.heartContinuationEnabled {
+                Text(L10n(playback.isHeartContinuation ? "playback.heartActive" : "playback.heartPending"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             ForEach(Array(playback.items.enumerated()), id: \.element.id) { index, item in
                 Button {
                     Haptics.tap()

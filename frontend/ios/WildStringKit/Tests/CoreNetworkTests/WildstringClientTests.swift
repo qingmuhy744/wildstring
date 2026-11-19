@@ -780,6 +780,18 @@ struct StubbedHTTPTests {
             #expect(daily.items.first?.reason == "常听")
         }
 
+        @Test func cachedDailyReadsExistingBatchOrNoContent() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "GET")
+                #expect(request.url?.path == "/api/v1/recommendations/daily/cached")
+                return .json(status: 200, body: #"{"id":"old","date":"2026-10-18","items":[]}"#)
+            }
+            let client = try makeClient()
+            #expect(try await client.cachedDailyRecommendations()?.id == "old")
+            StubURLProtocol.respond { _ in .empty(status: 204) }
+            #expect(try await client.cachedDailyRecommendations() == nil)
+        }
+
         @Test func recommendationFeedbackUsesRealTrackAndUniqueEvent() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.httpMethod == "POST")

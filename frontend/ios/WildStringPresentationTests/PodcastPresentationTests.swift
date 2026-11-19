@@ -12,6 +12,34 @@ final class PodcastPresentationTests: XCTestCase {
         FileManager.default.temporaryDirectory.appendingPathComponent("wildstring-podcast-presentation")
     }
 
+    func testLongMusicQueuePresentation() async throws {
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PresentationProtocol.self]
+        let server = try ServerAddress(input: "presentation.invalid")
+        let client = WildstringClient(server: server, store: InMemorySessionStore(), configuration: configuration)
+        let playback = PlaybackService(server: server, store: InMemoryQueueStore(), cookieHeader: { nil })
+        defer { playback.shutdown() }
+        let items = ["雨声与合成器", "长途列车", "微光"].map {
+            PlaybackService.Item(trackID: $0, title: $0, artist: "野弦乐队", album: "月台", streamPath: "unused", durationSeconds: 200)
+        }
+        playback.play(items: items, startingAt: 0, sourceCount: 120)
+        playback.pause()
+        XCTAssertTrue(playback.heartContinuationEnabled)
+        for width in [CGFloat(390), 1024] {
+            for scheme in [ColorScheme.light, .dark] {
+                let root = QueueView(client: client, playback: playback)
+                    .environment(\.locale, Locale(identifier: "zh-Hans"))
+                    .environment(\.colorScheme, scheme)
+                let (host, window) = present(root, size: CGSize(width: width, height: 844))
+                window.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
+                try await Task.sleep(for: .milliseconds(200))
+                try save(host.view, name: "ios-music-queue-\(Int(width))-\(scheme)")
+                window.isHidden = true
+            }
+        }
+    }
+
     func testPodcastCoverAndMiniPlayerAcrossSizesThemesAndLargeText() async throws {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let configuration = URLSessionConfiguration.ephemeral

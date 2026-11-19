@@ -5,6 +5,44 @@ import Testing
 @testable import WildString
 
 extension MacAssistantTests {
+    @Test func longSharedQueueUsesCurrentWindowForOfferAndManualLoad() async throws {
+        let ids = (0..<450).map { "t\($0)" }
+        let state = try JSONSerialization.data(withJSONObject: [
+            "version": 5, "device_id": "remote", "track_ids": ids, "index": 300,
+            "position_ms": 42500, "mode": "sequential", "playback_state": "paused", "handoff_eligible": true
+        ])
+        let stateJSON = String(decoding: state, as: UTF8.self)
+        StubURLProtocol.respond { request in
+            let path = request.url!.path
+            if path == "/api/v1/playback/state" { return .json(body: stateJSON) }
+            if path.hasPrefix("/api/v1/tracks/") {
+                let id = request.url!.lastPathComponent
+                return .json(body: #"{"id":"\#(id)","title":"\#(id)","artists":[],"album":null,"duration_ms":1000,"has_cover":false}"#)
+            }
+            return .empty(status: 404)
+        }
+        defer { StubURLProtocol.reset() }
+        let server = try ServerAddress(input: "music.example.com")
+        let client = WildstringClient(server: server, store: InMemorySessionStore(), configuration: StubURLProtocol.configuration())
+        let playback = PlaybackService(server: server, store: InMemoryQueueStore(), cookieHeader: { nil })
+        defer { playback.shutdown() }
+        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: "local")
+        await sync.poll()
+        let offer = try #require(sync.handoff)
+        #expect(offer.title == "t300")
+        #expect(offer.index == 0)
+        #expect(offer.tracks.count == 100)
+        #expect(Set(StubURLProtocol.requests.filter { $0.url!.path.hasPrefix("/api/v1/tracks/") }.map { $0.url!.lastPathComponent }) == Set(ids[300..<400]))
+        await sync.accept()
+        #expect(playback.currentItem?.trackID == "t300")
+        #expect(playback.currentTime == 42.5)
+        await sync.loadRemote()
+        #expect(playback.items.count == 100)
+        #expect(playback.currentItem?.trackID == "t300")
+        #expect(playback.currentTime == 42.5)
+        #expect(!playback.wantsPlayback)
+    }
+
     @Test func addingServerAuthenticatesBeforeReplacingCurrentConnection() async throws {
         let suite = "wildstring.server-tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
