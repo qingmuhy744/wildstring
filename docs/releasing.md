@@ -10,6 +10,8 @@
 
 完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。除每周定时基准与按需手动触发 **Android APK**（`run_emulator=true`）外，打标签触发 **Release** 时会自动对比上一版本标签，在存在功能性 Android 改动时并行运行完整模拟器回归；该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
 
+Android 周测有独立并发组。每个验证分片的摘要记录实际检出的提交。重跑 Android APK、CodeQL 的 Java/Kotlin 扫描或 Release 的签名 APK 构建时，Gradle 使用空的 Actions 依赖缓存环境。
+
 PR 工作流只有仓库读取权限，不读取发布私钥。
 
 Dev 签名使用专用 Actions secret `ANDROID_DEV_KEYSTORE_BASE64`，只在同仓库可信任务中恢复；Release 的 Android 验证任务也仅传入这个 Dev secret。调试 keystore 使用 Android 标准的 `androiddebugkey` 别名与 `android` 密码，私钥本体必须保密。公开指纹以 [`frontend/android/dev-signing-certificate.sha256`](../frontend/android/dev-signing-certificate.sha256) 为准，输入密钥与输出 APK 都需匹配该指纹，临时密钥在任务结束时删除。证书不符或可信任务缺少 secret 时失败，不降级上传随机签名包。
@@ -44,9 +46,10 @@ python3 scripts/package_release.py --tag vX.Y.Z --check-only
 
 1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。在推送或发起发布前，先在本地运行 `make check` 与 `make test-affected`（或完整 `make ci`），确保没有因界面文案调整或重构遗留的过期测试断言。
 2. 通过 PR 合并进入 main，确认主线 **CI** 与 **Android APK** 工作流均已在该最终提交上通过。
-3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
-4. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一个已发布版本标签（跳过失败未发布的草稿/残留标签）存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
-5. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。
+3. 有功能性 Android 改动时，用 `gh workflow run android.yml --ref main -f run_emulator=true` 在待发布提交上启动完整设备回归。保留其余输入的默认值，核对运行的 `headSha` 与待打标签的 SHA 一致，并等待四个设备分片通过。如果 main 在触发时更新，以运行记录中的实际 SHA 核对候选提交。
+4. 在已验证的提交创建并推送 `vX.Y.Z` 标签。
+5. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一个已发布版本标签（跳过失败未发布的草稿/残留标签）存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
+6. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。随后 **Sync Homebrew cask** 作业从正式 Release 读取校验清单并同步可选渠道。同步失败在 **Release summary** 显示，可通过作业菜单单独重跑。摘要同时记录 workflow attempt、首轮失败作业、Android 设备验证 SHA 与用例重试信息。
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。
 

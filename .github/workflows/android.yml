@@ -66,8 +66,8 @@ permissions:
   contents: read
 
 concurrency:
-  # Manual dispatches are flake-reproduction runs; let them run side by side.
-  group: android-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.run_id) || '' }}
+  # Keep the weekly baseline independent of pushes and manual reproductions.
+  group: android-${{ github.event_name == 'schedule' && 'weekly-main' || github.event.pull_request.number || github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -106,6 +106,8 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         if: steps.areas.outputs.android == 'true'
+        with:
+          cache-disabled: ${{ github.run_attempt > 1 }}
       - name: Install fixed Android SDK components
         if: steps.areas.outputs.android == 'true'
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
@@ -217,6 +219,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Record the device test commit
+        run: printf 'Android device test commit %s\n\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: android-instrumented-apks
