@@ -34,11 +34,12 @@ export function TrackActions({
     panel = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const anchorBottom = useRef(0);
-  useLayoutEffect(() => {
+  function fitMenu() {
     const node = panel.current;
-    if (open && node)
-      node.style.top = `${Math.max(12, Math.min(innerHeight - node.getBoundingClientRect().height - 12, anchorBottom.current + 8))}px`;
-  }, [open]);
+    if (!node?.matches(':popover-open')) return;
+    node.style.top = `${Math.max(12, Math.min(innerHeight - node.getBoundingClientRect().height - 12, anchorBottom.current + 8))}px`;
+  }
+  useLayoutEffect(fitMenu, [open]);
   function hide() {
     panel.current?.hidePopover();
   }
@@ -66,6 +67,7 @@ export function TrackActions({
         ref={panel}
         popover="auto"
         onBeforeToggle={(event) => setOpen(event.newState === 'open')}
+        onToggle={fitMenu}
         className="track-popover"
         role="group"
         aria-label={t('trackActions.operationsFor', { title: track.title })}
