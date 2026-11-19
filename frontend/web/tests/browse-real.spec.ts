@@ -238,24 +238,37 @@ test('在虚拟列表中跨标签页切换小大中，保留首个完整可见�
       });
       return row.getAttribute('data-browse-id');
     }, targetTop);
-  async function firstVisible() {
-    return page.locator('.track-row').evaluateAll((rows) => {
-      const edge = Math.min(
-        innerHeight,
-        document.querySelector('.player')!.getBoundingClientRect().top,
-      );
-      const row = rows.find(
-        (row) => row.getBoundingClientRect().top >= 0 && row.getBoundingClientRect().bottom <= edge,
-      );
-      return (
-        row && { id: row.getAttribute('data-browse-id'), top: row.getBoundingClientRect().top }
-      );
-    });
+  async function readAnchor(nextSize?: string) {
+    return page.locator('.track-row').evaluateAll(
+      (rows, { size, id }) => {
+        const edge = Math.min(
+          innerHeight,
+          document.querySelector('.player')!.getBoundingClientRect().top,
+        );
+        const row = rows.find(
+          (row) =>
+            row.getBoundingClientRect().top >= 0 && row.getBoundingClientRect().bottom <= edge,
+        );
+        const anchor = row && {
+          id: row.getAttribute('data-browse-id'),
+          top: row.getBoundingClientRect().top,
+        };
+        if (size && anchor?.id === id) {
+          // Capture the position in the same browser task that delivers the
+          // cross-tab preference change, before pending scroll adjustments can run.
+          const key = 'wildstring:user-preferences:admin:wildstring:track-list-size';
+          localStorage.setItem(key, size);
+          window.dispatchEvent(new StorageEvent('storage', { key, newValue: size }));
+        }
+        return anchor;
+      },
+      { size: nextSize, id: targetID },
+    );
   }
   async function expectAnchor(top: number) {
     await expect
       .poll(async () => {
-        const row = await firstVisible();
+        const row = await readAnchor();
         const offset = row ? row.top - top : Number.POSITIVE_INFINITY;
         return { id: row?.id, offset: Math.abs(offset) <= 1 ? 0 : offset };
       })
@@ -263,21 +276,16 @@ test('在虚拟列表中跨标签页切换小大中，保留首个完整可见�
   }
   await expectAnchor(targetTop);
   for (const size of ['small', 'large', 'medium']) {
-    const before = (await firstVisible())!.top;
-    // Settings now occupies its own page. Simulate another tab changing the
-    // shared preference so the reading anchor is measured on a visible list.
-    await page.evaluate((value) => {
-      const key = 'wildstring:user-preferences:admin:wildstring:track-list-size';
-      localStorage.setItem(key, value);
-      const event = new Event('storage');
-      Object.defineProperties(event, {
-        key: { value: key },
-        newValue: { value },
-      });
-      window.dispatchEvent(event);
-    }, size);
+    let beforeTop: number | undefined;
+    await expect
+      .poll(async () => {
+        const before = await readAnchor(size);
+        beforeTop = before?.top;
+        return before?.id;
+      })
+      .toBe(targetID);
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
-    await expectAnchor(before);
+    await expectAnchor(beforeTop!);
   }
   expect(Number(await lastBlock.getAttribute('data-track-offset'))).toBeGreaterThanOrEqual(
     loadedThrough,
