@@ -1117,7 +1117,7 @@ wheels = [
 
 [[package]]
 name = "wildstring-backend"
-version = "0.8.23"
+version = "0.8.24"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },
