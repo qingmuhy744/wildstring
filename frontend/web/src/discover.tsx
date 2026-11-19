@@ -10,7 +10,7 @@ import { RowMenu } from './row-menu';
 import { RecommendationLyricsDialog, RecommendationPlaylistDialog } from './recommendation-dialogs';
 import type { Player } from './player';
 import { SyncModeControl } from './playback-sync';
-import { modeNames, QUEUE_LIMIT, type PlaybackMode } from './playback-state';
+import { modeNames, musicWindow, type PlaybackMode } from './playback-state';
 import { ModelConnectionChoice, useModelConnections } from './model-connection';
 import { RecommendationPreferencesForm, RecommendationSources } from './recommendation-preferences';
 import { ListeningRankings } from './listening-rankings';
@@ -950,7 +950,7 @@ export function Devices({ player, user }: { player: Player; user: User }) {
                     device_id: deviceId.current,
                     track_ids: player.queue.map((t) => t.id),
                     index: player.index,
-                    position_ms: Math.round(player.position * 1000),
+                    position_ms: Math.round(player.position.read() * 1000),
                     mode: player.mode,
                     ...(snapshot?.handoff_supported
                       ? {
@@ -976,19 +976,19 @@ export function Devices({ player, user }: { player: Player; user: User }) {
             onClick={() =>
               void run(t('discoverPage.devices.preparing'), async () => {
                 const state = snapshot!;
-                if (state.track_ids.length > QUEUE_LIMIT)
-                  throw new Error(t('discoverPage.devices.queueExceeded', { limit: QUEUE_LIMIT }));
+                const window = musicWindow(state.track_ids.length, state.index);
+                const ids = state.track_ids.slice(window.offset, window.offset + window.count);
                 const tracks: Track[] = [];
-                for (let i = 0; i < state.track_ids.length; i += 10)
+                for (let i = 0; i < ids.length; i += 10)
                   tracks.push(
                     ...(await Promise.all(
-                      state.track_ids
+                      ids
                         .slice(i, i + 10)
                         .map((id) => api<Track>(`/tracks/${encodeURIComponent(id)}`)),
                     )),
                   );
                 player.setMode(state.mode);
-                player.start(tracks, state.index, state.position_ms / 1000, false);
+                player.start(tracks, window.index, state.position_ms / 1000, false);
                 setMessage(t('discoverPage.devices.loaded'));
               })
             }

@@ -135,7 +135,8 @@ struct BrowseView: View {
             .sheet(item: $demoReviewTrack) { track in
                 MetadataReviewView(client: client, initialTrack: track)
             }
-            .miniPlayer(playback, client: client)
+            .onDisappear { playback.cancelMusicSelection() }
+        .miniPlayer(playback, client: client)
         }
         .task { await ensureSectionLoaded() }
         .task { await loadLibraries() }
@@ -162,6 +163,7 @@ struct BrowseView: View {
     }
 
     private func selectLibrary(_ id: String?) {
+        playback.clearMusicContinuation()
         client.selectLibrary(id)
         AccountPreferences(server: server, username: username).setLibraryID(id)
         songsLoader = nil
@@ -198,7 +200,7 @@ struct BrowseView: View {
                 ) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
-                            playTracks(songsLoader.items, startingAt: track, using: playback)
+                            songsLoader.play(track, using: playback)
                         } label: {
                             TrackRow(
                                 client: client,
@@ -214,6 +216,7 @@ struct BrowseView: View {
                         LetterIndexBar(groups: browseGroups) { group in
                             guard let offset = group.offset else { return }
                             Haptics.tap()
+                            playback.cancelMusicSelection()
                             Task { await songsLoader.jump(toOffset: offset) }
                         }
                         .padding(.trailing, 2)
@@ -311,7 +314,7 @@ struct BrowseView: View {
         openDemoEditorsIfNeeded()
         guard autoPlayFirst, !didAutoPlay, let first = songsLoader?.items.first(where: \.isAvailable) ?? songsLoader?.items.first else { return }
         didAutoPlay = true
-        playTracks(songsLoader?.items ?? [], startingAt: first, using: playback)
+        songsLoader?.play(first, using: playback)
     }
 
     private func loadBrowseIndexIfNeeded() async {
@@ -371,6 +374,7 @@ struct BrowseView: View {
     }
 
     private func choose(songSort sort: TrackSort) {
+        playback.cancelMusicSelection()
         guard sort != songSort else { return }
         songSort = sort
         songOrder = CatalogSorting.defaultOrder(for: sort)
@@ -381,6 +385,7 @@ struct BrowseView: View {
     }
 
     private func toggleSongOrder() {
+        playback.cancelMusicSelection()
         songOrder = songOrder == .asc ? .desc : .asc
         preferences.songOrder = songOrder
         songsLoader = nil

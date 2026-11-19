@@ -80,8 +80,8 @@ struct MainTabView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("handoff.available")
                     .font(.footnote.bold())
-                if handoff.tracks.indices.contains(handoff.state.index) {
-                    Text(handoff.tracks[handoff.state.index].title)
+                if handoff.tracks.indices.contains(handoff.index) {
+                    Text(handoff.tracks[handoff.index].title)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

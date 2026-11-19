@@ -31,8 +31,12 @@ import {
   modeNames,
   readPlayback,
   savePlayback,
-  QUEUE_LIMIT,
+  COLLECTION_LIMIT,
+  MUSIC_QUEUE_LIMIT,
+  type HeartBatch,
   PLAYBACK_RATES,
+  playbackPosition,
+  usePlaybackPosition,
   normalizePlaybackRate,
   type PlaybackRate,
   type PlaybackMode,
@@ -44,7 +48,8 @@ import {
   removeDownload,
   activeOfflineUserId,
 } from './offline';
-import { libraryUser } from './library-context';
+import type { DailyRecommendation } from './recommendation-types';
+import { libraryUser, selectedLibrary } from './library-context';
 import type { MusicLibrary } from './music-libraries';
 import { GainControls, usePlaybackGain } from './playback-gain';
 import type { PodcastDetail } from './podcasts';
@@ -70,8 +75,24 @@ import {
 } from './podcast-remote';
 
 export function usePlayer(userId: string) {
-  const saved = useRef(readPlayback(userId));
-  const [mode, setMode] = useState<PlaybackMode>(saved.current?.mode || 'sequential');
+  const [saved] = useState(() => readPlayback(userId));
+  const [heart, setHeart] = useState<HeartBatch | null>(saved?.heart ?? null);
+  const heartRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const cancel = () => heartRequest.current?.abort();
+    const changeLibrary = () => {
+      cancel();
+      setHeart(null);
+    };
+    window.addEventListener('wildstring:library-changed', changeLibrary);
+    window.addEventListener('wildstring:library-access-changed', cancel);
+    return () => {
+      cancel();
+      window.removeEventListener('wildstring:library-changed', changeLibrary);
+      window.removeEventListener('wildstring:library-access-changed', cancel);
+    };
+  }, []);
+  const [mode, setMode] = useState<PlaybackMode>(saved?.mode || 'sequential');
   const [sleep, setSleep] = useState<number | 'track' | null>(null);
   const [clock, setClock] = useState(Date.now());
   const objectUrl = useRef<string | null>(null);
@@ -81,17 +102,19 @@ export function usePlayer(userId: string) {
   const audio = useRef<HTMLAudioElement>(null);
   const visualPhase = useRef(0);
   const tracker = useRef(new ListeningTracker(userId));
-  const [queue, setQueue] = useState<Track[]>(saved.current?.tracks || []);
-  const [index, setIndex] = useState(saved.current?.index ?? -1);
+  const [queue, setQueue] = useState<Track[]>(saved?.tracks || []);
+  const [index, setIndex] = useState(saved?.index ?? -1);
   const accessQueue = useRef({ queue, index });
   accessQueue.current = { queue, index };
   const accessValidated = useRef(false);
   const [playing, setPlaying] = useState(false);
-  const [position, setPosition] = useState(saved.current?.position || 0);
+  // The catalog renders independently of the media clock. Only the transport,
+  // artwork and timed lyrics subscribe to progress.
+  const [position] = useState(() => playbackPosition(saved?.position || 0));
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(saved.current?.volume ?? 0.8);
+  const [volume, setVolume] = useState(saved?.volume ?? 0.8);
   const [podcastPlaybackRate, setPlaybackRateState] = useState<PlaybackRate>(
-    normalizePlaybackRate(saved.current?.playbackRate),
+    normalizePlaybackRate(saved?.playbackRate),
   );
   const playbackRateRef = useRef<PlaybackRate>(podcastPlaybackRate);
   const [error, setError] = useState('');
@@ -222,8 +245,8 @@ export function usePlayer(userId: string) {
   }, [userId]);
   const [buffering, setBuffering] = useState(false);
   const generation = useRef(0);
-  const [quality, setQuality] = useState(saved.current?.quality || 'original');
-  const qualityRef = useRef(saved.current?.quality || 'original');
+  const [quality, setQuality] = useState(saved?.quality || 'original');
+  const qualityRef = useRef(saved?.quality || 'original');
   const [plan, setPlan] = useState<PlaybackPlan | null>(null);
   const planRef = useRef<PlaybackPlan | null>(null);
   const offset = useRef(0);
@@ -339,6 +362,7 @@ export function usePlayer(userId: string) {
     const tracks = current?.podcast_id ? [current] : music;
     if (tracks.length)
       savePlayback(userId, {
+        heart: current?.podcast_id ? null : heart,
         tracks,
         index: current?.podcast_id
           ? 0
@@ -346,7 +370,9 @@ export function usePlayer(userId: string) {
               0,
               tracks.findIndex((track) => track.id === current?.id),
             ),
-        position: offset.current + (audio.current?.currentTime || position),
+        position: audio.current?.currentTime
+          ? offset.current + audio.current.currentTime
+          : position.read(),
         quality,
         volume,
         playbackRate: podcastPlaybackRate,
@@ -355,7 +381,7 @@ export function usePlayer(userId: string) {
   };
   useEffect(() => {
     saveRef.current();
-  }, [queue, index, quality, volume, podcastPlaybackRate, mode, playing]);
+  }, [queue, index, quality, volume, podcastPlaybackRate, mode, playing, heart]);
   useEffect(() => {
     const save = () => saveRef.current();
     window.addEventListener('pagehide', save);
@@ -369,7 +395,7 @@ export function usePlayer(userId: string) {
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
-    const state = saved.current;
+    const state = saved;
     if (!state) return;
     const controller = new AbortController();
     const restore = async () => {
@@ -394,8 +420,11 @@ export function usePlayer(userId: string) {
   useEffect(() => {
     if (sleep === null || sleep === 'track') return;
     const check = () => {
-      setClock(Date.now());
-      if (Date.now() >= sleep) {
+      const now = Date.now();
+      setClock((previous) =>
+        Math.ceil((sleep - previous) / 60000) === Math.ceil((sleep - now) / 60000) ? previous : now,
+      );
+      if (now >= sleep) {
         desiredPlay.current = false;
         audio.current?.pause();
         setSleep(null);
@@ -511,7 +540,7 @@ export function usePlayer(userId: string) {
     setError('');
     setPlaying(false);
     setBuffering(true);
-    setPosition(seconds);
+    position.set(seconds);
     try {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       if (controller.signal.aborted || attempt !== generation.current) return;
@@ -573,6 +602,7 @@ export function usePlayer(userId: string) {
     autoplay = true,
     automatic = false,
     restartPodcast = false,
+    batch: HeartBatch | null = tracks === queue ? heart : null,
   ) {
     const element = audio.current;
     const track = tracks[target];
@@ -587,24 +617,36 @@ export function usePlayer(userId: string) {
       );
       return;
     }
+    if (
+      tracks.length > MUSIC_QUEUE_LIMIT &&
+      !track.podcast_id &&
+      !tracks.some((item) => item.podcast_id)
+    ) {
+      tracks = tracks.slice(target, target + MUSIC_QUEUE_LIMIT);
+      target = 0;
+      batch = { library: selectedLibrary(), recommended: false };
+    }
     if (tracks.some((item) => trackUnavailableReason(item))) {
       target = tracks.slice(0, target).filter((item) => !trackUnavailableReason(item)).length;
       tracks = tracks.filter((item) => !trackUnavailableReason(item));
     }
-    if (tracks.length > QUEUE_LIMIT) {
-      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
+    if (tracks.length > COLLECTION_LIMIT) {
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: COLLECTION_LIMIT }));
       return;
     }
     podcastRead.current?.abort();
     podcastRead.current = null;
     resumeSeek.current = null;
     permissionBlocked.current = false;
+    heartRequest.current?.abort();
     const intent = ++podcastIntent.current;
     answerProgress.current(null);
     const begin = (position: number) => {
       podcastTrack.current = track;
       tracker.current.start(track, element);
       if (!automatic && tracks !== queue) dismissedEpisodes.current.clear();
+      setHeart(track.podcast_id ? null : batch);
+      if (batch && tracks !== queue) setMode('sequential');
       setQueue(tracks);
       setIndex(target);
       void loadSource(track, position, autoplay);
@@ -666,6 +708,7 @@ export function usePlayer(userId: string) {
   }
 
   function pauseUser() {
+    heartRequest.current?.abort();
     desiredPlay.current = false;
     podcastIntent.current++;
     podcastRead.current?.abort();
@@ -677,6 +720,7 @@ export function usePlayer(userId: string) {
   }
 
   function resume() {
+    heartRequest.current?.abort();
     const element = audio.current;
     const id = episodeId(current?.id);
     const store = podcastProgress.current;
@@ -716,7 +760,7 @@ export function usePlayer(userId: string) {
         pendingSeek.current ??
         (store.isActive(id) && element.readyState >= 1
           ? offset.current + element.currentTime
-          : (local?.position_seconds ?? position));
+          : (local?.position_seconds ?? position.read()));
       const target =
         explicit ??
         (!online ||
@@ -747,7 +791,7 @@ export function usePlayer(userId: string) {
       } else {
         if (element.readyState >= 1) element.currentTime = target;
         else pendingSeek.current = target;
-        setPosition(target);
+        position.set(target);
         playLocal();
       }
     })()
@@ -916,7 +960,8 @@ export function usePlayer(userId: string) {
   function step(direction: number, automatic = false) {
     if (!queue.length) return;
     let target = index + direction;
-    if (automatic && sleep === 'track') {
+    if (!automatic) heartRequest.current?.abort();
+    if (automatic && (sleep === 'track' || (typeof sleep === 'number' && sleep <= Date.now()))) {
       setSleep(null);
       desiredPlay.current = false;
       audio.current?.pause();
@@ -1009,6 +1054,57 @@ export function usePlayer(userId: string) {
     if (target >= 0 && target < queue.length) {
       if (!automatic && direction > 0) feedback('skip');
       start(queue, target, undefined, true, automatic);
+    } else if (
+      automatic &&
+      target === queue.length &&
+      heart &&
+      heart.library === selectedLibrary() &&
+      desiredPlay.current
+    ) {
+      void continueDaily(heart);
+    }
+  }
+
+  async function continueDaily(batch: HeartBatch) {
+    heartRequest.current?.abort();
+    const request = new AbortController();
+    heartRequest.current = request;
+    try {
+      const daily = await api<DailyRecommendation | undefined>('/recommendations/daily/cached', {
+        signal: request.signal,
+      });
+      if (
+        !daily ||
+        request.signal.aborted ||
+        !desiredPlay.current ||
+        libraryUser() !== userId ||
+        selectedLibrary() !== batch.library ||
+        (typeof sleep === 'number' && sleep <= Date.now())
+      )
+        return;
+      const candidates = [
+        ...new Map(daily.items.map(({ track }) => [track.id, track])).values(),
+      ].filter((track) => !track.podcast_id && !trackUnavailableReason(track));
+      const played = new Set(queue.map((track) => track.id));
+      const fresh = batch.recommended
+        ? candidates
+        : candidates.filter((track) => !played.has(track.id));
+      const tracks = fresh.length ? fresh : candidates;
+      for (let i = tracks.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+      }
+      if (!tracks.length) return;
+      if (tracks[0].id === current?.id) {
+        if (tracks.length === 1) return;
+        [tracks[0], tracks[1]] = [tracks[1], tracks[0]];
+      }
+      start(tracks.slice(0, MUSIC_QUEUE_LIMIT), 0, 0, true, true, false, {
+        ...batch,
+        recommended: true,
+      });
+    } catch {
+      // Cached recommendations are optional. Leave the completed queue available for replay.
     }
   }
 
@@ -1036,8 +1132,8 @@ export function usePlayer(userId: string) {
       queued.push({ ...track, podcast_queue_origin: 'manual' });
     }
     if (items === remoteQueue.current.items) return;
-    if (items.length > QUEUE_LIMIT) {
-      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
+    if (items.length > COLLECTION_LIMIT) {
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: COLLECTION_LIMIT }));
       return;
     }
     void commitQueue(items);
@@ -1051,6 +1147,7 @@ export function usePlayer(userId: string) {
   }
 
   function addToQueue(tracks: Track[], next = false) {
+    heartRequest.current?.abort();
     tracks = tracks.filter((track) => !trackUnavailableReason(track));
     if (!tracks.length) {
       setError(i18n.t('playerPage.noPlayableTracks'));
@@ -1060,8 +1157,8 @@ export function usePlayer(userId: string) {
       void queuePodcast(tracks, next);
       return true;
     }
-    if (queue.length + tracks.length > QUEUE_LIMIT) {
-      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
+    if (queue.length + tracks.length > MUSIC_QUEUE_LIMIT) {
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: MUSIC_QUEUE_LIMIT }));
       return false;
     }
     if (index < 0 && next && !tracks.every((track) => track.podcast_id)) {
@@ -1069,7 +1166,7 @@ export function usePlayer(userId: string) {
       return true;
     }
     setQueue((items) => {
-      if (items.length + tracks.length > QUEUE_LIMIT) return items;
+      if (items.length + tracks.length > MUSIC_QUEUE_LIMIT) return items;
       const at = next ? index + 1 : items.length;
       return [...items.slice(0, at), ...tracks, ...items.slice(at)];
     });
@@ -1077,6 +1174,7 @@ export function usePlayer(userId: string) {
   }
 
   function seek(value: number) {
+    heartRequest.current?.abort();
     if (!audio.current || !current || !duration) return;
     const target = Math.max(0, Math.min(value, duration - 0.05));
     const id = episodeId(current.id);
@@ -1099,11 +1197,11 @@ export function usePlayer(userId: string) {
       );
     } else if (audio.current.readyState < 1 || pendingSeek.current !== null) {
       pendingSeek.current = target;
-      setPosition(target);
+      position.set(target);
     } else {
       tracker.current.beforeSeek(audio.current);
       audio.current.currentTime = target;
-      setPosition(target);
+      position.set(target);
     }
     if (restartingRead) {
       desiredPlay.current = false;
@@ -1112,6 +1210,7 @@ export function usePlayer(userId: string) {
   }
 
   function toggle() {
+    heartRequest.current?.abort();
     if (!current || !audio.current) return;
     if (podcastRead.current) {
       pauseUser();
@@ -1151,7 +1250,7 @@ export function usePlayer(userId: string) {
           : audio.current.currentTime;
       void loadSource(
         current,
-        loading.current ? position : seconds,
+        loading.current ? position.read() : seconds,
         loading.current ? desiredPlay.current : !audio.current.paused,
       );
     }
@@ -1369,7 +1468,10 @@ export function usePlayer(userId: string) {
     setPlaybackRate,
     plan,
     mode,
-    setMode,
+    setMode: (value: PlaybackMode) => {
+      heartRequest.current?.abort();
+      setMode(value);
+    },
     sleep,
     sleepLabel:
       sleep === 'track'
@@ -1382,6 +1484,7 @@ export function usePlayer(userId: string) {
             })
           : i18n.t('playerPage.sleepTimer'),
     setSleepTimer: (minutes: number | 'track' | null) => {
+      heartRequest.current?.abort();
       setClock(Date.now());
       setSleep(minutes === 'track' || minutes === null ? minutes : Date.now() + minutes * 60000);
     },
@@ -1392,6 +1495,17 @@ export function usePlayer(userId: string) {
         ? `AAC ${plan.output.bitrate_kbps} kbps`
         : i18n.t('playerPage.playbackDirect'),
     start,
+    heart,
+    startCollection: (tracks: Track[], target: number, total: number) =>
+      start(
+        tracks,
+        target,
+        undefined,
+        true,
+        false,
+        false,
+        total > MUSIC_QUEUE_LIMIT ? { library: selectedLibrary(), recommended: false } : null,
+      ),
     playPodcastEpisode,
     playPodcastQueue: async (episodeId?: string) => {
       podcastLine.current = 'queue';
@@ -1455,6 +1569,7 @@ export function usePlayer(userId: string) {
     addToQueue,
     playNext: (track: Track) => addToQueue([track], true),
     move: (from: number, to: number) => {
+      heartRequest.current?.abort();
       if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
       const next = [...queue];
       next.splice(to, 0, next.splice(from, 1)[0]);
@@ -1479,6 +1594,7 @@ export function usePlayer(userId: string) {
     },
     enqueue: (track: Track) => addToQueue([track]),
     remove: (target: number) => {
+      heartRequest.current?.abort();
       if (target === index) return;
       const track = queue[target];
       if (track?.podcast_queue_origin === 'auto') {
@@ -1533,7 +1649,7 @@ export function usePlayer(userId: string) {
           setSleep(null);
         }
         if (audio.current) tracker.current.sample(audio.current);
-        setPosition(offset.current + (audio.current?.currentTime || 0));
+        position.set(offset.current + (audio.current?.currentTime || 0));
       },
       onDurationChange: () => {
         if (loading.current || planRef.current?.mode === 'transcode') return;
@@ -1718,9 +1834,10 @@ export function PodcastSkipButton({
   );
 }
 
-export function PlaybackControls({ player }: { player: Player }) {
+export function PlaybackControls({ player, active = true }: { player: Player; active?: boolean }) {
   const { t } = useTranslation();
-  const { current, playing, index, queue, duration, position } = player;
+  const { current, playing, index, queue, duration } = player;
+  const position = usePlaybackPosition(player.position, active);
   const podcast = !!current?.podcast_id;
   return (
     <div className="transport">

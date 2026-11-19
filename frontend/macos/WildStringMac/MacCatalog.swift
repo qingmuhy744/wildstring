@@ -84,6 +84,38 @@ enum MacPlayback {
     guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
     playback.play(items: tracks.map(item), startingAt: index)
   }
+
+  static func playPaged(
+    _ tracks: [Track], startingAt track: Track, total: Int, client: WildstringClient,
+    playback: PlaybackService, fetch: @escaping (Int, Int) async throws -> ([Track], Int),
+    onError: @escaping (String) -> Void
+  ) {
+    guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+    guard index < total else { onError(L10n("playback.collectionChanged")); return }
+    let token = playback.beginMusicSelection()
+    let library = client.selectedLibrary()
+    let start = total > PlaybackService.musicQueueLimit ? index : 0
+    let count = min(PlaybackService.musicQueueLimit, total - start)
+    Task {
+      do {
+        let window: [Track]
+        if start + count <= tracks.count {
+          window = Array(tracks[start..<(start + count)])
+        } else {
+          let (items, currentTotal) = try await fetch(count, start)
+          guard playback.isCurrentMusicSelection(token), library == client.selectedLibrary() else { return }
+          guard currentTotal == total, items.count == count else { onError(L10n("playback.collectionChanged")); return }
+          window = items
+        }
+        guard playback.isCurrentMusicSelection(token), library == client.selectedLibrary() else { return }
+        guard window[index - start].id == track.id else { onError(L10n("playback.collectionChanged")); return }
+        playback.play(items: window.map(item), startingAt: index - start, sourceCount: total)
+      } catch {
+        guard playback.isCurrentMusicSelection(token) else { return }
+        onError(MacErrorText.message(for: error))
+      }
+    }
+  }
 }
 
 struct MacPlayableTracks: View {
@@ -103,6 +135,7 @@ struct MacPlayableTracks: View {
   var trackBadge: ((Track) -> String?)?
   var trackReason: ((Track) -> String?)?
   var onRecommendationFeedback: ((Track, String) async -> Void)?
+  var onPlay: ((Track) -> Void)?
   @Environment(\.navigateToTrackCollection) private var navigate
 
   @State private var selecting = false
@@ -177,7 +210,7 @@ struct MacPlayableTracks: View {
       }
     }
     .overlay(alignment: .bottom) {
-      if let notice {
+      if let notice = notice ?? (tracks.isEmpty ? nil : emptyDetail) {
         Text(notice)
           .font(.callout)
           .padding(.horizontal, 12)
@@ -275,7 +308,7 @@ struct MacPlayableTracks: View {
             if selected.contains(track.id) { selected.remove(track.id) }
             else { selected.insert(track.id) }
           } else {
-            MacPlayback.play(tracks, startingAt: track, playback: playback)
+            if let onPlay { onPlay(track) } else { MacPlayback.play(tracks, startingAt: track, playback: playback) }
           }
         } label: {
           MacCover(client: client, trackID: coverTrackID, side: 42)
@@ -289,7 +322,7 @@ struct MacPlayableTracks: View {
               if selected.contains(track.id) { selected.remove(track.id) }
               else { selected.insert(track.id) }
             } else {
-              MacPlayback.play(tracks, startingAt: track, playback: playback)
+              if let onPlay { onPlay(track) } else { MacPlayback.play(tracks, startingAt: track, playback: playback) }
             }
           } label: {
             Text(track.title)
@@ -607,6 +640,7 @@ private struct MacAlbumDetail: View {
   @State private var tracks: [Track] = []
   @State private var message: String?
   @State private var loading = true
+  @State private var loadingMore = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -630,8 +664,19 @@ private struct MacAlbumDetail: View {
         emptyTitle: message == nil ? L10n("macCatalog.albumEmpty") : L10n("macCatalog.cannotLoadAlbums"),
         emptyDetail: message,
         canManage: canManage,
-        isLoading: loading
+        isLoading: loading,
+        onPlay: { track in
+          MacPlayback.playPaged(tracks, startingAt: track, total: album.trackCount, client: client, playback: playback) { limit, offset in
+            let page = try await client.albumTracks(albumId: album.id, limit: limit, offset: offset)
+            return (page.items, page.total)
+          } onError: { message = $0 }
+        }
       )
+      if tracks.count < album.trackCount {
+        MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", album.trackCount - tracks.count)) {
+          Task { await loadMore() }
+        }
+      }
     }
     .navigationTitle(album.title)
     .navigationBarBackButtonHidden(true)
@@ -647,6 +692,19 @@ private struct MacAlbumDetail: View {
       }
     }
     .task { await load() }
+    .onDisappear { playback.cancelMusicSelection() }
+  }
+
+  private func loadMore() async {
+    guard !loadingMore else { return }
+    loadingMore = true
+    defer { loadingMore = false }
+    do {
+      let page = try await client.albumTracks(albumId: album.id, limit: 200, offset: tracks.count).items
+      tracks.append(contentsOf: page)
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
   }
 
   private func load() async {
@@ -825,6 +883,7 @@ private struct MacArtistDetail: View {
   @State private var tracks: [Track] = []
   @State private var message: String?
   @State private var loading = true
+  @State private var loadingMore = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -848,8 +907,19 @@ private struct MacArtistDetail: View {
         emptyTitle: message == nil ? L10n("macCatalog.artistEmpty") : L10n("macCatalog.cannotLoadArtists"),
         emptyDetail: message,
         canManage: canManage,
-        isLoading: loading
+        isLoading: loading,
+        onPlay: { track in
+          MacPlayback.playPaged(tracks, startingAt: track, total: artist.trackCount, client: client, playback: playback) { limit, offset in
+            let page = try await client.artistTracks(artistId: artist.id, limit: limit, offset: offset)
+            return (page.items, page.total)
+          } onError: { message = $0 }
+        }
       )
+      if tracks.count < artist.trackCount {
+        MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", artist.trackCount - tracks.count)) {
+          Task { await loadMore() }
+        }
+      }
     }
     .navigationTitle(artist.name)
     .navigationBarBackButtonHidden(true)
@@ -865,6 +935,19 @@ private struct MacArtistDetail: View {
       }
     }
     .task { await load() }
+    .onDisappear { playback.cancelMusicSelection() }
+  }
+
+  private func loadMore() async {
+    guard !loadingMore else { return }
+    loadingMore = true
+    defer { loadingMore = false }
+    do {
+      let page = try await client.artistTracks(artistId: artist.id, limit: 200, offset: tracks.count).items
+      tracks.append(contentsOf: page)
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
   }
 
   private func load() async {
@@ -1405,6 +1488,7 @@ private struct MacPlaylistDetail: View {
   @State private var tracks: [Track] = []
   @State private var message: String?
   @State private var loading = true
+  @State private var loadingMore = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -1430,8 +1514,19 @@ private struct MacPlaylistDetail: View {
         canManage: canManage,
         playlist: playlist,
         onReload: { await load() },
-        isLoading: loading
+        isLoading: loading,
+        onPlay: { track in
+          MacPlayback.playPaged(tracks, startingAt: track, total: playlist.trackCount, client: client, playback: playback) { limit, offset in
+            let page = try await client.playlistTracks(playlistID: playlist.id, limit: limit, offset: offset)
+            return (page.items, page.total)
+          } onError: { message = $0 }
+        }
       )
+      if tracks.count < playlist.trackCount {
+        MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", playlist.trackCount - tracks.count)) {
+          Task { await loadMore() }
+        }
+      }
     }
     .navigationTitle(playlist.name)
     .navigationBarBackButtonHidden(true)
@@ -1447,6 +1542,19 @@ private struct MacPlaylistDetail: View {
       }
     }
     .task { await load() }
+    .onDisappear { playback.cancelMusicSelection() }
+  }
+
+  private func loadMore() async {
+    guard !loadingMore else { return }
+    loadingMore = true
+    defer { loadingMore = false }
+    do {
+      let page = try await client.playlistTracks(playlistID: playlist.id, limit: 200, offset: tracks.count).items
+      tracks.append(contentsOf: page)
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
   }
 
   private func load() async {
@@ -1469,8 +1577,10 @@ struct MacFavoritesView: View {
   var canManage = false
 
   @State private var tracks: [Track] = []
+  @State private var favoritePlaylist: Playlist?
   @State private var message: String?
   @State private var loading = true
+  @State private var loadingMore = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -1502,8 +1612,20 @@ struct MacFavoritesView: View {
         emptyIcon: "heart",
         canManage: canManage,
         onReload: { await load() },
-        isLoading: loading
+        isLoading: loading,
+        onPlay: { track in
+          guard let favoritePlaylist else { return }
+          MacPlayback.playPaged(tracks, startingAt: track, total: favoritePlaylist.trackCount, client: client, playback: playback) { limit, offset in
+            let page = try await client.playlistTracks(playlistID: favoritePlaylist.id, limit: limit, offset: offset)
+            return (page.items, page.total)
+          } onError: { message = $0 }
+        }
       )
+      if let favoritePlaylist, tracks.count < favoritePlaylist.trackCount {
+        MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", favoritePlaylist.trackCount - tracks.count)) {
+          Task { await loadMore(favoritePlaylist) }
+        }
+      }
     }
     .navigationTitle(L10n("macCatalog.favoritesTitle"))
     .toolbar {
@@ -1512,6 +1634,19 @@ struct MacFavoritesView: View {
       }
     }
     .task { await load() }
+    .onDisappear { playback.cancelMusicSelection() }
+  }
+
+  private func loadMore(_ playlist: Playlist) async {
+    guard !loadingMore else { return }
+    loadingMore = true
+    defer { loadingMore = false }
+    do {
+      let page = try await client.playlistTracks(playlistID: playlist.id, limit: 200, offset: tracks.count)
+      tracks.append(contentsOf: page.items)
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
   }
 
   private func load() async {
@@ -1523,6 +1658,7 @@ struct MacFavoritesView: View {
         loading = false
         return
       }
+      favoritePlaylist = playlist
       tracks = try await MacPages.playlistTracks(client: client, playlistID: playlist.id)
       message = nil
       await favorites?.load()
@@ -1541,10 +1677,13 @@ struct MacListeningView: View {
   var canManage = false
 
   @State private var tracks: [Track] = []
+  @State private var total = 0
   @State private var message: String?
   @State private var loading = true
+  @State private var loadingMore = false
 
   var body: some View {
+    VStack(spacing: 0) {
     MacPlayableTracks(
       client: client,
       playback: playback,
@@ -1554,8 +1693,20 @@ struct MacListeningView: View {
       emptyDetail: message,
       emptyIcon: "clock",
       canManage: canManage,
-      isLoading: loading
+      isLoading: loading,
+      onPlay: { track in
+        MacPlayback.playPaged(tracks, startingAt: track, total: total, client: client, playback: playback) { limit, offset in
+          let page = try await client.tracks(limit: limit, offset: offset, sort: .lastPlayed, order: .desc, playedOnly: true)
+          return (page.items, page.total)
+        } onError: { message = $0 }
+      }
     )
+    if tracks.count < total {
+      MacLoadMoreBar(text: L10n("macLibrary.moreTracksRemaining", total - tracks.count)) {
+        Task { await loadMore() }
+      }
+    }
+    }
     .navigationTitle(L10n("macCatalog.listeningHistoryTitle"))
     .toolbar {
       QuietToolbarItem {
@@ -1563,11 +1714,27 @@ struct MacListeningView: View {
       }
     }
     .task { await load() }
+    .onDisappear { playback.cancelMusicSelection() }
+  }
+
+  private func loadMore() async {
+    guard !loadingMore else { return }
+    loadingMore = true
+    defer { loadingMore = false }
+    do {
+      let page = try await client.tracks(limit: 200, offset: tracks.count, sort: .lastPlayed, order: .desc, playedOnly: true)
+      tracks.append(contentsOf: page.items)
+      total = page.total
+    } catch {
+      message = MacErrorText.message(for: error)
+    }
   }
 
   private func load() async {
     loading = tracks.isEmpty
     do {
+      let first = try await client.tracks(limit: 1, sort: .lastPlayed, order: .desc, playedOnly: true)
+      total = first.total
       tracks = try await MacPages.collect { offset in
         try await client.tracks(
           limit: 200,

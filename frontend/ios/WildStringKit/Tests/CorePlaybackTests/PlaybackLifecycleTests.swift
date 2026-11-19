@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import CorePlayback
 
+extension AVPlaybackTests {
 @Suite("Playback lifecycle", .serialized)
 @MainActor
 struct PlaybackLifecycleTests {
@@ -536,6 +537,7 @@ struct PlaybackLifecycleTests {
             artist: "Test", streamPath: "unused")
         try await body(service, store, item)
     }
+}
 }
 
 private final class RestartQueueProtocol: URLProtocol {

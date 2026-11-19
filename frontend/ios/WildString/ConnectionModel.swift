@@ -384,6 +384,14 @@ final class ConnectionModel {
             deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID),
             accountKey: "\(primary.description)|\(username)"
         )
+        playback.musicContinuationScope = { [weak client] in "\(username)|\(client?.selectedLibrary() ?? "")" }
+        playback.loadCachedRecommendations = { [weak client] in
+            guard let client else { return [] }
+            let library = client.selectedLibrary()
+            let daily = try await client.cachedDailyRecommendations()
+            guard library == client.selectedLibrary() else { return [] }
+            return await MainActor.run { (daily?.items ?? []).map { $0.track.playbackItem } }
+        }
         playback.submitListening = { [weak client] report in
             guard let client else { return false }
             do {

@@ -53,6 +53,13 @@ def experience_router(repository, auth, providers, platform=None):
     def daily(repository: current):
         return recommendations.daily(repository)
 
+    @router.get("/recommendations/daily/cached")
+    def cached_daily(repository: current, response: Response):
+        batch = recommendations.cached_daily(repository)
+        if batch is None:
+            response.status_code = 204
+        return batch
+
     @router.post("/recommendations/daily/refresh", dependencies=mutation)
     def refresh(repository: current, body: Annotated[GenerationOptions | None, Body()] = None):
         return recommendations.daily(repository, refresh=True, body=body)

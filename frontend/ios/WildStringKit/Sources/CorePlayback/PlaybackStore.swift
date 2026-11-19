@@ -10,12 +10,21 @@ public struct QueueProgress: Equatable, Sendable {
     }
 }
 
+public struct QueueContinuation: Equatable, Sendable {
+    public var scope: String
+    public var active: Bool
+
+    public init(scope: String, active: Bool) { self.scope = scope; self.active = active }
+}
+
 public struct PersistedQueue: Equatable, Sendable {
     public var items: [PlaybackService.Item]
     public var currentIndex: Int?
     public var position: Double
+    public var continuation: QueueContinuation?
 
-    public init(items: [PlaybackService.Item], currentIndex: Int?, position: Double) {
+    public init(items: [PlaybackService.Item], currentIndex: Int?, position: Double, continuation: QueueContinuation? = nil) {
+        self.continuation = continuation
         self.items = items
         self.currentIndex = currentIndex
         self.position = position
@@ -24,7 +33,7 @@ public struct PersistedQueue: Equatable, Sendable {
 
 public protocol QueueStore: Sendable {
     func load() async throws -> PersistedQueue?
-    func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws
+    func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?, continuation: QueueContinuation?) async throws
     func saveProgress(_ progress: QueueProgress) async throws
     func clear() async throws
     /// A store bound to one connection space (server), or self when unscoped.
@@ -32,6 +41,10 @@ public protocol QueueStore: Sendable {
 }
 
 extension QueueStore {
+    public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws {
+        try await saveQueue(items, currentIndex: currentIndex, continuation: nil)
+    }
+
     public func scoped(to space: String) -> any QueueStore { self }
 }
 
@@ -45,8 +58,8 @@ public actor InMemoryQueueStore: QueueStore {
         persisted
     }
 
-    public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws {
-        persisted = PersistedQueue(items: items, currentIndex: currentIndex, position: 0)
+    public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?, continuation: QueueContinuation?) async throws {
+        persisted = PersistedQueue(items: items, currentIndex: currentIndex, position: 0, continuation: continuation)
     }
 
     public func saveProgress(_ progress: QueueProgress) async throws {

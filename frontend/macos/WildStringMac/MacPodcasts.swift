@@ -12,6 +12,8 @@ struct MacPodcastsView: View {
     @State private var shows: [PodcastSummary] = []
     @State private var lastDetailLoad = Date.distantPast
     @State private var detail: PodcastDetail?
+    @State private var detailRevision = 0
+    @State private var episodeProjection: MacPodcastProjection?
     @State private var message: String?
     @State private var detailMessage: String?
     @State private var selectedShowID: String?
@@ -24,6 +26,11 @@ struct MacPodcastsView: View {
     @State private var episodeFilter = "all"
     @State private var newestFirst = true
     @State private var showingQueue = false
+
+    private var projectionKey: MacPodcastProjectionKey {
+        MacPodcastProjectionKey(revision: detailRevision, showID: detail?.podcast.id, filter: episodeFilter,
+                                newestFirst: newestFirst, favoriteIDs: favorites?.ids)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -41,6 +48,24 @@ struct MacPodcastsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .background(MacTheme.canvas)
+            }
+        }
+        .task(id: projectionKey) {
+            guard let episodes = detail?.episodes else { episodeProjection = nil; return }
+            let key = projectionKey
+            while !Task.isCancelled {
+                let worker = Task.detached(priority: .userInitiated) {
+                    MacPodcastProjection.make(episodes: episodes, key: key)
+                }
+                let result = await withTaskCancellationHandler {
+                    await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled else { return }
+                episodeProjection = result
+                guard let next = result.nextChange else { return }
+                try? await Task.sleep(for: .seconds(max(0.01, next.timeIntervalSinceNow + 0.01)))
             }
         }
         .navigationTitle(L10n("macPodcasts.title"))
@@ -288,23 +313,27 @@ struct MacPodcastsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MacTheme.canvas)
         } else if let detail {
-            let completedCount = detail.episodes.filter(isCompleted).count
-            let unplayedCount = max(0, detail.episodes.count - completedCount)
-            let favoriteCount = detail.episodes.filter { isFavorite($0) }.count
-            let visibleEpisodes = filteredEpisodes(from: detail.episodes)
-            let groups = groupedEpisodes(from: visibleEpisodes)
-
+            let headerProjection = episodeProjection.flatMap { $0.key.showID == detail.podcast.id ? $0 : nil }
+            let projection = headerProjection.flatMap { projection in
+                projection.key.filter == episodeFilter
+                    && projection.key.newestFirst == newestFirst && projection.key.favoriteIDs == favorites?.ids
+                    ? projection : nil
+            }
+            let unplayedCount = headerProjection.map { max(0, detail.episodes.count - $0.completedCount) }
+                ?? detail.podcast.unplayedEpisodes
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    podcastHeader(detail, unplayedCount: unplayedCount)
+                    podcastHeader(detail, unplayedCount: unplayedCount,
+                                  next: headerProjection?.nextEpisode, preparing: headerProjection == nil)
                     Rectangle().fill(MacTheme.border).frame(height: 1)
+                    if let projection {
                     episodeFilterBar(
                         total: detail.episodes.count,
                         unplayed: unplayedCount,
-                        completed: completedCount,
-                        favorite: favoriteCount
+                        completed: projection.completedCount,
+                        favorite: projection.favoriteCount
                     )
-                    if visibleEpisodes.isEmpty {
+                    if projection.groups.isEmpty {
                         ContentUnavailableView(
                             episodeFilter == "completed" ? L10n("macPodcasts.noCompletedEpisodes") : (episodeFilter == "unplayed" ? L10n("macPodcasts.allEpisodesPlayed") : (episodeFilter == "favorite" ? L10n("macPodcasts.noFavoriteEpisodes") : L10n("macPodcasts.noEpisodes"))),
                             systemImage: episodeFilter == "favorite" ? "heart" : "waveform"
@@ -313,8 +342,8 @@ struct MacPodcastsView: View {
                         .padding(.vertical, 28)
                     } else {
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(groups, id: \.title) { group in
-                                if let title = group.title {
+                            ForEach(Array(projection.groups.enumerated()), id: \.offset) { _, group in
+                                if let title = groupTitle(group.heading) {
                                     Text(title)
                                         .font(MacTheme.micro)
                                         .foregroundStyle(MacTheme.muted)
@@ -357,6 +386,9 @@ struct MacPodcastsView: View {
                                 }
                             }
                         }
+                    }
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 28)
                     }
                 }
                 .frame(maxWidth: 860, alignment: .leading)
@@ -451,7 +483,8 @@ struct MacPodcastsView: View {
         }
     }
 
-    private func podcastHeader(_ detail: PodcastDetail, unplayedCount: Int) -> some View {
+    private func podcastHeader(_ detail: PodcastDetail, unplayedCount: Int,
+                               next: PodcastEpisode?, preparing: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 18) {
                 MacPodcastArtwork(url: detail.podcast.coverURL, side: 92)
@@ -479,10 +512,7 @@ struct MacPodcastsView: View {
                     .font(MacTheme.caption)
 
                     HStack(spacing: 10) {
-                        if detail.episodes.contains(where: { !isCompleted($0) }),
-                           let next = detail.episodes.filter({ $0.positionSeconds > 0 && !isCompleted($0) })
-                            .max(by: { ($0.lastListenedAt ?? "") < ($1.lastListenedAt ?? "") })
-                            ?? detail.episodes.first(where: { !isCompleted($0) }) {
+                        if let next {
                             let isCurrentNext = playback.currentItem?.trackID == "podcast_ep_\(next.id)"
                             let ctaLabel: String = if isCurrentNext {
                                 if playback.isBuffering {
@@ -517,7 +547,7 @@ struct MacPodcastsView: View {
                                 .background(MacTheme.accent, in: Capsule())
                             }
                             .buttonStyle(.plain)
-                        } else if !detail.episodes.isEmpty {
+                        } else if !preparing && !detail.episodes.isEmpty {
                             HStack(spacing: 6) {
                                 Image(systemName: "checkmark")
                                 Text(L10n("macPodcasts.allCompleted"))
@@ -601,11 +631,6 @@ struct MacPodcastsView: View {
         }
     }
 
-    private struct EpisodeGroup {
-        let title: String?
-        let episodes: [PodcastEpisode]
-    }
-
     private func isCompleted(_ episode: PodcastEpisode) -> Bool {
         episode.completed
     }
@@ -617,42 +642,12 @@ struct MacPodcastsView: View {
         return episode.loved
     }
 
-    private func filteredEpisodes(from episodes: [PodcastEpisode]) -> [PodcastEpisode] {
-        let filtered: [PodcastEpisode]
-        switch episodeFilter {
-        case "unplayed":
-            filtered = episodes.filter { !isCompleted($0) }
-        case "completed":
-            filtered = episodes.filter(isCompleted)
-        case "favorite":
-            filtered = episodes.filter { isFavorite($0) }
-        default:
-            filtered = episodes
+    private func groupTitle(_ heading: MacPodcastProjection.Group.Heading) -> String? {
+        switch heading {
+        case .recent: return L10n("macPodcasts.thisWeek")
+        case .older: return L10n("macPodcasts.older")
+        case .none: return nil
         }
-        return newestFirst ? filtered : Array(filtered.reversed())
-    }
-
-    private func groupedEpisodes(from episodes: [PodcastEpisode]) -> [EpisodeGroup] {
-        guard !episodes.isEmpty else { return [] }
-        let cutoff = Date().addingTimeInterval(-7 * 86_400)
-        var recent: [PodcastEpisode] = []
-        var older: [PodcastEpisode] = []
-        for episode in episodes {
-            if let date = macPodcastParsedDate(episode.pubDate), date >= cutoff {
-                recent.append(episode)
-            } else {
-                older.append(episode)
-            }
-        }
-        if !recent.isEmpty && !older.isEmpty {
-            return newestFirst
-                ? [EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent), EpisodeGroup(title: L10n("macPodcasts.older"), episodes: older)]
-                : [EpisodeGroup(title: L10n("macPodcasts.older"), episodes: older), EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent)]
-        }
-        if !recent.isEmpty {
-            return [EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent)]
-        }
-        return [EpisodeGroup(title: nil, episodes: older)]
     }
 
     private func loadShows() async {
@@ -673,6 +668,7 @@ struct MacPodcastsView: View {
             } else {
                 selectedShowID = nil
                 detail = nil
+                detailRevision += 1
             }
         } catch {
             loadingShows = false
@@ -691,10 +687,12 @@ struct MacPodcastsView: View {
             let loaded = try await client.podcast(id: id)
             guard selectedShowID == id, !Task.isCancelled else { return }
             detail = loaded
+            detailRevision += 1
             detailMessage = nil
         } catch {
             guard selectedShowID == id, !Task.isCancelled else { return }
             detail = nil
+            detailRevision += 1
             detailMessage = MacErrorText.message(for: error)
         }
     }

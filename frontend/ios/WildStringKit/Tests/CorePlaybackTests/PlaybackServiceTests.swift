@@ -4,9 +4,142 @@ import Foundation
 import Testing
 @testable import CorePlayback
 
+extension AVPlaybackTests {
 @Suite("PlaybackService", .serialized)
 @MainActor
 struct PlaybackServiceTests {
+    @Test func musicQueueWindowsCapacityAndSnapshotRestore() throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let items = (0..<150).map { PlaybackService.Item(trackID: "\($0)", title: "\($0)", artist: "A", streamPath: "unused") }
+        service.play(items: Array(items.prefix(100)), startingAt: 20)
+        #expect(service.items.count == 100)
+        #expect(service.currentIndex == 20)
+        #expect(!service.heartContinuationEnabled)
+        service.play(items: items, startingAt: 75)
+        #expect(service.items.map(\.trackID) == Array(items[75...]).map(\.trackID))
+        #expect(service.currentIndex == 0)
+        #expect(service.heartContinuationEnabled)
+        #expect(!service.enqueue(items: Array(items.prefix(26))))
+        #expect(service.items.count == 75)
+        service.adopt(items: items, startingAt: 60, position: 12, mode: "sequential")
+        #expect(service.items.count == 90)
+        #expect(service.currentItem?.trackID == "60")
+        #expect(service.currentTime == 12)
+        #expect(!service.heartContinuationEnabled)
+    }
+
+    @Test func heartContinuationReplacesBatchAndHonorsPause() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let old = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        let fresh = PlaybackService.Item(trackID: "fresh", title: "Fresh", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [old, fresh] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.items.map(\.trackID) == ["fresh"])
+        #expect(service.isHeartContinuation)
+        service.loadCachedRecommendations = {
+            try await Task.sleep(for: .milliseconds(100))
+            return [old]
+        }
+        service.handleItemEnded()
+        service.pause()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(service.currentItem?.trackID == "fresh")
+        #expect(!service.wantsPlayback)
+    }
+
+    @Test func heartContinuationRestoresOnlyForSameAccountAndLibrary() async throws {
+        let store = InMemoryQueueStore()
+        let service = try makeService(store: store)
+        service.musicContinuationScope = { "user|library-a" }
+        let item = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.pause()
+        await service.flushPersistence()
+        let restored = try makeService(store: store)
+        restored.musicContinuationScope = { "user|library-a" }
+        await restored.restore()
+        #expect(restored.heartContinuationEnabled)
+        #expect(!restored.isHeartContinuation)
+        #expect(!restored.wantsPlayback)
+        let other = try makeService(store: store)
+        other.musicContinuationScope = { "user|library-b" }
+        await other.restore()
+        #expect(!other.heartContinuationEnabled)
+        service.shutdown(preservingQueue: true)
+        restored.shutdown(preservingQueue: true)
+        other.shutdown(preservingQueue: true)
+    }
+
+    @Test func routeTransferPreservesHeartForSameAccountAndLibrary() async throws {
+        let store = InMemoryQueueStore()
+        let original = try makeService(store: store)
+        original.musicContinuationScope = { "alice|library" }
+        let item = PlaybackService.Item(trackID: "a", title: "A", artist: "A", streamPath: "unused")
+        original.play(items: [item], startingAt: 0, sourceCount: 101)
+        let snapshot = original.queue
+        original.shutdown(preservingQueue: true)
+        await original.flushPersistence()
+        let restored = try makeService(store: store)
+        restored.musicContinuationScope = { "alice|library" }
+        await restored.restore()
+        restored.restoreRouteQueue(snapshot, position: 9)
+        #expect(restored.heartContinuationEnabled)
+        #expect(!restored.wantsPlayback)
+        #expect(restored.currentTime == 9)
+        let other = try makeService(store: store)
+        other.musicContinuationScope = { "bob|library" }
+        await other.restore()
+        other.restoreRouteQueue(snapshot, position: 9)
+        #expect(!other.heartContinuationEnabled)
+        restored.shutdown(preservingQueue: true)
+        other.shutdown(preservingQueue: true)
+    }
+
+    @Test func heartModeRepeatsWholeBatchAndStopsSingleTrack() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let old = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        let fresh = PlaybackService.Item(trackID: "fresh", title: "Fresh", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [old, fresh] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.items.map(\.trackID) == ["fresh"])
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(Set(service.items.map(\.trackID)) == Set(["old", "fresh"]))
+        #expect(service.currentItem?.trackID == "old")
+        service.loadCachedRecommendations = { [old] }
+        service.play(items: [old], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.didFinishQueue)
+        #expect(!service.wantsPlayback)
+    }
+
+    @Test func heartContinuationStopsWhenEmptyAndSleepWins() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let item = PlaybackService.Item(trackID: "old", title: "Old", artist: "A", streamPath: "unused")
+        service.loadCachedRecommendations = { [] }
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.didFinishQueue)
+        #expect(!service.wantsPlayback)
+        service.play(items: [item], startingAt: 0, sourceCount: 101)
+        service.sleepAfterCurrentTrack()
+        service.loadCachedRecommendations = { [PlaybackService.Item(trackID: "new", title: "New", artist: "A", streamPath: "unused")] }
+        service.handleItemEnded()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(service.currentItem?.trackID == "old")
+        #expect(!service.wantsPlayback)
+    }
+
     @Test func missingItemsAreSkippedWithoutChangingManualSelectionOrPreviousQueue() throws {
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }
@@ -1281,6 +1414,142 @@ struct PlaybackServiceTests {
         return (service, recorder)
     }
 
+    @Test func legacyPendingIndexRetriesAndKeepsAccountsSeparate() async throws {
+        let suite = "wildstring.pending-index.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        struct Legacy: Encodable {
+            var bookmark: PodcastBookmark
+            var position = 30.0
+            var duration = 600.0
+            var completed = false
+            var version = 1
+            var conflict = false
+            var pending: Bool?
+        }
+        func saveLegacy(account: String, episode: String, pending: Bool?) throws {
+            var bookmark = PodcastBookmark()
+            bookmark.begin(episodeId: episode, deviceId: "local", baseVersion: 1)
+            let data = try JSONEncoder().encode(Legacy(bookmark: bookmark, pending: pending))
+            defaults.set(data, forKey: "wildstring.podcast.progress.\(account).\(episode)")
+        }
+        try saveLegacy(account: "account", episode: "old-a", pending: nil)
+        try saveLegacy(account: "account", episode: "ack", pending: false)
+        try saveLegacy(account: "account.other", episode: "old-b", pending: true)
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
+        let first = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        let second = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account.other", defaults: defaults)
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = first
+        service.loadPodcastProgress = { _ in nil }
+        actor Recorder {
+            var writes: [String] = []
+            var fail = true
+            func submit(_ id: String) -> PodcastSubmitResult {
+                writes.append(id)
+                return fail ? .failed : .ok
+            }
+            func reconnect() { fail = false }
+        }
+        let recorder = Recorder()
+        service.submitPodcastProgress = { id, _ in await recorder.submit(id) }
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_current", title: "Current", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect(defaults.bool(forKey: "wildstring.podcast.pendingMigrated.account"))
+        #expect((defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains("old-a"))
+        #expect(!(await recorder.writes).contains("old-b"))
+        #expect(!(await recorder.writes).contains("ack"))
+        await recorder.reconnect()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect((await recorder.writes).filter { $0 == "old-a" }.count >= 2)
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains("old-a"))
+        service.podcastCloud = second
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_other", title: "Other", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        service.pause()
+        await service.waitForPodcastTasks()
+        #expect((await recorder.writes).contains("old-b"))
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account.other") ?? []).contains("old-b"))
+    }
+
+    @Test func acknowledgedHistoryDoesNotEnterPendingIndex() async throws {
+        let suite = "wildstring.pending-performance.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        struct Legacy: Codable {
+            var bookmark: PodcastBookmark
+            var position = 30.0
+            var duration = 600.0
+            var completed = false
+            var version = 1
+            var conflict = false
+            var conflictVersion: Int? = nil
+            var pending = false
+            var pendingEvent: String? = nil
+        }
+        var bookmark = PodcastBookmark()
+        bookmark.begin(episodeId: "old", deviceId: "local", baseVersion: 1)
+        let acknowledged = try JSONEncoder().encode(Legacy(bookmark: bookmark))
+        for index in 0..<5000 {
+            defaults.set(acknowledged, forKey: "wildstring.podcast.progress.account.ack-\(index)")
+        }
+        var legacySamples: [Double] = []
+        let prefix = "wildstring.podcast.progress.account."
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            let keys = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }
+            for key in keys {
+                guard let data = defaults.data(forKey: key) else { continue }
+                _ = try? JSONDecoder().decode(Legacy.self, from: data)
+            }
+            legacySamples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+        }
+        legacySamples.sort()
+        print("Legacy history scan, 5000 acknowledged: median \(legacySamples[3]) ms; range \(legacySamples[0])–\(legacySamples[6]) ms")
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "history.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
+        service.loadPodcastProgress = { _ in nil }
+        service.submitPodcastProgress = { _, _ in .ok }
+        service.playPodcastEpisode(.init(trackID: "podcast_ep_current", title: "Current", artist: "Host", streamPath: "unused"))
+        await service.waitForPodcastTasks()
+        let firstStart = DispatchTime.now().uptimeNanoseconds
+        service.pause()
+        let firstCheckpoint = Double(DispatchTime.now().uptimeNanoseconds - firstStart) / 1_000_000
+        await service.waitForPodcastTasks()
+        let migrationElapsed = Double(DispatchTime.now().uptimeNanoseconds - firstStart) / 1_000_000
+        print("First checkpoint with migration: main \(firstCheckpoint) ms, completed \(migrationElapsed) ms")
+        #expect(defaults.bool(forKey: "wildstring.podcast.pendingMigrated.account"))
+        #expect(!(defaults.stringArray(forKey: "wildstring.podcast.pending.account") ?? []).contains { $0.hasPrefix("ack-") })
+        var samples: [Double] = []
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            service.flushHistoricalPodcastProgress(force: true)
+            samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            await service.waitForPodcastTasks()
+        }
+        samples.sort()
+        print("Podcast history flush entry, 5000 acknowledged: median \(samples[3]) ms; range \(samples[0])–\(samples[6]) ms")
+        var checkpointSamples: [Double] = []
+        for _ in 0..<7 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            service.pause()
+            checkpointSamples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            await service.waitForPodcastTasks()
+        }
+        checkpointSamples.sort()
+        print("Steady checkpoint, 5000 acknowledged: median \(checkpointSamples[3]) ms; range \(checkpointSamples[0])–\(checkpointSamples[6]) ms")
+    }
+
     @Test func explicitSelectionReadsCurrentBookmarkWithoutFlushingOldSession() async throws {
         let suite = "wildstring.pending-start.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -1650,7 +1919,9 @@ struct PlaybackServiceTests {
         let suite = "wildstring.offline-progress.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let client = WildstringClient(server: try ServerAddress(input: "offline.example.invalid"), store: InMemorySessionStore())
+        PodcastResumeProtocol.respond { _ in (503, Data()) }
+        let client = WildstringClient(server: try ServerAddress(input: "offline.example.invalid"),
+            store: InMemorySessionStore(), configuration: PodcastResumeProtocol.configuration())
         let cloud = PodcastCloudQueue(client: client, deviceID: "local", accountKey: "account", defaults: defaults)
         let store = InMemoryQueueStore()
         let first = try makeService(store: store)
@@ -1792,6 +2063,7 @@ struct PlaybackServiceTests {
         })
         #expect(!writes.contains { $0.write.positionSeconds == 300 })
     }
+}
 }
 
 private final class PodcastResumeProtocol: URLProtocol {

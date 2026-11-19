@@ -30,6 +30,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -93,11 +94,14 @@ import com.google.gson.JsonObject
 import coil.compose.AsyncImage
 import com.wildstring.app.BuildConfig
 import com.wildstring.app.R
+import com.wildstring.app.playback.MUSIC_QUEUE_LIMIT
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 private val Accent: Color @Composable get() = MaterialTheme.colorScheme.primary
@@ -654,7 +658,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             previousStyle = preferences.playbackStyle
         }
         LaunchedEffect(state.contentKey, state.server, state.account?.id) { selectionJob?.cancel() }
+        DisposableEffect(state.contentKey, settings, feature, selectedTracks != null, expanded) {
+            onDispose { vm.cancelCollectionPlayback() }
+        }
         BackHandler(enabled = !settings && (expanded || queue || selectedTracks != null || state.canGoBack || state.tab != "search")) {
+            vm.cancelCollectionPlayback()
             when { queue -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false; expanded -> collapsePlayer(); selectedTracks != null -> exitTrackSelection(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
@@ -853,7 +861,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             play = { tracks, index -> vm.play(tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
                                             albumActions = { albumActions = it })
                                         else CatalogBrowser(vm, state, header,
-                                            play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
+                                            play = { track, index -> vm.playCollection(track.id, index) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
                                             actions = { actions = it }, select = ::selectTracks, selectedIds = selectedTracks?.keys, selectionEnabled = !selectionBusy, toggleSelection = ::toggleTrackSelection, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
                                     }
                                 }
@@ -1059,10 +1067,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         )
     }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
+        val followed by produceState<Boolean?>(null, playlist.id, state.serverSelection) {
+            value = withContext(Dispatchers.IO) { playlist.id in vm.repository.downloads.followedPlaylists() }
+        }
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
         SongAction(stringResource(R.string.playlist_open), Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
-        SongAction(if (playlist.id in vm.repository.downloads.followedPlaylists()) stringResource(R.string.auto_download_off) else stringResource(R.string.playlist_auto_download), Icons.Default.Download) {
-            vm.followPlaylist(playlist, playlist.id !in vm.repository.downloads.followedPlaylists()); playlistActions = null
+        followed?.let { enabled -> SongAction(if (enabled) stringResource(R.string.auto_download_off) else stringResource(R.string.playlist_auto_download), Icons.Default.Download) {
+            vm.followPlaylist(playlist, !enabled); playlistActions = null
+        }
         }
         if (playlist.kind != "favorites") {
             SongAction(stringResource(R.string.playlist_edit), Icons.Default.Edit) { featurePlaylist = playlist; feature = "playlist"; playlistActions = null }
@@ -1204,11 +1216,15 @@ private fun AlbumActionsSheet(
     val action = remember { FeatureAction() }
     val resources = androidx.compose.ui.platform.LocalResources.current
     val scope = rememberCoroutineScope()
-    suspend fun tracks(): List<Track> = vm.repository.collectionTracks(CatalogQuery(
-        tab = "library", kind = "tracks", title = album.title, collection = "albums", collectionId = album.id, sort = "title"
-    ))
-    fun withTracks(next: Boolean = false, append: (List<Track>) -> Unit) {
-        scope.launch { action.run { val items = tracks(); append(items) } }
+    val albumQuery = CatalogQuery(tab = "library", kind = "tracks", title = album.title, collection = "albums", collectionId = album.id, sort = "title")
+    suspend fun tracks(): List<Track> = vm.repository.collectionTracks(albumQuery)
+    fun withPlaybackPage(apply: suspend (Page<Track>) -> Boolean) {
+        scope.launch {
+            action.run {
+                val page = vm.repository.playbackPage(albumQuery, 0, MUSIC_QUEUE_LIMIT)
+                if (apply(page)) onDismiss()
+            }
+        }
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1231,16 +1247,16 @@ private fun AlbumActionsSheet(
             }
             ActionStatus(action)
             SongAction(stringResource(R.string.album_play), Icons.Default.PlayArrow, onClick = tactile {
-                withTracks { items -> vm.play(items); onDismiss() }
+                withPlaybackPage(vm::playAlbumTracks)
             })
             SongAction(stringResource(R.string.play_next), Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile {
-                withTracks(next = true) { items -> vm.addToQueue(items, next = true); vm.notify(resources.getString(R.string.queued_next)); onDismiss() }
+                withPlaybackPage { page -> vm.enqueueAlbumTracks(page, next = true).also { if (it) vm.notify(resources.getString(R.string.queued_next)) } }
             })
             SongAction(stringResource(R.string.queue_add), Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile {
-                withTracks { items -> vm.addToQueue(items); vm.notify(resources.getString(R.string.queued_added)); onDismiss() }
+                withPlaybackPage { page -> vm.enqueueAlbumTracks(page).also { if (it) vm.notify(resources.getString(R.string.queued_added)) } }
             })
             SongAction(stringResource(R.string.album_save_offline), Icons.Default.Download, onClick = tactile {
-                withTracks { items -> vm.download(items); onDismiss() }
+                scope.launch { action.run { vm.download(tracks()); onDismiss() } }
             })
             SongAction(stringResource(R.string.playlist_add), Icons.AutoMirrored.Filled.PlaylistAdd, onClick = {
                 scope.launch { action.run { onAddPlaylist(tracks()) } }
@@ -1322,6 +1338,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
 @Composable
 internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit, columns: Boolean = false, select: (() -> Unit)? = null, checked: Boolean? = null, selectionEnabled: Boolean = true, toggle: () -> Unit = {}) {
     val current = state.current?.id == track.id
+    val preparing = state.preparingTrackId == track.id
     val album = state.collection == "albums" || state.albumFilter != null
     val size = LocalSongListSize.current
     val metric = when (state.sort) {
@@ -1341,12 +1358,18 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         .then(interaction)
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (current) Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(1.5.dp)).background(MaterialTheme.colorScheme.primary).padding(end = 6.dp))
+        val preparingIndicator: @Composable () -> Unit = {
+            val label = stringResource(R.string.preparing)
+            Box(Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface, CircleShape), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(16.dp).semantics { contentDescription = label }, strokeWidth = 2.dp)
+            }
+        }
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
-            if (current) PlaybackIndicator(state.playing, state.buffering)
+            if (preparing) preparingIndicator() else if (current) PlaybackIndicator(state.playing, state.buffering)
             else Text(track.trackNumber?.toString()?.padStart(2, '0') ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
         } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
             Cover(vm, track.coverId, track.title, Modifier.fillMaxSize())
-            if (current) PlaybackIndicator(state.playing, state.buffering)
+            if (preparing) preparingIndicator() else if (current) PlaybackIndicator(state.playing, state.buffering)
         }
         Column(Modifier.weight(if (columns) 2.4f else 1f).padding(start = 14.dp, end = 8.dp)) {
             Text(track.title, Modifier.testTag("track-title-$index"), color = if (!track.isAvailable) Muted else MaterialTheme.colorScheme.onSurface, fontWeight = if (current) FontWeight.SemiBold else FontWeight.Medium, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1413,7 +1436,11 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
         fun textWidth(text: String, style: androidx.compose.ui.text.TextStyle) = with(density) {
             measurer.measure(AnnotatedString(text), style = style, softWrap = false, maxLines = 1).size.width.toDp()
         }
-        val playLabel = if (state.collecting) stringResource(R.string.preparing) else stringResource(R.string.play_all)
+        val playLabel = stringResource(when {
+            state.collecting && state.preparingTrackId == null -> R.string.preparing
+            state.total > MUSIC_QUEUE_LIMIT -> R.string.play_from_start
+            else -> R.string.play_all
+        })
         val countLabel = stringResource(R.string.track_count, state.total)
         val sortContext = catalogSortContext(state.kind, state.collection, state.albumFilter)
         val sortLabel = sortContext?.let { stringResource(catalogSortLabel(state.sort, it)) }

@@ -867,7 +867,6 @@
       "shareSuccess": "当前队列与进度已共享。",
       "shareCurrent": "共享当前播放进度",
       "preparing": "正在准备继续…",
-      "queueExceeded": "这个队列超过网页 {{limit}} 首上限，请在原设备缩小后重新共享。",
       "loaded": "已载入共享进度，点击播放继续。",
       "continueHere": "在本设备继续",
       "incomplete": "未完成，请重新读取。",
@@ -1477,7 +1476,7 @@
     "favoritesLoadFailed": "暂时无法读取我喜欢歌单，请刷新重试。",
     "filesReorganized": "歌曲文件已按标准命名重排。",
     "fullCollectionFailed": "完整集合未读取成功，请重试。",
-    "fullQueueReady": "完整队列已就位，共 {{count}} 首。",
+    "fullQueueReady": "已准备 {{count}} 首歌曲",
     "indexRetry": "首字母索引未加载，重试",
     "kindFavorites": "喜欢的声音",
     "kindManual": "普通歌单",
@@ -1494,7 +1493,7 @@
     "loading": "读取中…",
     "loadingAlbumTracks": "正在读取专辑《{{title}}》歌曲…",
     "loadingAlbums": "正在加载专辑",
-    "loadingFullQueue": "正在读取完整播放列表…",
+    "loadingFullQueue": "正在准备队列…",
     "loadingMore": "正在加载更多…",
     "loadingMusic": "正在读取你的音乐…",
     "logoutFailed": "退出失败，请重试。",
@@ -1569,7 +1568,8 @@
     "unknownAlbum": "未知专辑",
     "unknownArtist": "未知艺人",
     "viewArtistAria": "查看艺人 {{name}}",
-    "viewSwitchAria": "曲库显示方式"
+    "viewSwitchAria": "曲库显示方式",
+    "playFromStart": "从头播放"
   },
   "librarySources": {
     "albumItem": "专辑 {{albumId}}",
@@ -2632,7 +2632,6 @@
     "podcastResume": "播客单集接续",
     "podcastResumeAria": "播客单集接续",
     "progressUpdated": "其他设备的进度已更新，请重新核对后载入。",
-    "queueLimitExceeded": "共享队列超过网页 {{limit}} 首上限。",
     "queueProgress": "{{count}} 首队列 · 第 {{index}} 首 · {{time}}",
     "queueUnavailable": "共享队列已经不可用。",
     "podcastSaveFailed": "保存失败，请检查网络后重试。"
@@ -3672,7 +3671,9 @@
     "orderOff": "关闭自动续播",
     "removeIndex": "移除队列第 {{index}} 首",
     "reorderInstruction": "使用每首歌曲右侧的上移和下移按钮调整播放顺序。",
-    "title": "播放队列"
+    "title": "播放队列",
+    "heartActive": "心动模式",
+    "heartAfter": "播完进入心动模式"
   },
   "rankings": {
     "aria": "收听排行",

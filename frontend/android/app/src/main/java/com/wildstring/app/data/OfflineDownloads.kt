@@ -31,6 +31,16 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     private val root = File(context.filesDir, "offline-v1").apply { mkdirs() }
     private val gson = Gson()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var pendingPause: Job? = null
+    private val pauseGuard = Any()
+    fun schedulePause(requestScope: String): Job = synchronized(pauseGuard) {
+        val previous = pendingPause
+        scope.launch(start = CoroutineStart.LAZY) {
+            previous?.join()
+            try { pauseAll(requestScope) } catch (_: CancellationException) { /* Account changed. */ }
+        }.also { pendingPause = it; it.start() }
+    }
+    suspend fun awaitPendingPause() { pendingPause?.join() }
     private var owner: String? = null
     private var activation: String? = null
     private val mutable = MutableStateFlow<List<OfflineEntry>>(emptyList())
@@ -64,8 +74,9 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     @Synchronized fun followedPlaylists(): Set<String> = ensureOwner()?.let {
         prefs.getStringSet("playlists:$it", emptySet())?.toSet()
     }.orEmpty()
-    @Synchronized fun followPlaylist(id: String, enabled: Boolean) {
+    @Synchronized fun followPlaylist(id: String, enabled: Boolean, requestScope: String? = null) {
         val profile = ensureOwner() ?: return
+        requireActive(requestScope)
         val ids = followedPlaylists().toMutableSet().apply { if (enabled) add(id) else remove(id) }
         prefs.edit().putStringSet("playlists:$profile", ids).apply()
     }
@@ -288,6 +299,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     }
     /** Called by the dataSync foreground service. A paused/interrupted file can resume with a validator. */
     suspend fun run(onProgress: (OfflineEntry) -> Unit) = withContext(Dispatchers.IO) {
+        awaitPendingPause()
         var optionsScope: String? = null
         var options: android.content.SharedPreferences? = null
         while (isActive) {

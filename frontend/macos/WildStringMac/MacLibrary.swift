@@ -34,7 +34,8 @@ struct MacMusicView: View {
                 emptyTitle: message == nil ? (query.isEmpty ? L10n("macLibrary.emptyLibrary") : L10n("macLibrary.noSearchResults", query)) : L10n("macLibrary.loadFailed"),
                 emptyDetail: message,
                 canManage: canManage,
-                isLoading: loading
+                isLoading: loading,
+                onPlay: play
             )
 
             if tracks.count < total {
@@ -51,9 +52,40 @@ struct MacMusicView: View {
             if focusSearch { searchFocused = true; focusSearch = false }
         }
         .task(id: query) { await load(reset: true) }
+        .onDisappear { playback.cancelMusicSelection() }
+    }
+
+    private func play(_ track: Track) {
+        guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+        guard index < total else { message = L10n("playback.collectionChanged"); return }
+        let token = playback.beginMusicSelection()
+        let library = client.selectedLibrary()
+        let text = query.trimmingCharacters(in: .whitespaces)
+        let start = total > PlaybackService.musicQueueLimit ? index : 0
+        let count = min(PlaybackService.musicQueueLimit, total - start)
+        Task {
+            do {
+                let window: [Track]
+                if start + count <= tracks.count {
+                    window = Array(tracks[start..<(start + count)])
+                } else {
+                    let page = try await client.tracks(limit: count, offset: start, query: text.isEmpty ? nil : text)
+                    guard playback.isCurrentMusicSelection(token), library == client.selectedLibrary() else { return }
+                    guard page.total == total, page.items.count == count else { message = L10n("playback.collectionChanged"); return }
+                    window = page.items
+                }
+                guard playback.isCurrentMusicSelection(token), library == client.selectedLibrary() else { return }
+                guard window[index - start].id == track.id else { message = L10n("playback.collectionChanged"); return }
+                playback.play(items: window.map(MacPlayback.item), startingAt: index - start, sourceCount: total)
+            } catch {
+                guard playback.isCurrentMusicSelection(token) else { return }
+                message = MacErrorText.message(for: error)
+            }
+        }
     }
 
     private func load(reset: Bool) async {
+        if reset { playback.cancelMusicSelection() }
         if reset { loading = tracks.isEmpty }
         do {
             let text = query.trimmingCharacters(in: .whitespaces)

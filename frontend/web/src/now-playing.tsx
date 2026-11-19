@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { useTranslation } from 'react-i18next';
 import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
+import { usePlaybackPosition } from './playback-state';
 import { PlaybackVisual, usePlaybackStyle } from './playback-style';
 import { FavoriteButton, type Favorites } from './favorites';
 import {
@@ -325,6 +326,7 @@ export function NowPlaying({
           isPodcast ? (
             <PodcastStage
               player={player}
+              active={active}
               showQueue={panel === 'queue'}
               onPreview={() => setArtwork(true)}
             />
@@ -342,7 +344,8 @@ export function NowPlaying({
                     !(landscape && (panel || queueOpen)) &&
                     !artwork
                   }
-                  position={player.position}
+                  progressSource={player.position}
+                  active={active}
                   duration={player.duration}
                   phase={player.visualPhase}
                   onPreview={() => setArtwork(true)}
@@ -405,6 +408,7 @@ export function NowPlaying({
                 <LyricsPanel
                   key={current.id}
                   player={player}
+                  visible={active}
                   onTogglePanel={() => setPanel(null)}
                 />
               )}
@@ -460,7 +464,7 @@ export function NowPlaying({
               </small>
             </span>
           </div>
-          <PlaybackControls player={player} />
+          <PlaybackControls player={player} active={active} />
           <div className="fullscreen-options">
             {isPodcast && <PlaybackRateControl player={player} />}
             <SleepControl player={player} />
@@ -564,7 +568,15 @@ export function NowPlaying({
 
 type LyricSize = 'small' | 'medium' | 'large';
 
-function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel: () => void }) {
+function LyricsPanel({
+  player,
+  visible,
+  onTogglePanel,
+}: {
+  player: Player;
+  visible: boolean;
+  onTogglePanel: () => void;
+}) {
   const { t } = useTranslation();
   const current = player.current;
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
@@ -584,13 +596,15 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
   const drag = useRef<{ pointer: number; y: number; scrollTop: number; moved: boolean } | null>(
     null,
   );
-  const [displayPosition, setDisplayPosition] = useState(player.position);
+  const position = usePlaybackPosition(player.position, visible);
+  const [displayPosition, setDisplayPosition] = useState(position);
   useEffect(() => {
+    if (!visible) return;
     if (!player.playing) {
-      setDisplayPosition(player.position);
+      setDisplayPosition(position);
       return;
     }
-    const anchor = player.position;
+    const anchor = position;
     const started = performance.now();
     let frame = 0;
     const tick = () => {
@@ -600,7 +614,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
     setDisplayPosition(anchor);
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [current?.id, player.playing, player.position]);
+  }, [current?.id, visible, player.playing, position]);
   useEffect(() => {
     const query = matchMedia('(pointer: coarse)');
     const changed = () => setCoarse(query.matches);

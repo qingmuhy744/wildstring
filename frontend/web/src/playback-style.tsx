@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject 
 import { artist, time, type Track } from './api';
 import { Cover } from './cover';
 import { useTranslation } from 'react-i18next';
+import { usePlaybackPosition, type PlaybackPosition } from './playback-state';
 import './playback-style.css';
 
 export type PlaybackStyle = 'cover' | 'vinyl' | 'cassette';
@@ -91,7 +92,8 @@ export function PlaybackVisual({
   style,
   podcast = false,
   playing,
-  position,
+  progressSource,
+  active,
   duration,
   phase,
   onImage,
@@ -101,7 +103,8 @@ export function PlaybackVisual({
   style: PlaybackStyle;
   podcast?: boolean;
   playing: boolean;
-  position: number;
+  progressSource: PlaybackPosition;
+  active: boolean;
   duration: number;
   phase: MutableRefObject<number>;
   onImage: (image: HTMLImageElement) => void;
@@ -145,6 +148,7 @@ export function PlaybackVisual({
       reduced.removeEventListener('change', update);
     };
   }, [playing, podcast, style, phase]);
+  const position = usePlaybackPosition(progressSource, active);
   const progress = duration > 0 ? Math.max(0, Math.min(position / duration, 1)) : 0;
   return (
     <div

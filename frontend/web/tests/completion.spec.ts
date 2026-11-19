@@ -46,7 +46,7 @@ async function offline(context: BrowserContext, page: Page) {
   await expect(page.getByRole('heading', { name: '离线音乐' })).toBeVisible();
 }
 
-test('完整集合超过50首，失败原子保留队列与音频，上限明确', async ({ page }) => {
+test('短列表收齐跨页歌曲，读取失败或列表变化保留已有播放', async ({ page }) => {
   await login(page);
   const source = (await allTracks(page))[0];
   const tracks = Array.from({ length: 57 }, (_, i) => ({
@@ -60,7 +60,7 @@ test('完整集合超过50首，失败原子保留队列与音频，上限明确
     const query = new URL(route.request().url()).searchParams;
     const offset = Number(query.get('offset') || 0);
     const limit = Math.min(50, Number(query.get('limit') || 50));
-    if (fail && Number(query.get('limit')) === 200) return route.fulfill({ status: 503, json: {} });
+    if (fail && Number(query.get('limit')) === 57) return route.fulfill({ status: 503, json: {} });
     return route.fulfill({
       json: {
         items: tracks.slice(offset, offset + limit),
@@ -92,7 +92,7 @@ test('完整集合超过50首，失败原子保留队列与音频，上限明确
   fail = false;
   huge = true;
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
-  await expect(page.locator('.toast')).toContainText('最多 5000 首');
+  await expect(page.locator('.toast')).toContainText('曲库内容已变化');
   expect((await audio(page)).source).toBe(before.source);
 });
 

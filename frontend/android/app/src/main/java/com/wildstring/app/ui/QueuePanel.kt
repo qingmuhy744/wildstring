@@ -78,7 +78,12 @@ internal fun QueuePanel(
         return
     }
     val feedback = LocalTactileFeedback.current
-    QueueList(state.queue, state.entryId, modifier,
+    val title = when (state.heartBatch?.recommended) {
+        true -> R.string.heart_queue_active
+        false -> R.string.heart_queue_pending
+        null -> R.string.queue_title_count
+    }
+    QueueList(state.queue, state.entryId, modifier, title = stringResource(title, state.queue.size),
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
         onRemove = {},
         onSwipeRemove = { row ->

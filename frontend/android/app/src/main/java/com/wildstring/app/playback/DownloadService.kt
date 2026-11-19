@@ -11,6 +11,7 @@ import com.wildstring.app.AppLanguage
 import com.wildstring.app.MainActivity
 import com.wildstring.app.R
 import com.wildstring.app.data.OfflineDownloads
+import com.wildstring.app.data.SessionStore
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.*
@@ -19,14 +20,21 @@ import kotlinx.coroutines.*
 @AndroidEntryPoint
 class DownloadService : Service() {
     @Inject lateinit var downloads: OfflineDownloads
+    @Inject lateinit var session: SessionStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
+    private var pausing = false
+    private fun pauseDownloads() {
+        if (pausing) return
+        pausing = true
+        session.cacheScope()?.let { downloads.schedulePause(it) }
+    }
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, AppLanguage.string(R.string.dl_svc_channel_name), NotificationManager.IMPORTANCE_LOW))
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "pause") { downloads.pauseAll(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
+        if (intent?.action == "pause") { pauseDownloads(); job?.cancel(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
         startForeground(ID, notification(AppLanguage.string(R.string.dl_svc_preparing)))
         if (job?.isActive != true) job = scope.launch {
             try { downloads.run { item -> if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this@DownloadService, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
@@ -35,12 +43,12 @@ class DownloadService : Service() {
         }
         return START_NOT_STICKY
     }
-    override fun onTimeout(startId: Int, fgsType: Int) { downloads.pauseAll(); scope.cancel(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+    override fun onTimeout(startId: Int, fgsType: Int) { pauseDownloads(); scope.cancel(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
     private fun notification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL)
         .setSmallIcon(R.drawable.ic_wildstring).setContentTitle(AppLanguage.string(R.string.dl_svc_notification_title)).setContentText(text).setOngoing(true)
         .setContentIntent(PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         .addAction(0, AppLanguage.string(R.string.dl_svc_pause_all_action), PendingIntent.getService(this, 2, Intent(this, DownloadService::class.java).setAction("pause"), PendingIntent.FLAG_IMMUTABLE)).build()
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onDestroy() { downloads.pauseAll(); scope.cancel(); super.onDestroy() }
+    override fun onDestroy() { if (job?.isActive == true) pauseDownloads(); scope.cancel(); super.onDestroy() }
     companion object { private const val CHANNEL = "offline-downloads"; private const val ID = 22 }
 }

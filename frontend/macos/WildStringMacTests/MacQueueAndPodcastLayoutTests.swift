@@ -69,6 +69,13 @@ extension MacAssistantTests {
 
             let suffix = scheme == .light ? "light" : "dark"
             try saveScreenshot(host: host, name: "mac-shell-favorites-queue-\(suffix)")
+
+            let playback = try #require(session.playback)
+            playback.play(items: playback.items, startingAt: 0, sourceCount: 120)
+            playback.pause()
+            #expect(playback.heartContinuationEnabled)
+            try await Task.sleep(for: .milliseconds(150))
+            try saveScreenshot(host: host, name: "mac-shell-long-music-queue-\(suffix)")
         }
     }
 

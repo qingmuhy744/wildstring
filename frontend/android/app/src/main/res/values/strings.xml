@@ -328,6 +328,7 @@
     <string name="album_save_offline">Save album offline</string>
     <string name="album_edit">Edit album details</string>
     <string name="preparing">Preparing…</string>
+    <string name="play_from_start">Play from start</string>
     <string name="play_all">Play all</string>
     <string name="sort_track_name">Title</string>
     <string name="list_actions">List actions</string>
@@ -390,6 +391,9 @@
     <string name="sort_plays">Play count</string>
     <string name="sort_listening_time">Listening time</string>
     <string name="close">Close</string>
+    <string name="heart_queue_active">Heart mode · %1$d</string>
+    <string name="heart_queue_pending">%1$d up next · Heart mode follows</string>
+    <string name="music_queue_capacity">A music queue can hold up to 100 songs.</string>
     <string name="queue_title_count">Play queue · %1$d</string>
     <string name="queue_drag_named">Drag to reorder: %1$s</string>
     <string name="queue_position">Song %1$d of %2$d</string>
@@ -1974,14 +1978,12 @@
     <string name="vm_playlists_checked">Playlists checked. New tracks will be saved automatically; downloaded files kept.</string>
     <string name="vm_podcast_resume_hint">For podcasts, please resume from the episode list. Progress is saved separately for each episode.</string>
     <string name="vm_queue_limit_exceeded">Playback queue can have at most 5,000 tracks.</string>
-    <string name="vm_queue_max_limit">Playback queue can have at most 5,000 items.</string>
     <string name="vm_queue_update_failed">Failed to update queue; previous playback kept.</string>
     <string name="vm_removed_from_playlist">Removed from playlist</string>
     <string name="vm_server_already_saved">This server is already saved. Please select it directly.</string>
     <string name="vm_server_changed">Server has changed.</string>
     <string name="vm_server_or_account_changed">Server or account has changed.</string>
     <string name="vm_session_changed">Session has changed.</string>
-    <string name="vm_shared_queue_limit_exceeded">Shared queue exceeds local 5,000 track limit.</string>
     <string name="vm_syncing_selected_playlists">Syncing selected playlists…</string>
     <string name="vm_title_assistant">AI Assistant</string>
     <string name="vm_title_discover">Discover</string>

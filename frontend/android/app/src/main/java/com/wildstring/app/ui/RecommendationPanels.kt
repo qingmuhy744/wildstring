@@ -138,9 +138,13 @@ internal fun recommendationIssue(code: String): String = when {
         selecting = selectedIds.isNotEmpty()
     }
     fun enqueue(tracks: List<Track>, next: Boolean = false) {
-        action.message = if (vm.addToQueue(tracks, next)) {
-            endSelection(); resources.getString(if (next) R.string.daily_queued_next else R.string.daily_queued, tracks.size)
-        } else resources.getString(R.string.daily_queue_failed)
+        val submitted = selectedIds
+        vm.addToQueue(tracks, next) { added ->
+            action.message = if (added) {
+                if (selectedIds == submitted) endSelection()
+                resources.getString(if (next) R.string.daily_queued_next else R.string.daily_queued, tracks.size)
+            } else resources.getString(R.string.daily_queue_failed)
+        }
     }
     BackHandler(enabled = selecting) { endSelection() }
     Column(Modifier.fillMaxSize()) {

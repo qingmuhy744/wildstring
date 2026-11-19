@@ -9,6 +9,7 @@ struct SearchView: View {
 
     @State private var query = ""
     @State private var tracks: [Track] = []
+    @State private var total = 0
     @State private var isSearching = false
     @State private var hasSearched = false
     @State private var errorMessage: String?
@@ -20,7 +21,7 @@ struct SearchView: View {
                 ForEach(tracks) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
-                            playTracks(tracks, startingAt: track, using: playback)
+                            play(track)
                         } label: {
                             TrackRow(
                                 client: client,
@@ -72,8 +73,40 @@ struct SearchView: View {
             }
             .searchable(text: $query, prompt: Text(L10n("searchView.prompt")))
             .task(id: query) { await runSearch() }
+            .onDisappear { playback.cancelMusicSelection() }
             .task { await openAssistantForDemoIfNeeded() }
             .miniPlayer(playback, client: client)
+        }
+    }
+
+    private func play(_ track: Track) {
+        guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+        let token = playback.beginMusicSelection()
+        let text = query.trimmingCharacters(in: .whitespaces)
+        let library = client.selectedLibrary()
+        let sourceTotal = total
+        guard index < sourceTotal else { errorMessage = L10n("playback.collectionChanged"); return }
+        let start = sourceTotal > PlaybackService.musicQueueLimit ? index : 0
+        let count = min(PlaybackService.musicQueueLimit, sourceTotal - start)
+        guard count > 0 else { return }
+        Task {
+            do {
+                let window: [Track]
+                if start + count <= tracks.count {
+                    window = Array(tracks[start..<(start + count)])
+                } else {
+                    let page = try await client.tracks(limit: count, offset: start, query: text)
+                    guard playback.isCurrentMusicSelection(token), client.selectedLibrary() == library else { return }
+                    guard page.total == sourceTotal, page.items.count == count else { errorMessage = L10n("playback.collectionChanged"); return }
+                    window = page.items
+                }
+                guard playback.isCurrentMusicSelection(token), client.selectedLibrary() == library else { return }
+                guard window[index - start].id == track.id else { errorMessage = L10n("playback.collectionChanged"); return }
+                playback.play(items: window.map(\.playbackItem), startingAt: index - start, sourceCount: sourceTotal)
+            } catch {
+                guard playback.isCurrentMusicSelection(token) else { return }
+                errorMessage = ErrorText.message(for: error)
+            }
         }
     }
 
@@ -86,7 +119,9 @@ struct SearchView: View {
         #endif
     }
 
-    private func runSearch() async {        let text = query.trimmingCharacters(in: .whitespaces)
+    private func runSearch() async {
+        playback.cancelMusicSelection()
+        let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             tracks = []
             hasSearched = false
@@ -103,7 +138,9 @@ struct SearchView: View {
         defer { isSearching = false }
         do {
             let page = try await client.tracks(limit: 100, query: text)
+            guard !Task.isCancelled else { return }
             tracks = page.items
+            total = page.total
             hasSearched = true
             errorMessage = nil
         } catch {

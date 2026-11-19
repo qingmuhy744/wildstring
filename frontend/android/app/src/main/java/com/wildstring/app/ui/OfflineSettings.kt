@@ -14,6 +14,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.PlaybackRequest
 import com.wildstring.app.data.Playlist
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @Composable internal fun downloadQualityLabel(bitrate: Int) = if (bitrate == 0) stringResource(R.string.quality_original) else "AAC $bitrate kbps"
 
@@ -24,7 +28,9 @@ import kotlinx.coroutines.launch
     var menu by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var playlists by remember { mutableStateOf<List<Playlist>?>(null) }
-    var selected by remember { mutableStateOf(downloads.followedPlaylists()) }
+    var selected by remember { mutableStateOf<Set<String>?>(null) }
+    val selectionLock = remember { Mutex() }
+    LaunchedEffect(downloads) { selected = withContext(Dispatchers.IO) { downloads.followedPlaylists() } }
     val status by vm.offlineSyncStatus.collectAsStateWithLifecycle()
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -42,21 +48,29 @@ import kotlinx.coroutines.launch
         Switch(wifi, { wifi = it; downloads.wifiOnly = it; scope.launch { action.run { vm.syncOfflinePlaylists() } } })
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.playlist_auto_count, selected.size), Modifier.weight(1f))
-        TextButton({ choosing = true; scope.launch { action.run { playlists = vm.allPlaylists() } } }) { Text(stringResource(R.string.playlist_choose)) }
+        Text(stringResource(R.string.playlist_auto_count, selected.orEmpty().size), Modifier.weight(1f))
+        TextButton({ choosing = true; scope.launch { action.run { playlists = vm.allPlaylists() } } }, enabled = selected != null) { Text(stringResource(R.string.playlist_choose)) }
     }
     Text(stringResource(R.string.offline_auto_hint), style = MaterialTheme.typography.bodySmall)
     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall)
     ActionStatus(action)
-    if (selected.isNotEmpty()) TextButton({ scope.launch { action.run { vm.syncOfflinePlaylists() } } }, enabled = !action.busy) { Text(stringResource(R.string.playlist_check_now)) }
+    if (!selected.isNullOrEmpty()) TextButton({ scope.launch { action.run { vm.syncOfflinePlaylists() } } }, enabled = !action.busy) { Text(stringResource(R.string.playlist_check_now)) }
     if (choosing) AlertDialog(onDismissRequest = { choosing = false }, title = { Text(stringResource(R.string.playlist_auto_download)) }, text = {
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
             if (playlists == null) Text(if (action.busy) stringResource(R.string.playlist_loading) else stringResource(R.string.playlist_loading_failed))
             playlists?.forEach { playlist ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(playlist.id in selected, { enabled ->
-                        downloads.followPlaylist(playlist.id, enabled)
-                        selected = downloads.followedPlaylists()
+                    Checkbox(playlist.id in selected.orEmpty(), { enabled ->
+                        val owner = vm.repository.session.cacheScope() ?: return@Checkbox
+                        scope.launch {
+                            selectionLock.withLock {
+                                val updated = withContext(Dispatchers.IO) {
+                                    downloads.followPlaylist(playlist.id, enabled, owner)
+                                    downloads.followedPlaylists()
+                                }
+                                if (owner == vm.repository.session.cacheScope()) selected = updated
+                            }
+                        }
                     })
                     Column(Modifier.weight(1f)) { Text(playlist.name); Text(stringResource(R.string.track_count, playlist.trackCount), style = MaterialTheme.typography.bodySmall) }
                 }

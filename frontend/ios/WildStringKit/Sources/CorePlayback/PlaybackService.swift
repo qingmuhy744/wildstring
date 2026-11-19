@@ -98,6 +98,12 @@ public final class PlaybackService {
         }
     }
 
+    nonisolated public static let musicQueueLimit = 100
+    public private(set) var isHeartContinuation = false
+    public private(set) var heartContinuationEnabled = false
+    @ObservationIgnored public var musicContinuationScope: (@Sendable () -> String)?
+    @ObservationIgnored public var loadCachedRecommendations: (@Sendable () async throws -> [Item])?
+
     public private(set) var queue = PlaybackQueue()
     public private(set) var isPlaying = false
     /// True when the queue stopped after its last track, so handoff publishes
@@ -182,7 +188,7 @@ public final class PlaybackService {
     @ObservationIgnored private var podcastConflictVersion: Int?
     @ObservationIgnored private var podcastHasConflict = false
     @ObservationIgnored private var podcastKnownCompleted = false
-    private struct StoredPodcast: Codable {
+    private struct StoredPodcast: Codable, Sendable {
         var bookmark: PodcastBookmark
         var position: Double
         var duration: Double
@@ -283,7 +289,15 @@ public final class PlaybackService {
     /// Loads the persisted queue in a paused state; playback only starts on demand.
     public func restore() async {
         guard let persisted = try? await store.load() else { return }
-        queue = PlaybackQueue(items: persisted.items, currentIndex: persisted.currentIndex)
+        let index = min(max(0, persisted.currentIndex ?? 0), max(0, persisted.items.count - 1))
+        let music = persisted.items.first.map { Self.podcastEpisodeID($0.trackID) == nil } ?? false
+        let items = music && persisted.items.count > Self.musicQueueLimit
+            ? Array(persisted.items.dropFirst(index).prefix(Self.musicQueueLimit)) : persisted.items
+        queue = PlaybackQueue(items: items, currentIndex: items.count == persisted.items.count ? index : 0)
+        if music, let continuation = persisted.continuation, continuation.scope == musicContinuationScope?() {
+            heartContinuationEnabled = true
+            isHeartContinuation = continuation.active
+        }
         podcastOverrideItem = nil
         currentTime = persisted.position
         duration = currentItem.map { max(0, $0.durationSeconds) } ?? 0
@@ -308,7 +322,17 @@ public final class PlaybackService {
 
     // MARK: - Commands
 
-    public func play(items: [Item], startingAt index: Int, position: Double = 0) {
+    public func beginMusicSelection() -> Int { invalidatePodcastAdvance() }
+    public func isCurrentMusicSelection(_ token: Int) -> Bool { token == podcastTurn }
+    public func cancelMusicSelection() { invalidatePodcastAdvance() }
+    public func clearMusicContinuation() {
+        invalidatePodcastAdvance()
+        heartContinuationEnabled = false
+        isHeartContinuation = false
+        persistQueueAndProgress()
+    }
+
+    public func play(items: [Item], startingAt index: Int, position: Double = 0, sourceCount: Int? = nil) {
         guard items.indices.contains(index) else { return }
         let turn = invalidatePodcastAdvance()
         podcastOverrideItem = nil
@@ -318,8 +342,14 @@ public final class PlaybackService {
             errorMessage = KitL10n("kit.playback.trackUnavailableRetry", items[index].title, reason)
             return
         }
-        let playable = items.filter { $0.unavailableReason == nil }
-        let selectedIndex = items.prefix(index).filter { $0.unavailableReason == nil }.count
+        let music = Self.podcastEpisodeID(items[index].trackID) == nil
+        let longSource = music && (sourceCount ?? items.count) > Self.musicQueueLimit
+        let window = longSource && items.count > Self.musicQueueLimit ? Array(items.dropFirst(index).prefix(Self.musicQueueLimit)) : items
+        let windowIndex = window.count == items.count ? index : 0
+        let playable = window.filter { $0.unavailableReason == nil }
+        let selectedIndex = window.prefix(windowIndex).filter { $0.unavailableReason == nil }.count
+        heartContinuationEnabled = longSource
+        isHeartContinuation = false
         queue.set(items: playable, startingAt: selectedIndex)
         if let episodeID = Self.podcastEpisodeID(queue.current?.trackID ?? "") {
             podcastLine = .show
@@ -352,6 +382,7 @@ public final class PlaybackService {
         position: Double? = nil,
         line: PodcastPlaybackLine = .show
     ) {
+        clearMusicContinuation()
         podcastLine = line
         podcastResumeSeek = nil
         restoredPodcast = nil
@@ -501,6 +532,7 @@ public final class PlaybackService {
     }
 
     public func resume() {
+        invalidatePodcastAdvance()
         guard currentItem != nil else { return }
         if pendingPodcastPrompt != nil { return }
         if let episode = Self.podcastEpisodeID(currentItem?.trackID ?? ""), loadPodcastProgress != nil {
@@ -560,12 +592,14 @@ public final class PlaybackService {
     }
 
     public func next() {
+        invalidatePodcastAdvance()
         if beginContextStep(.next) { return }
         if podcastOverrideItem != nil { skipPodcastEpisode(.next); return }
         move(by: 1)
     }
 
     public func previous() {
+        invalidatePodcastAdvance()
         if beginContextStep(.previous) { return }
         if podcastOverrideItem != nil { skipPodcastEpisode(.previous); return }
         move(by: -1)
@@ -575,6 +609,7 @@ public final class PlaybackService {
 
     @discardableResult
     public func enqueue(items: [Item], next: Bool = false) -> Bool {
+        invalidatePodcastAdvance()
         let playable = items.filter { $0.unavailableReason == nil }
         guard !playable.isEmpty else {
             errorMessage = KitL10n("kit.playback.noPlayableTracks")
@@ -601,7 +636,7 @@ public final class PlaybackService {
             }
             if music.isEmpty { return true }
         }
-        guard queue.count + music.count <= 5000 else {
+        guard queue.count + music.count <= Self.musicQueueLimit else {
             errorMessage = KitL10n("kit.playback.queueLimit")
             return false
         }
@@ -614,15 +649,18 @@ public final class PlaybackService {
     }
 
     public func toggleShuffle() {
+        invalidatePodcastAdvance()
         queue.toggleShuffle()
         persistQueueAndProgress()
     }
 
     public func cycleRepeatMode() {
+        invalidatePodcastAdvance()
         queue.cycleRepeatMode()
     }
 
     public func playQueueEntry(at index: Int) {
+        invalidatePodcastAdvance()
         podcastOverrideItem = nil
         queue.move(to: index)
         startCurrent(autoplay: true, startAt: 0)
@@ -630,6 +668,7 @@ public final class PlaybackService {
     }
 
     public func removeQueueEntry(at index: Int) {
+        invalidatePodcastAdvance()
         guard index != currentIndex else { return }
         podcastOverrideItem = nil
         queue.remove(at: index)
@@ -637,18 +676,21 @@ public final class PlaybackService {
     }
 
     public func movePlaybackEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        invalidatePodcastAdvance()
         podcastOverrideItem = nil
         queue.movePlaybackEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
 
     public func moveQueueEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        invalidatePodcastAdvance()
         podcastOverrideItem = nil
         queue.moveEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
 
     public func seek(to seconds: Double) {
+        invalidatePodcastAdvance()
         performSeek(to: seconds, isUserInitiated: true)
     }
 
@@ -826,7 +868,10 @@ public final class PlaybackService {
     }
 
     public func stopAndClear(preservingStoredQueue: Bool = false) {
+        invalidatePodcastAdvance()
         if preservingStoredQueue { persistQueueAndProgress() }
+        heartContinuationEnabled = false
+        isHeartContinuation = false
         assetLoadTask?.cancel()
         assetLoadTask = nil
         cancelSleepTimer()
@@ -923,7 +968,13 @@ public final class PlaybackService {
     public func adopt(items: [Item], startingAt index: Int, position: Double, mode: String) {
         guard !items.isEmpty else { return }
         podcastOverrideItem = nil
-        queue.set(items: items, startingAt: min(max(0, index), items.count - 1))
+        invalidatePodcastAdvance()
+        heartContinuationEnabled = false
+        isHeartContinuation = false
+        let start = min(max(0, index), items.count - 1)
+        let music = Self.podcastEpisodeID(items[start].trackID) == nil
+        let window = music && items.count > Self.musicQueueLimit ? Array(items.dropFirst(start).prefix(Self.musicQueueLimit)) : items
+        queue.set(items: window, startingAt: window.count == items.count ? start : 0)
         let shuffled = mode == "shuffle"
         if queue.isShuffled != shuffled {
             queue.toggleShuffle()
@@ -964,6 +1015,7 @@ public final class PlaybackService {
     }
 
     public func sleepAfterCurrentTrack() {
+        invalidatePodcastAdvance()
         cancelSleepTimer()
         pauseAfterCurrentTrack = true
     }
@@ -1427,7 +1479,31 @@ public final class PlaybackService {
             persistProgress()
             return
         }
+        guard heartContinuationEnabled, let loadCachedRecommendations else {
+            stopAtEndOfPodcast()
+            return
+        }
+        let turn = invalidatePodcastAdvance()
+        let previous = Set(queue.items.map(\.trackID))
+        let lastID = endedTrackID
+        let firstContinuation = !isHeartContinuation
         stopAtEndOfPodcast()
+        Task { @MainActor in
+            let all = (try? await loadCachedRecommendations())?.filter { $0.unavailableReason == nil } ?? []
+            guard turn == self.podcastTurn, self.heartContinuationEnabled, self.queue.repeatMode == .off else { return }
+            let fresh = all.filter { !previous.contains($0.trackID) }
+            var next = (firstContinuation && !fresh.isEmpty ? fresh : all).shuffled()
+            if next.count == 1, next[0].trackID == lastID { return }
+            if next.count > 1, next.first?.trackID == lastID,
+               let different = next.firstIndex(where: { $0.trackID != lastID }) {
+                next.swapAt(0, different)
+            }
+            guard !next.isEmpty else { return }
+            self.queue.set(items: Array(next.prefix(Self.musicQueueLimit)), startingAt: 0)
+            self.isHeartContinuation = true
+            self.startCurrent(autoplay: true, startAt: 0)
+            self.persistQueueAndProgress()
+        }
     }
 
     private func advanceLocalPodcast(endedTrackID: String?) {
@@ -1635,8 +1711,9 @@ public final class PlaybackService {
         let savedItems = items
         let savedIndex = index
         let position = currentTime
+        let continuation = heartContinuationEnabled ? musicContinuationScope.map { QueueContinuation(scope: $0(), active: isHeartContinuation) } : nil
         persistence.enqueue { store in
-            try? await store.saveQueue(savedItems, currentIndex: savedIndex)
+            try? await store.saveQueue(savedItems, currentIndex: savedIndex, continuation: continuation)
             try? await store.saveProgress(QueueProgress(index: savedIndex, position: position))
         }
     }
@@ -1707,7 +1784,7 @@ public final class PlaybackService {
                                            position: Double(snapshot.positionSeconds),
                                            duration: Double(snapshot.durationSeconds ?? 0),
                                            completed: true, version: snapshot.version)
-                if let data = try? JSONEncoder().encode(record) { podcastCloud?.defaults.set(data, forKey: key) }
+                storePodcast(record, episode: episode, key: key)
             }
             isBuffering = false
             if podcastCloud != nil {
@@ -1802,7 +1879,20 @@ public final class PlaybackService {
                                    completed: completed, version: acceptedVersion ?? (previous?.bookmark.sessionId == podcast.sessionId ? previous!.version : podcast.baseVersion),
                                    conflict: podcastHasConflict, conflictVersion: podcastConflictVersion,
                                    pending: pending, pendingEvent: pendingEvent)
-        if let data = try? JSONEncoder().encode(stored) { podcastCloud?.defaults.set(data, forKey: key) }
+        storePodcast(stored, episode: podcast.episodeId, key: key)
+    }
+
+    private func storePodcast(_ stored: StoredPodcast, episode: String, key: String) {
+        guard let cloud = podcastCloud, let account = cloud.accountKey,
+              let data = try? JSONEncoder().encode(stored) else { return }
+        cloud.defaults.set(data, forKey: key)
+        let indexKey = "wildstring.podcast.pending.\(account)"
+        var pending = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+        let shouldKeep = stored.pending != false && stored.bookmark.ready && !stored.bookmark.blocked
+        if shouldKeep != pending.contains(episode) {
+            if shouldKeep { pending.insert(episode) } else { pending.remove(episode) }
+            cloud.defaults.set(Array(pending), forKey: indexKey)
+        }
     }
 
     private func checkpointListening(state: String) {
@@ -1817,14 +1907,16 @@ public final class PlaybackService {
 
     private func checkpointPodcast(event: String, force: Bool) {
         if event == "ended" { podcastKnownCompleted = true }
-        saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
         guard let write = podcast.next(
             positionSeconds: Int(currentTime.rounded()),
             durationSeconds: Int(duration.rounded()),
             event: event,
             nowMs: Self.monotonicMs(),
             force: force
-        ) else { return }
+        ) else {
+            saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
+            return
+        }
         flushHistoricalPodcastProgress(force: force)
         saveStoredPodcast(position: currentTime, completed: podcastKnownCompleted, event: event)
         let episode = podcast.episodeId
@@ -1838,7 +1930,7 @@ public final class PlaybackService {
                     let stored = StoredPodcast(bookmark: PodcastBookmark(), position: Double(current.positionSeconds),
                                                duration: Double(current.durationSeconds ?? 0),
                                                completed: current.completed == true, version: current.version)
-                    if let data = try? JSONEncoder().encode(stored) { service.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                    service.storePodcast(stored, episode: episode, key: storageKey)
                 }
                 return
             }
@@ -1907,7 +1999,7 @@ public final class PlaybackService {
                     } else if var stored = self.loadStoredPodcast(episode), stored.bookmark.sessionId == write.sessionId,
                               let storageKey {
                         stored.version = snapshot.version
-                        if let data = try? JSONEncoder().encode(stored) { self.podcastCloud?.defaults.set(data, forKey: storageKey) }
+                        self.storePodcast(stored, episode: episode, key: storageKey)
                     }
                 }
             }
@@ -1917,25 +2009,53 @@ public final class PlaybackService {
         return task
     }
 
-    private func flushHistoricalPodcastProgress(force: Bool) {
+    func flushHistoricalPodcastProgress(force: Bool) {
         guard podcastHistoryFlush == nil, let cloud = podcastCloud, let account = cloud.accountKey,
               submitPodcastProgress != nil else { return }
         let prefix = "wildstring.podcast.progress.\(account)."
-        let keys = cloud.defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }
+        let indexKey = "wildstring.podcast.pending.\(account)"
+        let migrationKey = "wildstring.podcast.pendingMigrated.\(account)"
         podcastHistoryFlush = Task { @MainActor [weak self] in
             defer { self?.podcastHistoryFlush = nil }
-            for key in keys {
-                guard let self else { return }
-                let episode = String(key.dropFirst(prefix.count))
-                guard self.currentItem?.trackID != "podcast_ep_\(episode)",
-                      var stored = self.loadStoredPodcast(episode), stored.pending != false,
-                      stored.bookmark.ready, !stored.bookmark.blocked,
-                      let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
+            guard let self else { return }
+            if !cloud.defaults.bool(forKey: migrationKey) {
+                let defaults = PodcastDefaultsBox(cloud.defaults)
+                let legacy = await Task.detached(priority: .utility) {
+                    let values = defaults.value.dictionaryRepresentation()
+                    return Set(values.compactMap { key, value -> String? in
+                        guard key.hasPrefix(prefix), let data = value as? Data,
+                              let stored = try? JSONDecoder().decode(StoredPodcast.self, from: data),
+                              stored.pending != false, stored.bookmark.ready, !stored.bookmark.blocked else { return nil }
+                        let episode = String(key.dropFirst(prefix.count))
+                        return stored.bookmark.episodeId == episode ? episode : nil
+                    })
+                }.value
+                guard self.podcastCloud === cloud else { return }
+                let current = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+                cloud.defaults.set(Array(current.union(legacy)), forKey: indexKey)
+                cloud.defaults.set(true, forKey: migrationKey)
+            }
+            let episodes = cloud.defaults.stringArray(forKey: indexKey) ?? []
+            for episode in episodes {
+                guard self.podcastCloud === cloud else { return }
+                let key = prefix + episode
+                guard self.currentItem?.trackID != "podcast_ep_\(episode)" else { continue }
+                guard var stored = self.loadStoredPodcast(episode) else {
+                    var pending = Set(cloud.defaults.stringArray(forKey: indexKey) ?? [])
+                    pending.remove(episode)
+                    cloud.defaults.set(Array(pending), forKey: indexKey)
+                    continue
+                }
+                guard stored.pending != false, stored.bookmark.ready, !stored.bookmark.blocked else {
+                    self.storePodcast(stored, episode: episode, key: key)
+                    continue
+                }
+                guard let write = stored.bookmark.next(positionSeconds: Int(stored.position.rounded()),
                                                        durationSeconds: Int(stored.duration.rounded()),
                                                        event: stored.completed ? "ended" : (stored.pendingEvent ?? "stop"),
                                                        nowMs: Self.monotonicMs(), force: force)
                 else { continue }
-                if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
+                self.storePodcast(stored, episode: episode, key: key)
                 let submission = self.enqueuePodcastWrite(write, episode: episode) { service, write, result in
                     guard service.currentItem?.trackID != "podcast_ep_\(episode)",
                           service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
@@ -1961,7 +2081,7 @@ public final class PlaybackService {
                     }
                     guard service.currentItem?.trackID != "podcast_ep_\(episode)",
                           service.loadStoredPodcast(episode)?.bookmark.sessionId == write.sessionId else { return }
-                    if let data = try? JSONEncoder().encode(stored) { cloud.defaults.set(data, forKey: key) }
+                    service.storePodcast(stored, episode: episode, key: key)
                 }
                 await submission?.value
             }
@@ -2048,6 +2168,11 @@ public final class PlaybackService {
 #endif
 
 /// Holds the player service for callbacks AVFoundation makes off the main actor.
+private struct PodcastDefaultsBox: @unchecked Sendable {
+    let value: UserDefaults
+    init(_ value: UserDefaults) { self.value = value }
+}
+
 final class PlaybackServiceBox: @unchecked Sendable {
     nonisolated(unsafe) weak var service: PlaybackService?
 

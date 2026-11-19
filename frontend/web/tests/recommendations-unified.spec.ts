@@ -218,7 +218,9 @@ test('个人与大家排行按真实范围请求，跨页队列完整且不展�
   await expect(panel).toContainText('不展示个人记录');
   await expect(panel).not.toContainText('qingmuhy');
   await panel.getByRole('button', { name: '播放排行', exact: true }).click();
-  await expect.poll(() => calls.rank.some((query) => query.includes('limit=100'))).toBe(true);
+  await expect
+    .poll(() => calls.rank.some((query) => query.includes('limit=23&offset=0')))
+    .toBe(true);
   await expect
     .poll(async () =>
       page.evaluate(() => Object.values(localStorage).some((value) => value.includes('rank-22'))),
@@ -434,8 +436,14 @@ test('真实后端：账号推荐设置、本地请求和收听排行可回读',
     path: `../../artifacts/recommendations-real-rankings-${info.project.name}.png`,
     fullPage: false,
   });
+  const firstTitle = await ranking
+    .locator('.ranking-track .track-title strong')
+    .first()
+    .innerText();
+  const firstTrack = tracks.find((track: { title: string }) => track.title === firstTitle);
+  expect(firstTrack).toBeDefined();
   await ranking.getByRole('button', { name: '播放排行', exact: true }).click();
-  await expect.poll(async () => (await audio(page)).source).toContain(tracks[0].id);
+  await expect.poll(async () => (await audio(page)).source).toContain(firstTrack.id);
 });
 
 test('旧服务端只本地回退，不会默用全局付费模型', async ({ page }) => {

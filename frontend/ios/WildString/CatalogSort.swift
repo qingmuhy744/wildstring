@@ -1,4 +1,5 @@
 import CoreNetwork
+import CorePlayback
 import Foundation
 import Observation
 
@@ -148,6 +149,7 @@ final class AlbumTracksModel {
     private let pageSize: Int
     private let fetchPage: (Int, Int) async throws -> AlbumTrackPage
     private var nextOffset = 0
+    private var revision = 0
 
     init(
         pageSize: Int = 200,
@@ -160,6 +162,7 @@ final class AlbumTracksModel {
     var canLoadMore: Bool { items.count < total }
 
     func loadInitial() async {
+        revision += 1
         items = []
         discs = []
         total = 0
@@ -167,6 +170,39 @@ final class AlbumTracksModel {
         didLoadOnce = false
         errorMessage = nil
         await loadMore()
+    }
+
+    func play(_ track: Track, using playback: PlaybackService) {
+        guard let index = items.firstIndex(where: { $0.id == track.id }) else { return }
+        let token = playback.beginMusicSelection()
+        let selectionRevision = revision
+        let sourceTotal = total
+        guard index < sourceTotal else { errorMessage = L10n("playback.collectionChanged"); return }
+        let start = sourceTotal > PlaybackService.musicQueueLimit ? index : 0
+        let count = min(PlaybackService.musicQueueLimit, sourceTotal - start)
+        guard count > 0 else { return }
+        Task {
+            do {
+                let tracks: [Track]
+                if start + count <= items.count {
+                    tracks = Array(items[start..<(start + count)])
+                } else {
+                    let page = try await fetchPage(count, start)
+                    guard playback.isCurrentMusicSelection(token), selectionRevision == revision else { return }
+                    guard page.total == sourceTotal, page.items.count == count else {
+                        errorMessage = L10n("playback.collectionChanged")
+                        return
+                    }
+                    tracks = page.items
+                }
+                guard playback.isCurrentMusicSelection(token), selectionRevision == revision else { return }
+                guard tracks[index - start].id == track.id else { errorMessage = L10n("playback.collectionChanged"); return }
+                playback.play(items: tracks.map(\.playbackItem), startingAt: index - start, sourceCount: sourceTotal)
+            } catch {
+                guard playback.isCurrentMusicSelection(token) else { return }
+                errorMessage = ErrorText.message(for: error)
+            }
+        }
     }
 
     func loadMore() async {

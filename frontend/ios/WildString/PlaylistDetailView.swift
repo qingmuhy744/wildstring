@@ -34,7 +34,7 @@ struct PlaylistDetailView: View {
                 ) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
-                            playTracks(loader.items, startingAt: track, using: playback)
+                            loader.play(track, using: playback)
                         } label: {
                             TrackRow(
                                 client: client,
@@ -64,6 +64,7 @@ struct PlaylistDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
         }
+        .onDisappear { playback.cancelMusicSelection() }
         .miniPlayer(playback, client: client)
         .task { await load() }
     }
@@ -87,7 +88,7 @@ struct PlaylistDetailView: View {
                     .foregroundStyle(.tertiary)
                 Button {
                     if let first = loader?.items.first(where: \.isAvailable) ?? loader?.items.first {
-                        playTracks(loader?.items ?? [], startingAt: first, using: playback)
+                        loader?.play(first, using: playback)
                     }
                 } label: {
                     Label(L10n("playlistDetail.playAll"), systemImage: "play.fill")

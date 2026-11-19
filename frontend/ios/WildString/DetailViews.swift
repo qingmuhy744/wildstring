@@ -37,7 +37,7 @@ struct AlbumDetailView: View {
                             ForEach(section.tracks) { track in
                                 TrackActionRow(client: client, track: track) {
                                     Button {
-                                        playTracks(model.items, startingAt: track, using: playback)
+                                        model.play(track, using: playback)
                                     } label: {
                                         TrackRow(
                                             client: client,
@@ -74,7 +74,7 @@ struct AlbumDetailView: View {
                     }
                 }
                 .listStyle(.plain)
-                .refreshable { await model.loadInitial() }
+                .refreshable { playback.cancelMusicSelection(); await model.loadInitial() }
                 .overlay {
                     if !model.didLoadOnce {
                         ProgressView()
@@ -98,6 +98,7 @@ struct AlbumDetailView: View {
                 sortMenu
             }
         }
+        .onDisappear { playback.cancelMusicSelection() }
         .miniPlayer(playback, client: client)
         .task { await ensureLoaded() }
     }
@@ -156,6 +157,7 @@ struct AlbumDetailView: View {
             ForEach(CatalogSorting.songSorts, id: \.self) { option in
                 Button {
                     guard option != sort else { return }
+                    playback.cancelMusicSelection()
                     sort = option
                     order = CatalogSorting.defaultOrder(for: option)
                     preferences.albumTracksSort = sort
@@ -202,7 +204,7 @@ struct AlbumDetailView: View {
                     .foregroundStyle(.tertiary)
                 Button {
                     if let first = model?.items.first(where: \.isAvailable) ?? model?.items.first {
-                        playTracks(model?.items ?? [], startingAt: first, using: playback)
+                        model?.play(first, using: playback)
                     }
                 } label: {
                     Label(L10n("detailView.playAll"), systemImage: "play.fill")
@@ -279,6 +281,7 @@ struct ArtistDetailView: View {
                 }
             }
         }
+        .onDisappear { playback.cancelMusicSelection() }
         .miniPlayer(playback, client: client)
         .task { await ensureSectionLoaded() }
         .onChange(of: section) { _, _ in
@@ -297,7 +300,7 @@ struct ArtistDetailView: View {
                 ) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
-                            playTracks(songsLoader.items, startingAt: track, using: playback)
+                            songsLoader.play(track, using: playback)
                         } label: {
                             TrackRow(
                                 client: client,
@@ -385,6 +388,7 @@ struct ArtistDetailView: View {
             ForEach(CatalogSorting.songSorts, id: \.self) { option in
                 Button {
                     guard option != songSort else { return }
+                    playback.cancelMusicSelection()
                     songSort = option
                     songOrder = CatalogSorting.defaultOrder(for: option)
                     preferences.artistSongSort = songSort
@@ -401,6 +405,7 @@ struct ArtistDetailView: View {
             }
             Divider()
             Button {
+                playback.cancelMusicSelection()
                 songOrder = songOrder == .asc ? .desc : .asc
                 preferences.artistSongOrder = songOrder
                 songsLoader = nil

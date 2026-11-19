@@ -30,6 +30,14 @@ public struct PlaybackQueue: Equatable, Sendable {
         self.positionInOrder = index
     }
 
+    /// Window a shared music snapshot before resolving track metadata.
+    public static func musicWindow(trackIDs: [String], index: Int) -> (trackIDs: [String], index: Int) {
+        guard !trackIDs.isEmpty else { return ([], 0) }
+        let selected = min(max(0, index), trackIDs.count - 1)
+        guard trackIDs.count > PlaybackService.musicQueueLimit else { return (trackIDs, selected) }
+        return (Array(trackIDs.dropFirst(selected).prefix(PlaybackService.musicQueueLimit)), 0)
+    }
+
     public var count: Int { items.count }
     public var playbackItems: [PlaybackService.Item] { order.map { items[$0] } }
 

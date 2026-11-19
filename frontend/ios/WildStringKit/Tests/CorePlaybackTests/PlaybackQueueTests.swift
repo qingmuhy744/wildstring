@@ -13,6 +13,19 @@ private func item(_ suffix: String) -> PlaybackService.Item {
 
 @Suite("PlaybackQueue")
 struct PlaybackQueueTests {
+    @Test func sharedMusicWindowPreservesSelectedTrackAndCapacity() {
+        let ids = (0..<450).map { "t\($0)" }
+        let window = PlaybackQueue.musicWindow(trackIDs: ids, index: 300)
+        #expect(window.trackIDs == Array(ids[300..<400]))
+        #expect(window.index == 0)
+        let tail = PlaybackQueue.musicWindow(trackIDs: ids, index: 430)
+        #expect(tail.trackIDs == Array(ids[430...]))
+        #expect(tail.index == 0)
+        let short = PlaybackQueue.musicWindow(trackIDs: Array(ids.prefix(100)), index: 63)
+        #expect(short.trackIDs.count == 100)
+        #expect(short.index == 63)
+    }
+
     @Test func setStartsAtRequestedIndex() {
         var queue = PlaybackQueue()
         queue.set(items: [item("a"), item("b"), item("c")], startingAt: 1)
