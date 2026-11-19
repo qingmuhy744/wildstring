@@ -236,7 +236,9 @@ class MobileCompletionTest {
         Fixture(257).use { fixture -> val vm = connect(fixture)
             try {
                 val first = gson.fromJson(fixture.track(0), Track::class.java)
-                compose.runOnIdle { vm.play(listOf(first)); vm.controller!!.pause(); vm.controller!!.seekTo(1000); vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 257, null)) }
+                compose.runOnIdle { vm.play(listOf(first), autoplay = false, positionMs = 1000) }
+                compose.waitUntil(10_000) { vm.state.value.current?.id == first.id }
+                compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 257, null)) }
                 compose.waitUntil(10_000) { !vm.state.value.loading }
                 val oldEntry = compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId }
                 fixture.failPage.set(true)
@@ -312,8 +314,9 @@ class MobileCompletionTest {
             try {
                 fixture.holdCollection.set(true)
                 val first = gson.fromJson(fixture.track(0), Track::class.java)
+                compose.runOnIdle { vm.play(listOf(first), autoplay = false) }
+                compose.waitUntil(10_000) { vm.state.value.current?.id == first.id }
                 val oldEntry = compose.runOnIdle {
-                    vm.play(listOf(first), autoplay = false)
                     vm.navigate("library"); vm.kind("tracks")
                     vm.controller!!.currentMediaItem!!.mediaId
                 }
