@@ -35,7 +35,9 @@ test('歌曲菜单图标与文字对齐，深浅色及窄屏保持控件可达',
     expect(centers[0].height).toBe(centers[1].height);
     await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
     const menu = page.getByRole('group', { name: '操作 晴天测试曲', exact: true });
-    const alignment = await menu.locator(':scope > button').evaluateAll((buttons) =>
+    const menuButtons = menu.locator(':scope > button');
+    await expect(menuButtons.first()).toBeVisible();
+    const alignment = await menuButtons.evaluateAll((buttons) =>
       buttons.map((button) => {
         const icon = button.querySelector('svg')!.getBoundingClientRect();
         const text = button.querySelector('span')!.getBoundingClientRect();

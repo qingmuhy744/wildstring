@@ -65,7 +65,7 @@ export function TrackActions({
         id={id}
         ref={panel}
         popover="auto"
-        onToggle={(event) => setOpen(event.newState === 'open')}
+        onBeforeToggle={(event) => setOpen(event.newState === 'open')}
         className="track-popover"
         role="group"
         aria-label={t('trackActions.operationsFor', { title: track.title })}
