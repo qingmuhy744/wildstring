@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { trackUnavailableReason, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
@@ -7,6 +7,7 @@ import type { Player } from './player';
 import { AlbumLink } from './album-link';
 import { beforeTrackListSizeChange, useTrackListSize } from './track-list-size';
 import { PlaybackIndicator } from './playback-indicator';
+import { TrackWindow, type TrackBlockMeasurements } from './track-window';
 
 export function TrackList({
   page,
@@ -14,6 +15,8 @@ export function TrackList({
   onNotice,
   revision,
   operations,
+  measurements,
+  anchorID,
   showStats = false,
   statsSort = 'last_played_at',
   albumTracks = false,
@@ -26,6 +29,8 @@ export function TrackList({
   onNotice: (notice: string) => void;
   revision: number;
   operations: TrackOperations;
+  measurements: TrackBlockMeasurements;
+  anchorID?: string;
   showStats?: boolean;
   statsSort?: string;
   albumTracks?: boolean;
@@ -74,20 +79,154 @@ export function TrackList({
     if (row) window.scrollBy(0, row.getBoundingClientRect().top - previous.top);
   }, [listSize]);
   const multiDisc = (page.discs?.length || 0) > 1;
-  const boundaries = new Map(
-    groupDiscs && multiDisc ? page.discs?.map((disc) => [disc.offset, disc]) : [],
+  const boundaries = useMemo(
+    () => new Map(groupDiscs && multiDisc ? page.discs?.map((disc) => [disc.offset, disc]) : []),
+    [groupDiscs, multiDisc, page.discs],
   );
+  const discOffsets = useMemo(() => [...boundaries.keys()], [boundaries]);
   const playTrack = (track: TrackPage['items'][number], index: number) =>
     onPlay ? onPlay(track) : player.start(page.items, index);
+  function renderTrack(i: number) {
+    const track = page.items[i];
+    const absolute = page.offset + i;
+    const disc = boundaries.get(absolute);
+    const rowIndex = absolute + 2 + discOffsets.filter((offset) => offset <= absolute).length;
+    return (
+      <Fragment key={track.id}>
+        {disc && (
+          <div
+            className="disc-heading"
+            role="row"
+            aria-label={`Disc ${disc.number}`}
+            aria-rowindex={rowIndex - 1}
+          >
+            <div role="cell" className="disc-heading-content">
+              <strong>DISC {String(disc.number).padStart(2, '0')}</strong>
+              <small>{t('trackList.discTrackCount', { count: disc.track_count })}</small>
+              <span className="disc-rule" />
+            </div>
+          </div>
+        )}
+        <div
+          className={`track-row ${player.current?.id === track.id ? 'current' : ''} ${trackUnavailableReason(track) ? 'track-unavailable' : ''}`}
+          role="row"
+          aria-current={player.current?.id === track.id ? 'true' : undefined}
+          key={track.id}
+          aria-rowindex={rowIndex}
+          data-browse-id={track.id}
+          onClick={(event) => {
+            if (
+              event.target instanceof Element &&
+              event.target.closest('button, a, input, select, summary, label')
+            )
+              return;
+            playTrack(track, i);
+          }}
+        >
+          <span role="cell" className="track-number">
+            {player.current?.id === track.id ? (
+              <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+            ) : (
+              String(
+                albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
+              ).padStart(2, '0')
+            )}
+          </span>
+          <div role="cell" className="track-identity">
+            {!albumTracks && (
+              <Cover
+                key={`${track.id}-${revision}`}
+                trackId={track.id}
+                title={track.album || track.title}
+              />
+            )}
+            <div className="track-title-group">
+              <button
+                className="track-title"
+                onClick={() => playTrack(track, i)}
+                aria-label={t('trackList.playTrackAria', { title: track.title })}
+              >
+                <strong>{track.title}</strong>
+                {trackUnavailableReason(track) && (
+                  <span className="track-unavailable-label">{trackUnavailableReason(track)}</span>
+                )}
+              </button>
+              <small className="track-artist-row">
+                {albumTracks && multiDisc && !groupDiscs && (
+                  <span className="disc-chip">Disc {track.disc_number || 1}</span>
+                )}
+                {track.artists.length
+                  ? track.artists.map((name, artistIndex) => (
+                      <Fragment key={`${name}-${artistIndex}`}>
+                        {artistIndex > 0 && <span aria-hidden="true"> / </span>}
+                        {onOpenArtist ? (
+                          <button
+                            className="track-artist-link"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenArtist(name);
+                            }}
+                          >
+                            {name}
+                          </button>
+                        ) : (
+                          name
+                        )}
+                      </Fragment>
+                    ))
+                  : t('trackList.unknownArtist')}
+                {showStats && (
+                  <span className="track-stat">
+                    {' '}
+                    ·{' '}
+                    {statsSort === 'play_count'
+                      ? t('trackList.playCount', { count: track.play_count })
+                      : statsSort === 'listened_ms'
+                        ? t('trackList.listenedTime', { time: listeningTime(track.listened_ms) })
+                        : track.last_played_at
+                          ? t('trackList.playedAt', {
+                              date: new Date(track.last_played_at).toLocaleDateString(),
+                            })
+                          : t('trackList.neverPlayed')}
+                  </span>
+                )}
+              </small>
+            </div>
+          </div>
+          <span className="album-column ellipsis" role="cell" title={track.album || ''}>
+            {operations.onOpenAlbum && track.album_id ? (
+              <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
+            ) : (
+              track.album || t('trackList.unknownAlbum')
+            )}
+          </span>
+          <span className="quality-column" role="cell">
+            <span className="format">{track.format.toUpperCase()}</span>
+          </span>
+          <time role="cell">{time(track.duration_ms / 1000)}</time>
+          <span role="cell">
+            <TrackActions
+              track={track}
+              player={player}
+              operations={operations}
+              onNotice={onNotice}
+            />
+          </span>
+        </div>
+      </Fragment>
+    );
+  }
   return (
     <div
       className={`track-list ${albumTracks ? 'album-tracks' : ''}`}
       data-list-size={listSize}
       ref={root}
       role="table"
+      aria-rowcount={page.total + 1 + discOffsets.length}
       aria-label={t('trackList.ariaLabel')}
     >
-      <div className="track-header" role="row">
+      <div className="track-header" role="row" aria-rowindex={1}>
         <span role="columnheader">#</span>
         <span role="columnheader">{t('trackList.headerTitleArtist')}</span>
         <span className="album-column" role="columnheader">
@@ -101,129 +240,14 @@ export function TrackList({
           <span className="sr-only">{t('trackList.headerActions')}</span>
         </span>
       </div>
-      {page.items.map((track, i) => (
-        <Fragment key={track.id}>
-          {boundaries.has(page.offset + i) &&
-            (() => {
-              const disc = boundaries.get(page.offset + i)!;
-              return (
-                <div className="disc-heading" role="row" aria-label={`Disc ${disc.number}`}>
-                  <div role="cell" className="disc-heading-content">
-                    <strong>DISC {String(disc.number).padStart(2, '0')}</strong>
-                    <small>{t('trackList.discTrackCount', { count: disc.track_count })}</small>
-                    <span className="disc-rule" />
-                  </div>
-                </div>
-              );
-            })()}
-          <div
-            className={`track-row ${player.current?.id === track.id ? 'current' : ''} ${trackUnavailableReason(track) ? 'track-unavailable' : ''}`}
-            role="row"
-            aria-current={player.current?.id === track.id ? 'true' : undefined}
-            key={track.id}
-            data-browse-id={track.id}
-            onClick={(event) => {
-              if (
-                event.target instanceof Element &&
-                event.target.closest('button, a, input, select, summary, label')
-              )
-                return;
-              playTrack(track, i);
-            }}
-          >
-            <span role="cell" className="track-number">
-              {player.current?.id === track.id ? (
-                <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
-              ) : (
-                String(
-                  albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
-                ).padStart(2, '0')
-              )}
-            </span>
-            <div role="cell" className="track-identity">
-              {!albumTracks && (
-                <Cover
-                  key={`${track.id}-${revision}`}
-                  trackId={track.id}
-                  title={track.album || track.title}
-                />
-              )}
-              <div className="track-title-group">
-                <button
-                  className="track-title"
-                  onClick={() => playTrack(track, i)}
-                  aria-label={t('trackList.playTrackAria', { title: track.title })}
-                >
-                  <strong>{track.title}</strong>
-                  {trackUnavailableReason(track) && (
-                    <span className="track-unavailable-label">{trackUnavailableReason(track)}</span>
-                  )}
-                </button>
-                <small className="track-artist-row">
-                  {albumTracks && multiDisc && !groupDiscs && (
-                    <span className="disc-chip">Disc {track.disc_number || 1}</span>
-                  )}
-                  {track.artists.length
-                    ? track.artists.map((name, artistIndex) => (
-                        <Fragment key={`${name}-${artistIndex}`}>
-                          {artistIndex > 0 && <span aria-hidden="true"> / </span>}
-                          {onOpenArtist ? (
-                            <button
-                              className="track-artist-link"
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onOpenArtist(name);
-                              }}
-                            >
-                              {name}
-                            </button>
-                          ) : (
-                            name
-                          )}
-                        </Fragment>
-                      ))
-                    : t('trackList.unknownArtist')}
-                  {showStats && (
-                    <span className="track-stat">
-                      {' '}
-                      ·{' '}
-                      {statsSort === 'play_count'
-                        ? t('trackList.playCount', { count: track.play_count })
-                        : statsSort === 'listened_ms'
-                          ? t('trackList.listenedTime', { time: listeningTime(track.listened_ms) })
-                          : track.last_played_at
-                            ? t('trackList.playedAt', {
-                                date: new Date(track.last_played_at).toLocaleDateString(),
-                              })
-                            : t('trackList.neverPlayed')}
-                    </span>
-                  )}
-                </small>
-              </div>
-            </div>
-            <span className="album-column ellipsis" role="cell" title={track.album || ''}>
-              {operations.onOpenAlbum && track.album_id ? (
-                <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
-              ) : (
-                track.album || t('trackList.unknownAlbum')
-              )}
-            </span>
-            <span className="quality-column" role="cell">
-              <span className="format">{track.format.toUpperCase()}</span>
-            </span>
-            <time role="cell">{time(track.duration_ms / 1000)}</time>
-            <span role="cell">
-              <TrackActions
-                track={track}
-                player={player}
-                operations={operations}
-                onNotice={onNotice}
-              />
-            </span>
-          </div>
-        </Fragment>
-      ))}
+      <TrackWindow
+        page={page}
+        discOffsets={discOffsets}
+        listSize={listSize}
+        measurements={measurements}
+        anchorID={anchorID}
+        renderTrack={renderTrack}
+      />
     </div>
   );
 }

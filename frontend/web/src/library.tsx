@@ -53,6 +53,7 @@ import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
 import { ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
+import type { TrackBlockMeasurements } from './track-window';
 import {
   AlphabetRail,
   useContinuousBrowse,
@@ -551,6 +552,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }, [browseIdentity, indexEnabled, indexRevision]);
   const listRoot = useRef<HTMLDivElement>(null);
   const listEnd = useRef<HTMLDivElement>(null);
+  const trackMeasurements = useRef<TrackBlockMeasurements>(new Map());
   const listStart = useRef<HTMLDivElement>(null);
   const scrollToRestore = useRef<number | null>(null);
   const pendingJump = useRef(false);
@@ -1842,6 +1844,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       onNotice={setNotice}
                       revision={revision}
                       operations={operations}
+                      measurements={trackMeasurements.current}
+                      anchorID={prependAnchor.current?.id}
                       onPlay={(track) => void completeCollection(track)}
                       onOpenArtist={(name) => void openArtistName(name)}
                       showStats={view === 'listening'}
