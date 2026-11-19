@@ -24,6 +24,8 @@ import com.wildstring.app.playback.mediaItems
 import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 import java.io.IOException
 import com.wildstring.app.playback.AudioCache
@@ -91,10 +93,12 @@ class MusicViewModel @Inject constructor(
     private data class CatalogPlayback(val source: CatalogSource, val entries: Map<String, String>)
     private var catalogPlayback: CatalogPlayback? = null
     private var collectionPlaybackJob: Job? = null
+    private val queueAdditionLock = Mutex()
     private fun catalogSource() = CatalogSource(query().copy(offset = 0), loadGeneration, repository.cache.catalogRevision,
         repository.session.requestState(), repository.session.cacheScope())
 
     private var localPlaybackEpoch = 0L
+    private var queueReplacementGeneration = 0L
     private var pendingSeekTargetMs: Long? = null
     private var pendingSeekAtElapsedMs = 0L
     private var lastPositionEntryId: String? = null
@@ -953,7 +957,7 @@ class MusicViewModel @Inject constructor(
         }
     }
 
-    private fun playPrepared(tracks: List<Track>, index: Int?, autoplay: Boolean, positionMs: Long?, preserveQueue: Boolean, preparedItems: List<MediaItem>?): Boolean {
+    private fun playPrepared(tracks: List<Track>, index: Int?, autoplay: Boolean, positionMs: Long?, preserveQueue: Boolean, preparedItems: List<MediaItem>?, incrementEpoch: Boolean = true): Boolean {
         val c = controller ?: return false
         if (tracks.isEmpty()) return false
         val selected = index ?: tracks.indexOfFirst { it.isAvailable }.takeIf { it >= 0 } ?: 0
@@ -981,7 +985,8 @@ class MusicViewModel @Inject constructor(
             } else item
         }
         val previous = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
-        localPlaybackEpoch++
+        if (incrementEpoch) localPlaybackEpoch++
+        if (!preserveQueue && incrementEpoch) queueReplacementGeneration++
         pendingSeekTargetMs = if (startPos > 0L) startPos else null
         pendingSeekAtElapsedMs = if (startPos > 0L) android.os.SystemClock.elapsedRealtime() else 0L
         val previousIndex = c.currentMediaItemIndex; val position = c.currentPosition; val previousAutoplay = c.playWhenReady
@@ -1020,7 +1025,7 @@ class MusicViewModel @Inject constructor(
     }
 
     /** A media entry ID distinguishes an original row from a manually inserted duplicate. */
-    private fun reuseCatalogEntry(c: MediaController, source: CatalogSource, trackId: String, onStarted: () -> Unit): Boolean {
+    private suspend fun reuseCatalogEntry(c: MediaController, source: CatalogSource, trackId: String, epoch: Long, onStarted: () -> Unit): Boolean {
         val cached = catalogPlayback?.takeIf { it.source == source } ?: return false
         val entryId = cached.entries[trackId] ?: return false
         val indices = 0 until c.mediaItemCount
@@ -1030,12 +1035,21 @@ class MusicViewModel @Inject constructor(
         } else {
             // The user removed this song. Reinsert only the explicit selection in their edited queue.
             val track = mutable.value.tracks.firstOrNull { it.id == trackId } ?: return false
-            val originalEntries = cached.entries.values.toHashSet()
-            if (indices.none { c.getMediaItemAt(it).mediaId in originalEntries }) return false
-            if (!addToQueue(track, next = true)) return true
-            val inserted = c.currentMediaItemIndex + 1
-            catalogPlayback = cached.copy(entries = cached.entries + (trackId to c.getMediaItemAt(inserted).mediaId))
-            playQueue(inserted)
+            return queueAdditionLock.withLock {
+                if (source != catalogSource() || epoch != localPlaybackEpoch || c !== controller) return@withLock true
+                val originalEntries = cached.entries.values.toHashSet()
+                if ((0 until c.mediaItemCount).none { c.getMediaItemAt(it).mediaId in originalEntries }) return@withLock false
+                if (!track.isAvailable) { applyQueue(c, emptyList(), true, emptyList()); return@withLock true }
+                val heart = c.currentMediaItem.heartBatch()
+                val items = withContext(Dispatchers.IO) { listOf(track).mediaItems(repository, heart) }
+                if (source != catalogSource() || epoch != localPlaybackEpoch || c !== controller || catalogPlayback != cached) return@withLock true
+                if (!applyQueue(c, listOf(track), true, items)) return@withLock true
+                val inserted = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == items.single().mediaId } ?: return@withLock true
+                catalogPlayback = cached.copy(entries = cached.entries + (trackId to items.single().mediaId))
+                playQueue(inserted)
+                onStarted()
+                true
+            }
         }
         onStarted()
         return true
@@ -1067,7 +1081,7 @@ class MusicViewModel @Inject constructor(
                 val c = controller ?: return@launch
                 val source = catalogSource()
                 val epoch = ++localPlaybackEpoch
-                if (startId != null && reuseCatalogEntry(c, source, startId, onStarted)) return@launch
+                if (startId != null && reuseCatalogEntry(c, source, startId, epoch, onStarted)) return@launch
                 val longList = mutable.value.total > MUSIC_QUEUE_LIMIT
                 val tracks = playbackTracks(source.query, startId, startIndex)
                 if (tracks.isEmpty()) { notify(AppLanguage.string(R.string.vm_collection_empty_music)); return@launch }
@@ -1253,19 +1267,41 @@ class MusicViewModel @Inject constructor(
 
     suspend fun enqueueAlbumTracks(page: Page<Track>, next: Boolean = false): Boolean {
         require(page.total <= MUSIC_QUEUE_LIMIT) { AppLanguage.string(R.string.music_queue_capacity) }
-        val available = page.items.filter { it.isAvailable }
-        if (available.size + (controller?.mediaItemCount ?: 0) > MUSIC_QUEUE_LIMIT) {
-            mutable.update { it.copy(error = AppLanguage.string(R.string.music_queue_capacity)) }
-            return false
-        }
-        return addToQueue(available, next, prepareAlbumItems(available, controller?.currentMediaItem.heartBatch()))
+        return enqueueTracks(page.items, next)
     }
 
-    fun addToQueue(tracks: List<Track>, next: Boolean = false): Boolean = addToQueue(tracks, next, null)
+    fun addToQueue(tracks: List<Track>, next: Boolean = false, onComplete: (Boolean) -> Unit = {}) = viewModelScope.launch {
+        val owner = repository.session.cacheScope()
+        try {
+            val added = enqueueTracks(tracks, next)
+            if (owner != null && owner == repository.session.cacheScope()) onComplete(added)
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            if (owner != null && owner == repository.session.cacheScope()) {
+                mutable.update { it.copy(error = friendlyError(error)) }
+                onComplete(false)
+            }
+        }
+    }
 
-    private fun addToQueue(tracks: List<Track>, next: Boolean, preparedItems: List<MediaItem>?): Boolean {
+    private suspend fun enqueueTracks(input: List<Track>, next: Boolean): Boolean {
         val c = controller ?: return false
-        val tracks = tracks.filter { it.isAvailable }
+        val owner = repository.session.cacheScope() ?: return false
+        val library = repository.selectedLibraryId
+        val generation = queueReplacementGeneration
+        val tracks = input.filter { it.isAvailable }
+        if (tracks.isEmpty()) return applyQueue(c, tracks, next, emptyList())
+        localPlaybackEpoch++
+        return queueAdditionLock.withLock {
+            if (owner != repository.session.cacheScope() || library != repository.selectedLibraryId || c !== controller || generation != queueReplacementGeneration) return@withLock false
+            val heart = c.currentMediaItem.heartBatch()
+            val items = withContext(Dispatchers.IO) { tracks.mediaItems(repository, heart) }
+            if (owner != repository.session.cacheScope() || library != repository.selectedLibraryId || c !== controller || generation != queueReplacementGeneration) return@withLock false
+            applyQueue(c, tracks, next, items)
+        }
+    }
+
+    private fun applyQueue(c: MediaController, tracks: List<Track>, next: Boolean, items: List<MediaItem>): Boolean {
         if (tracks.isEmpty()) {
             mutable.update { it.copy(error = AppLanguage.string(R.string.vm_no_playable_tracks_rescan)) }
             return false
@@ -1277,17 +1313,14 @@ class MusicViewModel @Inject constructor(
             return false
         }
         if (c.mediaItemCount == 0) {
-            return playPrepared(tracks, null, true, null, false, preparedItems)
+            return playPrepared(tracks, null, true, null, false, items, incrementEpoch = false)
         }
-        localPlaybackEpoch++
         tracks.forEach { repository.rememberPlaybackTrack(it) }
-        val heart = c.currentMediaItem.heartBatch()
-        val items = preparedItems ?: tracks.mediaItems(repository, heart)
         if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
         else c.addMediaItems(items)
         return true
     }
-    fun addToQueue(track: Track, next: Boolean = false) = addToQueue(listOf(track), next)
+    fun addToQueue(track: Track, next: Boolean = false, onComplete: (Boolean) -> Unit = {}) = addToQueue(listOf(track), next, onComplete)
     fun playQueue(index: Int) { localPlaybackEpoch++; controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
     fun removeQueue(index: Int) { localPlaybackEpoch++; controller?.removeMediaItem(index) }
     fun removeQueueEntry(entryId: String): Pair<Int, MediaItem>? {
@@ -1309,7 +1342,7 @@ class MusicViewModel @Inject constructor(
         localPlaybackEpoch++
         c.addMediaItem(index.coerceIn(0, c.mediaItemCount), item)
     }
-    fun clearQueue() { catalogPlayback = null; localPlaybackEpoch++; controller?.let { it.stop(); it.clearMediaItems(); rebuildQueue(); refreshPlayer() } }
+    fun clearQueue() { catalogPlayback = null; localPlaybackEpoch++; queueReplacementGeneration++; controller?.let { it.stop(); it.clearMediaItems(); rebuildQueue(); refreshPlayer() } }
     fun moveQueue(entryId: String, toIndex: Int) {
         localPlaybackEpoch++
         controller?.let { c ->

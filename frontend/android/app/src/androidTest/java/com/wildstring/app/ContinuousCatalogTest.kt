@@ -145,6 +145,140 @@ class ContinuousCatalogTest {
         }
     }
 
+    @Test fun manualQueueAdditionsStayOrderedWithoutBlockingOnOfflineIndex() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            compose.waitUntil(10_000) { vm.controller != null }
+            val locked = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val holder = Thread {
+                synchronized(vm.repository.downloads) {
+                    locked.countDown()
+                    release.await(8, TimeUnit.SECONDS)
+                }
+            }
+            val results = mutableListOf<Boolean>()
+            try {
+                compose.runOnIdle { vm.controller!!.stop(); vm.controller!!.clearMediaItems() }
+                holder.start(); assertTrue(locked.await(5, TimeUnit.SECONDS))
+                val start = android.os.SystemClock.elapsedRealtime()
+                compose.runOnIdle {
+                    vm.addToQueue(songs[0]) { results += it }
+                    vm.addToQueue(songs[1]) { results += it }
+                }
+                assertTrue("Queue addition blocked on offline index", android.os.SystemClock.elapsedRealtime() - start < 5000)
+                release.countDown()
+                compose.waitUntil(15_000) { compose.runOnIdle { results.size == 2 && vm.state.value.queue.size == 2 } }
+                compose.runOnIdle { vm.controller!!.pause() }
+                assertEquals(listOf(true, true), results)
+                assertEquals(listOf("song-0", "song-1"), vm.state.value.queue.map { it.trackId })
+                compose.runOnIdle {
+                    vm.addToQueue(songs[2], next = true) { results += it }
+                    vm.addToQueue(songs[3], next = true) { results += it }
+                }
+                compose.waitUntil(15_000) { compose.runOnIdle { results.size == 4 && vm.state.value.queue.size == 4 } }
+                assertEquals(listOf("song-0", "song-3", "song-2", "song-1"), vm.state.value.queue.map { it.trackId })
+                assertTrue(results.all { it })
+                compose.runOnIdle { vm.play(songs.take(99), 0) }
+                compose.waitUntil(15_000) { vm.state.value.queue.size == 99 }
+                compose.runOnIdle {
+                    results.clear()
+                    vm.addToQueue(songs[99]) { results += it }
+                    vm.addToQueue(songs[100]) { results += it }
+                }
+                compose.waitUntil(15_000) { compose.runOnIdle { results.size == 2 } }
+                assertEquals(listOf(true, false), results)
+                assertEquals(100, compose.runOnIdle { vm.controller!!.mediaItemCount })
+                val lockedAgain = CountDownLatch(1)
+                val releaseAgain = CountDownLatch(1)
+                val secondHolder = Thread {
+                    synchronized(vm.repository.downloads) {
+                        lockedAgain.countDown()
+                        releaseAgain.await(8, TimeUnit.SECONDS)
+                    }
+                }
+                try {
+                    secondHolder.start(); assertTrue(lockedAgain.await(5, TimeUnit.SECONDS))
+                    compose.runOnIdle {
+                        results.clear()
+                        vm.addToQueue(songs[101]) { results += it }
+                        vm.clearQueue()
+                    }
+                } finally { releaseAgain.countDown(); secondHolder.join(5000) }
+                compose.waitUntil(15_000) { compose.runOnIdle { results.size == 1 } }
+                assertEquals(listOf(false), results)
+                assertEquals(0, compose.runOnIdle { vm.controller!!.mediaItemCount })
+                val lockedLibrary = CountDownLatch(1)
+                val releaseLibrary = CountDownLatch(1)
+                val libraryHolder = Thread {
+                    synchronized(vm.repository.downloads) {
+                        lockedLibrary.countDown()
+                        releaseLibrary.await(8, TimeUnit.SECONDS)
+                    }
+                }
+                try {
+                    libraryHolder.start(); assertTrue(lockedLibrary.await(5, TimeUnit.SECONDS))
+                    compose.runOnIdle {
+                        results.clear()
+                        vm.addToQueue(songs[102]) { results += it }
+                        vm.repository.selectLibrary("other-library")
+                    }
+                } finally { releaseLibrary.countDown(); libraryHolder.join(5000) }
+                compose.waitUntil(15_000) { compose.runOnIdle { results.size == 1 } }
+                assertEquals(listOf(false), results)
+                assertEquals(0, compose.runOnIdle { vm.controller!!.mediaItemCount })
+                compose.runOnIdle { vm.repository.selectLibrary("all") }
+                val lockedOwner = CountDownLatch(1)
+                val releaseOwner = CountDownLatch(1)
+                val ownerHolder = Thread {
+                    synchronized(vm.repository.downloads) {
+                        lockedOwner.countDown()
+                        releaseOwner.await(8, TimeUnit.SECONDS)
+                    }
+                }
+                val pending = try {
+                    ownerHolder.start(); assertTrue(lockedOwner.await(5, TimeUnit.SECONDS))
+                    compose.runOnIdle {
+                        results.clear()
+                        vm.addToQueue(songs[103]) { results += it }.also { vm.repository.session.invalidate() }
+                    }
+                } finally { releaseOwner.countDown(); ownerHolder.join(5000) }
+                compose.waitUntil(15_000) { pending.isCompleted }
+                assertTrue(results.isEmpty())
+                assertEquals(0, compose.runOnIdle { vm.controller!!.mediaItemCount })
+            } finally {
+                release.countDown(); holder.join(5000)
+                compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() }
+            }
+        }
+    }
+
+    @Test fun pendingManualAdditionDoesNotAppendAfterPlaybackReplacesQueue() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            compose.waitUntil(10_000) { vm.controller != null }
+            val locked = CountDownLatch(1); val release = CountDownLatch(1)
+            val holder = Thread { synchronized(vm.repository.downloads) { locked.countDown(); release.await(30, TimeUnit.SECONDS) } }
+            val podcast = Track("podcast_ep_new", "New episode", emptyList(), null, 12000)
+            var result: Boolean? = null
+            try {
+                holder.start(); assertTrue(locked.await(5, TimeUnit.SECONDS))
+                compose.runOnIdle {
+                    vm.addToQueue(songs[0]) { result = it }
+                    vm.play(listOf(podcast), autoplay = false)
+                }
+                compose.waitUntil(20_000) { compose.runOnIdle { vm.controller!!.currentMediaItem?.mediaMetadata?.extras?.getString("track_id") == podcast.id } }
+                release.countDown()
+                compose.waitUntil(15_000) { compose.runOnIdle { result != null } }
+                assertEquals(false, result)
+                assertEquals(listOf(podcast.id), compose.runOnIdle { (0 until vm.controller!!.mediaItemCount).map { vm.controller!!.getMediaItemAt(it).mediaMetadata.extras!!.getString("track_id") } })
+            } finally {
+                release.countDown(); holder.join(5000)
+                compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() }
+            }
+        }
+    }
+
     @Test fun discoverySeparatesNewArrivalsFromListeningHistory() {
         MockWebServer().use { server ->
             fixture(server); val vm = connect(server)

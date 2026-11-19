@@ -271,18 +271,37 @@ class MobileCompletionTest {
                 compose.waitUntil(20000) { vm.state.value.current?.id == "completion-2" && vm.state.value.playing }
                 compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
                 // A manually inserted duplicate and a removed entry must survive the next selection.
-                val expected = compose.runOnIdle {
-                    val c = vm.controller!!
+                val addition = compose.runOnIdle {
                     vm.removeQueue(6)
                     vm.addToQueue(vm.state.value.tracks[3], next = true)
-                    (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
                 }
+                compose.waitUntil(10_000) { addition.isCompleted }
+                val expected = compose.runOnIdle { val c = vm.controller!!; (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId } }
                 fixture.requests.clear()
                 compose.onNodeWithTag("track-title-3", useUnmergedTree = true).performTouchInput { click() }
                 compose.waitUntil(10000) { vm.state.value.current?.id == "completion-3" }
                 val actual = compose.runOnIdle { val c = vm.controller!!; (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId } }
                 assertEquals(expected, actual)
                 assertFalse(fixture.requests.any { it.contains("limit=100") || it.contains("limit=200") })
+                val removedTrack = compose.runOnIdle {
+                    val c = vm.controller!!
+                    val target = c.getMediaItemAt(9)
+                    val other = c.getMediaItemAt(10)
+                    vm.removeQueueEntry(target.mediaId); vm.removeQueueEntry(other.mediaId)
+                    target.mediaMetadata.extras!!.getString("track_id")!!
+                }
+                val locked = CountDownLatch(1); val release = CountDownLatch(1)
+                val holder = Thread { synchronized(vm.repository.downloads) { locked.countDown(); release.await(8, TimeUnit.SECONDS) } }
+                var started = false
+                try {
+                    holder.start(); assertTrue(locked.await(5, TimeUnit.SECONDS))
+                    compose.runOnIdle {
+                        vm.addToQueue(vm.state.value.tracks[4])
+                        vm.playCollection(removedTrack) { started = true }
+                    }
+                } finally { release.countDown(); holder.join(5000) }
+                compose.waitUntil(15_000) { compose.runOnIdle { started && vm.state.value.current?.id == removedTrack } }
+                assertEquals(removedTrack, compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaMetadata.extras!!.getString("track_id") })
             } finally { fixture.releaseCollection.countDown(); cleanup(vm) }
         }
     }
@@ -400,15 +419,20 @@ class MobileCompletionTest {
                 compose.waitUntil(15000) { vm.state.value.current?.id == "completion-1" && vm.state.value.playing }
                 assertNull(vm.state.value.heartBatch)
                 assertEquals(100, vm.state.value.queue.size)
-                assertFalse(compose.runOnIdle { vm.addToQueue(vm.state.value.tracks.first()) })
+                var result: Boolean? = null
+                compose.runOnIdle { vm.addToQueue(vm.state.value.tracks.first()) { result = it } }
+                compose.waitUntil(10_000) { compose.runOnIdle { result != null } }
+                assertEquals(false, result)
                 assertEquals(100, vm.state.value.queue.size)
-                compose.runOnIdle {
+                val removed = compose.runOnIdle {
                     val c = vm.controller!!
-                    val removed = vm.removeQueueEntry(c.getMediaItemAt(0).mediaId)!!
-                    assertTrue(vm.addToQueue(vm.state.value.tracks.first()))
-                    vm.restoreQueueEntry(removed.first, removed.second)
-                    assertEquals(100, c.mediaItemCount)
+                    vm.removeQueueEntry(c.getMediaItemAt(0).mediaId)!!
                 }
+                result = null
+                compose.runOnIdle { vm.addToQueue(vm.state.value.tracks.first()) { result = it } }
+                compose.waitUntil(10_000) { compose.runOnIdle { result != null } }
+                assertEquals(true, result)
+                compose.runOnIdle { vm.restoreQueueEntry(removed.first, removed.second); assertEquals(100, vm.controller!!.mediaItemCount) }
             } finally { cleanup(vm) }
         }
     }
