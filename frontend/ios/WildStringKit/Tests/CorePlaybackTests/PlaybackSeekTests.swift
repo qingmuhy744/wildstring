@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import CorePlayback
 
+extension AVPlaybackTests {
 @Suite("Playback lyric seeks", .serialized)
 @MainActor
 struct PlaybackSeekTests {
@@ -105,6 +106,7 @@ struct PlaybackSeekTests {
         #expect(!log.contains { $0.rangeHeader == "bytes=0-524287" })
         #expect(abs(service.player.currentTime().seconds - 510) < 5)
     }
+}
 }
 
 private final class CBRMP3SeekProtocol: URLProtocol {

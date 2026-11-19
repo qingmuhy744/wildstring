@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import CorePlayback
 
+extension AVPlaybackTests {
 @Suite("PlaybackService", .serialized)
 @MainActor
 struct PlaybackServiceTests {
@@ -1924,6 +1925,7 @@ struct PlaybackServiceTests {
         })
         #expect(!writes.contains { $0.write.positionSeconds == 300 })
     }
+}
 }
 
 private final class PodcastResumeProtocol: URLProtocol {
