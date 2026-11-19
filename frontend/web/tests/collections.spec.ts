@@ -281,17 +281,23 @@ test('实际收听累计、一次计数、暂停跳转不增加与收听视图',
   await page.screenshot({ path: `../../artifacts/listening-${info.project.name}.png` });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   // Replaying the final queue entry must create a new listening session.
-  await tab(page, '歌曲');
-  const finalTrack = (await tracks(page)).at(-1)!;
+  await section(page, '全部歌曲');
+  const lastRow = page.locator('.track-row').last();
+  await expect(lastRow).toBeVisible();
+  const finalID = (await lastRow.getAttribute('data-browse-id'))!;
   const sessions = new Set<string>();
   page.on('request', (request) => {
     if (!request.url().endsWith('/api/v1/listening') || request.method() !== 'POST') return;
     const payload = request.postDataJSON();
-    if (payload.track_id === finalTrack.id && payload.listened_ms === 0)
-      sessions.add(payload.session_id);
+    if (payload.track_id === finalID && payload.listened_ms === 0) sessions.add(payload.session_id);
   });
-  await page.getByRole('button', { name: `播放 ${finalTrack.title}`, exact: true }).click();
-  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.2);
+  await lastRow.getByRole('button', { name: /^播放 / }).click();
+  await expect
+    .poll(async () => {
+      const state = await audio(page);
+      return !state.paused && state.source.includes(finalID) && state.time > 0.2;
+    })
+    .toBe(true);
   await expect.poll(() => sessions.size).toBe(1);
   await page.getByLabel('播放进度').focus();
   await page.getByLabel('播放进度').press('End');
