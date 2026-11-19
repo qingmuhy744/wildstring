@@ -9,7 +9,7 @@ import { Icon } from './icons';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError, eventId, time, type Track } from './api';
-import { QUEUE_LIMIT, type PlaybackMode } from './playback-state';
+import { musicWindow, type PlaybackMode } from './playback-state';
 import type { Player } from './player';
 import i18n from './i18n';
 
@@ -217,13 +217,13 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           setOffer(null);
           return;
         }
-        if (state.track_ids.length > QUEUE_LIMIT)
-          throw new Error(i18n.t('playbackSync.queueLimitExceeded', { limit: QUEUE_LIMIT }));
+        const window = musicWindow(state.track_ids.length, state.index);
+        const ids = state.track_ids.slice(window.offset, window.offset + window.count);
         const tracks: Track[] = [];
-        for (let offset = 0; offset < state.track_ids.length; offset += 10)
+        for (let offset = 0; offset < ids.length; offset += 10)
           tracks.push(
             ...(await Promise.all(
-              state.track_ids
+              ids
                 .slice(offset, offset + 10)
                 .map((id) =>
                   api<Track>(`/tracks/${encodeURIComponent(id)}`, { signal: controller.signal }),
@@ -276,7 +276,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         offeredPause = null;
         offered = 0;
         latest.current.setMode(state.mode);
-        latest.current.start(tracks, state.index, state.position_ms / 1000, false);
+        latest.current.start(tracks, window.index, state.position_ms / 1000, false);
         setOffer(null);
       } catch (reason) {
         if (!controller.signal.aborted) {

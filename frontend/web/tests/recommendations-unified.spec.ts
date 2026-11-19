@@ -218,7 +218,9 @@ test('个人与大家排行按真实范围请求，跨页队列完整且不展�
   await expect(panel).toContainText('不展示个人记录');
   await expect(panel).not.toContainText('qingmuhy');
   await panel.getByRole('button', { name: '播放排行', exact: true }).click();
-  await expect.poll(() => calls.rank.some((query) => query.includes('limit=100'))).toBe(true);
+  await expect
+    .poll(() => calls.rank.some((query) => query.includes('limit=23&offset=0')))
+    .toBe(true);
   await expect
     .poll(async () =>
       page.evaluate(() => Object.values(localStorage).some((value) => value.includes('rank-22'))),

@@ -867,7 +867,6 @@
       "shareSuccess": "Current queue and progress shared.",
       "shareCurrent": "Share current playback",
       "preparing": "Preparing to resume…",
-      "queueExceeded": "This queue exceeds the web limit of {{limit}} tracks. Please shrink it on the original device and share again.",
       "loaded": "Shared progress loaded. Click play to resume.",
       "continueHere": "Resume on this device",
       "incomplete": "Incomplete, please read again.",
@@ -1477,7 +1476,7 @@
     "favoritesLoadFailed": "Favorites playlist could not be read. Refresh and try again.",
     "filesReorganized": "Track files renamed to the standard layout.",
     "fullCollectionFailed": "Could not load the full collection. Try again.",
-    "fullQueueReady": "Full queue ready: {{count}} tracks.",
+    "fullQueueReady": "Queue ready · {{count}} songs",
     "indexRetry": "Alphabet index not loaded, retry",
     "kindFavorites": "Favorites",
     "kindManual": "Manual playlist",
@@ -1494,7 +1493,7 @@
     "loading": "Loading…",
     "loadingAlbumTracks": "Loading tracks from album \"{{title}}\"…",
     "loadingAlbums": "Loading albums",
-    "loadingFullQueue": "Loading full queue…",
+    "loadingFullQueue": "Preparing queue…",
     "loadingMore": "Loading more…",
     "loadingMusic": "Loading your music…",
     "logoutFailed": "Sign out failed. Try again.",
@@ -1569,7 +1568,8 @@
     "unknownAlbum": "Unknown album",
     "unknownArtist": "Unknown artist",
     "viewArtistAria": "View artist {{name}}",
-    "viewSwitchAria": "Library view"
+    "viewSwitchAria": "Library view",
+    "playFromStart": "Play from start"
   },
   "librarySources": {
     "albumItem": "Album {{albumId}}",
@@ -2632,7 +2632,6 @@
     "podcastResume": "Podcast episode resume",
     "podcastResumeAria": "Podcast episode resume mode",
     "progressUpdated": "Progress was updated on another device. Please review and reload.",
-    "queueLimitExceeded": "Shared queue exceeds the web limit of {{limit}} tracks.",
     "queueProgress": "{{count}} tracks in queue · Track {{index}} · {{time}}",
     "queueUnavailable": "The shared queue is no longer available.",
     "podcastSaveFailed": "Could not save. Check your connection and try again."
@@ -3672,7 +3671,9 @@
     "orderOff": "Turn off auto continue",
     "removeIndex": "Remove queue item {{index}}",
     "reorderInstruction": "Use the move up and move down buttons on the right of each track to adjust playback order.",
-    "title": "Play Queue"
+    "title": "Play Queue",
+    "heartActive": "Heart mode",
+    "heartAfter": "Heart mode after this queue"
   },
   "rankings": {
     "aria": "Listening charts",

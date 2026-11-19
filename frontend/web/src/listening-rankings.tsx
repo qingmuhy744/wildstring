@@ -4,7 +4,7 @@ import { api, artist, listeningTime, type Track } from './api';
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import type { Player } from './player';
-import { QUEUE_LIMIT } from './playback-state';
+import { readMusicWindow, musicWindow, MUSIC_QUEUE_LIMIT } from './playback-state';
 import { errorText } from './workspace-ui';
 import { Icon } from './icons';
 interface RankingRow {
@@ -95,29 +95,24 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
     setPlaying(true);
     setError('');
     try {
-      let items = rows;
-      if (rows.length < total) {
-        items = [];
-        let offset = 0;
-        while (!c.signal.aborted) {
-          const page = await api<RankingPage>(
-            `/recommendations/rankings?${query}&limit=100&offset=${offset}`,
-            { signal: c.signal },
-          );
-          if (page.total > QUEUE_LIMIT)
-            throw new Error(t('rankings.queueLimit', { limit: QUEUE_LIMIT }));
-          items.push(...page.items);
-          offset += page.items.length;
-          if (offset >= page.total) break;
-          if (!page.items.length) throw new Error(t('rankings.incomplete'));
-        }
-      }
+      const selected = id ? rows.findIndex((item) => item.track.id === id) : 0;
+      if (selected < 0) throw new Error(t('rankings.missing'));
+      const { offset, count, index } = musicWindow(total, selected);
+      const items =
+        offset + count <= rows.length
+          ? rows.slice(offset, offset + count)
+          : await readMusicWindow(total, selected, (cursor, limit) =>
+              api<RankingPage>(
+                `/recommendations/rankings?${query}&limit=${limit}&offset=${cursor}`,
+                { signal: c.signal },
+              ),
+            );
       if (c.signal.aborted || token !== epoch.current) return;
-      const index = id ? items.findIndex((item) => item.track.id === id) : 0;
-      if (index < 0) throw new Error(t('rankings.missing'));
-      player.start(
+      if (id && items[index]?.track.id !== id) throw new Error(t('rankings.missing'));
+      player.startCollection(
         items.map((item) => item.track),
         index,
+        total,
       );
     } catch (reason) {
       if (!c.signal.aborted) setError(errorText(reason));
@@ -149,7 +144,9 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
         <div className="toolbar-actions">
           <button disabled={!rows.length || playing} onClick={() => void play()}>
             <Icon name="playlist" />
-            {playing ? t('rankings.preparing') : t('rankings.play')}
+            {playing
+              ? t('rankings.preparing')
+              : t(total > MUSIC_QUEUE_LIMIT ? 'library.playFromStart' : 'rankings.play')}
           </button>
           <button
             disabled={loading || playing}

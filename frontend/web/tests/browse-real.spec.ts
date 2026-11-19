@@ -18,7 +18,7 @@ async function tab(page: Page, name: string) {
     .click();
 }
 
-test('真实拼音索引：远跳未加载的 Z、向前补载、列表去重及完整队列', async ({ page }) => {
+test('真实拼音索引：远跳未加载的 Z、向前补载、列表去重及从所点位置建立队列', async ({ page }) => {
   await login(page);
   await expect(page.locator('.pagination')).toHaveCount(0);
   const rail = page.getByRole('navigation', { name: '首字母定位' });
@@ -36,9 +36,11 @@ test('真实拼音索引：远跳未加载的 Z、向前补载、列表去重及
   await rail.getByRole('button', { name: '定位到 Z', exact: true }).click();
   await request;
   await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('最后');
-  const count = await page.getByRole('table').getByRole('row').count();
+  // The upper boundary can also preload on mobile as the jump scrolls into place.
+  const previousRow = page.locator('.track-row').first();
+  const before = await previousRow.getAttribute('data-browse-id');
   await page.getByRole('button', { name: '加载前面的歌曲', exact: true }).click();
-  await expect.poll(() => page.getByRole('table').getByRole('row').count()).toBeGreaterThan(count);
+  await expect(previousRow).not.toHaveAttribute('data-browse-id', before!);
   const ids = await page
     .locator('.track-row')
     .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-browse-id')));
@@ -57,7 +59,7 @@ test('真实拼音索引：远跳未加载的 Z、向前补载、列表去重及
         return key ? JSON.parse(localStorage.getItem(key)!).tracks.length : 0;
       });
     })
-    .toBe(258);
+    .toBe(Math.min(100, index.total - last.offset));
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
 });
 

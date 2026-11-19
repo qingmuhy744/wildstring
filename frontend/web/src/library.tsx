@@ -67,7 +67,12 @@ import { Notifications, useNotifications } from './notifications';
 import type { NotificationAction } from './agent-api';
 import './workspace.css';
 import { followPlaylist, followedPlaylists, useOfflinePlaylistSync } from './offline-playlists';
-import { collectTracks } from './playback-state';
+import {
+  collectTracks,
+  catalogMusicWindow,
+  musicWindow,
+  MUSIC_QUEUE_LIMIT,
+} from './playback-state';
 import { saveDownloads, usingOfflineAccess } from './offline';
 
 const Assistant = lazy(() =>
@@ -274,6 +279,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     }
   }
   const [collectionBusy, setCollectionBusy] = useState(false);
+  const savingCollection = useRef(false);
   const collectionRequest = useRef<AbortController | null>(null);
   const albumRequest = useRef<AbortController | null>(null);
   useEffect(
@@ -488,10 +494,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     parameters.set('sort', catalogSort.sort);
     parameters.set('order', catalogSort.order);
   }
-  const browseIdentity = `${revision}|${view}|${browsePath}?${parameters}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${liveRules ? favorites.change : 0}`;
+  const browseSource = `${browsePath}?${parameters}`;
+  const browseIdentity = `${revision}|${view}|${browseSource}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${liveRules ? favorites.change : 0}`;
   const browse = useContinuousBrowse<Track | Album | Artist | Playlist>({
     identity: browseIdentity,
-    path: `${browsePath}?${parameters}`,
+    path: browseSource,
     enabled: !specialView && !(view === 'favorites' && !activePlaylist),
   });
   const visible = browse.page;
@@ -900,30 +907,39 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       playlistPending.current.delete(list.id);
     }
   }
-  function collectionPath() {
-    const parameters = new URLSearchParams({ q: album ? '' : query, include_unavailable: 'true' });
-    let path = '/tracks';
-    if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
-    else if (selectedArtist) {
-      path = `/artists/${selectedArtist.id}/tracks`;
-      if (album) parameters.set('album_id', album.id);
-    } else if (album) path = `/albums/${album.id}/tracks`;
-    if (view === 'artists' && artistRole) parameters.set('role', artistRole);
-    if (view === 'listening') parameters.set('played_only', 'true');
-    if (sortable) {
-      parameters.set('sort', catalogSort.sort);
-      parameters.set('order', catalogSort.order);
-    }
-    return `${path}?${parameters}`;
-  }
-  async function completeCollection(target?: Track, download = false) {
-    if (collectionRequest.current) return;
+  async function completeCollection(
+    target?: Track,
+    download = false,
+    source = browseSource,
+    total = page?.total ?? 0,
+  ) {
+    if (collectionRequest.current && (download || savingCollection.current)) return;
+    savingCollection.current = download;
+    collectionRequest.current?.abort();
     const controller = new AbortController();
     collectionRequest.current = controller;
     setCollectionBusy(true);
     setNotice(download ? t('library.preparingOffline') : t('library.loadingFullQueue'));
     try {
-      const collection = await collectTracks(collectionPath(), controller.signal);
+      const row = target && page ? page.items.findIndex((track) => track.id === target.id) : 0;
+      if (row < 0) throw new Error(t('library.trackRemovedFromCollection'));
+      const selected = target ? (page?.offset ?? 0) + row : 0;
+      const { offset, count } = musicWindow(total, selected);
+      let collection: Track[];
+      if (download) {
+        collection = await collectTracks(source, controller.signal);
+      } else if (
+        page &&
+        source === browseSource &&
+        offset >= page.offset &&
+        offset + count <= page.offset + page.items.length
+      ) {
+        collection = page.items.slice(offset - page.offset, offset - page.offset + count);
+      } else {
+        collection = await catalogMusicWindow(source, total, selected, controller.signal);
+      }
+      if (target && total > MUSIC_QUEUE_LIMIT && collection[0]?.id !== target.id)
+        throw new Error(t('library.trackRemovedFromCollection'));
       if (target && trackUnavailableReason(target)) {
         throw new Error(
           t('library.trackUnavailable', {
@@ -941,7 +957,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       } else {
         const index = target ? tracks.findIndex((t) => t.id === target.id) : 0;
         if (index < 0) throw new Error(t('library.trackRemovedFromCollection'));
-        player.start(tracks, index);
+        player.startCollection(tracks, index, total);
         setNotice(t('library.fullQueueReady', { count: tracks.length }));
       }
     } catch (e) {
@@ -1460,13 +1476,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     <span aria-hidden="true">▶ </span>
                     {collectionBusy
                       ? t('library.preparing')
-                      : album
-                        ? t('library.playAlbum')
-                        : selectedArtist
-                          ? t('library.playArtist')
-                          : activePlaylist
-                            ? t('library.playPlaylist')
-                            : t('library.playAll')}
+                      : (page?.total ?? 0) > MUSIC_QUEUE_LIMIT
+                        ? t('library.playFromStart')
+                        : album
+                          ? t('library.playAlbum')
+                          : selectedArtist
+                            ? t('library.playArtist')
+                            : activePlaylist
+                              ? t('library.playPlaylist')
+                              : t('library.playAll')}
                   </button>
                 )}
                 {kind === 'tracks' && (
@@ -1963,22 +1981,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             setAlbumLoading(false);
             setAlbum(albumMenu.item);
           }}
-          onPlay={async () => {
-            try {
-              setNotice(t('library.loadingAlbumTracks', { title: albumMenu.item.title }));
-              const tracks = await collectTracks(
-                `/albums/${encodeURIComponent(albumMenu.item.id)}/tracks`,
-              );
-              if (tracks.length) {
-                player.start(tracks, 0);
-                setNotice(
-                  t('library.playingAlbum', { title: albumMenu.item.title, count: tracks.length }),
-                );
-              }
-            } catch (err) {
-              setNotice(err instanceof Error ? err.message : t('library.albumPlayFailed'));
-            }
-          }}
+          onPlay={() =>
+            void completeCollection(
+              undefined,
+              false,
+              `/albums/${encodeURIComponent(albumMenu.item.id)}/tracks`,
+              albumMenu.item.track_count,
+            )
+          }
           onEdit={() => {
             setEditingAlbum(albumMenu.item);
           }}

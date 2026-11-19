@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Album } from './api';
+import { MUSIC_QUEUE_LIMIT } from './playback-state';
 import { Icon } from './icons';
 
 export function AlbumMenu({
@@ -84,7 +85,8 @@ export function AlbumMenu({
           onClose();
         }}
       >
-        <Icon name="play" /> {t('albumMenu.playAll')}
+        <Icon name="play" />{' '}
+        {t(album.track_count > MUSIC_QUEUE_LIMIT ? 'library.playFromStart' : 'albumMenu.playAll')}
       </button>
       {canManage && (
         <button

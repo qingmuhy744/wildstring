@@ -50,7 +50,15 @@ export function QueuePanel({
       <div className="queue-heading">
         <div>
           <h2>
-            {upNextOnly ? t('queuePanel.nextEpisode') : t('queuePanel.title')}{' '}
+            {upNextOnly
+              ? t('queuePanel.nextEpisode')
+              : t(
+                  player.heart
+                    ? player.heart.recommended
+                      ? 'queuePanel.heartActive'
+                      : 'queuePanel.heartAfter'
+                    : 'queuePanel.title',
+                )}{' '}
             <small>{entries.length}</small>
           </h2>
         </div>

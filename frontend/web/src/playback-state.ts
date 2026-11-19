@@ -1,5 +1,6 @@
 import { api, type Track, type TrackPage } from './api';
 import i18n from './i18n';
+import { selectedLibrary } from './library-context';
 
 export type PlaybackMode = 'sequential' | 'repeat_all' | 'repeat_one' | 'shuffle';
 export const modeNames: Record<PlaybackMode, string> = {
@@ -22,8 +23,47 @@ export function normalizePlaybackRate(value: unknown): PlaybackRate {
   const rate = Number(value);
   return PLAYBACK_RATES.includes(rate as PlaybackRate) ? (rate as PlaybackRate) : 1;
 }
-export const QUEUE_LIMIT = 5000;
+export const MUSIC_QUEUE_LIMIT = 100;
+export const COLLECTION_LIMIT = 5000;
+export type HeartBatch = { library: string; recommended: boolean };
+
+export function musicWindow(total: number, selected: number) {
+  const offset = total > MUSIC_QUEUE_LIMIT ? selected : 0;
+  return { offset, count: Math.min(total - offset, MUSIC_QUEUE_LIMIT), index: selected - offset };
+}
+
+// Some sources return fewer rows than requested. Stop at the end of the window.
+export async function readMusicWindow<T>(
+  total: number,
+  selected: number,
+  read: (offset: number, limit: number) => Promise<{ total: number; items: T[] }>,
+) {
+  const { offset, count } = musicWindow(total, selected);
+  const items: T[] = [];
+  while (items.length < count) {
+    const remaining = count - items.length;
+    const page = await read(offset + items.length, remaining);
+    if (page.total !== total) throw new Error(i18n.t('playbackState.collectionChanged'));
+    if (!page.items.length) throw new Error(i18n.t('playbackState.collectionIncomplete'));
+    items.push(...page.items.slice(0, remaining));
+  }
+  return items;
+}
+export function catalogMusicWindow(
+  path: string,
+  total: number,
+  selected: number,
+  signal: AbortSignal,
+) {
+  const url = new URL(path, location.origin);
+  return readMusicWindow(total, selected, (offset, limit) => {
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('limit', String(limit));
+    return api<TrackPage>(url.pathname + url.search, { signal });
+  });
+}
 export interface SavedPlayback {
+  heart?: HeartBatch | null;
   tracks: Track[];
   index: number;
   position: number;
@@ -42,7 +82,7 @@ export function readPlayback(userId: string): SavedPlayback | null {
       !value ||
       !Array.isArray(value.tracks) ||
       !value.tracks.length ||
-      value.tracks.length > QUEUE_LIMIT ||
+      value.tracks.length > COLLECTION_LIMIT ||
       !value.tracks.every(
         (t: Track) =>
           typeof t?.id === 'string' &&
@@ -55,9 +95,20 @@ export function readPlayback(userId: string): SavedPlayback | null {
       value.index >= value.tracks.length
     )
       return null;
+    const music = !value.tracks.some((track: Track) => track.id.startsWith('podcast_ep_'));
+    const { offset, count, index } = music
+      ? musicWindow(value.tracks.length, value.index)
+      : { offset: 0, count: value.tracks.length, index: value.index };
     return {
       ...value,
-      tracks: value.tracks.map((track: Partial<Track>) => ({
+      heart:
+        value.heart?.library === selectedLibrary()
+          ? value.heart
+          : music && value.tracks.length > MUSIC_QUEUE_LIMIT
+            ? { library: selectedLibrary(), recommended: false }
+            : null,
+      index,
+      tracks: value.tracks.slice(offset, offset + count).map((track: Partial<Track>) => ({
         album_artists: [],
         artist_credit: '',
         album_artist_credit: '',
@@ -104,6 +155,7 @@ export function savePlayback(userId: string, state: SavedPlayback) {
         tracks: state.tracks.map((track) => ({
           id: track.id,
           album_id: track.album_id,
+          library_id: track.library_id,
           title: track.title,
           artists: track.artists,
           album: track.album,
@@ -130,7 +182,7 @@ export function savePlayback(userId: string, state: SavedPlayback) {
     /* storage may be full or disabled */
   }
 }
-// Fetch every page before replacing the audible queue. Changing collections cannot truncate a queue.
+// Offline saving still collects the entire source.
 export async function collectTracks(path: string, signal?: AbortSignal): Promise<Track[]> {
   const url = new URL(path, location.origin);
   url.searchParams.set('limit', '200');
@@ -141,8 +193,8 @@ export async function collectTracks(path: string, signal?: AbortSignal): Promise
   while (true) {
     url.searchParams.set('offset', String(cursor));
     const page = await api<TrackPage>(`${url.pathname}${url.search}`, { signal });
-    if (!Number.isInteger(page.total) || page.total > QUEUE_LIMIT)
-      throw new Error(i18n.t('playbackState.collectionLimitExceeded', { limit: QUEUE_LIMIT }));
+    if (!Number.isInteger(page.total) || page.total > COLLECTION_LIMIT)
+      throw new Error(i18n.t('playbackState.collectionLimitExceeded', { limit: COLLECTION_LIMIT }));
     if (total !== -1 && total !== page.total)
       throw new Error(i18n.t('playbackState.collectionChanged'));
     total = page.total;
