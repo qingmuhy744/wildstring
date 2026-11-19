@@ -93,7 +93,11 @@ class RealBackendCompletionTest {
             assertNotNull(runBlocking { api.listeningSummary() })
             assertNotNull(runBlocking { api.artists("", role = "composer") })
 
-            compose.runOnIdle { vm.play(tracks.take(2)); vm.controller!!.pause(); vm.controller!!.seekTo(1000) }
+            compose.runOnIdle { vm.play(tracks.take(2), autoplay = false, positionMs = 1000) }
+            compose.waitUntil(10_000) {
+                val state = vm.state.value
+                state.current?.id == track.id && state.queue.size == 2
+            }
             step = "shared"
             val shared = runBlocking { withContext(Dispatchers.Main) { vm.sharePlayback() } }
             assertEquals(vm.deviceId(), shared.deviceId)
