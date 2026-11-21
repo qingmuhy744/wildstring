@@ -24,11 +24,12 @@
 1. **批扫去固定等待**（`backend/src/wildstring/lyric_scans.py`）
    - 改造 `LyricScans.run()`，复用 `Providers.run()` 的事件循环节奏：`step()` 返回有进展时仅做极短让步（`0.02s`）立即继续处理下一条到期任务或已扫覆盖推进；无到期任务时按最近 `next_at` 计算休眠时长（上限 `0.5s`）并等待 `exit.wait(delay)`，在避免空转的同时消除每步 `0.5s` 固定损耗。
 
-2. **锁外热缓存快路径与进程内优先级槽位**（`backend/src/wildstring/plugin_archives.py`）
-   - `execute()` 先调用 `context.manager.current(...)` 校验启用状态与配置版本，再按 `[plugin.sha256, config_version, method, value]` 计算缓存键；非 `force` 且 `provider_cache` 未过期时直接在锁外返回结果。
-   - 未命中缓存时先经过每个 `plugin_id` 对应的进程内轻量优先级条件锁，再获取 `.request.lock`，并在锁内二次复查缓存（Double-Checked Locking），避免并发冷请求重复击穿上游：
-     - 交互式调用（`batch_id is None`，优先级 `0`）排在后台批扫（`batch_id is not None`，优先级 `1`）之前唤醒并领取释放后的来源槽，在不耦合 `Providers` 与 `LyricScans` 两套任务表的前提下兑现手动优先；
-     - 后台批扫短等待后仍未拿到槽位则快速让路并重排；已开始的调用执行到返回或超时。
+2. **锁外热缓存快路径与进程内显式优先级槽位**（`backend/src/wildstring/plugin_archives.py`、`backend/src/wildstring/music_sources.py`、`backend/src/wildstring/providers.py`、`backend/src/wildstring/lyric_scans.py`）
+   - `execute()` 先调用 `context.manager.current(...)` 校验启用状态与配置版本，再按 `[plugin.sha256, config_version, method, value]` 计算缓存键；非 `force` 且 `provider_cache` 未过期时直接在锁外返回结果（在门控冷却检查与槽位锁之前运行）。
+   - 未命中缓存时先经过每个 `plugin_id` 对应的进程内轻量优先级条件锁，再获取 `.request.lock`，并在锁内二次复查缓存（Double-Checked Locking），避免并发冷请求重复击穿上游。由调用入口显式传递 `interactive: bool` 到 `PluginContext` / `execute()`，不以 `batch_id is None` 猜测优先级：
+     - `interactive=True`（优先级 `0`）：**仅限**显式单曲用户操作——手动单曲查歌词（`POST /manage/tracks/{track_id}/online-lyrics`）、显式单曲元数据刷新（`providers.enqueue(scope="track")`）与插件测试（`POST /manage/source-plugins/{id}/test`）；`Providers.step()` 领取任务时同样优先处理交互式单曲刷新。
+     - `interactive=False`（优先级 `1`，短等待后让路重排）：后台歌词批扫（`LyricScans`）以及 `Providers` 中的批量／自动元数据任务（`album` / `library` / 多曲 `provider_jobs` 与 `auto_new` 自动刷新）。已开始的调用执行到返回或超时。
+   - **手动查歌词与同曲目批扫任务衔接**：重复点击手动查歌词仍复用已有的**手动** `lyric_lookup_jobs` 记录，但 `enqueue_lyrics()` 不直接复用批扫自建的 `job_id`；当目标曲目存在等待中或正在单源扫描的批扫项时，手动请求独立创建并激活高优先级手动 `lyric_lookup_jobs`（并发查询全部已启用歌词来源，并可直接命中批扫已写入的 `provider_cache` 热缓存），批扫侧在 `claim_job()` 检测到活跃手动任务时让路推迟，待手动任务完成后再继续。
 
 3. **`source_plugin_busy` 轻推迟重排**（`backend/src/wildstring/lyric_scans.py`）
    - `process_scoped()` 捕获 `source_plugin_busy` 时，不递增真实网络失败 `attempts`，不走 `30/60s` 失败退避，改为短延迟（`2~5s`）重回 `queued`。
@@ -75,21 +76,24 @@
 2. **批扫按来源分槽跨歌曲并行**（`backend/src/wildstring/lyric_scans.py`）
    - 将批扫单线程循环升级为“协调器选任务 + 每来源至多 1 个活跃槽位”的并发调度器：
      - 同一 `track_id` 同一时刻只允许一个活跃批扫项，逐来源推进。满足目标时在一个事务内保存结果并转入 `ready`；只有需要继续查询时才重新入队。
-     - 无需新增数据库列：以现有的 `lyric_scan_items.results` JSON 映射作为已完成来源权威集合（`provider_index` 同步写为 `len(results)`，不再作为单向跳过游标）。每次调度按 `options["providers"]` 优先级选出首个未在 `results` 中且未冷却的来源；仅在需要新增物理请求时受冷却约束，覆盖记录和热缓存仍可直接命中。若当前所有剩余未查来源均处于冷却中，则以 `next_at = min(cooldown_until)` 重新入队，等冷却到期后再补查，不把暂缓来源记作未匹配；若后续已达标则直接结束。
-     - 来源槽空闲时通过阶段一的进程内优先级条件锁优先让手动任务领取；每个来源仍只执行一个调用，继续共享原有物理请求门控。
+     - 无需新增数据库列：以现有的 `lyric_scan_items.results` JSON 映射作为已完成来源权威集合（`provider_index` 同步写为 `len(results)`，不再作为单向跳过游标）。**不在任务调度前预先剔除冷却中来源**，严格先做本地可完成判定，仅在即将发出真实物理请求时才受冷却约束：
+       1. 先查 `lyric_scan_coverage` 覆盖记录（非 `force` 且命中即本地直接推进）；
+       2. 未覆盖时进入 `lookup()` / `execute()`，由锁外 `provider_cache` 热缓存快路径在槽位与冷却检查**之前**执行——若搜索、（按需）详情与歌词全部命中热缓存，即使 `cooldown_until > now` 也直接在本地完成该来源；
+       3. 仅当缓存未命中、即将向门控申请物理请求并遇到生效冷却（`source_plugin_rate_limited`、`upstream_429=False` 且带 `cooldown_until`）时，在本次巡检中暂缓该来源（不写入 `results`，不消耗 `attempts`），继续尝试同一首歌 `options["providers"]` 中的下一个未查来源；若后续来源达标则原子转入 `ready` 结束，若全部剩余未查来源均因缓存未命中触发冷却，再以 `next_at = min(cooldown_until)` 重新入队等冷却到期后补查。
+     - 来源槽空闲时通过阶段一的显式优先级条件锁优先让交互式任务（`interactive=True`）领取；每个来源仍只执行一个调用，继续共享原有物理请求门控。
      - 继续复用 `exit` 暂停/取消信号、`checkpoint()` 批次状态检查与 `library_job_scope` 上下文隔离。
 
 ### 阶段四：插件打包器、Nuitka 原生扩展与文档契约同步
 
 - 更新 `scripts/package_source_plugins.py` 的 AST 导出符号清单与 `README.txt`（声明 `WildString source plugin API v2`），核验 `make source-plugins`。
 - 更新原生编译插件夹具 `tests/fixtures/plugins/native_core.py` 至 v2 方法签名，核验 `make test-native-plugin`。
-- 遵循 `AGENTS.md` §2 界面降噪原则同步文档与简明文案：更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`）中的 `sourcePlugins.importDescription` 以及 `docs/architecture/source-plugins.md`，明确插件与候选管理仅在 Web 提供，取消对跨主协议版本无条件保留旧包的承诺，简明写清“兼容协议升级保留插件与配置，协议大版本变更会清理不兼容旧包并需重新导入与配置”；不为新安装空状态堆砌常驻迁移横幅。
-- **Android 历史残留死代码清理**（插件管理、批扫管理、管理中心与资料候选审阅入口已在 `MobileFeatures.kt` `"source-plugins"`、`"lyric-scans"`、`"management"`、`"suggestions"` 路由退役并引导至 Web，清理下列未挂载死代码及孤立资源，严禁误删仍在使用的面板与路由）：
-  - `frontend/android/app/src/main/java/com/wildstring/app/ui/MusicSourcePlugins.kt`：删除未挂载的 `SourcePluginsPanel`（以及仅由它引用的 `uploadPlugin` / `downloadPlugin` 等 API 辅助方法）；**保留同一文件内的 `OnlineLyricsPanel`**（仍被 `"lyrics"` 路由下的 `LyricsEditorPanel` 挂载）。
+- 遵循 `AGENTS.md` §2 界面降噪原则同步文档与简明文案：更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`）中的 `sourcePlugins.importDescription` 以及 `docs/architecture/source-plugins.md`，明确**插件 ZIP 导入维护、歌词批扫管理、曲库管理中心与元数据候选审阅**仅在 Web 提供（Android 保留单曲歌词编辑页的在线歌词查询、预览与应用），取消对跨主协议版本无条件保留旧包的承诺，简明写清“兼容协议升级保留插件与配置，协议大版本变更会清理不兼容旧包并需重新导入与配置”；不为新安装空状态堆砌常驻迁移横幅。
+- **Android 历史残留死代码清理**（插件 ZIP 管理、批扫管理、管理中心与资料候选审阅入口已在 `MobileFeatures.kt` `"source-plugins"`、`"lyric-scans"`、`"management"`、`"suggestions"` 路由退役并引导至 Web；**Android 保留单曲在线歌词编辑入口**，清理下列未挂载死代码及孤立资源，严禁误删仍在使用的组件与资源）：
+  - `frontend/android/app/src/main/java/com/wildstring/app/ui/MusicSourcePlugins.kt`：删除未挂载的 `SourcePluginsPanel`，以及仅由它引用的 `uploadPlugin` / `downloadPlugin` API 方法；**保留通用的 `agentDelete`**（`AgentPlatform.kt` 与 `Repository.kt` 仍在调用），并**保留同一文件内的 `OnlineLyricsPanel`**（仍被 `"lyrics"` 路由下的 `LyricsEditorPanel` 挂载用于单曲在线歌词查询、预览与应用）。
   - `frontend/android/app/src/main/java/com/wildstring/app/ui/LyricScans.kt`：删除未挂载的 `LyricScansPanel`；**保留 `lyricLevelLabel`**（或将其移至 `AgentWorkspace.kt` 旁），因 `AgentWorkspace.kt` 仍在调用。
   - `frontend/android/app/src/main/java/com/wildstring/app/ui/LibraryManagementTools.kt`：删除未挂载的 `ManagementPanel` 与 `SuggestionsPanel`；**保留 `MetadataPanel`、`LyricsEditorPanel`、`AlbumMetadataPanel` 与 `MetadataRefreshPrompt`**。
   - `frontend/android/app/src/main/java/com/wildstring/app/ui/MetadataReview.kt`：删除未挂载的 `MetadataReviewPanel`（及该文件内不再被引用的残留代码）。
-  - `frontend/android/app/src/main/res/values/strings.xml` 与 `values-zh/strings.xml`：清理上述死代码移除后不再被引用的孤立字符串资源（如无人引用的 `src_plugin_*`、`lyric_scan_*`、`meta_rev_*`、`lib_mgmt_*`，以 Android Lint `UnusedResources` 检出为准），同时**保留** `MobileFeatures.kt` 中引导前往 Web 的 `"source-plugins"` / `"lyric-scans"` 等路由及 `SourceGainWorkspaceTest` 现有断言。
+  - `frontend/android/app/src/main/res/values/strings.xml` 与 `values-zh/strings.xml`：清理上述死代码移除后不再被引用的孤立字符串资源，**务必保留 `OnlineLyricsPanel` 使用的 `src_plugin_*` 以及 `lyricLevelLabel` 使用的 `lyric_scan_level_*`**（严格以 Android Lint `UnusedResources` 检出为准，不按前缀批量误删）；同时**保留** `MobileFeatures.kt` 中引导前往 Web 的 `"source-plugins"` / `"lyric-scans"` 等路由及 `SourceGainWorkspaceTest` 现有断言。
 
 ## 验收（按 AGENTS.md §3 定级）
 
@@ -107,11 +111,11 @@
   - `make source-plugins`：跑通 `plugins/node-runtime` 单元测试、rolldown 打包与三个 `2.0.0` ZIP 产物生成。
   - `make check` 与 `make test-affected`：覆盖全部更新后的后端、Web 与契约检查。
   - `make test-native-plugin`：验证 Nuitka CPython 3.12 编译扩展在 `api_version = 2` 契约下的导入、调用与升级。
-  - 交付前执行 `make ci` 与 `make android-ci`（运行 `:app:lintDebug` 检查无孤立字符串资源、单元测试、`:app:compileDebugAndroidTestKotlin` 含 `SourceGainWorkspaceTest` 与 Debug APK 打包），并按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
+  - 交付前执行 `make ci` 与 `make android-ci`（常规 push 的 `.github/workflows/android.yml` 触发策略保持不变），在标准 Android 模拟器上**实际执行** `SourceGainWorkspaceTest` 的两个退役入口仪器测试（`retiredPluginRouteDirectsOwnersToWebWithoutLoadingConfiguration`、`retiredAlbumLyricScanRouteDirectsOwnersToWebWithoutStartingWork`）并走通「单曲歌词编辑 → 在线歌词查询 → 预览／应用」，同时按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
 - **专项量化与回归场景（隔离合成上游 + 假 HTTP 传输）**：
   - **请求预算**：无歧义曲目歌词冷查询验证 QQ、网易云物理请求降至 2 次、酷狗降至 3 次；隐藏重制版后缀导致同分歧义时触发 1 次批量详情回退并正确区分版本；同专辑 3 候选元数据建议验证专辑详情按 `release_id` 去重，且 `include_release=False/True` 缓存互不污染；批量响应乱序或缺失单条时保留成功项；摘要未达标时可通过详情回退正确匹配。
-  - **锁与调度延迟**：同来源持锁慢查询期间热缓存命中耗时 `< 50ms`（不再等待 2s 报错）；批扫连续 4 步已扫覆盖推进总耗时 `< 200ms`；批扫撞到已占用的来源锁时短暂重排，且不消耗 `attempts`；来源槽释放后，排队中的手动任务先于后台领取。
-  - **429 端到端与跨来源并行**：从假 HTTP 层向网易云/酷狗 Node 运行时注入 `HTTP 429` + `Retry-After: 120`，验证 `plugin_request_gates.cooldown_until` 正确写入约 120s，验证冷却期间重复查询不产生上游请求、不续期，缓存仍可用；首选来源冷却时其余来源继续，达标歌曲不再发后续请求，未达标歌曲到期后可继续查被暂缓的来源。
+  - **锁与调度延迟**：同来源持锁慢查询期间热缓存命中耗时 `< 50ms`（不再等待 2s 报错）；批扫连续 4 步已扫覆盖推进总耗时 `< 200ms`；批扫撞到已占用的来源锁时短暂重排，且不消耗 `attempts`；来源槽释放后，显式交互单曲任务（`interactive=True`）先于批量/自动元数据刷新及歌词批扫（`interactive=False`）领取；批扫排队或进行中对同曲目发起手动查歌词时，走高优先级全量查询而不复用批扫单目标中止语义。
+  - **429 端到端与跨来源并行**：从假 HTTP 层向网易云/酷狗 Node 运行时注入 `HTTP 429` + `Retry-After: 120`，验证 `plugin_request_gates.cooldown_until` 正确写入约 120s，验证冷却期间重复查询不产生上游请求、不续期；验证全部已启用来源均在冷却中但首选来源命中热缓存时，手动查歌词与批扫均以零上游请求在本地完成；首选来源冷却且缓存未命中时其余来源继续，达标歌曲不再发后续请求，未达标歌曲到期后可继续查被暂缓的来源。
   - **存量 v1 清理回归**：用带 Cookie、已应用歌词和未完成任务的合成实例验证升级。旧包、旧设置及插件专用 Cookie 被清理；旧任务进入终态，已应用歌词与无关配置仍可用。重复启动无额外影响，重新导入并配置 v2 后查询正常。
 
 ## 风险
