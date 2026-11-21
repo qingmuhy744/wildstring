@@ -127,6 +127,18 @@ class PlatformMediaSessionTest {
             await("AAC selection must preserve lossy original playback") { vm.state.value.playbackQuality == uiString(R.string.abs_player_quality_original) + " · MP3" && onMain { vm.controller!!.isPlaying } }
             progress(system, paused = false)
             assertTrue(requests.any { it == "/api/v1/tracks/lossy/stream" })
+
+            val lossy = track.copy(id = "lossy", format = "mp3")
+            onMain { vm.play(listOf(track, lossy), index = 1, autoplay = false) }
+            await("Second song is ready") { onMain { vm.controller!!.mediaItemCount == 2 && vm.controller!!.currentMediaItemIndex == 1 && vm.controller!!.playbackState == Player.STATE_READY } }
+            system.transportControls.seekTo(6000)
+            await("Playhead is past the previous-button threshold") { onMain { vm.controller!!.currentPosition >= 5900 } }
+            system.transportControls.skipToPrevious()
+            await("System previous selects the first song and starts its AAC stream from zero") {
+                onMain { vm.controller!!.currentMediaItemIndex == 0 && vm.controller!!.currentPosition < 200 && vm.controller!!.playbackState == Player.STATE_READY }
+            }
+            system.transportControls.skipToNext()
+            await("System next selects the second song") { onMain { vm.controller!!.currentMediaItemIndex == 1 } }
         } } finally {
             runCatching { compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED) }
             onMain { vm.settings.quality(0); vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() }

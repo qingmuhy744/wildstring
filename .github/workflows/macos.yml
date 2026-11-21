@@ -10,14 +10,7 @@ on:
       - ".github/workflows/macos.yml"
       - "scripts/package_macos_dmg.sh"
       - "Makefile"
-  pull_request:
-    paths:
-      - "frontend/macos/**"
-      - "frontend/apple-shared/**"
-      - "frontend/ios/WildStringKit/**"
-      - ".github/workflows/macos.yml"
-      - "scripts/package_macos_dmg.sh"
-      - "Makefile"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -41,6 +34,8 @@ jobs:
         run: brew install xcodegen
       - name: Test shared kit
         run: make ios-test
+      - name: Test native macOS app
+        run: make macos-test
       - name: Build and pack a DMG
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}

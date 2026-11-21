@@ -137,7 +137,12 @@ class AgentWorkspaceTest {
             openPreferences()
             compose.onNodeWithText(uiString(R.string.settings_research)).performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-memory-input").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
+            compose.runOnIdle { vm.settings.appearance("dark") }
+            compose.onNodeWithTag("agent-memory-input").performScrollTo().performClick().assertIsFocused()
+            compose.onNodeWithText(uiString(R.string.research_memory_example)).assertExists()
+            capture("research-memory-input-dark-phone.png", dark = true)
+            compose.onNodeWithTag("agent-memory-input").performTextInput("优先录音室版本")
+            compose.runOnIdle { vm.settings.appearance("light") }
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
             compose.onNodeWithTag("agent-memory-save").performScrollTo().assertIsEnabled().performClick()
@@ -180,7 +185,7 @@ class AgentWorkspaceTest {
                 compose.onAllNodes(isRoot()).onLast().printToLog("ResearchFailure")
             }
             throw error
-        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+        } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
     @Test fun historyRenameDeleteAndBusyFailurePreserveCurrentConversation() {
         val vm = vm()
@@ -251,7 +256,11 @@ class AgentWorkspaceTest {
             capture("agent-notifications-phone.png")
             compose.onNodeWithTag("notice-read-notice-one").performClick()
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
-            compose.onNodeWithText(uiString(R.string.agent_ws_unread_count, 0)).assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_empty_notifications_unread)).assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).assertDoesNotExist()
+            compose.runOnIdle { vm.settings.appearance("dark") }
+            capture("agent-notifications-empty-dark-phone.png", dark = true)
+            compose.runOnIdle { vm.settings.appearance("system") }
             compose.onNodeWithText("新草案待确认").assertDoesNotExist()
             compose.onNodeWithTag("notice-filter-read").performClick()
             compose.onNodeWithText("新草案待确认").assertExists()
@@ -318,6 +327,7 @@ class AgentWorkspaceTest {
     private fun capture(name: String, dark: Boolean = false) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.waitForIdle(350, 5_000)
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let { java.io.File(it) } ?: instrumentation.targetContext.getExternalFilesDir(null)!!
         directory.mkdirs()
         val deadline = android.os.SystemClock.elapsedRealtime() + 5000

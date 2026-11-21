@@ -17,15 +17,16 @@ concurrency:
 jobs:
   changes:
     # Decides which expensive suites a pull request needs. Every other trigger (push to main,
-    # release reuse, manual runs) runs everything. The required jobs below always start and
-    # report under their own names; only their steps are skipped, because a skipped job would
-    # stay "pending" for the merge rules forever.
+    # release reuse, manual runs) runs the full core CI. Required checks report for every PR.
     name: Detect changed areas
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.areas.outputs.backend }}
       web: ${{ steps.areas.outputs.web }}
+      container: ${{ steps.areas.outputs.container }}
+      macos: ${{ steps.areas.outputs.macos }}
+      ios: ${{ steps.areas.outputs.ios }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,11 +41,11 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then
             python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
           else
-            printf 'backend=true\nweb=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'backend=true\nweb=true\ncontainer=true\n' | tee -a "$GITHUB_OUTPUT"
           fi
 
   quality:
-    name: Code Quality & Packaging
+    name: Static Checks & Packaging
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -239,28 +240,57 @@ jobs:
           test "$SHARD_RESULT" = "success"
 
   container:
-    # Runs only when the backend, scripts or deploy inputs changed. History shows the suite
-    # inside the container fails on its own (read-only filesystem, container FFmpeg), so pull
-    # requests that touch those inputs keep the full run.
     name: Container Smoke & Test
     needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Container checks not needed for this change
-        if: needs.changes.outputs.backend != 'true'
-        run: echo "No backend, script or deploy changes; the container checks are skipped."
+        if: needs.changes.outputs.container != 'true'
+        run: echo "Container inputs are unchanged; the container checks are skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.backend == 'true'
+        if: needs.changes.outputs.container == 'true'
         with:
           persist-credentials: false
       - name: Build, start and smoke-check the container
-        if: needs.changes.outputs.backend == 'true'
+        if: needs.changes.outputs.container == 'true'
         run: make docker-up docker-smoke
       - name: Run the backend suite with the container FFmpeg
         if: needs.changes.outputs.backend == 'true'
         run: make docker-test SKIP_RUNTIME_BUILD=1
-      - if: failure() && needs.changes.outputs.backend == 'true'
+      - if: failure() && needs.changes.outputs.container == 'true'
         run: make docker-logs LOG_ARGS='--tail=200'
-      - if: always() && needs.changes.outputs.backend == 'true'
+      - if: always() && needs.changes.outputs.container == 'true'
         run: make docker-down
+
+  macos:
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    uses: ./.github/workflows/macos.yml
+
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    uses: ./.github/workflows/ios.yml
+
+  quality_gate:
+    name: Code Quality & Packaging
+    needs: [quality, changes, macos, ios]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify packaging and selected Apple jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          MACOS_NEEDED: ${{ needs.changes.outputs.macos }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          IOS_NEEDED: ${{ needs.changes.outputs.ios }}
+          IOS_RESULT: ${{ needs.ios.result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$CHANGES_RESULT" = success
+          echo "macOS: $MACOS_RESULT; iOS: $IOS_RESULT"
+          if [ "$MACOS_NEEDED" = true ]; then test "$MACOS_RESULT" = success; fi
+          if [ "$IOS_NEEDED" = true ]; then test "$IOS_RESULT" = success; fi

@@ -4,11 +4,13 @@
 
 `.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：锁定依赖、hooks、Python/Web 测试、Web 构建与锁文件检查。容器任务执行 `make docker-up docker-smoke docker-test`，检查 API、Web、FFmpeg、非 root、只读音乐及后端测试，最后停止容器并保留数据卷。
 
+PR 根据变更路径选择检查。Web 构建输入变更时执行镜像构建与容器冒烟，后端或部署输入变更时补跑容器内的后端测试。主分支必检项 `Code Quality & Packaging` 汇总静态检查、打包和选中的 macOS、iOS 作业。维护规则时应使用汇总作业名，完整工作流的路径过滤会让必检项缺失。
+
 `make dependency-audit` 审计完整 Web 和插件 npm 依赖。Web 构建链的 [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) 有一项经确认的限时例外，具体版本、范围和截止时间见[审计脚本](../scripts/audit_web_dependencies.py)。CI 原样打印审计报告及例外命中提示。新增公告、受影响版本变更、进入生产依赖或到期未修复仍会阻断。确认上游补丁后更新锁文件并移除临时代码，同时将 Web 恢复为常规完整审计。
 
 `.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用独立固定签名，可与正式版共存，同签名 Dev 包之间可覆盖安装；正式安装包从 Releases 下载。Fork / Dependabot 的无密钥构建继续检查，但不上传可安装的 Dev 附件。
 
-完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。除每周定时基准与按需手动触发 **Android APK**（`run_emulator=true`）外，打标签触发 **Release** 时会自动对比上一版本标签，在存在功能性 Android 改动时并行运行完整模拟器回归；该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
+完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。每周定时基准、手动触发 **Android APK**（`run_emulator=true`）和符合范围的 **Release** 都可并行运行完整模拟器回归。Release 对比上一版已发布标签，覆盖 Android 代码、后端运行代码与依赖，以及设备测试夹具。设备测试使用一次性合成曲库 API，通过 `realBackend` 验证登录、认证音频串流、播放、歌词与手机和平板布局。
 
 Android 周测有独立并发组。每个验证分片的摘要记录实际检出的提交。重跑 Android APK、CodeQL 的 Java/Kotlin 扫描或 Release 的签名 APK 构建时，Gradle 使用空的 Actions 依赖缓存环境。
 
@@ -29,10 +31,10 @@ Android `versionCode` 必须随发布严格递增，Apple 构建号与 Android `
 将标签替换为实际版本后运行版本一致性检查：
 
 ```sh
-python3 scripts/package_release.py --tag vX.Y.Z --check-only
+python3 scripts/package_release.py --tag vX.Y.Z --previous-tag vA.B.C --check-only
 ```
 
-该脚本检查当前后端、Web 与 Android `versionName`；iOS／macOS 的 `project.yml` 未由脚本自动检查，发版前需单独核对。
+`vA.B.C` 为候选提交之前的已发布版本。脚本核对五端版本，以及 Android 和 Apple 各自递增的构建号。Apple 的 `MARKETING_VERSION` 使用数字版本，预发布后缀保留在 Git 标签和支持该后缀的生态中。Release 自动选择对比标签。
 
 正式签名使用仓库 Actions secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_SIGNING_CERT_SHA256`。密钥仅在签名步骤写入 runner 临时目录，权限 0600，步骤退出立即删除；校验证书指纹后才上传 APK。Gradle 的常规依赖缓存不包含私钥。
 
@@ -45,11 +47,11 @@ python3 scripts/package_release.py --tag vX.Y.Z --check-only
 ## 发布顺序
 
 1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。在推送或发起发布前，先在本地运行 `make check` 与 `make test-affected`（或完整 `make ci`），确保没有因界面文案调整或重构遗留的过期测试断言。
-2. 通过 PR 合并进入 main，确认主线 **CI** 与 **Android APK** 工作流均已在该最终提交上通过。
-3. 有功能性 Android 改动时，用 `gh workflow run android.yml --ref main -f run_emulator=true` 在待发布提交上启动完整设备回归。保留其余输入的默认值，核对运行的 `headSha` 与待打标签的 SHA 一致，并等待四个设备分片通过。如果 main 在触发时更新，以运行记录中的实际 SHA 核对候选提交。
+2. 通过 PR 合并进入 main，等待 **CI**、**CodeQL** 与适用的 **Android APK** 和 Apple 构建在待发布 SHA 上通过，核对告警和审阅意见。
+3. 涉及 Android、后端接口或设备夹具的改动，可以在打标签前用 `gh workflow run android.yml --ref main -f run_emulator=true` 先跑设备回归。核对运行的 `headSha` 与候选 SHA，并检查四个分片结果。
 4. 在已验证的提交创建并推送 `vX.Y.Z` 标签。
-5. **Release** 工作流核对标签、三个端版本及 main 祖先关系后，通过 [`scripts/release_verify_scope.py`](../scripts/release_verify_scope.py) 自动判定检查范围：若同一提交已在 main 通过主线 **CI** 则复用该结果免重跑；若对比上一个已发布版本标签（跳过失败未发布的草稿/残留标签）存在功能性 Android 改动则执行 4 分片并行模拟器回归，否则仅执行 Android 构建、单元测试与 Lint；最后始终构建固定签名 R8 正式 APK，并在模拟器实际安装、检查连接页。
-6. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。随后 **Sync Homebrew cask** 作业从正式 Release 读取校验清单并同步可选渠道。同步失败在 **Release summary** 显示，可通过作业菜单单独重跑。摘要同时记录 workflow attempt、首轮失败作业、Android 设备验证 SHA 与用例重试信息。
+5. **Release** 核对标签、五端版本、构建号和 main 祖先关系，复用同一 SHA 已通过的主线 **CI**，并按 [发版验证范围](../scripts/release_verify_scope.py) 选择 Android 设备回归。每次发布都验证 Apple 客户端，安装并启动固定签名的 R8 APK。
+6. 验证通过后发布 Web ZIP、插件 ZIP、客户端安装包以及双架构镜像。**Sync stable channels** 从已发布的稳定版本中选择最高版本，更新 GitHub 最新版本、GHCR `latest` 和可选 Homebrew tap。**Release summary** 记录各渠道状态、首轮失败作业、设备验证 SHA 和用例重试信息。
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。
 

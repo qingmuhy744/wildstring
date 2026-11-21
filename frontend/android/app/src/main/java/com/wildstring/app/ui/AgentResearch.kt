@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
         provider = settings!!.text("provider"); enabled = settings!!.flag("enabled"); budget = settings!!.number("daily_budget", 100).toString()
     }
     LaunchedEffect(Unit) { action.run { load() }; if (action.message == AppLanguage.string(R.string.completed) || action.message == "\u5df2\u5b8c\u6210") action.message = null }
-    LazyColumn(Modifier.fillMaxSize().testTag("agent-research"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().imePadding().testTag("agent-research"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text(stringResource(R.string.research_chat_search), style = MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.research_search_hint), style = MaterialTheme.typography.bodySmall)
@@ -71,7 +71,12 @@ import kotlinx.coroutines.launch
                     preferences = vm.agent.request("assistant-preferences", "PUT", jsonBody("retention_days" to value.number("retention_days", 30), "context_summary" to if (field == "context_summary") checked else value.flag("context_summary"), "long_term_memory" to if (field == "long_term_memory") checked else value.flag("long_term_memory")))
                 } } }, enabled = !action.busy && preferences != null) }
             }
-            OutlinedTextField(content, { content = it.take(1000) }, label = { Text(if (editing == null) stringResource(R.string.research_memory_input) else stringResource(R.string.research_memory_edit)) }, modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"), minLines = 2)
+            OutlinedTextField(
+                content, { content = it.take(1000) },
+                label = { Text(if (editing == null) stringResource(R.string.research_memory_input) else stringResource(R.string.research_memory_edit)) },
+                placeholder = { Text(stringResource(R.string.research_memory_example)) },
+                modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"), minLines = 2,
+            )
             Row {
                 TextButton({ scope.launch { action.run {
                     val current = editing

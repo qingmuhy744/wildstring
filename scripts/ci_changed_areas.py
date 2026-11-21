@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Report which CI areas a change touches, for GitHub Actions job outputs.
 
-Every check on `main` is required, and GitHub leaves a *skipped job* pending forever. The
-workflows therefore keep each required job and skip only its expensive steps when this script
-says its inputs are untouched. Anything unknown counts as touching everything, so a new
-top-level directory is tested until it is classified here.
+Filtering out an entire workflow can leave a required check pending. Workflows that report
+required checks start for every PR and decide which suites to run after inspecting the diff.
+Unknown inputs run the backend, Web and Android checks until classified here.
 
-Usage: ci_changed_areas.py BASE HEAD     # prints `backend=`, `web=` and `android=true|false`
-Pushes to main, tags, manual runs and release reuse never call this and run everything.
+Usage: ci_changed_areas.py BASE HEAD     # prints one boolean per validation area
 """
 
 from __future__ import annotations
@@ -40,8 +38,7 @@ INERT = (
     "LICENSE",
 )
 
-# Files the backend suite and the container build read. `scripts/` and `plugins/` feed backend
-# tests; `deploy/` and the lockfile feed the container.
+# `scripts/` and `plugins/` feed backend tests, including the containerized backend suite.
 BACKEND = (
     "backend/",
     "scripts/",
@@ -79,11 +76,20 @@ ANDROID = (
     ".github/workflows/android.yml",
     ".github/workflows/release.yml",
 )
+MACOS = (
+    "frontend/macos/",
+    "frontend/apple-shared/",
+    "frontend/ios/WildStringKit/",
+    "scripts/package_macos_dmg.sh",
+    ".github/workflows/macos.yml",
+    "Makefile",
+)
+IOS = ("frontend/ios/", "frontend/apple-shared/", ".github/workflows/ios.yml", "Makefile")
 
 
 def changed_files(base: str, head: str) -> list[str]:
     result = subprocess.run(  # nosec B603 B607
-        ["git", "diff", "--name-only", f"{base}...{head}"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"],
         check=True,
         capture_output=True,
         text=True,
@@ -123,16 +129,20 @@ def main(argv: list[str]) -> int:
     except subprocess.CalledProcessError as error:
         # An unreadable diff must never hide tests.
         print(f"git diff failed ({error.returncode}); running everything", file=sys.stderr)
-        files = ["?unknown"]
+        for area in ("backend", "web", "android", "container", "macos", "ios"):
+            print(f"{area}=true")
+        return 0
     backend = touches(files, BACKEND)
-    web = touches(files, WEB)
-    android = touches_android(files)
-    for line in (
-        f"backend={str(backend).lower()}",
-        f"web={str(web).lower()}",
-        f"android={str(android).lower()}",
-    ):
-        print(line)
+    selected = {
+        "backend": backend,
+        "web": touches(files, WEB),
+        "android": touches_android(files),
+        "container": backend or any(name.startswith("frontend/web/") for name in files),
+        "macos": any(name.startswith(MACOS) for name in files),
+        "ios": any(name.startswith(IOS) for name in files),
+    }
+    for area, needed in selected.items():
+        print(f"{area}={str(needed).lower()}")
     print(f"{len(files)} changed files", file=sys.stderr)
     return 0
 
