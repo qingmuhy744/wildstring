@@ -6,6 +6,22 @@ import XCTest
 
 @MainActor
 final class PlaybackSharingTests: XCTestCase {
+    func testRestoresMusicDurationBeforePlayback() async throws {
+        let track = try JSONDecoder().decode(Track.self, from: Data(
+            #"{"id":"track","title":"Track","artists":["Artist"],"duration_ms":12500,"has_cover":false}"#.utf8
+        ))
+        let store = InMemoryQueueStore()
+        try await store.saveQueue([track.playbackItem], currentIndex: 0)
+        try await store.saveProgress(QueueProgress(index: 0, position: 7))
+        let server = try ServerAddress(input: "handoff.example.invalid")
+        let playback = PlaybackService(server: server, store: store, cookieHeader: { nil })
+        defer { playback.shutdown() }
+        await playback.restore()
+        XCTAssertEqual(playback.currentTime, 7)
+        XCTAssertEqual(playback.duration, 12.5)
+        XCTAssertFalse(playback.wantsPlayback)
+    }
+
     func testLongSharedQueueOffersAndAdoptsSelectedWindow() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "wildstring.handoff.\(UUID().uuidString)"))
         let configuration = URLSessionConfiguration.ephemeral

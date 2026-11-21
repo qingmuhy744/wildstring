@@ -180,7 +180,8 @@ extension Track {
             album: album,
             hasCover: hasCover,
             streamPath: "api/v1/tracks/\(id)/stream",
-      unavailableReason: unavailableReason
+            unavailableReason: unavailableReason,
+            durationSeconds: Double(max(0, durationMs)) / 1000
         )
     }
 }
