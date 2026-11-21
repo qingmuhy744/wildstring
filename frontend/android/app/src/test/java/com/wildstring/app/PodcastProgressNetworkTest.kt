@@ -421,29 +421,41 @@ class PodcastProgressNetworkTest {
 
     @Test fun historicalConflictIsDiscardedEvenWhenItBelongsToSameDevice() = ProgressFixture().use { fixture ->
         val puts = AtomicInteger()
+        val releaseFirst = CountDownLatch(1)
         fixture.server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 if (request.path == "/api/v1/podcasts/resume-mode") return json("{\"resume_mode\":\"auto\"}")
                 if (request.method == "GET") return json(state(0, "", ""))
                 val update = JsonParser.parseString(request.body.readUtf8()).asJsonObject
-                if (puts.incrementAndGet() == 1) return MockResponse().setResponseCode(503)
+                if (puts.incrementAndGet() == 1) {
+                    check(releaseFirst.await(5, TimeUnit.SECONDS))
+                    return MockResponse().setResponseCode(503)
+                }
                 return json("{\"detail\":{\"current\":${state(8, update.get("device_id").asString, "newer-session")}}}", 409)
             }
         }
         val progress = PodcastProgress(fixture.context, fixture.repository)
         runBlocking {
             assertTrue(progress.prepare("episode", "Episode", 3_600_000) is PodcastPreparation.Play)
-            withTimeout(5000) { while (puts.get() < 1) delay(20) }
-            progress.leave()
+            try {
+                withTimeout(5000) { while (puts.get() < 1) delay(20) }
+                progress.leave()
+            } finally {
+                releaseFirst.countDown()
+            }
             ShadowSystemClock.advanceBy(Duration.ofSeconds(11)) // The outbox retry is throttled by Android's clock.
             progress.retry()
-            withTimeout(5000) { while (puts.get() < 2) delay(20) }
-            delay(200)
+            withTimeout(5000) { progress.positions.first { it["episode"]?.version == 8L } }
+            assertEquals(2, puts.get())
+            assertFalse(progress.conflict.value)
+            val row = fixture.repository.database.podcasts().get(fixture.repository.session.storageScope()!!, "episode")
+            val saved = com.google.gson.Gson().fromJson(row!!.payload, EpisodeCheckpoint::class.java)
+            assertEquals(8L, saved.remote.version)
+            assertFalse(saved.dirty)
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(11))
             progress.retry()
             delay(200)
             assertEquals(2, puts.get())
-            assertFalse(progress.conflict.value)
-            assertEquals(8L, progress.positions.value["episode"]?.version)
         }
     }
 
