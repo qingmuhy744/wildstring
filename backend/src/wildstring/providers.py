@@ -478,6 +478,7 @@ class Providers:
         config = self.settings()
         if not config["enabled"]:
             raise HTTPException(409, "providers_disabled")
+        interactive = scope == "track"
         ids = list(dict.fromkeys(track_ids or []))
         library_id = self.repository.library_id(create=track_batch)
         batch_id = None
@@ -506,15 +507,15 @@ class Providers:
                 raise HTTPException(404, "track_not_found")
             clock = time.time()
             existing_active = connection.execute(
-                "SELECT id,track_id,metadata_version,status,refresh_mode,force FROM provider_jobs "
+                "SELECT id,track_id,metadata_version,status,refresh_mode,force,interactive FROM provider_jobs "
                 "WHERE status IN ('queued','running') AND track_id IN "
                 "(SELECT value FROM json_each(?))",
                 (json.dumps([row["id"] for row in rows]),),
             ).fetchall()
             inserted = connection.executemany(
-                "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
+                "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive) VALUES (?,?,?,'queued',?,?,?,?,?)",
                 [
-                    (uuid4().hex, row["id"], row["version"], clock, clock, mode, force)
+                    (uuid4().hex, row["id"], row["version"], clock, clock, mode, force, interactive)
                     for row in rows
                 ],
             )
@@ -533,16 +534,19 @@ class Providers:
                     changed = (
                         job["metadata_version"] != current["version"]
                         or merged_mode != job["refresh_mode"]
+                        or (interactive and not job["interactive"])
                         or bool(force)
                         and not job["force"]
                     )
                     if changed:
                         connection.execute(
-                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,updated_at=? WHERE id=?",
+                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,interactive=MAX(interactive,?),next_attempt=CASE WHEN ? THEN 0 ELSE next_attempt END,updated_at=? WHERE id=?",
                             (
                                 current["version"],
                                 merged_mode,
                                 int(bool(force or job["force"])),
+                                interactive,
+                                interactive,
                                 clock,
                                 job["id"],
                             ),
@@ -550,27 +554,39 @@ class Providers:
                         upgraded += 1
                 elif job["metadata_version"] != current["version"]:
                     connection.execute(
-                        """INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,created_at,updated_at)
-                        VALUES (?,?,?,?,?,?)
+                        """INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,interactive,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?)
                         ON CONFLICT(track_id) DO UPDATE SET metadata_version=excluded.metadata_version,
                         refresh_mode=CASE WHEN provider_refresh_intents.refresh_mode='all' OR excluded.refresh_mode='all' THEN 'all' ELSE 'missing' END,
-                        force=MAX(provider_refresh_intents.force,excluded.force),updated_at=excluded.updated_at""",
+                        force=MAX(provider_refresh_intents.force,excluded.force),
+                        interactive=MAX(provider_refresh_intents.interactive,excluded.interactive),updated_at=excluded.updated_at""",
                         (
                             job["track_id"],
                             current["version"],
                             merged_mode,
                             int(bool(force or job["force"])),
+                            interactive,
                             clock,
                             clock,
                         ),
                     )
                     intents += 1
                 else:
-                    changed = merged_mode != job["refresh_mode"] or bool(force) and not job["force"]
+                    changed = (
+                        merged_mode != job["refresh_mode"]
+                        or (bool(force) and not job["force"])
+                        or (interactive and not job["interactive"])
+                    )
                     if changed:
                         connection.execute(
-                            "UPDATE provider_jobs SET refresh_mode=?,force=?,updated_at=? WHERE id=?",
-                            (merged_mode, int(bool(force or job["force"])), clock, job["id"]),
+                            "UPDATE provider_jobs SET refresh_mode=?,force=?,interactive=MAX(interactive,?),updated_at=? WHERE id=?",
+                            (
+                                merged_mode,
+                                int(bool(force or job["force"])),
+                                interactive,
+                                clock,
+                                job["id"],
+                            ),
                         )
                         upgraded += 1
             connection.executemany(
@@ -641,7 +657,7 @@ class Providers:
                 continue
         return sorted(matches.values(), key=lambda item: item["match"]["score"], reverse=True)[:3]
 
-    def suggestions(self, track, *, force=False):
+    def suggestions(self, track, *, force=False, interactive=False):
         output, warnings = [], []
         config = self.settings()
         local_cover = bool(track.get("has_cover"))
@@ -805,7 +821,7 @@ class Providers:
                         if isinstance(error, ProviderError)
                         else "lastfm_invalid_response"
                     )
-        plugin_output, plugin_warnings = self.sources.suggestions(track)
+        plugin_output, plugin_warnings = self.sources.suggestions(track, interactive=interactive)
         output.extend(plugin_output)
         warnings.extend(plugin_warnings)
         priority = self.source_priority()
@@ -841,7 +857,7 @@ class Providers:
         if latest is not None:
             successor = uuid4().hex
             connection.execute(
-                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
+                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive) VALUES (?,?,?,'queued',?,?,?,?,?)",
                 (
                     successor,
                     job["track_id"],
@@ -850,6 +866,7 @@ class Providers:
                     time.time(),
                     intent["refresh_mode"],
                     intent["force"],
+                    intent["interactive"],
                 ),
             )
             connection.execute(
@@ -864,7 +881,9 @@ class Providers:
         track = self.repository.track(job["track_id"])
         if track is None:
             raise ProviderError("track_not_found", False)
-        suggestions, warnings = self.suggestions(track, force=bool(job["force"]))
+        suggestions, warnings = self.suggestions(
+            track, force=bool(job["force"]), interactive=bool(job["interactive"])
+        )
         from wildstring.library.scope import require_current_library
 
         require_current_library(self.database, "metadata:write")
@@ -878,6 +897,17 @@ class Providers:
             ).fetchone()[0]
             if version != job["metadata_version"]:
                 status = "stale"
+            elif (
+                not job["interactive"]
+                and job["busy_deferrals"] < 3
+                and any(warning.endswith(":source_plugin_busy") for warning in warnings)
+            ):
+                connection.execute(
+                    "UPDATE provider_jobs SET status='queued',busy_deferrals=busy_deferrals+1,"
+                    "next_attempt=CASE WHEN interactive THEN 0 ELSE ? END,updated_at=? WHERE id=? AND status='running'",
+                    (time.time() + 3, time.time(), job["id"]),
+                )
+                return
             else:
                 saved = 0
                 for source, url, fields, cover, match in suggestions:
@@ -952,6 +982,11 @@ class Providers:
             self.worker_lock.acquire()
         except Timeout:
             return
+        try:
+            self.sources.retire_old_packages()
+        except Exception:
+            self.worker_lock.release()
+            raise
         self.exit.clear()
         self.thread = threading.Thread(target=self.run, daemon=True, name="providers")
         self.thread.start()
@@ -1044,8 +1079,9 @@ class Providers:
                 # automatic/backfill queue.  Keep FIFO ordering within each class,
                 # while letting explicit `force` refreshes provide timely feedback.
                 job = connection.execute(
-                    "SELECT * FROM provider_jobs WHERE status='queued' "
-                    "ORDER BY force DESC, created_at, id LIMIT 1"
+                    "SELECT * FROM provider_jobs WHERE status='queued' AND next_attempt<=? "
+                    "ORDER BY interactive DESC, force DESC, created_at, id LIMIT 1",
+                    (clock,),
                 ).fetchone()
                 if job:
                     connection.execute(
@@ -1067,7 +1103,9 @@ class Providers:
                                 "SELECT status,error FROM provider_jobs WHERE id=?", (job["id"],)
                             ).fetchone()
                         record_event(
-                            "provider.task.finished",
+                            "provider.task.deferred"
+                            if finished["status"] == "queued"
+                            else "provider.task.finished",
                             stage=finished["status"],
                             code=finished["error"],
                         )

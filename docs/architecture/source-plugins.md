@@ -1,6 +1,6 @@
-# 数据源 ZIP 插件（API v1）
+# 数据源 ZIP 插件（API v2）
 
-所有者在 Web「管理中心 → 服务设置 → 数据源插件」手动导入 ZIP，配置后启用。新安装默认没有数据源插件，启动或服务升级不自动导入、启用或删除插件；已安装的包、启用状态、配置与密钥保留。Release 分别提供 QQ、酷狗、网易云三个可选包，源码暂留本仓库。导出得到原始 ZIP，配置、Cookie、查询历史不在导出包内。没有插件时基本播放、MusicBrainz 和 Last.fm 保持可用。Android 不提供插件或资料候选管理。
+所有者在 Web「管理中心 → 服务设置 → 数据源插件」手动导入 ZIP，配置后启用。新安装默认没有数据源插件，启动或服务升级不会自动导入或启用插件。兼容升级保留已安装的包、启用状态、配置与密钥。首次升级至 API v2 时清理旧插件及其专用配置和凭据，管理员重新导入 v2 ZIP、配置并启用。已应用歌词继续可用。Release 分别提供 QQ、酷狗、网易云三个可选包，源码暂留本仓库。导出得到原始 ZIP，配置、Cookie、查询历史不在导出包内。没有插件时基本播放、MusicBrainz 和 Last.fm 保持可用。插件 ZIP 管理、歌词批扫管理和元数据候选审阅在 Web 提供。Android 保留单曲在线歌词查询、预览和应用。
 
 平台请求、认证差异、字段映射、专辑版本选择及 QRC／KRC／YRC 解码与格式处理位于插件内，由插件维护者更新。核心不识别这些平台的响应字段。核心负责权限、统一结构校验、候选排序、确认应用、数据库和客户端播放格式。元数据与歌词可以选择不同来源，所有候选都需要核对版本、艺人和时长。
 
@@ -28,7 +28,7 @@ README.txt             配置、依赖及平台使用条件
   "upstream": "https://example.com/source",
   "license": "GPL-3.0-only",
   "version": "1.0.0",
-  "api_version": 1,
+  "api_version": 2,
   "entrypoint": "adapter:Plugin",
   "capabilities": ["metadata", "lyrics", "cover"],
   "requires_modules": [],
@@ -43,7 +43,7 @@ README.txt             配置、依赖及平台使用条件
 
 ID 为 2–41 个小写字母、数字、下划线或连字符，以字母开头。版本使用三段版本号，可带预发布后缀。配置类型为 `text`、`url`、`secret`。Secret 仅供插件调用，不回传客户端；空值保留现有值，管理 API 的 `clear_secrets` 可清除。
 
-ZIP 最大16 MiB、展开32 MiB、300个条目，拒绝路径穿越、链接、加密、重复路径和文件／目录冲突。导入只注册并停用，不执行插件代码。升级须提交原配置版本及预期插件 ID，配置保留、版本递增且停用，管理员重新确认启用。历史已选歌词不因插件停用／卸载而消失；旧包文件保留用于恢复，卸载清除活动注册和该插件凭据。
+ZIP 最大16 MiB、展开32 MiB、300个条目，拒绝路径穿越、链接、加密、重复路径和文件／目录冲突。导入只注册并停用，不执行插件代码。升级须提交原配置版本及预期插件 ID，配置保留、版本递增且停用，管理员重新确认启用。历史已选歌词不因插件停用／卸载而消失；覆盖升级会清理旧包文件，卸载清除活动注册和该插件凭据。
 
 插件是管理员信任的服务端 Python 代码，有服务进程账号所能访问的权限。独立子进程用于限制生命周期和故障影响，**不构成操作系统安全沙箱**。普通账号、模型和 MCP 凭据不能导入或启用插件。官方镜像提供固定 Python 3.12、Node 22 及 QQ SDK 运行依赖；维护者可用 `lib/` 携带兼容依赖并覆盖同名模块，无需修改核心。含本机二进制的依赖需匹配服务端架构。
 
@@ -72,17 +72,24 @@ lib/plugin_core.cpython-312-…so         Nuitka --module 产物
 ```python
 class Plugin:
     def search(self, context, query):
-        return [{"id": "opaque-provider-id"}]
+        return [{
+            "id": "opaque-provider-id",
+            "title": "歌曲",
+            "artists": ["艺人"],
+            "duration_ms": 240000,
+            "source_url": "https://example.com/song/123",
+        }]
 
-    def metadata(self, context, candidate):
-        return {
+    def metadata(self, context, request):
+        # request contains candidates and include_release.
+        return [{
             "id": "opaque-provider-id",
             "release_id": "edition-id",
             "duration_ms": 240000,
             "fields": {"title": "歌曲", "artists": ["艺人"], "album": "确认的发行版"},
             "source_url": "https://example.com/song/123",
             "cover_url": None,
-        }
+        }]
 
     def lyrics(self, context, candidate):
         return {
@@ -96,15 +103,15 @@ class Plugin:
         }
 ```
 
-`search` 的候选结构不透明，由同包 `metadata` 消费。核心最多取3个候选；`metadata.fields` 使用现有元数据覆盖字段及同样校验。歌曲／发行 ID、来源 URL、时长与匹配依据保留，录音首次发行时间 `original_date` 与本发行日期 `release_date` 分开；不要把再版日期写成首发日期。封面仅接收现有公共 CAA 或插件 manifest `cover_hosts` 声明的 HTTPS 域名及其子域名，确认后下载。
+`search` 最多返回三个统一候选。标题、艺人或时长不足时补查详情，匹配证据充分时歌词查询直接使用搜索候选。`metadata` 接收 `{"candidates": [...], "include_release": bool}` 并按候选 ID 返回成功项。歌词回退采用轻量详情，元数据建议采用完整发行详情。`metadata.fields` 使用现有元数据覆盖字段及同样校验。歌曲／发行 ID、来源 URL、时长与匹配依据保留，录音首次发行时间 `original_date` 与本发行日期 `release_date` 分开；不要把再版日期写成首发日期。封面仅接收现有公共 CAA 或插件 manifest `cover_hosts` 声明的 HTTPS 域名及其子域名，确认后下载。
 
-`lyrics` 接收已归一化的 metadata 候选，可保留平台额外字段。`normalized` 为 `none`、`plain` 或 `synced`；时间均为整数毫秒，逐字可增加 `words: [{text, start_ms, end_ms}]`，行可增加 `end_ms`。译文和罗马音分别保留于 `layers.translation`、`layers.romanization`，每层为行数组。没有 `normalized` 时核心仅尝试标准 LRC／纯文本。插件应完成平台加解密、歌词匹配及转换，再返回统一结构。
+`lyrics` 接收已归一化的搜索或详情候选，可保留平台额外字段。`normalized` 为 `none`、`plain` 或 `synced`；时间均为整数毫秒，逐字可增加 `words: [{text, start_ms, end_ms}]`，行可增加 `end_ms`。译文和罗马音分别保留于 `layers.translation`、`layers.romanization`，每层为行数组。没有 `normalized` 时核心仅尝试标准 LRC／纯文本。插件应完成平台加解密、歌词匹配及转换，再返回统一结构。
 
 原文最多512 KiB，归一化最多2 MiB、5000行、单行2000字块、时间范围0–24小时。列表只返回100行预览及完整行数，完整内容和原文保留服务端。每首保留最近5批查询及正在使用的旧候选。确认应用使用歌词版本和文件版本，偏移允许±60秒；仅更新数据库，不改写音乐。手动编辑会取代所选在线歌词。
 
 播放和候选预览接口的每个原文行附带可选 `translation`、`romanization` 文本字段，供两端一致显示。语言层仍保留原有结构；服务端按时间配对，容忍最多250毫秒差异，不按数组下标硬拼。修复内容、验证与未实现边界见[歌词视图契约](../../contracts/lyric-view.md)。
 
-0.5.3参考插件版本为1.1.0，QQ SDK仍锁定0.8.2。可选manifest字段 `request_pacing: true` 声明所有物理请求使用运行时门控；未声明时宿主仅控制调用间隔。后台扫描、设置及兼容边界见[歌词补全与洗版](../product/lyric-scans.md)。
+0.5.3参考插件版本为1.1.0，当时 QQ SDK 锁定为 0.8.2。可选manifest字段 `request_pacing: true` 声明所有物理请求使用运行时门控；未声明时宿主仅控制调用间隔。后台扫描、设置及兼容边界见[歌词补全与洗版](../product/lyric-scans.md)。
 
 0.5.4参考ZIP为1.1.1。酷狗／网易云使用各自的最小元数据工作区，适配、上游归档哈希、来源文件与许可证在`plugins/node-runtime/vendor`；生成及核验入口为`make source-providers-check`，说明见[插件运行依赖](../../plugins/node-runtime/README.md)。不再安装Forge、PAC解释器及FTP依赖，显式HTTP(S)代理继续支持。
 
@@ -117,8 +124,12 @@ class Plugin:
 - 仅允许 `search`、`metadata`、`lyrics` 方法。子进程调用最长60秒，每个查询上下文90秒；测试按钮25秒。结果缓存30分钟，按包摘要、配置版本和请求隔离。改变配置或升级后旧缓存不会复用。
 - 错误用 `raise PluginError("source_plugin_no_lyrics")` 等简短代码；不要把 Cookie、令牌、URL 查询里的密钥或上游完整异常放入错误文本。stdout 留给协议，普通打印转 stderr 并丢弃。
 
-QQ 包使用 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 0.8.2；酷狗包对应 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)；网易云包对应 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。后两个 ZIP 已包含锁定提交的元数据／歌词模块，官方镜像提供 Node 22 通用运行时，默认无需单独部署上游服务；也可填写外部 HTTP 服务地址。平台 Cookie 为可选配置，覆盖仍取决于上游授权。它们均为社区项目，并非平台官方 API；不提供音频下载。格式处理参考 [LDDC](https://github.com/chenmozhijin/LDDC)，不加载 Qt 桌面程序。上游及平台条款、覆盖和可用性由插件说明和维护者核验。
+QQ 包使用 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 0.9.0；酷狗包对应 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)；网易云包对应 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。后两个 ZIP 已包含锁定提交的元数据／歌词模块，官方镜像提供 Node 22 通用运行时，默认无需单独部署上游服务；也可填写外部 HTTP 服务地址。平台 Cookie 为可选配置，覆盖仍取决于上游授权。它们均为社区项目，并非平台官方 API；不提供音频下载。格式处理参考 [LDDC](https://github.com/chenmozhijin/LDDC)，不加载 Qt 桌面程序。上游及平台条款、覆盖和可用性由插件说明和维护者核验。
 
 本仓库参考包源码在 `plugins/`，用 `make source-plugins` 打包。网易云／酷狗包内的 `service.cjs` 由 `plugins/node-runtime/package-lock.json` 锁定上游提交与传递依赖，只包含所用元数据和歌词接口；不用上游登录／反作弊模块、PAC／FTP 代理，不包含音频下载。Node-forge 的已知签名校验通告未覆盖本包仅使用的公钥加密路径；维护者扩展接口前仍应重新审计依赖和可达路径。许可证保留在 `THIRD-PARTY-NOTICES.txt`。
 
 第三方可独立维护同样格式的 ZIP，不需要向核心增加平台枚举。无需为此部署额外 MCP Server。
+
+不同来源可以并行运行。手动查询合并各来源结果，批扫同一首歌按可用来源的优先级逐个匹配，达标后结束。单来源继续使用最小请求间隔和冷却门控，缓存命中时可直接返回。
+
+匹配明确且只取一条歌词时，QQ 与网易云各需一次搜索和一次歌词请求，酷狗还需一次歌词候选定位请求。QQ SDK 在设备会话首次建立或刷新时可能发出额外请求，这些请求同样经过来源门控。

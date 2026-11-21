@@ -9,6 +9,7 @@ import json
 import sys
 import time
 from contextlib import suppress
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -16,6 +17,17 @@ from urllib.request import Request
 
 from wildstring.outbound import OutboundError, request_bytes
 from wildstring.source_plugins import PluginError
+
+
+def retry_delay(header):
+    try:
+        delay = int(header)
+    except (ValueError, TypeError):
+        try:
+            delay = int(parsedate_to_datetime(header).timestamp() - time.time())
+        except (ValueError, TypeError, OverflowError):
+            delay = 900
+    return max(60, min(86400, delay))
 
 
 class Context:
@@ -29,7 +41,7 @@ class Context:
             else 50
         )
 
-    def http(self, url, *, payload=None, headers=None):
+    def http(self, url, *, payload=None, headers=None, rate_codes=(429,)):
         self.throttle()
         remaining = min(12, self.deadline - time.monotonic())
         if remaining <= 0:
@@ -43,7 +55,7 @@ class Context:
                 **(headers or {}),
             },
         )
-        _, _, raw = request_bytes(
+        _, response_headers, raw = request_bytes(
             request,
             timeout=remaining,
             limit=2 * 1024 * 1024,
@@ -52,6 +64,15 @@ class Context:
             service="source_plugin",
         )
         result = json.loads(raw)
+        rate_codes = {str(code) for code in rate_codes}
+        if isinstance(result, dict) and any(
+            str(result.get(key)) in rate_codes for key in ("code", "error_code")
+        ):
+            raise PluginError(
+                "source_plugin_rate_limited",
+                upstream_429=True,
+                retry_after=retry_delay(response_headers.get("Retry-After", "900")),
+            )
         if (
             not isinstance(result, dict)
             or result.get("code") not in (None, 0, 200)
@@ -104,30 +125,35 @@ def main():
     except Exception as error:
         if isinstance(error, HTTPError):
             if error.code == 429:
-                code = "source_plugin_rate_limited"
-                try:
-                    delay = max(60, min(86400, int(error.headers.get("Retry-After", "900"))))
-                except (ValueError, TypeError):
-                    delay = 900
-                from wildstring.plugin_rate import cooldown
-
-                cooldown(data.get("rate"), delay)
+                error = PluginError(
+                    "source_plugin_rate_limited",
+                    upstream_429=True,
+                    retry_after=retry_delay(error.headers.get("Retry-After", "900")),
+                )
             else:
                 code = (
                     "source_plugin_auth_or_rejected"
                     if error.code in {401, 403}
                     else "source_plugin_http_error"
                 )
-            error = PluginError(code)
-        elif isinstance(error, PluginError) and error.code == "source_plugin_rate_limited":
+                error = PluginError(code)
+        if isinstance(error, PluginError) and error.upstream_429:
             from wildstring.plugin_rate import cooldown
 
-            cooldown(data.get("rate"))
+            error.cooldown_until = cooldown(
+                data.get("cooldown_rate") or data.get("rate"), error.retry_after or 900
+            )
         result = {
             "error": error.code
             if isinstance(error, PluginError | OutboundError)
             else "source_plugin_worker_failed"
         }
+        if isinstance(error, PluginError):
+            result.update(
+                upstream_429=error.upstream_429,
+                retry_after=error.retry_after,
+                cooldown_until=error.cooldown_until,
+            )
     sys.stdout.write(json.dumps(result))
 
 

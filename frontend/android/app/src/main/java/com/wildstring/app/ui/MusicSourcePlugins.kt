@@ -3,8 +3,6 @@ package com.wildstring.app.ui
 import com.wildstring.app.R
 import com.wildstring.app.AppLanguage
 import androidx.compose.ui.res.stringResource
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,113 +12,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
 import com.wildstring.app.data.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.ByteArrayOutputStream
-
-@Composable internal fun SourcePluginsPanel(vm: MusicViewModel) {
-    val context = LocalContext.current; val uriHandler = LocalUriHandler.current
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    var plugins by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var fields by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
-    var savedPlugins by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var savedFields by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
-    val tests = remember { mutableStateMapOf<String, FeatureAction>() }
-    val busy = action.busy || tests.values.any { it.busy }
-    var upgrade by remember { mutableStateOf<JsonObject?>(null) }; var exporting by remember { mutableStateOf<JsonObject?>(null) }
-    suspend fun load() {
-        plugins = vm.repository.feature("manage/source-plugins").objects()
-        fields = plugins.associate { it.text("id") to (it.getAsJsonObject("config")?.entrySet()?.associate { e -> e.key to e.value.asString } ?: emptyMap()) }
-        savedPlugins = plugins.associate { it.text("id") to it.toString() }
-        savedFields = fields
-    }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { action.run {
-            val owner = vm.repository.session.cacheScope()
-            val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { input ->
-                val output = ByteArrayOutputStream(); val buffer = ByteArray(8192)
-                while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= 16 * 1024 * 1024) { AppLanguage.string(R.string.src_plugin_zip_size_exceeded) }; output.write(buffer, 0, n) }
-                output.toByteArray()
-            } }
-            require(owner == vm.repository.session.cacheScope()) { AppLanguage.string(R.string.src_plugin_account_changed) }
-            val url = vm.repository.url("api", "v1", "manage", "source-plugins", "import") + (upgrade?.let { "?expected_version=${it.number("version")}&expected_id=${it.text("id")}" } ?: "")
-            val response = vm.repository.api().uploadPlugin(url, bytes.toRequestBody("application/zip".toMediaType()), RequestOwner(owner!!))
-            if (!response.isSuccessful) throw AgentApiException(response.code(), "source_plugin_invalid_zip", diagnosticId(response.headers()["X-Wildstring-Trace-Id"]))
-            require(owner == vm.repository.session.cacheScope()) { AppLanguage.string(R.string.src_plugin_account_changed) }
-            load(); action.message = AppLanguage.string(R.string.src_plugin_imported_disabled_notice); upgrade = null
-        } }
-    }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        val plugin = exporting
-        if (uri != null && plugin != null) scope.launch { action.run {
-            withContext(Dispatchers.IO) { vm.repository.api().downloadPlugin(vm.repository.url("api", "v1", "manage", "source-plugins", plugin.text("id"), "export"), RequestOwner(vm.repository.session.cacheScope()!!)).use { body ->
-                context.contentResolver.openOutputStream(uri, "wt")!!.use { output -> body.byteStream().use { input ->
-                    val buffer = ByteArray(8192); var total = 0
-                    while (true) { val n = input.read(buffer); if (n < 0) break; total += n; require(total <= 16 * 1024 * 1024); output.write(buffer, 0, n) }
-                } }
-            } }; action.message = AppLanguage.string(R.string.src_plugin_exported_notice)
-        } }
-    }
-    LaunchedEffect(Unit) { action.run { load() }; if (action.message == "\u5df2\u5b8c\u6210") action.message = null }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.src_plugin_title), style = MaterialTheme.typography.titleLarge)
-        Text(stringResource(R.string.src_plugin_description))
-        ActionStatus(action)
-        Button({ upgrade = null; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy) { Text(stringResource(R.string.src_plugin_import_zip)) }
-        plugins.forEach { p -> key(p.text("id")) {
-            val id = p.text("id")
-            val test = remember { FeatureAction().also { tests[id] = it } }
-            val dirty = savedPlugins[id] != p.toString() || savedFields[id] != fields[id]
-            HorizontalDivider(); Text(p.text("name"), style = MaterialTheme.typography.titleMedium)
-            Text(if (p.flag("request_pacing")) stringResource(R.string.src_plugin_request_pacing) else stringResource(R.string.src_plugin_call_pacing_hint), style = MaterialTheme.typography.bodySmall)
-            Text(stringResource(R.string.src_plugin_version_info, p.text("license"), p.text("plugin_version"), p.number("version")), style = MaterialTheme.typography.bodySmall)
-            TextButton({ uriHandler.openUri(p.text("upstream")) }) { Text(stringResource(R.string.src_plugin_view_upstream)) }
-            if (!p.flag("available")) Text(stringResource(R.string.src_plugin_missing_dependencies))
-            listOf("enabled" to R.string.src_plugin_enable_plugin, "metadata_enabled" to R.string.src_plugin_provide_metadata, "lyrics_enabled" to R.string.src_plugin_provide_lyrics).forEach { (key, labelRes) ->
-                Row { Text(stringResource(labelRes), Modifier.weight(1f)); Switch(p.flag(key), { checked -> plugins = plugins.map { value -> if (value === p) value.deepCopy().apply { addProperty(key, checked) } else value } }, enabled = !busy) }
-            }
-            OutlinedTextField(p.number("priority").toString(), { text -> text.toIntOrNull()?.takeIf { it in 0..100 }?.let { number -> plugins = plugins.map { value -> if (value === p) value.deepCopy().apply { addProperty("priority", number) } else value } } }, label = { Text(stringResource(R.string.src_plugin_priority_label)) })
-            p.objects("settings").forEach { field ->
-                val key = field.text("key"); val id = p.text("id")
-                OutlinedTextField(fields[id]?.get(key).orEmpty(), { fields = fields + (id to (fields[id].orEmpty() + (key to it))) }, label = { Text(field.text("label")) }, visualTransformation = if (field.text("type") == "secret") PasswordVisualTransformation() else VisualTransformation.None, singleLine = true)
-            }
-            TextButton({ scope.launch { action.run {
-                val config = JsonObject().apply { fields[p.text("id")]?.forEach { (key, value) -> addProperty(key, value) } }
-                vm.repository.feature("manage/source-plugins/${p.text("id")}", "PUT", jsonBody("version" to p.number("version"), "enabled" to p.flag("enabled"), "metadata_enabled" to p.flag("metadata_enabled"), "lyrics_enabled" to p.flag("lyrics_enabled"), "priority" to p.number("priority")).apply { add("config", config) })
-                load(); action.message = AppLanguage.string(R.string.src_plugin_settings_saved)
-            } } }, enabled = !busy) { Text(stringResource(R.string.src_plugin_save_named, p.text("name"))) }
-            TextButton({ scope.launch { test.run {
-                val result = vm.repository.feature("manage/source-plugins/$id/test", "POST")
-                test.message = AppLanguage.string(R.string.src_plugin_test_response, result.number("count").toInt())
-            } } }, enabled = !busy && !dirty && p.flag("enabled"), modifier = Modifier.testTag("plugin-test-$id")) { Text(stringResource(R.string.src_plugin_test_plugin)) }
-            if (dirty) Text(stringResource(R.string.src_plugin_save_before_test_hint), style = MaterialTheme.typography.bodySmall)
-            else Column(Modifier.testTag("plugin-test-result-$id")) { ActionStatus(test) }
-            Row {
-                TextButton({ exporting = p; exporter.launch("wildstring-${p.text("id")}.zip") }, enabled = !busy) { Text(stringResource(R.string.src_plugin_export_zip)) }
-                TextButton({ upgrade = p; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy) { Text(stringResource(R.string.src_plugin_upgrade_zip)) }
-            }
-            TextButton({ scope.launch { action.run {
-                val response = vm.repository.api().agentDelete(vm.repository.url("api", "v1", "manage", "source-plugins", p.text("id")) + "?version=${p.number("version")}", RequestOwner(vm.repository.session.cacheScope()!!))
-                if (!response.isSuccessful) throw AgentApiException(response.code(), "source_plugin_disable_first", null)
-                load(); action.message = AppLanguage.string(R.string.src_plugin_uninstalled_notice)
-            } } }, enabled = !busy && !p.flag("enabled")) { Text(stringResource(R.string.src_plugin_uninstall_plugin)) }
-        } }
-        if (plugins.isEmpty()) Text(stringResource(R.string.src_plugin_empty_hint))
-    }
-}
 
 private data class CandidateQualitySummary(
     val label: String,

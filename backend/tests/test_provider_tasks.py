@@ -2,6 +2,7 @@
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from test_personal_library import music
 from test_providers import HEADERS, RECORDING, enable
@@ -375,3 +376,39 @@ def test_failed_provider_job_promotes_pending_refresh_intent_and_diagnostics_use
             promoted["refresh_mode"],
             promoted["force"],
         ) == (2, "queued", "all", 1)
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_single_track_refresh_promotes_queued_background_job(
+    settings, authenticated_client, running
+):
+    seed(settings)
+    with authenticated_client(settings) as client:
+        service, track = setup_service(client)
+        service.enqueue([track["id"]])
+        service.suggestions = lambda *args, **kwargs: ([], ["fixture-source:source_plugin_busy"])
+        service.step()
+        with service.database.connect() as db:
+            old = db.execute(
+                "SELECT id, interactive, status, next_attempt FROM provider_jobs"
+            ).fetchone()
+            assert old["interactive"] == 0 and old["status"] == "queued"
+            assert old["next_attempt"] > time.time()
+        if running:
+            with service.database.connect(write=True) as db:
+                db.execute(
+                    "UPDATE provider_jobs SET status='running',next_attempt=0 WHERE id=?",
+                    (old["id"],),
+                )
+        response = client.post(
+            BASE + "/refresh",
+            headers=HEADERS,
+            json={"scope": "track", "id": track["id"]},
+        )
+        assert response.status_code == 200, response.text
+        with Database(settings.data_dir).connect() as db:
+            jobs = [
+                tuple(row)
+                for row in db.execute("SELECT id, interactive, next_attempt FROM provider_jobs")
+            ]
+            assert jobs == [(old["id"], 1, 0)]

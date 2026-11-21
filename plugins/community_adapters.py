@@ -17,7 +17,11 @@ from urllib.parse import urlencode, urlsplit
 from wildstring.plugin_api import Manifest, PluginError
 
 BRIDGE_SETTINGS = (
-    {"key": "base_url", "label": "外部服务地址（可选，留空使用插件内置）", "type": "url"},
+    {
+        "key": "base_url",
+        "label": "外部服务地址（可选，留空使用插件内置）",
+        "type": "url",
+    },
     {"key": "cookie", "label": "平台 Cookie（可选，留空保留）", "type": "secret"},
 )
 
@@ -82,7 +86,10 @@ def bridge(context, path, parameters):
                     "source_plugin_auth_or_rejected",
                     "source_plugin_timeout",
                 }
-                else "source_plugin_unavailable"
+                else "source_plugin_unavailable",
+                upstream_429=value.get("upstream_429", False),
+                retry_after=value.get("retry_after"),
+                cooldown_until=value.get("cooldown_until"),
             )
         if (
             not isinstance(value, dict)
@@ -121,8 +128,18 @@ class QQTransport:
             url += ("&" if "?" in url else "?") + urlencode(options["params"])
         payload = options.get("json")
         result = await asyncio.to_thread(
-            self.context.http, url, payload=payload, headers=options.get("headers")
+            self.context.http,
+            url,
+            payload=payload,
+            headers=options.get("headers"),
+            rate_codes=(429, 2001),
         )
+        if any(
+            isinstance(item, dict) and item.get("code") in (429, 2001)
+            for key, item in result.items()
+            if key.startswith("req_")
+        ):
+            raise PluginError("source_plugin_rate_limited", upstream_429=True, retry_after=900)
 
         class Response:
             status_code = 200
@@ -153,7 +170,7 @@ class QQPlugin:
         "QQ 音乐 / QQMusicApi",
         "https://github.com/L-1124/QQMusicApi",
         "GPL-3.0-only",
-        version="1.1.1",
+        version="2.0.0",
         request_pacing=True,
         requires_modules=("qqmusic_api",),
         cover_hosts=("gtimg.cn",),
@@ -177,10 +194,18 @@ class QQPlugin:
                     response = await client.search.search_by_type(
                         keyword=value, num=3, highlight=False
                     )
-                elif operation == "song":
-                    response = await client.song.get_detail(value)
-                elif operation == "album":
-                    response = await client.album.get_detail(value)
+                elif operation in {"song", "album"}:
+                    api = client.song if operation == "song" else client.album
+                    responses = await client.gather(
+                        [api.get_detail(identity) for identity in value],
+                        return_exceptions=True,
+                    )
+                    if responses and all(isinstance(r, Exception) for r in responses):
+                        raise responses[0]
+                    return [
+                        r.model_dump(mode="json") if not isinstance(r, Exception) else None
+                        for r in responses
+                    ]
                 else:
                     response = await client.lyric.get_lyric(value, qrc=True, trans=True, roma=True)
                 return response.model_dump(mode="json")
@@ -188,39 +213,76 @@ class QQPlugin:
         return asyncio.run(asyncio.wait_for(run(), timeout=35))
 
     def search(self, context, query):
-        return self.call(context, "search", query).get("song", [])[:3]
+        songs = self.call(context, "search", query).get("song", [])[:3]
+        return [
+            {
+                "id": song["mid"],
+                "title": clean(song.get("title") or song.get("name")),
+                "artists": [clean(a.get("name")) for a in song.get("singer", [])],
+                "album": clean((song.get("album") or {}).get("name")),
+                "duration_ms": int(song.get("interval") or 0) * 1000 or None,
+                "release_id": (song.get("album") or {}).get("mid"),
+                "source_url": f"https://y.qq.com/n/ryqq/songDetail/{song['mid']}",
+            }
+            for song in songs
+            if song.get("mid")
+        ]
 
-    def metadata(self, context, candidate):
-        song = self.call(context, "song", candidate["mid"])["track"]
-        album = song.get("album") or {}
-        details = self.call(context, "album", album["mid"]) if album.get("mid") else {}
-        release = details.get("album") or album
-        fields = {
-            "title": clean(song.get("title") or song["name"]),
-            "artists": [clean(a["name"]) for a in song.get("singer", [])],
-            "album": clean(release.get("name") or album.get("name")),
-        }
-        if release.get("time_public"):
-            fields["release_date"] = release["time_public"]
-        if release.get("genre"):
-            fields["genres"] = [clean(release["genre"])]
-        for field, key in (("track_number", "index_album"), ("disc_number", "index_cd")):
-            if positive(song.get(key)):
-                fields[field] = positive(song[key])
-        mid = album.get("mid")
-        return {
-            "id": song["mid"],
-            "release_id": mid,
-            "title": fields["title"],
-            "artists": fields["artists"],
-            "duration_ms": int(song.get("interval", 0)) * 1000,
-            "fields": fields,
-            "source_url": f"https://y.qq.com/n/ryqq/songDetail/{song['mid']}",
-            "cover_url": f"https://y.gtimg.cn/music/photo_new/T002R500x500M000{mid}.jpg"
-            if mid
-            else None,
-            "raw": {"song": song, "album": details},
-        }
+    def metadata(self, context, request):
+        candidates = request["candidates"]
+        songs = self.call(context, "song", [item["id"] for item in candidates])
+        tracks = [
+            (item, result["track"])
+            for item, result in zip(candidates, songs, strict=False)
+            if result and result.get("track")
+        ]
+        mids = list(
+            dict.fromkeys(
+                (song.get("album") or {}).get("mid")
+                for _, song in tracks
+                if (song.get("album") or {}).get("mid")
+            )
+        )
+        releases = {}
+        if request["include_release"] and mids:
+            releases = dict(zip(mids, self.call(context, "album", mids), strict=False))
+        output = []
+        for candidate, song in tracks:
+            album = song.get("album") or {}
+            mid = album.get("mid")
+            details = releases.get(mid) or {}
+            release = details.get("album") or album
+            fields = {
+                "title": clean(song.get("title") or song.get("name")),
+                "artists": [clean(a.get("name")) for a in song.get("singer", [])],
+                "album": clean(release.get("name") or album.get("name")),
+            }
+            if request["include_release"] and release.get("time_public"):
+                fields["release_date"] = release["time_public"]
+            if request["include_release"] and release.get("genre"):
+                fields["genres"] = [clean(release["genre"])]
+            for field, key in (
+                ("track_number", "index_album"),
+                ("disc_number", "index_cd"),
+            ):
+                if positive(song.get(key)):
+                    fields[field] = positive(song[key])
+            output.append(
+                {
+                    **candidate,
+                    "id": candidate["id"],
+                    "release_id": mid,
+                    "title": fields["title"],
+                    "artists": fields["artists"],
+                    "duration_ms": int(song.get("interval") or 0) * 1000 or None,
+                    "fields": fields,
+                    "cover_url": f"https://y.gtimg.cn/music/photo_new/T002R500x500M000{mid}.jpg"
+                    if request["include_release"] and mid
+                    else None,
+                    "raw": {"song": song, "album": details},
+                }
+            )
+        return output
 
     def lyrics(self, context, candidate):
         data = self.call(context, "lyrics", candidate["id"])
@@ -238,7 +300,7 @@ class NeteasePlugin:
         "网易云音乐 / API Enhanced",
         "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced",
         "GPL-3.0-only",
-        version="1.1.1",
+        version="2.0.0",
         request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("music.126.net",),
@@ -249,41 +311,81 @@ class NeteasePlugin:
         return True
 
     def search(self, context, query):
-        return (
+        songs = (
             bridge(context, "/cloudsearch", {"keywords": query, "type": 1, "limit": 3})
             .get("result", {})
             .get("songs", [])[:3]
         )
+        return [
+            {
+                "id": str(song["id"]),
+                "title": clean(song.get("name")),
+                "artists": [
+                    clean(a.get("name")) for a in (song.get("ar") or song.get("artists") or [])
+                ],
+                "album": clean((song.get("al") or song.get("album") or {}).get("name")),
+                "duration_ms": int(song.get("dt") or song.get("duration") or 0) or None,
+                "release_id": str((song.get("al") or song.get("album") or {}).get("id") or ""),
+                "source_url": f"https://music.163.com/song?id={song['id']}",
+            }
+            for song in songs
+            if song.get("id")
+        ]
 
-    def metadata(self, context, candidate):
-        result = bridge(context, "/song/detail", {"ids": str(candidate["id"])})
-        song = result["songs"][0]
-        album = song.get("al") or song.get("album") or {}
-        details = bridge(context, "/album", {"id": album["id"]}).get("album") or album
-        fields = {
-            "title": clean(song["name"]),
-            "artists": [clean(a["name"]) for a in (song.get("ar") or song.get("artists") or [])],
-            "album": clean(details.get("name")),
-        }
-        if details.get("publishTime", 0) > 0:
-            fields["release_date"] = (
-                datetime.fromtimestamp(details["publishTime"] / 1000, UTC).date().isoformat()
+    def metadata(self, context, request):
+        candidates = {item["id"]: item for item in request["candidates"]}
+        result = bridge(context, "/song/detail", {"ids": ",".join(candidates)})
+        songs = [song for song in result.get("songs", []) if str(song.get("id")) in candidates]
+        albums = {}
+        if request["include_release"]:
+            for song in songs:
+                album = song.get("al") or song.get("album") or {}
+                identity = album.get("id")
+                if identity and identity not in albums:
+                    try:
+                        albums[identity] = bridge(context, "/album", {"id": identity}).get("album")
+                    except PluginError as error:
+                        if error.code in {
+                            "source_plugin_rate_limited",
+                            "lyric_scan_paused",
+                        }:
+                            raise
+                        albums[identity] = None
+        output = []
+        for song in songs:
+            album = song.get("al") or song.get("album") or {}
+            if request["include_release"] and album.get("id") and not albums.get(album["id"]):
+                continue
+            details = albums.get(album.get("id")) or album
+            fields = {
+                "title": clean(song.get("name")),
+                "artists": [
+                    clean(a.get("name")) for a in (song.get("ar") or song.get("artists") or [])
+                ],
+                "album": clean(details.get("name")),
+            }
+            if request["include_release"] and details.get("publishTime", 0) > 0:
+                fields["release_date"] = (
+                    datetime.fromtimestamp(details["publishTime"] / 1000, UTC).date().isoformat()
+                )
+            for field, key in (("track_number", "no"), ("disc_number", "cd")):
+                if positive(song.get(key)):
+                    fields[field] = positive(song[key])
+            identity = str(song["id"])
+            output.append(
+                {
+                    **candidates[identity],
+                    "id": identity,
+                    "release_id": str(album.get("id") or ""),
+                    "title": fields["title"],
+                    "artists": fields["artists"],
+                    "duration_ms": int(song.get("dt") or song.get("duration") or 0) or None,
+                    "fields": fields,
+                    "cover_url": details.get("picUrl") if request["include_release"] else None,
+                    "raw": {"song": song, "album": details},
+                }
             )
-        if positive(song.get("no")):
-            fields["track_number"] = positive(song["no"])
-        if positive(song.get("cd")):
-            fields["disc_number"] = positive(song["cd"])
-        return {
-            "id": str(song["id"]),
-            "release_id": str(album["id"]),
-            "title": fields["title"],
-            "artists": fields["artists"],
-            "duration_ms": int(song.get("dt") or song.get("duration") or 0),
-            "fields": fields,
-            "source_url": f"https://music.163.com/song?id={song['id']}",
-            "cover_url": details.get("picUrl"),
-            "raw": {"song": song, "album": details},
-        }
+        return output
 
     def lyrics(self, context, candidate):
         data = bridge(context, "/lyric/new", {"id": candidate["id"]})
@@ -302,7 +404,7 @@ class KuGouPlugin:
         "酷狗音乐 / KuGouMusicApi",
         "https://github.com/MakcRe/KuGouMusicApi",
         "GPL-3.0-only",
-        version="1.1.3",
+        version="2.0.0",
         request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("kugou.com",),
@@ -315,56 +417,95 @@ class KuGouPlugin:
     def search(self, context, query):
         result = bridge(context, "/search", {"keywords": query, "type": "song", "pagesize": 3})
         data = result.get("data") or {}
-        return (data.get("lists") or data.get("info") or [])[:3]
+        songs = (data.get("lists") or data.get("info") or [])[:3]
+        output = []
+        for song in songs:
+            identity = str(
+                song.get("MixSongID")
+                or song.get("mixsongid")
+                or song.get("AlbumAudioID")
+                or song.get("album_audio_id")
+                or ""
+            )
+            if not identity:
+                continue
+            file_hash = song.get("FileHash") or song.get("hash") or ""
+            output.append(
+                {
+                    "id": identity,
+                    "title": clean(song.get("SongName") or song.get("FileName")),
+                    "artists": [
+                        clean(a) for a in str(song.get("SingerName", "")).split("、") if a.strip()
+                    ],
+                    "album": clean(song.get("AlbumName")),
+                    "duration_ms": int(song.get("Duration") or song.get("duration") or 0) * 1000
+                    or None,
+                    "release_id": str(song.get("AlbumID") or ""),
+                    "source_url": f"https://www.kugou.com/song/#hash={file_hash}",
+                    "token": {"hash": file_hash},
+                }
+            )
+        return output
 
-    def metadata(self, context, candidate):
-        identity = str(
-            candidate.get("MixSongID")
-            or candidate.get("mixsongid")
-            or candidate.get("mixsongid".upper())
-            or candidate.get("AlbumAudioID")
-            or ""
-        )
+    def metadata(self, context, request):
+        candidates = {item["id"]: item for item in request["candidates"]}
         data = (
             bridge(
                 context,
                 "/krm/audio",
-                {"album_audio_id": identity, "fields": "album_info,base,authors.base"},
+                {
+                    "album_audio_id": ",".join(candidates),
+                    "fields": "album_info,base,authors.base",
+                },
             ).get("data")
             or []
         )
-        record = data[0] if isinstance(data, list) and data else data
-        base = record.get("base") or {}
-        album = record.get("album_info") or {}
-        artists = [
-            clean(a.get("base", a).get("author_name") or a.get("base", a).get("name"))
-            for a in record.get("authors", [])
-        ]
-        fields = {
-            "title": clean(
-                base.get("audio_name") or candidate.get("SongName") or candidate.get("FileName")
-            ),
-            "artists": artists
-            or [clean(a) for a in str(candidate.get("SingerName", "")).split("、") if a.strip()],
-            "album": clean(album.get("album_name") or candidate.get("AlbumName")),
-        }
-        if album.get("publish_date"):
-            fields["release_date"] = str(album["publish_date"])[:10]
-        return {
-            "id": identity,
-            "hash": candidate.get("FileHash") or candidate.get("hash") or base.get("hash"),
-            "release_id": str(album.get("album_id") or candidate.get("AlbumID") or ""),
-            "title": fields["title"],
-            "artists": fields["artists"],
-            "duration_ms": int(candidate.get("Duration") or candidate.get("duration") or 0) * 1000,
-            "fields": fields,
-            "source_url": f"https://www.kugou.com/song/#hash={candidate.get('FileHash') or candidate.get('hash') or ''}",
-            "cover_url": (album.get("sizable_cover") or album.get("cover") or "").replace(
-                "{size}", "500"
+        output = []
+        for record in data:
+            base = record.get("base") or {}
+            identity = str(
+                record.get("album_audio_id")
+                or record.get("entity_id")
+                or base.get("album_audio_id")
+                or base.get("id")
+                or ""
             )
-            or None,
-            "raw": record,
-        }
+            candidate = candidates.get(identity)
+            if not candidate:
+                continue
+            album = record.get("album_info") or {}
+            artists = [
+                clean(a.get("base", a).get("author_name") or a.get("base", a).get("name"))
+                for a in record.get("authors", [])
+            ]
+            fields = {
+                "title": clean(base.get("audio_name") or candidate["title"]),
+                "artists": artists or candidate["artists"],
+                "album": clean(album.get("album_name") or candidate.get("album")),
+            }
+            if request["include_release"] and album.get("publish_date"):
+                fields["release_date"] = str(album["publish_date"])[:10]
+            file_hash = (candidate.get("token") or {}).get("hash") or base.get("hash") or ""
+            output.append(
+                {
+                    **candidate,
+                    "release_id": str(album.get("album_id") or candidate.get("release_id") or ""),
+                    "title": fields["title"],
+                    "artists": fields["artists"],
+                    "duration_ms": int(base.get("duration") or 0) * 1000
+                    or candidate.get("duration_ms"),
+                    "fields": fields,
+                    "token": {"hash": file_hash},
+                    "cover_url": (album.get("sizable_cover") or album.get("cover") or "").replace(
+                        "{size}", "500"
+                    )
+                    or None
+                    if request["include_release"]
+                    else None,
+                    "raw": record,
+                }
+            )
+        return output
 
     def lyrics(self, context, candidate):
         found = bridge(
@@ -372,7 +513,7 @@ class KuGouPlugin:
             "/search/lyric",
             {
                 "keywords": candidate["title"] + " " + " ".join(candidate["artists"]),
-                "hash": candidate.get("hash") or "",
+                "hash": (candidate.get("token") or {}).get("hash") or "",
                 "duration": candidate["duration_ms"],
                 "man": "yes",
             },
@@ -384,7 +525,12 @@ class KuGouPlugin:
         data = bridge(
             context,
             "/lyric",
-            {"id": lyric["id"], "accesskey": lyric["accesskey"], "fmt": "krc", "decode": "true"},
+            {
+                "id": lyric["id"],
+                "accesskey": lyric["accesskey"],
+                "fmt": "krc",
+                "decode": "true",
+            },
         )
         return {
             "format": "krc",

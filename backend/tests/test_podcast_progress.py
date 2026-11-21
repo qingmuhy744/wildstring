@@ -479,7 +479,7 @@ def test_resume_preference_schema53_upgrade_preserves_bookmarks(episode_client, 
     database.initialize()
     with database.connect() as connection:
         # A database already at 53 (pinyin browse keys) must still gain the resume table.
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 54
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='podcast_resume_prefs'"
         ).fetchone()

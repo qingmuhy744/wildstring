@@ -10,8 +10,8 @@ const zip = execFileSync(
 import io,json,zipfile,sys
 b=io.BytesIO()
 with zipfile.ZipFile(b,'w') as z:
- z.writestr('manifest.json',json.dumps({'id':'browser-source','name':'浏览器合成来源','upstream':'https://example.com/plugin','license':'GPL-3.0-only','version':'1.0.0','settings':[]}))
- z.writestr('adapter.py','class Plugin:\\n def search(self,c,q): return []\\n def metadata(self,c,v): return {}\\n def lyrics(self,c,v): return {}\\n')
+ z.writestr('manifest.json',json.dumps({'id':'browser-source','name':'浏览器合成来源','upstream':'https://example.com/plugin','license':'GPL-3.0-only','version':'1.0.0','api_version':2,'settings':[]}))
+ z.writestr('adapter.py','class Plugin:\\n def search(self,c,q): return []\\n def metadata(self,c,v): return []\\n def lyrics(self,c,v): return {}\\n')
 sys.stdout.buffer.write(b.getvalue())
 `,
   ],
@@ -19,11 +19,19 @@ sys.stdout.buffer.write(b.getvalue())
 );
 
 test('ZIP 导入、配置、测试、升级及导出使用真实后端', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
   else await page.getByRole('button', { name: '管理中心', exact: true }).click();
   await manageTab(page, '数据源');
   const panel = page.locator('.source-plugins');
+  await expect(panel.locator('.source-plugin-card')).toHaveCount(0);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
+    await panel.screenshot({
+      path: `../../artifacts/050-verification/source-plugins-empty-${theme}-${info.project.name}.png`,
+    });
+  }
   await panel
     .getByLabel('数据源插件 ZIP', { exact: true })
     .setInputFiles({ name: 'synthetic.zip', mimeType: 'application/zip', buffer: zip });
@@ -40,6 +48,12 @@ test('ZIP 导入、配置、测试、升级及导出使用真实后端', async (
   await expect(plugin.locator('.plugin-operation-result')).toContainText('已保存');
   await plugin.getByRole('button', { name: '测试 浏览器合成来源', exact: true }).click();
   await expect(plugin.locator('.plugin-test-result')).toContainText('已响应');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
+    await panel.screenshot({
+      path: `../../artifacts/050-verification/source-plugins-enabled-${theme}-${info.project.name}.png`,
+    });
+  }
   await expect(plugin.locator('.plugin-operation-result')).toContainText('已保存');
   await page.route('**/api/v1/manage/source-plugins/browser-source/test', (route) =>
     route.fulfill({ status: 409, json: { detail: 'source_plugin_configuration_changed' } }),

@@ -97,9 +97,10 @@ class Plugin:
         counter = context.directory / "requests.json"
         count = json.loads(counter.read_text()) if counter.exists() else 0
         counter.write_text(json.dumps(count + 1))
-        return [{{"id":"song"}}]
-    def metadata(self, context, candidate):
-        return {{"id":"song", "title":{track["title"]!r}, "artists":{track["artists"]!r}, "duration_ms":{track["duration_ms"]}, "fields":{{"title":{track["title"]!r},"artists":{track["artists"]!r}}}, "source_url":"https://example.com/song"}}
+        return [{{"id":"song", "title":{track["title"]!r}, "artists":{track["artists"]!r}, "duration_ms":{track["duration_ms"]}, "source_url":"https://example.com/song"}}]
+    def metadata(self, context, request):
+        (context.directory / "details-requested").touch()
+        return [{{"id":"song", "title":{track["title"]!r}, "artists":{track["artists"]!r}, "duration_ms":{track["duration_ms"]}, "fields":{{"title":{track["title"]!r},"artists":{track["artists"]!r}}}, "source_url":"https://example.com/song"}}]
     def lyrics(self, context, candidate):
         return {{"original":"synthetic", "normalized":{{"kind":"synced", "format":"krc", "lines":[{{"time_ms":1000,"text":"Synthetic","words":[{{"start_ms":1000,"end_ms":2000,"text":"Synthetic"}}]}}],"layers":{{"translation":[{{"time_ms":1000,"text":"合成译文"}}]}}}}}}
 """
@@ -155,6 +156,9 @@ def test_scan_coverage_force_scope_and_confirmation_restore(
         assert result["counts"] == {"ready": 1}, result
         assert client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()["kind"] == "none"
         assert result["items"][0]["quality"]["level"] == 5
+        assert not (
+            scans.sources.providers.directory / "plugin-state/fixture-source/details-requested"
+        ).exists()
         second = client.post(BASE, headers=HEADERS, json=body).json()
         repeated = finish(client, scans, second["id"])
         assert repeated["counts"] == {"ready": 1}
@@ -475,3 +479,194 @@ def test_partial_source_failure_keeps_a_usable_upgrade(settings, authenticated_c
         assert result["counts"] == {"ready": 1}
         assert result["items"][0]["quality"]["level"] == 4
         assert result["items"][0]["error"] == "source_plugin_timeout"
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_partial_cooldown_keeps_candidate_and_retries_source(
+    settings, authenticated_client, monkeypatch, force
+):
+    from wildstring.source_plugins import InstalledPlugin
+
+    prepare(settings, monkeypatch)
+    with authenticated_client(settings) as client:
+        _, scans = setup(settings, client)
+        original_candidates = scans.sources.candidates
+        original_lyrics = InstalledPlugin.lyrics
+
+        def two_candidates(*args, **kwargs):
+            values, context = original_candidates(*args, **kwargs)
+            return [values[0], values[0] | {"id": "other"}], context
+
+        blocked = True
+        calls = []
+
+        def lyrics(plugin, context, candidate):
+            calls.append(candidate["id"])
+            value = original_lyrics(plugin, context, candidate)
+            if candidate["id"] == "song":
+                return value | {
+                    "normalized": value["normalized"] | {"layers": {}},
+                }
+            if blocked:
+                raise PluginError("source_plugin_rate_limited")
+            return value
+
+        monkeypatch.setattr(scans.sources, "candidates", two_candidates)
+        monkeypatch.setattr(InstalledPlugin, "lyrics", lyrics)
+        batch = client.post(BASE, headers=HEADERS, json={"force": force}).json()
+        with scans.database.connect(write=True) as db:
+            db.execute(
+                "INSERT INTO plugin_request_gates(plugin_id,cooldown_until) VALUES (?,?)",
+                ("fixture-source", time.time() + 120),
+            )
+        assert scans.step()
+        row = client.get(f"{BASE}/{batch['id']}").json()["items"][0]
+        assert row["status"] == "queued" and row["attempts"] == 0
+        assert row["quality"]["level"] == 4 and row["results"] == {}
+        first_candidate = row["candidate_id"]
+        with scans.database.connect(write=True) as db:
+            assert db.execute("SELECT count(*) FROM lyric_scan_coverage").fetchone()[0] == 0
+            db.execute("UPDATE lyric_scan_items SET next_at=0 WHERE id=?", (row["id"],))
+            db.execute("UPDATE plugin_request_gates SET cooldown_until=0")
+            db.execute("DELETE FROM provider_cache")
+        blocked = False
+        assert finish(client, scans, batch["id"])["counts"] == {"ready": 1}
+        with scans.database.connect() as db:
+            assert db.execute(
+                "SELECT 1 FROM lyric_candidates WHERE id=?", (first_candidate,)
+            ).fetchone()
+        assert calls == ["song", "other", "song", "other"]
+
+
+def test_workers_claim_distinct_sources_and_tracks(settings, authenticated_client, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    prepare(settings, monkeypatch)
+    with authenticated_client(settings) as client:
+        track, scans = setup(settings, client)
+        batch = client.post(BASE, headers=HEADERS, json={}).json()
+        with scans.database.connect(write=True) as db:
+            options = batch["options"]
+            options["providers"].append({"id": "second-source"})
+            db.execute(
+                "UPDATE lyric_scan_batches SET options=? WHERE id=?",
+                (json.dumps(options), batch["id"]),
+            )
+            original = db.execute(
+                "SELECT * FROM lyric_scan_items WHERE batch_id=?", (batch["id"],)
+            ).fetchone()
+            db.execute(
+                "INSERT INTO lyric_scan_items(id,batch_id,track_id,title,results,updated_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    "second-item",
+                    batch["id"],
+                    "second-track",
+                    "Synthetic second track",
+                    '{"fixture-source":{"status":"no_match","error":null}}',
+                    original["updated_at"],
+                ),
+            )
+        entered, release = threading.Event(), threading.Event()
+        claimed = []
+
+        def process(item, _options):
+            claimed.append((item["track_id"], item["source"]))
+            if item["track_id"] == track["id"]:
+                entered.set()
+                assert release.wait(5)
+            with scans.database.connect(write=True) as db:
+                db.execute(
+                    "UPDATE lyric_scan_items SET status='no_match' WHERE id=?", (item["id"],)
+                )
+
+        monkeypatch.setattr(scans, "process", process)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(scans.step)
+            try:
+                assert entered.wait(5)
+                assert pool.submit(scans.step).result(5)
+                assert claimed == [
+                    (track["id"], "fixture-source"),
+                    ("second-track", "second-source"),
+                ]
+            finally:
+                release.set()
+            assert first.result(5)
+
+
+def test_cooldown_releases_source_slot_for_other_tracks(
+    settings, authenticated_client, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    prepare(settings, monkeypatch)
+    music(settings, "第二首.flac", ["合成艺人"], ["合成艺人"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        _, scans = setup(settings, client)
+        batch = client.post(BASE, headers=HEADERS, json={}).json()
+        options = batch["options"]
+        options["providers"].extend([{"id": "source-b"}, {"id": "source-c"}])
+        with scans.database.connect(write=True) as db:
+            db.execute(
+                "UPDATE lyric_scan_batches SET options=? WHERE id=?",
+                (json.dumps(options), batch["id"]),
+            )
+
+        active_b = threading.Event()
+        active_first_source = threading.Event()
+        release_b = threading.Event()
+        release_first_source = threading.Event()
+        calls = []
+        call_lock = threading.Lock()
+
+        def process_provider(item, _track, _record, provider, _options):
+            identity = provider["id"]
+            with scans.claim_lock:
+                assert item["source"] == identity
+                assert identity in scans.active_sources
+            with call_lock:
+                calls.append((item["track_id"], identity))
+            if identity == "fixture-source":
+                with call_lock:
+                    count = sum(source == identity for _, source in calls)
+                if count == 2:
+                    active_first_source.set()
+                    assert release_first_source.wait(5)
+                return time.time() + 120
+            assert identity == "source-b"
+            active_b.set()
+            assert release_b.wait(5)
+            scans.advance(item, identity, "no_match")
+            return None
+
+        monkeypatch.setattr(scans, "process_provider", process_provider)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(scans.step)
+            try:
+                assert active_b.wait(5)
+                second = pool.submit(scans.step)
+                assert active_first_source.wait(5)
+                with scans.claim_lock:
+                    assert scans.active_sources == {"fixture-source", "source-b"}
+                release_first_source.set()
+                assert second.result(5)
+            finally:
+                release_first_source.set()
+                release_b.set()
+            assert first.result(5)
+        assert [identity for _, identity in calls].count("fixture-source") == 2
+        assert [identity for _, identity in calls].count("source-b") == 1
+        assert [identity for _, identity in calls].count("source-c") == 0
+        with scans.database.connect() as db:
+            rows = db.execute(
+                "SELECT status, results, attempts, busy_deferrals FROM lyric_scan_items "
+                "WHERE batch_id=?",
+                (batch["id"],),
+            ).fetchall()
+        assert len(rows) == 2
+        for row in rows:
+            assert row["status"] == "queued"
+            assert row["attempts"] == row["busy_deferrals"] == 0
+            assert "fixture-source" not in json.loads(row["results"])

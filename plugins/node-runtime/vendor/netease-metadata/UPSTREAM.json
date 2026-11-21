@@ -33,5 +33,8 @@
     "util/logger.js": "f1c1ff07eaf06822ca8fcf880f149555e982060198178e68a3bf682c43458363",
     "util/option.js": "2bdd9827630ea91e5bdb008b1652126c5d29c3bab59dc4cf25a87f1a19208224",
     "util/request.js": "62d64389f1af2d33c0d0a64184b714dfc168b4638cadb31e546a69c23ac2aa9f"
+  },
+  "dependency_overrides": {
+    "axios": "^1.21.0"
   }
 }

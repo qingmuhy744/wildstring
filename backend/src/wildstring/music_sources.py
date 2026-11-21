@@ -3,6 +3,8 @@
 import json
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from difflib import SequenceMatcher
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -10,7 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Request as APIRequest
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from wildstring.library.edits import Overrides
 from wildstring.library.lyric_edits import LyricsEditor, lyric_text
@@ -18,7 +20,7 @@ from wildstring.library.metadata import normalize
 from wildstring.library.online_lyrics import display_lyrics, normalize_bundle
 from wildstring.lyric_scans import LyricScans
 from wildstring.source_models import LyricChoice
-from wildstring.source_plugins import PluginError, registry
+from wildstring.source_plugins import API_VERSION, PluginError, registry
 
 
 class PluginSettings(BaseModel):
@@ -40,6 +42,8 @@ def matching(track, candidate):
     flags = (
         "live",
         "现场",
+        "demo",
+        "小样",
         "remaster",
         "重制",
         "acoustic",
@@ -99,6 +103,7 @@ class PluginContext:
         self.directory = manager.providers.directory
         self.deadline = deadline or time.monotonic() + 90
         self.force = False
+        self.interactive = False
         self.batch_id = None
         self.interval_seconds = 5
 
@@ -107,6 +112,71 @@ class MusicSources:
     def __init__(self, providers):
         self.providers, self.database = providers, providers.database
         self.scans = LyricScans(self)
+
+    def retire_old_packages(self):
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = [
+                row
+                for row in db.execute(
+                    "SELECT plugin_id, sha256, manifest FROM source_plugin_packages"
+                )
+                if json.loads(row["manifest"]).get("api_version") != API_VERSION
+            ]
+            if not old:
+                return
+            ids = {row["plugin_id"] for row in old}
+            credentials = {
+                key: None
+                for key in self.providers.secrets()
+                if any(key.startswith(f"source:{identity}:") for identity in ids)
+            }
+            if credentials:
+                self.providers.secrets(credentials)
+            for row in old:
+                identity = row["plugin_id"]
+                for target in (
+                    self.providers.directory / "source-plugins" / row["sha256"],
+                    self.providers.directory / "plugin-state" / identity,
+                ):
+                    if target.exists():
+                        shutil.rmtree(target)
+                db.execute("DELETE FROM source_plugin_settings WHERE plugin_id=?", (identity,))
+                db.execute("DELETE FROM source_plugin_packages WHERE plugin_id=?", (identity,))
+                db.execute("DELETE FROM provider_cache WHERE provider=?", ("plugin:" + identity,))
+            if not db.execute(
+                "SELECT 1 FROM source_plugin_packages p JOIN source_plugin_settings s USING(plugin_id) "
+                "WHERE s.enabled=1 AND s.lyrics_enabled=1 LIMIT 1"
+            ).fetchone():
+                db.execute(
+                    "UPDATE lyric_lookup_jobs AS j SET status='cancelled',"
+                    "error='source_plugin_incompatible_api',updated_at=? "
+                    "WHERE status IN ('queued','running') AND NOT EXISTS "
+                    "(SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id)",
+                    (time.time(),),
+                )
+            affected = [
+                row["id"]
+                for row in db.execute(
+                    "SELECT id, options FROM lyric_scan_batches WHERE status IN ('running','paused')"
+                )
+                if any(
+                    provider["id"] in ids for provider in json.loads(row["options"])["providers"]
+                )
+            ]
+            for batch_id in affected:
+                db.execute(
+                    "UPDATE lyric_lookup_jobs SET status='cancelled',error='source_plugin_incompatible_api' WHERE status IN ('running','paused','queued') AND id IN (SELECT job_id FROM lyric_scan_items WHERE batch_id=?)",
+                    (batch_id,),
+                )
+                db.execute(
+                    "UPDATE lyric_scan_items SET status='cancelled',error='source_plugin_incompatible_api' WHERE batch_id=? AND status IN ('queued','running')",
+                    (batch_id,),
+                )
+                db.execute(
+                    "UPDATE lyric_scan_batches SET status='cancelled',updated_at=? WHERE id=?",
+                    (time.time(), batch_id),
+                )
 
     @property
     def plugins(self):
@@ -223,7 +293,17 @@ class MusicSources:
             )
         return next(value for value in self.catalog() if value["id"] == identity)
 
-    def candidates(self, track, identity, *, force=False, batch_id=None, interval_seconds=5):
+    def candidates(
+        self,
+        track,
+        identity,
+        *,
+        force=False,
+        batch_id=None,
+        interval_seconds=5,
+        include_release=True,
+        interactive=False,
+    ):
         configuration = self.settings(identity)
         context = PluginContext(self, identity, configuration)
         context.force, context.batch_id, context.interval_seconds = (
@@ -231,6 +311,7 @@ class MusicSources:
             batch_id,
             interval_seconds,
         )
+        context.interactive = interactive
         if batch_id:
             context.deadline = time.monotonic() + max(180, interval_seconds * 12 + 120)
         plugin = self.plugins[identity]
@@ -238,84 +319,147 @@ class MusicSources:
         candidates = plugin.search(context, query)
         if not isinstance(candidates, list):
             raise PluginError("source_plugin_invalid_response")
-        result = []
-        for candidate in candidates[:3]:
-            detail = plugin.metadata(context, candidate)
-            if (
-                not isinstance(detail, dict)
-                or not isinstance(detail.get("id"), str)
-                or not 1 <= len(detail["id"]) <= 300
-                or not isinstance(detail.get("fields"), dict)
-            ):
-                raise PluginError("source_plugin_invalid_response")
-            url = detail.get("source_url", "")
-            parsed = urlsplit(url)
-            if (
-                parsed.scheme != "https"
-                or not parsed.hostname
-                or parsed.username
-                or parsed.password
-                or len(url) > 4000
-                or any(c.isspace() or ord(c) < 32 for c in url)
-            ):
-                raise PluginError("source_plugin_invalid_response")
-            duration = detail.get("duration_ms")
-            if duration is not None and (
-                type(duration) is not int or not 0 < duration <= 86_400_000
-            ):
-                raise PluginError("source_plugin_invalid_response")
-            fields = Overrides.model_validate(
-                {
-                    key: value
-                    for key, value in detail["fields"].items()
-                    if value not in (None, "", [])
-                }
-            ).model_dump(exclude_unset=True)
-            detail["fields"] = fields
-            detail["title"] = fields.get("title", "")
-            detail["artists"] = fields.get("artists", [])
-            detail["match"] = matching(track, detail)
-            result.append(detail)
-        return sorted(result, key=lambda value: -value["match"]["score"]), context
-
-    def suggestions(self, track):
-        output, warnings = [], []
-        for config in self.catalog():
-            if not config["enabled"] or not config["metadata_enabled"]:
-                continue
+        valid_candidates = []
+        summaries = []
+        for row in candidates[:3]:
             try:
-                candidates, context = self.candidates(track, config["id"])
-                self.current(config["id"], context.configuration["version"])
-                for candidate in candidates:
-                    output.append(
-                        (
-                            config["id"],
-                            candidate["source_url"],
-                            candidate["fields"],
-                            candidate.get("cover_url"),
-                            candidate["match"],
+                summary = self.candidate(track, row)
+            except (PluginError, ValidationError):
+                continue
+            valid_candidates.append(row)
+            summaries.append(summary)
+        ranked = sorted(summaries, key=lambda row: -row["match"]["score"])
+        if not ranked:
+            return [], context
+        from wildstring.lyric_quality import matched
+
+        if not include_release and (
+            matched(ranked[0])
+            and all(
+                row["title"]
+                and row["artists"]
+                and row.get("duration_ms")
+                and not row["title"].endswith(("...", "…"))
+                for row in ranked
+            )
+            and (
+                len(ranked) == 1
+                or ranked[0]["match"]["score"] - ranked[1]["match"]["score"] >= 0.05
+            )
+        ):
+            return [row for row in ranked if matched(row)], context
+        details = plugin.metadata(
+            context, {"candidates": valid_candidates, "include_release": include_release}
+        )
+        if not isinstance(details, list):
+            raise PluginError("source_plugin_invalid_response")
+        valid_ids = {row["id"] for row in summaries}
+        result = {}
+        for row in details:
+            try:
+                detail = self.candidate(track, row, full=True)
+            except (PluginError, ValidationError):
+                continue
+            if detail["id"] in valid_ids:
+                result[detail["id"]] = detail
+        ranked = sorted(
+            (result[row["id"]] for row in summaries if row["id"] in result),
+            key=lambda row: -row["match"]["score"],
+        )
+        if not include_release:
+            ranked = [row for row in ranked if matched(row)] or ranked
+        return ranked, context
+
+    @staticmethod
+    def candidate(track, detail, *, full=False):
+        if (
+            not isinstance(detail, dict)
+            or not isinstance(detail.get("id"), str)
+            or not 1 <= len(detail["id"]) <= 300
+        ):
+            raise PluginError("source_plugin_invalid_response")
+        url = detail.get("source_url", "")
+        if not isinstance(url, str):
+            raise PluginError("source_plugin_invalid_response")
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            raise PluginError("source_plugin_invalid_response") from None
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or len(url) > 4000
+            or any(c.isspace() or ord(c) < 32 for c in url)
+        ):
+            raise PluginError("source_plugin_invalid_response")
+        duration = detail.get("duration_ms")
+        if duration is not None and (type(duration) is not int or not 0 < duration <= 86_400_000):
+            raise PluginError("source_plugin_invalid_response")
+        values = (
+            detail.get("fields")
+            if full
+            else {key: detail[key] for key in ("title", "artists", "album") if key in detail}
+        )
+        if not isinstance(values, dict):
+            raise PluginError("source_plugin_invalid_response")
+        fields = Overrides.model_validate(
+            {key: value for key, value in values.items() if value not in (None, "", [])}
+        ).model_dump(exclude_unset=True)
+        detail = detail | {
+            "fields": fields,
+            "title": fields.get("title", ""),
+            "artists": fields.get("artists", []),
+        }
+        return detail | {"match": matching(track, detail)}
+
+    def suggestions(self, track, *, interactive=False):
+        output, warnings = [], []
+        configs = [
+            config
+            for config in self.catalog()
+            if config["available"] and config["enabled"] and config["metadata_enabled"]
+        ]
+
+        def fetch(config):
+            candidates, context = self.candidates(track, config["id"], interactive=interactive)
+            self.current(config["id"], context.configuration["version"])
+            return [
+                (config["id"], row["source_url"], row["fields"], row.get("cover_url"), row["match"])
+                for row in candidates
+            ]
+
+        with ThreadPoolExecutor(max_workers=max(1, len(configs))) as pool:
+            futures = [
+                (config, pool.submit(copy_context().run, fetch, config)) for config in configs
+            ]
+            for config, future in futures:
+                try:
+                    output.extend(future.result())
+                except Exception as error:
+                    warnings.append(
+                        config["id"]
+                        + ":"
+                        + (
+                            error.code
+                            if isinstance(error, PluginError)
+                            else "source_plugin_invalid_response"
                         )
                     )
-            except Exception as error:
-                warnings.append(
-                    config["id"]
-                    + ":"
-                    + (
-                        error.code
-                        if isinstance(error, PluginError)
-                        else "source_plugin_invalid_response"
-                    )
-                )
         return output, warnings
 
     def enqueue_lyrics(self, track_id):
         LyricsEditor(self.providers.repository).read(track_id)
-        if not any(value["enabled"] and value["lyrics_enabled"] for value in self.catalog()):
+        if not any(
+            value["available"] and value["enabled"] and value["lyrics_enabled"]
+            for value in self.catalog()
+        ):
             raise HTTPException(409, "source_plugins_disabled")
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT id FROM lyric_lookup_jobs WHERE track_id=? AND status IN ('queued','running')",
+                "SELECT id FROM lyric_lookup_jobs j WHERE track_id=? AND status IN ('queued','running') AND NOT EXISTS (SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id)",
                 (track_id,),
             ).fetchone()
             if row:
@@ -331,7 +475,7 @@ class MusicSources:
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             job = db.execute(
-                "SELECT * FROM lyric_lookup_jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
+                "SELECT * FROM lyric_lookup_jobs j WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id) ORDER BY created_at LIMIT 1"
             ).fetchone()
             if not job:
                 return False
@@ -346,73 +490,87 @@ class MusicSources:
             with library_job_scope(self.database, "lyric_lookup_jobs", job["id"], job["track_id"]):
                 with self.database.connect(write=True) as db:
                     db.execute(
-                        "DELETE FROM lyric_candidates WHERE track_id=? AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
+                        "DELETE FROM lyric_candidates WHERE track_id=? AND job_id IN (SELECT id FROM lyric_lookup_jobs WHERE status NOT IN ('queued','running','paused')) AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
                         (job["track_id"], job["track_id"]),
                     )
                     db.execute(
-                        "DELETE FROM lyric_lookup_jobs WHERE track_id=? AND id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT job_id FROM lyric_candidates)",
+                        "DELETE FROM lyric_lookup_jobs WHERE track_id=? AND status NOT IN ('queued','running','paused') AND id NOT IN (SELECT job_id FROM lyric_scan_items WHERE job_id IS NOT NULL) AND id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT job_id FROM lyric_candidates)",
                         (job["track_id"], job["track_id"]),
                     )
                 track = self.providers.repository.track(job["track_id"])
                 record = LyricsEditor(self.providers.repository).read(job["track_id"])
-                for config in self.catalog():
-                    if not config["enabled"] or not config["lyrics_enabled"]:
-                        continue
-                    try:
-                        candidates, context = self.candidates(track, config["id"])
-                        for candidate in candidates[:2]:
-                            raw = self.plugins[config["id"]].lyrics(context, candidate)
-                            if (
-                                len(
+                configs = [
+                    config
+                    for config in self.catalog()
+                    if config["available"] and config["enabled"] and config["lyrics_enabled"]
+                ]
+
+                def fetch(config):
+                    candidates, context = self.candidates(
+                        track, config["id"], include_release=False, interactive=True
+                    )
+                    for candidate in candidates[:2]:
+                        raw = self.plugins[config["id"]].lyrics(context, candidate)
+                        if (
+                            len(
+                                json.dumps(
+                                    {
+                                        key: value
+                                        for key, value in raw.items()
+                                        if key != "normalized"
+                                    }
+                                ).encode()
+                            )
+                            > 512 * 1024
+                        ):
+                            raise PluginError("source_plugin_response_too_large")
+                        normalized = normalize_bundle(raw, config["id"])
+                        if normalized["kind"] == "none":
+                            continue
+                        self.current(config["id"], config["version"])
+                        with self.database.connect(write=True) as db:
+                            db.execute(
+                                "INSERT INTO lyric_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                (
+                                    uuid4().hex,
+                                    job["id"],
+                                    track["id"],
+                                    config["id"],
+                                    str(candidate["id"]),
+                                    candidate["source_url"],
+                                    json.dumps(candidate["match"]),
                                     json.dumps(
                                         {
                                             key: value
                                             for key, value in raw.items()
                                             if key != "normalized"
                                         }
-                                    ).encode()
-                                )
-                                > 512 * 1024
-                            ):
-                                raise PluginError("source_plugin_response_too_large")
-                            normalized = normalize_bundle(raw, config["id"])
-                            if normalized["kind"] == "none":
-                                continue
-                            self.current(config["id"], config["version"])
-                            with self.database.connect(write=True) as db:
-                                db.execute(
-                                    "INSERT INTO lyric_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                    (
-                                        uuid4().hex,
-                                        job["id"],
-                                        track["id"],
-                                        config["id"],
-                                        str(candidate["id"]),
-                                        candidate["source_url"],
-                                        json.dumps(candidate["match"]),
-                                        json.dumps(
-                                            {
-                                                key: value
-                                                for key, value in raw.items()
-                                                if key != "normalized"
-                                            }
-                                        ),
-                                        json.dumps(normalized),
-                                        record["version"],
-                                        record["file_version"],
-                                        time.time(),
                                     ),
-                                )
-                    except Exception as error:
-                        warnings.append(
-                            config["id"]
-                            + ":"
-                            + (
-                                error.code
-                                if isinstance(error, PluginError)
-                                else "source_plugin_invalid_response"
+                                    json.dumps(normalized),
+                                    record["version"],
+                                    record["file_version"],
+                                    time.time(),
+                                ),
                             )
-                        )
+
+                with ThreadPoolExecutor(max_workers=max(1, len(configs))) as pool:
+                    futures = [
+                        (config, pool.submit(copy_context().run, fetch, config))
+                        for config in configs
+                    ]
+                    for config, future in futures:
+                        try:
+                            future.result()
+                        except Exception as error:
+                            warnings.append(
+                                config["id"]
+                                + ":"
+                                + (
+                                    error.code
+                                    if isinstance(error, PluginError)
+                                    else "source_plugin_invalid_response"
+                                )
+                            )
                 with self.database.connect(write=True) as db:
                     count = db.execute(
                         "SELECT count(*) FROM lyric_candidates WHERE job_id=?", (job["id"],)
@@ -440,7 +598,7 @@ class MusicSources:
             jobs = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT * FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5",
+                    "SELECT * FROM lyric_lookup_jobs j WHERE track_id=? AND NOT EXISTS (SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id) ORDER BY created_at DESC LIMIT 5",
                     (track_id,),
                 )
             ]
@@ -551,7 +709,7 @@ class MusicSources:
 
         @router.get("/manage/source-plugins")
         def catalog(user=admin):
-            return {"items": self.catalog(), "api_version": 1}
+            return {"items": self.catalog(), "api_version": API_VERSION}
 
         @router.post("/manage/source-plugins/import", dependencies=mutation)
         async def import_zip(
@@ -630,6 +788,7 @@ class MusicSources:
             if not configuration["enabled"]:
                 raise HTTPException(409, "source_plugin_disabled")
             context = PluginContext(self, identity, configuration, time.monotonic() + 25)
+            context.interactive = True
             try:
                 values = self.plugins[identity].search(context, "摇滚")
                 if not isinstance(values, list):

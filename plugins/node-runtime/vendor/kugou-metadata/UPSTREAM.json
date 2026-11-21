@@ -31,6 +31,7 @@
     "util/util.js": "d9e56bc04072fff7c07c75d80737b267df5245742c3aa0484e2ac50282bbab5d"
   },
   "dependency_overrides": {
+    "axios": "^1.21.0",
     "pako": "^3.0.3"
   }
 }

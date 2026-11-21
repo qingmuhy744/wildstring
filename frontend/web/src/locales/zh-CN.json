@@ -3900,7 +3900,7 @@
     "filterWord": "仅看逐字（{{count}}）",
     "fineTune": "微调：",
     "importAction": "导入插件",
-    "importDescription": "默认不预装数据源插件，请手动导入 ZIP，配置后启用。服务升级会保留已安装的插件和配置。插件会运行代码，请选择你信任的 WildString 插件包。",
+    "importDescription": "请导入可信的插件 ZIP，配置后启用。兼容协议升级会保留插件与配置；协议大版本变更会清理不兼容的旧包，需重新导入并配置。插件管理、歌词批扫、曲库管理和元数据候选审阅仅在网页端提供。",
     "importSuccess": "插件已导入，请在下方配置并启用。",
     "importTitle": "导入新插件",
     "installedTitle": "已安装插件",
