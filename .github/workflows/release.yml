@@ -48,7 +48,11 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-        run: python3 scripts/release_verify_scope.py | tee -a "$GITHUB_OUTPUT"
+        run: python3 scripts/release_verify_scope.py >> "$GITHUB_OUTPUT"
+      - name: Compare native build numbers with the previous release
+        env:
+          PREVIOUS_RELEASE: ${{ steps.scope.outputs.previous_release }}
+        run: python3 scripts/package_release.py --tag "$RELEASE_TAG" --previous-tag "$PREVIOUS_RELEASE" --check-only
 
   verify:
     needs: source
@@ -172,6 +176,8 @@ jobs:
           persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Verify Apple clients
+        run: make ios-test ios-build macos-test
       - name: Build and pack a DMG
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -251,7 +257,6 @@ jobs:
           tags: |
             type=raw,value=${{ env.RELEASE_TAG }}
             type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
-            type=raw,value=latest,enable=${{ !contains(env.RELEASE_TAG, '-') }}
             type=sha
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: container
@@ -273,22 +278,32 @@ jobs:
           cp "docs/releases/$RELEASE_TAG.md" "$RUNNER_TEMP/release-notes.md"
           # shellcheck disable=SC2016
           printf '\n容器镜像：`%s:%s`\n\n镜像摘要：`%s`\n' "$IMAGE" "$RELEASE_TAG" "$IMAGE_DIGEST" >> "$RUNNER_TEMP/release-notes.md"
+          PRERELEASE=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE+=(--prerelease); fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
+            DRAFT=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+            if [ "$DRAFT" = true ]; then
+              gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE[@]}"
+            else
+              gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
+            fi
           else
-            PRERELEASE=()
-            if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE+=(--prerelease); fi
-            gh release create "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "WildString / 野弦 ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE[@]}"
+            gh release create "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false --title "WildString / 野弦 ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE[@]}"
           fi
 
-  homebrew:
-    name: Sync Homebrew cask
+  channels:
+    name: Sync stable channels
     needs: publish
     if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
+    permissions:
+      contents: write
+      packages: write
+    concurrency:
+      group: stable-release-channels
+      cancel-in-progress: false
     outputs:
       outcome: ${{ steps.report.outputs.outcome }}
     steps:
@@ -296,8 +311,31 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref_name }}
           persist-credentials: false
+      - name: Find the highest published stable version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STABLE_TAG=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select((.draft or .prerelease) | not) | .tag_name' \
+            | python3 scripts/release_verify_scope.py --latest-stable)
+          echo "STABLE_TAG=$STABLE_TAG" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update the stable image and GitHub latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$STABLE_TAG"
+          gh release edit "$STABLE_TAG" --repo "$GITHUB_REPOSITORY" --latest
       - name: Update Homebrew Tap cask
         id: sync
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -308,12 +346,12 @@ jobs:
             echo "outcome=not-configured" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          gh release download "$STABLE_TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
           TAP_DIR="$RUNNER_TEMP/homebrew-tap"
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TAP_DIR"
           mkdir -p "$TAP_DIR/Casks"
           python3 scripts/generate_homebrew_cask.py \
-            --version "${RELEASE_TAG#v}" \
+            --version "${STABLE_TAG#v}" \
             --checksums-file "$RUNNER_TEMP/SHA256SUMS" \
             --output "$TAP_DIR/Casks/wildstring.rb"
           git -C "$TAP_DIR" config user.name "github-actions[bot]"
@@ -323,13 +361,13 @@ jobs:
             echo "Homebrew Tap cask is already up to date."
             exit 0
           fi
-          git -C "$TAP_DIR" commit -m "chore(cask): update wildstring to ${RELEASE_TAG#v}"
+          git -C "$TAP_DIR" commit -m "chore(cask): update wildstring to ${STABLE_TAG#v}"
           git -C "$TAP_DIR" push origin HEAD
       - name: Report Homebrew sync status
         id: report
         if: always()
         env:
-          SYNC_OUTCOME: ${{ steps.sync.outputs.outcome || job.status }}
+          SYNC_OUTCOME: ${{ steps.sync.outputs.outcome || steps.sync.outcome }}
         run: |
           echo "outcome=$SYNC_OUTCOME" >> "$GITHUB_OUTPUT"
           if [ "$SYNC_OUTCOME" = failure ]; then
@@ -338,7 +376,7 @@ jobs:
 
   summary:
     name: Release summary
-    needs: [source, verify_android, publish, homebrew]
+    needs: [source, verify_android, publish, channels]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -354,13 +392,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
-          HOMEBREW_RESULT: ${{ needs.homebrew.outputs.outcome || needs.homebrew.result }}
+          CHANNELS_RESULT: ${{ needs.channels.result }}
+          HOMEBREW_RESULT: ${{ needs.channels.outputs.outcome || needs.channels.result }}
           RUN_ANDROID_EMULATOR: ${{ needs.source.outputs.run_android_emulator }}
           ANDROID_RESULT: ${{ needs.verify_android.result }}
         run: |
           {
             printf '## Release %s · attempt %s\n\n' "$RELEASE_TAG" "$GITHUB_RUN_ATTEMPT"
             printf -- '- Core release · **%s**\n' "$PUBLISH_RESULT"
+            printf -- '- Stable channels · **%s**\n' "$CHANNELS_RESULT"
             printf -- '- Homebrew sync · **%s**\n' "$HOMEBREW_RESULT"
             if [ "$PUBLISH_RESULT" = success ]; then
               printf -- '- [GitHub Release](%s/%s/releases/tag/%s)\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG"

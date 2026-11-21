@@ -13,7 +13,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -65,6 +67,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
 
 private val PRESET_FEEDS = listOf(
     "声东击西" to "https://etw.fm/rss",
@@ -82,6 +85,7 @@ private fun podcastDescription(raw: String): String =
 @Composable
 fun PodcastChannelPage(
     vm: MusicViewModel,
+    tabReselections: Flow<String>,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -93,11 +97,23 @@ fun PodcastChannelPage(
     val podcasts = browser.podcasts.takeIf { browser.owner == owner }.orEmpty()
     val loading = browser.owner != owner || !browser.listLoaded || browser.listLoading
     val pageStates = rememberSaveableStateHolder()
+    val subscriptions = rememberLazyListState()
     var selectedPublisherId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPublisherName by rememberSaveable { mutableStateOf("") }
     var publisherOriginPodcastId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedPublisher = selectedPublisherId?.let { PodcastPublisher(it, selectedPublisherName) }
     val selectedId = state.podcastId
+    LaunchedEffect(tabReselections) {
+        tabReselections.collect { tab ->
+            val current = vm.state.value
+            if (tab != "podcast" || current.tab != tab) return@collect
+            if (current.podcastId != null || selectedPublisherId != null) {
+                selectedPublisherId = null
+                publisherOriginPodcastId = null
+                if (current.podcastId != null) vm.back()
+            } else subscriptions.requestScrollToItem(0)
+        }
+    }
     val closePublisher = {
         val originId = publisherOriginPodcastId
         selectedPublisherId = null
@@ -154,6 +170,7 @@ fun PodcastChannelPage(
                         pageStates.SaveableStateProvider("list") {
                             PodcastListView(
                                 vm = vm,
+                                listState = subscriptions,
                                 podcasts = podcasts.filter { it.followed },
                                 selectedId = selectedId,
                                 canManage = false,
@@ -827,6 +844,7 @@ private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: Stri
 @Composable
 private fun PodcastListView(
     vm: MusicViewModel,
+    listState: LazyListState,
     podcasts: List<PodcastSummary>,
     canManage: Boolean,
     canAdd: Boolean,
@@ -869,6 +887,7 @@ private fun PodcastListView(
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", stringResource(R.string.pod_scr_refresh_subscriptions)) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().testTag("podcast-list"),
+                state = listState,
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp, top = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {

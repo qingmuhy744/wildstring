@@ -8,12 +8,14 @@ import os
 import re
 import subprocess  # nosec B404 - invokes fixed git commands without shell
 import sys
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 
 ANDROID_EMULATOR_INPUTS = (
     "frontend/android/",
+    "backend/src/",
     "tests/fixtures/audio/",
     "scripts/run_android_instrumented.py",
     "scripts/ci_recover_emulator.sh",
@@ -21,6 +23,7 @@ ANDROID_EMULATOR_INPUTS = (
     "scripts/serve_web_tests.py",
     ".github/workflows/android.yml",
 )
+BACKEND_DEPENDENCY_FILES = {"backend/pyproject.toml", "backend/uv.lock"}
 VERSION_BUMP_LINE = re.compile(r"^\s*version(?:Code|Name)\s*=\s*")
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -86,17 +89,18 @@ def find_previous_tag(
     release_tag: str,
     ref: str = "HEAD~1",
     published_tags: set[str] | None = None,
+    *,
+    include_prereleases: bool = False,
 ) -> str | None:
     try:
         output = run_git("tag", "--merged", ref, "--list", "v[0-9]*", "--sort=-v:refname")
     except subprocess.CalledProcessError:
         return None
-    is_prerelease = "-" in release_tag
     for line in output.splitlines():
         tag = line.strip()
         if not tag or tag == release_tag:
             continue
-        if not is_prerelease and "-" in tag:
+        if not include_prereleases and "-" not in release_tag and "-" in tag:
             continue
         if published_tags is not None and tag not in published_tags:
             continue
@@ -124,6 +128,21 @@ def is_pure_android_version_bump(prev_tag: str, head: str = "HEAD") -> bool:
     return bool(changed_lines) and all(VERSION_BUMP_LINE.match(line) for line in changed_lines)
 
 
+def backend_dependencies_changed(previous: str, head: str, path: str) -> bool:
+    try:
+        old, new = (tomllib.loads(run_git("show", f"{ref}:{path}")) for ref in (previous, head))
+    except (subprocess.CalledProcessError, tomllib.TOMLDecodeError):
+        return True
+    for config in (old, new):
+        if path == "backend/pyproject.toml":
+            config["project"].pop("version", None)
+        else:
+            for package in config["package"]:
+                if package["name"] == "wildstring-backend":
+                    package.pop("version", None)
+    return old != new
+
+
 def needs_android_emulator(
     release_tag: str,
     head: str = "HEAD",
@@ -135,7 +154,9 @@ def needs_android_emulator(
     try:
         changed = [
             line.strip()
-            for line in run_git("diff", "--name-only", f"{prev_tag}...{head}").splitlines()
+            for line in run_git(
+                "diff", "--name-only", "--no-renames", f"{prev_tag}...{head}"
+            ).splitlines()
             if line.strip()
         ]
     except subprocess.CalledProcessError as error:
@@ -151,6 +172,11 @@ def needs_android_emulator(
             continue
         if path.startswith(ANDROID_EMULATOR_INPUTS):
             return True, f"Android input {path} changed since {prev_tag}; running Android emulator"
+        if path in BACKEND_DEPENDENCY_FILES and backend_dependencies_changed(prev_tag, head, path):
+            return (
+                True,
+                f"Backend dependency input {path} changed since {prev_tag}; running Android emulator",
+            )
     return False, f"no functional Android inputs changed since {prev_tag}; skipping emulator"
 
 
@@ -199,6 +225,15 @@ def needs_ci_verify(repo: str, head_sha: str, token: str) -> tuple[bool, str]:
     return True, f"no passing main CI run found on {head_sha[:8]}; running CI verify"
 
 
+def latest_stable(tags) -> str | None:
+    versions = [
+        (tuple(int(part) for part in match.groups()), match[0])
+        for tag in tags
+        if (match := re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag.strip()))
+    ]
+    return max(versions)[1] if versions else None
+
+
 def main() -> int:
     release_tag = os.environ.get("RELEASE_TAG", "")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -214,13 +249,23 @@ def main() -> int:
             published_tags=published_tags,
         )
     run_ci, ci_reason = needs_ci_verify(repo, head_sha, token)
+    previous = find_previous_tag(
+        release_tag, ref="HEAD", published_tags=published_tags, include_prereleases=True
+    )
 
     print(f"[release-scope] {emulator_reason}", file=sys.stderr)
     print(f"[release-scope] {ci_reason}", file=sys.stderr)
     print(f"run_android_emulator={'true' if run_emulator else 'false'}")
     print(f"run_ci_verify={'true' if run_ci else 'false'}")
+    print(f"previous_release={previous or ''}")
     return 0
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--latest-stable"]:
+        tag = latest_stable(sys.stdin)
+        if tag is None:
+            sys.exit("No published stable release found")
+        print(tag)
+        sys.exit(0)
     raise SystemExit(main())

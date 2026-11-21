@@ -128,7 +128,34 @@ def test_an_unreadable_diff_runs_everything(monkeypatch, capsys):
     monkeypatch.setattr(areas.subprocess, "run", broken)
     assert areas.main(["ci_changed_areas.py", "base", "head"]) == 0
     output = capsys.readouterr().out.split()
-    assert output == ["backend=true", "web=true", "android=true"]
+    assert output == [
+        "backend=true",
+        "web=true",
+        "android=true",
+        "container=true",
+        "macos=true",
+        "ios=true",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("frontend/web/package-lock.json", {"web", "container"}),
+        ("frontend/apple-shared/ServerRoutesEditor.swift", {"macos", "ios"}),
+        ("frontend/ios/WildString/Player.swift", {"ios"}),
+        ("frontend/macos/WildStringMac/Player.swift", {"macos"}),
+        ("docs/releasing.md", set()),
+    ],
+)
+def test_container_and_apple_scopes(monkeypatch, capsys, path, expected):
+    monkeypatch.setattr(areas, "changed_files", lambda base, head: [path])
+    assert areas.main(["ci_changed_areas.py", "base", "head"]) == 0
+    assert {
+        line.split("=")[0]
+        for line in capsys.readouterr().out.splitlines()
+        if line.endswith("=true")
+    } == expected
 
 
 @pytest.mark.skipif(
@@ -161,7 +188,14 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=false", "web=false", "android=true"]
+    assert out == [
+        "backend=false",
+        "web=false",
+        "android=true",
+        "container=false",
+        "macos=false",
+        "ios=false",
+    ]
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend/x.py").write_text("x\n")
     git("add", "-A")
@@ -173,4 +207,11 @@ def test_the_script_reads_a_real_diff(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.split()
-    assert out == ["backend=true", "web=true", "android=true"]
+    assert out == [
+        "backend=true",
+        "web=true",
+        "android=true",
+        "container=true",
+        "macos=false",
+        "ios=false",
+    ]

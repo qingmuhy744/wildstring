@@ -273,7 +273,9 @@ export function usePlayer(userId: string) {
   const [podcastQueueItems, setPodcastQueueItems] = useState<RemoteQueueItem[]>([]);
   const queueLoad = useRef<Promise<void> | null>(null);
   const queueSave = useRef<Promise<void> | null>(null);
-  const preferenceSave = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingPodcastPreferences = useRef(new Map<string, PodcastPreference>());
+  const [failedPodcastPreferences, setFailedPodcastPreferences] = useState<string[]>([]);
+  const podcastPreferenceFailed = failedPodcastPreferences.includes(current?.podcast_id ?? '');
   const conflictVersion = useRef<number | null>(null);
   const [podcastSync, setPodcastSync] = useState<'ready' | 'error' | 'conflict'>('ready');
   const preferenceRev = useRef(0);
@@ -285,7 +287,9 @@ export function usePlayer(userId: string) {
     preferenceShowRef.current = null;
     if (!show) return;
     const revision = ++preferenceRev.current;
-    setPodcastPreference(readPodcastPreference(userId, show));
+    const pendingPreference = pendingPodcastPreferences.current.get(show);
+    setPodcastPreference(pendingPreference ?? readPodcastPreference(userId, show));
+    if (pendingPreference) preferenceShowRef.current = show;
     setPodcastQueueStatus('loading');
     const controller = new AbortController();
     void api<PodcastDetail>(`/podcasts/${encodeURIComponent(show)}`, { signal: controller.signal })
@@ -297,18 +301,20 @@ export function usePlayer(userId: string) {
       .catch(() => {
         if (!controller.signal.aborted) setPodcastQueueStatus('error');
       });
-    void getQueuePreferences()
-      .then((prefs) => {
-        if (controller.signal.aborted || revision !== preferenceRev.current) return;
-        const value = syncPodcastPreferenceCache(userId, show, prefs);
-        preferenceShowRef.current = show;
-        setPodcastPreference(value);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted && revision === preferenceRev.current) {
+    if (!pendingPreference) {
+      void getQueuePreferences()
+        .then((prefs) => {
+          if (controller.signal.aborted || revision !== preferenceRev.current) return;
+          const value = syncPodcastPreferenceCache(userId, show, prefs);
           preferenceShowRef.current = show;
-        }
-      });
+          setPodcastPreference(value);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted && revision === preferenceRev.current) {
+            preferenceShowRef.current = show;
+          }
+        });
+    }
     return () => controller.abort();
   }, [current?.id, current?.podcast_id, userId]);
   useEffect(() => {
@@ -840,6 +846,23 @@ export function usePlayer(userId: string) {
     void ensureRemoteQueue().catch(() => {});
   }, [userId]);
 
+  function persistPodcastPreference(show: string, preference: PodcastPreference) {
+    pendingPodcastPreferences.current.set(show, preference);
+    setFailedPodcastPreferences((failed) => failed.filter((id) => id !== show));
+    void saveShowPlaybackPreference(show, preference).then(
+      () => {
+        if (pendingPodcastPreferences.current.get(show) === preference) {
+          pendingPodcastPreferences.current.delete(show);
+        }
+      },
+      () => {
+        if (pendingPodcastPreferences.current.get(show) === preference) {
+          setFailedPodcastPreferences((failed) => [...failed, show]);
+        }
+      },
+    );
+  }
+
   function commitQueue(items: RemoteQueueItem[]) {
     remoteQueue.current.items = items;
     remoteQueue.current.loaded = true;
@@ -1009,16 +1032,18 @@ export function usePlayer(userId: string) {
       }
       const intentSnapshot = podcastIntent.current;
       void (async () => {
-        let resolvedPref = readPodcastPreference(userId, activeShow);
-        try {
-          const prefs = await getQueuePreferences();
-          resolvedPref = syncPodcastPreferenceCache(userId, activeShow, prefs);
-          preferenceShowRef.current = activeShow;
-          setPodcastPreference(resolvedPref);
-        } catch {
-          preferenceShowRef.current = activeShow;
-        }
-        if (!podcastAutoContinues(resolvedPref) || intentSnapshot !== podcastIntent.current) return;
+        const pending = pendingPodcastPreferences.current.get(activeShow);
+        const revision = preferenceRev.current;
+        const prefs = pending ? null : await getQueuePreferences().catch(() => null);
+        if (intentSnapshot !== podcastIntent.current) return;
+        const resolvedPref =
+          prefs && revision === preferenceRev.current
+            ? syncPodcastPreferenceCache(userId, activeShow, prefs)
+            : (pendingPodcastPreferences.current.get(activeShow) ??
+              readPodcastPreference(userId, activeShow));
+        preferenceShowRef.current = activeShow;
+        setPodcastPreference(resolvedPref);
+        if (!podcastAutoContinues(resolvedPref)) return;
         try {
           const detail =
             podcastDetail?.podcast.id === activeShow
@@ -1409,9 +1434,16 @@ export function usePlayer(userId: string) {
     podcastQueueItems,
     podcastPreview,
     podcastSync,
-    retryPodcastQueue: () => {
-      if (remoteQueue.current.hold) return;
-      void commitQueue(remoteQueue.current.items);
+    podcastPreferenceFailed,
+    retryPodcastSync: () => {
+      const show = current?.podcast_id;
+      if (show && podcastPreferenceFailed) {
+        const preference = pendingPodcastPreferences.current.get(show);
+        if (preference) persistPodcastPreference(show, { ...preference });
+      }
+      if (podcastSync === 'error' && !remoteQueue.current.hold) {
+        void commitQueue(remoteQueue.current.items);
+      }
     },
     useServerPodcastQueue: async () => {
       try {
@@ -1459,10 +1491,7 @@ export function usePlayer(userId: string) {
       const next = { ...value, autoContinue: value.order !== 'off' };
       savePodcastPreference(userId, current.podcast_id, next);
       setPodcastPreference(next);
-      const show = current.podcast_id;
-      preferenceSave.current = preferenceSave.current
-        .then(() => saveShowPlaybackPreference(show, next))
-        .catch(() => setPodcastSync('error'));
+      persistPodcastPreference(current.podcast_id, next);
     },
     changeQuality,
     setPlaybackRate,

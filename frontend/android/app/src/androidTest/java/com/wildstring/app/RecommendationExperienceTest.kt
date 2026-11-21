@@ -358,6 +358,10 @@ class RecommendationExperienceTest {
                 assertEquals("https://podcast.example/feed.xml", added.text("feed_url"))
                 assertEquals("12345", added.text("itunes_id"))
                 assertNull(vm.state.value.current)
+                compose.onNodeWithTag("nav-podcast").performClick()
+                compose.waitUntil(10_000) { vm.state.value.podcastId == null }
+                compose.onNodeWithTag("podcast-list").assertIsDisplayed()
+                compose.onNodeWithTag("podcast-episode-explore-episode").assertDoesNotExist()
             } finally { cleanup(vm) }
         }
     }

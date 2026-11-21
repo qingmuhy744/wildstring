@@ -97,7 +97,9 @@ import com.wildstring.app.R
 import com.wildstring.app.playback.MUSIC_QUEUE_LIMIT
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -591,6 +593,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             },
         )
     val savedPages = rememberSaveableStateHolder()
+    val tabReselections = remember { MutableSharedFlow<String>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
+    fun selectTab(tab: String) {
+        if (tab != vm.state.value.tab) vm.navigate(tab)
+        else if (tab != "assistant" && (tab == "podcast" || !vm.returnToCatalogHome())) tabReselections.tryEmit(tab)
+    }
     val pullRefresh = rememberPullToRefreshState()
     val savedKeys = remember { ArrayDeque<String>() }
     LaunchedEffect(state.contentKey) {
@@ -674,7 +681,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 Row(Modifier.fillMaxSize()) {
                     if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
                         Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
-                        RailItems(state, vm)
+                        RailItems(state, ::selectTab)
                     }
                     val showMiniPlayer = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
                     Scaffold(
@@ -761,7 +768,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             tonalElevation = 0.dp,
                                             modifier = Modifier.testTag("bottom-navigation"),
                                         ) {
-                                            BottomItems(state, vm)
+                                            BottomItems(state, ::selectTab)
                                         }
                                     }
                                 }
@@ -770,7 +777,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     ) { padding ->
                         Box(Modifier.fillMaxSize().padding(padding)) {
                             if (state.tab == "podcast") {
-                                savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm) }
+                                savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm, tabReselections) }
                             } else if (state.tab == "assistant") {
                                 savedPages.SaveableStateProvider("assistant") {
                                 MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true }) {
@@ -857,10 +864,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     }, state = pullRefresh,
                                     indicator = { WildRefreshIndicator(showRefreshIndicator, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
                                     savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
-                                        if (state.kind == "discover") DiscoveryPage(vm, state,
+                                        if (state.kind == "discover") DiscoveryPage(vm, state, tabReselections,
                                             play = { tracks, index -> vm.play(tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
                                             albumActions = { albumActions = it })
-                                        else CatalogBrowser(vm, state, header,
+                                        else CatalogBrowser(vm, state, tabReselections, header,
                                             play = { track, index -> vm.playCollection(track.id, index) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
                                             actions = { actions = it }, select = ::selectTracks, selectedIds = selectedTracks?.keys, selectionEnabled = !selectionBusy, toggleSelection = ::toggleTrackSelection, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
                                     }
@@ -1303,19 +1310,19 @@ private fun navItems() = listOf(
 )
 
 @Composable
-private fun RailItems(state: MusicState, vm: MusicViewModel) {
+private fun RailItems(state: MusicState, select: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     navItems().forEach { (id, label, icon) ->
-        NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+        NavigationRailItem(state.tab == id, { keyboard?.hide(); select(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
-private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
+private fun RowScope.BottomItems(state: MusicState, select: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     navItems().forEach { (id, label, icon) ->
         NavigationBarItem(
             selected = state.tab == id,
-            onClick = { keyboard?.hide(); vm.navigate(id) },
+            onClick = { keyboard?.hide(); select(id) },
             modifier = Modifier.testTag("nav-$id"),
             icon = { Icon(icon, label) },
             label = { Text(label, maxLines = 1, softWrap = false) },

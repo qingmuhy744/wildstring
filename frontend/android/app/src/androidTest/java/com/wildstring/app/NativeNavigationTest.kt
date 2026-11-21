@@ -258,6 +258,20 @@ class NativeNavigationTest {
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 compose.onNodeWithText("布局测试专辑 17").performClick()
                 compose.waitUntil(15_000) { vm.state.value.collection == "albums" && !vm.state.value.loading }
+                val musicTab = compose.onNodeWithTag("nav-library")
+                musicTab.performClick()
+                compose.waitUntil(15_000) { !vm.state.value.canGoBack && !vm.state.value.loading }
+                compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
+                repeat(3) { musicTab.performClick() }
+                compose.onNodeWithText("布局测试专辑 01").assertIsDisplayed()
+                capture("native-phone-library-reselected-light.png")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("native-phone-library-reselected-dark.png")
+                compose.runOnIdle { vm.settings.appearance("light") }
+
+                compose.onNodeWithTag("album-grid").performScrollToIndex(16)
+                compose.onNodeWithText("布局测试专辑 17").performClick()
+                compose.waitUntil(15_000) { vm.state.value.collection == "albums" && !vm.state.value.loading }
                 compose.onNodeWithTag("nav-search").performClick()
                 compose.onAllNodesWithText(uiString(R.string.view_all)).onFirst().performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
@@ -287,6 +301,17 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("navigation-rail").assertIsDisplayed()
                 assertEquals("Opening and closing settings must not reload the catalog", count, requests.get())
                 capture("native-tablet-library.png")
+                compose.onNodeWithTag("nav-search").performClick()
+                compose.waitUntil(15_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                assertEquals(0, vm.state.value.navigationDepth)
+                compose.onNodeWithTag("nav-search").performClick()
+                compose.onNodeWithTag("discovery-albums").assertIsDisplayed()
+                capture("native-tablet-discovery-reselected-light.png")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("native-tablet-discovery-reselected-dark.png")
+                compose.runOnIdle { vm.settings.appearance("light") }
+                compose.onAllNodesWithText(uiString(R.string.view_all)).onFirst().performClick()
+                compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
                 phoneWindow()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty() }
                 capture("native-phone-library-restored.png")

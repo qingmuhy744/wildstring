@@ -11,6 +11,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import com.wildstring.app.data.PlaybackRequest
+import com.wildstring.app.data.podcastEpisodeId
 
 /** Exposes a whole-song timeline to both the app and lock-screen controllers. */
 internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolver: PlaybackResolver) : ForwardingSimpleBasePlayer(engine) {
@@ -107,6 +108,13 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
         if (engine.playbackState == Player.STATE_IDLE || engine.playbackState == Player.STATE_ENDED) engine.prepare()
     }
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+        // System controllers send SEEK_TO_PREVIOUS, which otherwise restarts a song past three seconds.
+        if (seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS &&
+            podcastEpisodeId(engine.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) == null) {
+            val previous = previousMediaItemIndex
+            if (previous == C.INDEX_UNSET) return Futures.immediateVoidFuture()
+            return handleSeek(previous, C.TIME_UNSET, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        }
         if (mediaItemIndex in 0 until engine.mediaItemCount && transcode(engine.getMediaItemAt(mediaItemIndex))) {
             rebase(mediaItemIndex, if (positionMs == C.TIME_UNSET) 0 else positionMs)
             return Futures.immediateVoidFuture()

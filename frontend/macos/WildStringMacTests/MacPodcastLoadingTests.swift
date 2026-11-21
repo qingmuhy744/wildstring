@@ -9,6 +9,9 @@ import os
 
 extension MacAssistantTests {
     @Test func intakeSettingsShowEachLabelOnceAndKeepBothMenus() async throws {
+        let language = InterfaceLanguage.current
+        InterfaceLanguage.store("en")
+        defer { InterfaceLanguage.store(language.rawValue) }
         let playback = PlaybackService(
             server: try ServerAddress(input: "music.example.com"),
             store: InMemoryQueueStore(), cookieHeader: { nil }
@@ -36,7 +39,7 @@ extension MacAssistantTests {
                 try png.write(to: URL(fileURLWithPath: "/tmp/wildstring-podcast-settings-\(Int(width))-\(appearance).png"))
                 let recognition = VNRecognizeTextRequest()
                 recognition.recognitionLevel = .accurate
-                recognition.recognitionLanguages = ["zh-Hans", "en-US"]
+                recognition.recognitionLanguages = ["en-US"]
                 try VNImageRequestHandler(data: png).perform([recognition])
                 let text = (recognition.results ?? []).compactMap { $0.topCandidates(1).first?.string }
                     .joined(separator: " ").replacingOccurrences(of: " ", with: "")
@@ -44,8 +47,10 @@ extension MacAssistantTests {
                     let label = L10n(key).replacingOccurrences(of: " ", with: "")
                     #expect(text.components(separatedBy: label).count - 1 == 1, "Visible label must occur once: \(text)")
                 }
-                #expect(text.contains(L10n("macPodcasts.intakeQueueLast").replacingOccurrences(of: " ", with: "")))
-                #expect(text.contains(L10n("macPodcasts.continueFollow").replacingOccurrences(of: " ", with: "")))
+                for key in ["macPodcasts.intakeQueueLast", "macPodcasts.continueFollow"] {
+                    let label = L10n(key).replacingOccurrences(of: " ", with: "")
+                    #expect(text.contains(label))
+                }
             }
         }
     }

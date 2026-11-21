@@ -405,23 +405,71 @@ test('真实接口：顺序切换、跳过已听完、偏好恢复，收起界�
   await page.reload();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.getByLabel('播客续播顺序')).toHaveValue('off');
+  let releaseSave = () => {};
+  const holdSave = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route('**/api/v1/podcasts/queue/preferences', async (route) => {
+    if (route.request().method() === 'PUT') await holdSave;
+    await route.continue();
+  });
   const savedDescending = page.waitForResponse(
     (response) =>
       response.url().includes('/podcasts/queue/preferences') &&
       response.request().method() === 'PUT' &&
       (response.request().postData() || '').includes('"order":"desc"'),
   );
-  await page.getByLabel('播客续播顺序').selectOption('desc');
-  expect((await savedDescending).ok()).toBeTruthy();
-  await expect(page.locator('.programme-track')).toHaveCount(3);
-  await page.getByRole('button', { name: '收起全屏播放' }).click();
-  await page.getByRole('button', { name: '下一集', exact: true }).click();
-  await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-5/stream');
-  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(page.locator('.programme-track').first()).toContainText('第 3 集');
+  try {
+    await page.getByLabel('播客续播顺序').selectOption('desc');
+    await expect(page.locator('.programme-track')).toHaveCount(3);
+    await page.getByRole('button', { name: '收起全屏播放' }).click();
+    await page.getByRole('button', { name: '下一集', exact: true }).click();
+    await expect.poll(async () => (await audio(page)).source).toContain('/episodes/radio-5/stream');
+    await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+    await expect(page.locator('.programme-track').first()).toContainText('第 3 集');
+  } finally {
+    releaseSave();
+    expect((await savedDescending).ok()).toBeTruthy();
+  }
   await page.getByRole('button', { name: '收音机暂停' }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(failures).toEqual([]);
+});
+
+test('播客续播偏好保存失败可以重试，重试只提交偏好', async ({ page }) => {
+  await openRadio(page);
+  const preferencePath = '/api/v1/podcasts/queue/preferences';
+  let queueWrites = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PUT' &&
+      new URL(request.url()).pathname === '/api/v1/podcasts/queue'
+    ) {
+      queueWrites += 1;
+    }
+  });
+  await page.route(`**${preferencePath}`, async (route) => {
+    if (route.request().method() === 'PUT') {
+      await route.fulfill({ status: 503, json: { detail: 'temporary_failure' } });
+    } else await route.continue();
+  });
+
+  await page.getByLabel('播客续播顺序').selectOption('off');
+  const sync = page.getByRole('status').filter({ hasText: '暂时无法同步，本机播放不受影响' });
+  await expect(sync).toBeVisible();
+  await expect(page.getByLabel('播客续播顺序')).toHaveValue('off');
+  await page.unroute(`**${preferencePath}`);
+
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' && new URL(response.url()).pathname === preferencePath,
+  );
+  await sync.getByRole('button', { name: '重试' }).click();
+  expect((await saved).ok()).toBeTruthy();
+  await expect(sync).toHaveCount(0);
+  const preferences = await (await page.request.get(preferencePath)).json();
+  expect(preferences.shows['radio-test'].order).toBe('off');
+  expect(queueWrites).toBe(0);
 });
 
 test('切换接下来播放面板后左侧收音机仍保留', async ({ page }) => {

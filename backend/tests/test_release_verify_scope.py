@@ -6,10 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
+import package_release  # noqa: E402
 import release_verify_scope as scope  # noqa: E402
 
 
@@ -107,7 +110,7 @@ def test_prerelease_considers_prior_prerelease_tag(monkeypatch) -> None:
         changed="backend/src/wildstring/main.py\n",
     )
     run, reason = scope.needs_android_emulator("v0.8.20-rc.2")
-    assert run is False
+    assert run is True
     assert "v0.8.20-rc.1" in reason
 
 
@@ -197,7 +200,7 @@ def test_needs_android_emulator_uses_published_baseline(monkeypatch):
     run_emu, reason = scope.needs_android_emulator("v0.8.22", published_tags={"v0.8.20"})
     assert run_emu is True
     assert "v0.8.20" in reason
-    assert seen_diffs == [("diff", "--name-only", "v0.8.20...HEAD")]
+    assert seen_diffs == [("diff", "--name-only", "--no-renames", "v0.8.20...HEAD")]
 
     run_empty, empty_reason = scope.needs_android_emulator("v0.8.22", published_tags=set())
     assert run_empty is True
@@ -249,6 +252,7 @@ def test_main_fails_closed_when_published_lookup_fails(monkeypatch, capsys):
 
     monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: (None, "lookup failed"))
     monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+    _mock_git(monkeypatch, tags="v0.8.21\n", changed="")
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("needs_android_emulator should not run when published lookup failed")
@@ -258,6 +262,7 @@ def test_main_fails_closed_when_published_lookup_fails(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "run_android_emulator=true" in out
     assert "run_ci_verify=false" in out
+    assert "previous_release=v0.8.21" in out
 
 
 def test_main_forwards_published_tags(monkeypatch, capsys):
@@ -268,6 +273,7 @@ def test_main_forwards_published_tags(monkeypatch, capsys):
 
     monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: ({"v0.8.20"}, ""))
     monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+    _mock_git(monkeypatch, tags="v0.8.21\nv0.8.20\n", changed="")
 
     seen: dict[str, object] = {}
 
@@ -280,4 +286,50 @@ def test_main_forwards_published_tags(monkeypatch, capsys):
     assert scope.main() == 0
     out = capsys.readouterr().out
     assert "run_android_emulator=false" in out
+    assert "previous_release=v0.8.20" in out
     assert seen == {"release_tag": "v0.8.22", "published_tags": {"v0.8.20"}}
+
+
+def test_release_device_scope_distinguishes_dependency_changes_from_version_bumps(monkeypatch):
+    inputs = {
+        "v0.8.24": '[project]\nversion = "0.8.24"\ndependencies = ["fastapi"]',
+        "HEAD": '[project]\nversion = "0.8.25"\ndependencies = ["fastapi"]',
+    }
+
+    def fake_run_git(command, *args):
+        if command == "tag":
+            return "v0.8.24\n"
+        if command == "diff":
+            return "backend/pyproject.toml\n"
+        ref, _ = args[0].split(":")
+        return inputs[ref]
+
+    monkeypatch.setattr(scope, "run_git", fake_run_git)
+    assert not scope.needs_android_emulator("v0.8.25")[0]
+    inputs["HEAD"] = inputs["HEAD"].replace('"fastapi"', '"fastapi>=1"')
+    assert scope.needs_android_emulator("v0.8.25")[0]
+
+
+def test_latest_stable_prefers_numeric_version_even_when_an_older_release_was_republished():
+    assert scope.latest_stable(["v0.8.9", "v0.8.10", "v0.9.0-rc.1", "v0.8.2"]) == "v0.8.10"
+    assert scope.latest_stable(["v0.9.0-rc.1"]) is None
+
+
+def test_release_rejects_nonincreasing_build_numbers_and_mismatched_apple_version(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(package_release, "ROOT", tmp_path)
+    for relative in package_release.APPLE_CONFIGS.values():
+        config = tmp_path / relative
+        config.parent.mkdir(parents=True)
+        config.write_text('MARKETING_VERSION: "0.8.25"\nCURRENT_PROJECT_VERSION: "60"\n')
+
+    def older_build(_command, path):
+        return 'CURRENT_PROJECT_VERSION: "59"' if path.endswith(".yml") else "versionCode = 60"
+
+    monkeypatch.setattr(package_release, "run_git", older_build)
+    package_release.check_native_builds("versionCode = 61", "0.8.25", "v0.8.24")
+    with pytest.raises(ValueError, match="versionCode must increase"):
+        package_release.check_native_builds("versionCode = 60", "0.8.25", "v0.8.24")
+    with pytest.raises(ValueError, match="MARKETING_VERSION must match"):
+        package_release.check_native_builds("versionCode = 61", "0.8.26", "v0.8.24")

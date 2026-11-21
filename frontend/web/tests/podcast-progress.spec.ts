@@ -479,6 +479,10 @@ test('同一浏览器另一个标签页接手后，原页面主动回听仍能�
   const next = await context.newPage();
   await next.goto('/');
   await expect(next.locator('.app-shell')).toBeVisible();
+  // Let the cold restore finish before testing the active resume command.
+  await expect
+    .poll(() => next.locator('audio').evaluate((element: HTMLAudioElement) => element.readyState))
+    .toBeGreaterThanOrEqual(1);
   await next.getByRole('button', { name: '播放', exact: true }).click();
   await expect.poll(async () => (await audio(next)).paused).toBe(false);
   await expect.poll(async () => (await audio(next)).time).toBeGreaterThanOrEqual(6);
@@ -516,6 +520,7 @@ test('发生设备冲突后继续收听仍保存本机位置，暂停不会覆�
   await otherDevice(page, 0);
   await episodes(page);
   await start(page);
+  await expect.poll(async () => (await local(page))?.dirty).toBe(false);
   const newer = await otherDevice(page, 8);
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');
   await expect.poll(async () => (await local(page))?.conflict).toBe(true);
