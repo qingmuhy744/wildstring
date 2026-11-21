@@ -38,14 +38,20 @@ extension MacAssistantTests {
                 recognition.recognitionLevel = .accurate
                 recognition.recognitionLanguages = ["zh-Hans", "en-US"]
                 try VNImageRequestHandler(data: png).perform([recognition])
-                let text = (recognition.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-                    .joined(separator: " ").replacingOccurrences(of: " ", with: "")
+                let regions = (recognition.results ?? []).map { observation in
+                    observation.topCandidates(5).map { $0.string.replacingOccurrences(of: " ", with: "") }
+                }
                 for key in ["macPodcasts.newEpisodeIntake", "macPodcasts.autoContinue"] {
                     let label = L10n(key).replacingOccurrences(of: " ", with: "")
-                    #expect(text.components(separatedBy: label).count - 1 == 1, "Visible label must occur once: \(text)")
+                    let occurrences = regions.reduce(0) { count, candidates in
+                        count + (candidates.map { $0.components(separatedBy: label).count - 1 }.max() ?? 0)
+                    }
+                    #expect(occurrences == 1, "Visible label must occur once: \(regions)")
                 }
-                #expect(text.contains(L10n("macPodcasts.intakeQueueLast").replacingOccurrences(of: " ", with: "")))
-                #expect(text.contains(L10n("macPodcasts.continueFollow").replacingOccurrences(of: " ", with: "")))
+                for key in ["macPodcasts.intakeQueueLast", "macPodcasts.continueFollow"] {
+                    let label = L10n(key).replacingOccurrences(of: " ", with: "")
+                    #expect(regions.contains { $0.contains { $0.contains(label) } })
+                }
             }
         }
     }

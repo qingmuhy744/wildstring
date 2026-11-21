@@ -35,6 +35,10 @@ extension MacAssistantTests {
             let host = NSHostingView(rootView: GlyphFixture(state: state, reduced: reduced))
             let window = presentationWindow(host, size: CGSize(width: 120, height: 120))
             defer { window.close() }
+            window.styleMask.insert(.titled)
+            window.center()
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
             var previousImage: Data?
             var stableFrames = 0
             for _ in 0..<120 {
@@ -81,7 +85,9 @@ extension MacAssistantTests {
                     #expect(!frames.filter { ($0["time"] as! Double) > firstChange + 320 }.contains { $0["changed"] as! Bool })
                 }
                 if reduced { #expect(Set(hashes).count == 1) }
-                else { #expect(Set(hashes).count > 3) }
+                else {
+                    #expect(Set(hashes).count > 3, "Reduce Motion: \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion); visible: \(window.occlusionState.contains(.visible))")
+                }
                 let path = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("wildstring-mac-glyph-\(reduced)-\(index)-\(phase).json")
                 try JSONSerialization.data(withJSONObject: frames).write(to: path)
                 try saveScreenshot(host: host, name: "mac-transport-\(reduced)-\(index)-\(phase)")
