@@ -9,6 +9,9 @@ import os
 
 extension MacAssistantTests {
     @Test func intakeSettingsShowEachLabelOnceAndKeepBothMenus() async throws {
+        let language = InterfaceLanguage.current
+        InterfaceLanguage.store("en")
+        defer { InterfaceLanguage.store(language.rawValue) }
         let playback = PlaybackService(
             server: try ServerAddress(input: "music.example.com"),
             store: InMemoryQueueStore(), cookieHeader: { nil }
@@ -36,21 +39,17 @@ extension MacAssistantTests {
                 try png.write(to: URL(fileURLWithPath: "/tmp/wildstring-podcast-settings-\(Int(width))-\(appearance).png"))
                 let recognition = VNRecognizeTextRequest()
                 recognition.recognitionLevel = .accurate
-                recognition.recognitionLanguages = ["zh-Hans", "en-US"]
+                recognition.recognitionLanguages = ["en-US"]
                 try VNImageRequestHandler(data: png).perform([recognition])
-                let regions = (recognition.results ?? []).map { observation in
-                    observation.topCandidates(5).map { $0.string.replacingOccurrences(of: " ", with: "") }
-                }
+                let text = (recognition.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: " ").replacingOccurrences(of: " ", with: "")
                 for key in ["macPodcasts.newEpisodeIntake", "macPodcasts.autoContinue"] {
                     let label = L10n(key).replacingOccurrences(of: " ", with: "")
-                    let occurrences = regions.reduce(0) { count, candidates in
-                        count + (candidates.map { $0.components(separatedBy: label).count - 1 }.max() ?? 0)
-                    }
-                    #expect(occurrences == 1, "Visible label must occur once: \(regions)")
+                    #expect(text.components(separatedBy: label).count - 1 == 1, "Visible label must occur once: \(text)")
                 }
                 for key in ["macPodcasts.intakeQueueLast", "macPodcasts.continueFollow"] {
                     let label = L10n(key).replacingOccurrences(of: " ", with: "")
-                    #expect(regions.contains { $0.contains { $0.contains(label) } })
+                    #expect(text.contains(label))
                 }
             }
         }

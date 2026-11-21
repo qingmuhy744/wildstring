@@ -85,9 +85,7 @@ extension MacAssistantTests {
                     #expect(!frames.filter { ($0["time"] as! Double) > firstChange + 320 }.contains { $0["changed"] as! Bool })
                 }
                 if reduced { #expect(Set(hashes).count == 1) }
-                else {
-                    #expect(Set(hashes).count > 3, "Reduce Motion: \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion); visible: \(window.occlusionState.contains(.visible))")
-                }
+                else { #expect(Set(hashes).count > 3) }
                 let path = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("wildstring-mac-glyph-\(reduced)-\(index)-\(phase).json")
                 try JSONSerialization.data(withJSONObject: frames).write(to: path)
                 try saveScreenshot(host: host, name: "mac-transport-\(reduced)-\(index)-\(phase)")
@@ -137,7 +135,7 @@ private struct GlyphFixture: View {
     let reduced: Bool
     var body: some View {
         PlaybackTransportGlyph(playing: state.phase != 0, buffering: state.phase == 2, size: 24,
-            foreground: MacTheme.onAccent, motionAllowed: !reduced)
+            foreground: MacTheme.onAccent, reduceMotionOverride: reduced)
             .frame(width: 64, height: 64).background(.orange, in: Circle())
             .frame(width: 120, height: 120).background(.white)
             .preferredColorScheme(.light)
