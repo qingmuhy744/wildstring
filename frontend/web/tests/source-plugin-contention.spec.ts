@@ -88,13 +88,24 @@ sys.stdout.buffer.write(data.getvalue())
     expect(
       currentBatch.items.find((item: { track_id: string }) => item.track_id === track.id)?.status,
     ).toBe('running');
+    const queued = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === `/api/v1/manage/tracks/${track.id}/online-lyrics`,
+    );
     await search.click();
+    const queuedResponse = await queued;
+    expect(queuedResponse.ok()).toBe(true);
+    const manualJobId: string = (await queuedResponse.json()).id;
     await expect(search).toBeDisabled();
     await expect
       .poll(
-        async () =>
-          (await (await page.request.get(`/api/v1/manage/tracks/${track.id}/online-lyrics`)).json())
-            .jobs[0]?.status,
+        async () => {
+          const result = await (
+            await page.request.get(`/api/v1/manage/tracks/${track.id}/online-lyrics`)
+          ).json();
+          return result.jobs.find((job: { id: string }) => job.id === manualJobId)?.status;
+        },
         { timeout: 30000, intervals: [200] },
       )
       .toBe('completed');
@@ -106,7 +117,7 @@ sys.stdout.buffer.write(data.getvalue())
     expect(result.items.some((item: { plugin_id: string }) => item.plugin_id === pluginId)).toBe(
       true,
     );
-    expect(result.jobs[0].warnings).toEqual([]);
+    expect(result.jobs.find((job: { id: string }) => job.id === manualJobId)?.warnings).toEqual([]);
   } finally {
     if (batchId) {
       await page.request.post(`/api/v1/manage/lyric-scans/${batchId}/control`, {
