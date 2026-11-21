@@ -274,6 +274,8 @@ export function usePlayer(userId: string) {
   const queueLoad = useRef<Promise<void> | null>(null);
   const queueSave = useRef<Promise<void> | null>(null);
   const pendingPodcastPreferences = useRef(new Map<string, PodcastPreference>());
+  const [failedPodcastPreferences, setFailedPodcastPreferences] = useState<string[]>([]);
+  const podcastPreferenceFailed = failedPodcastPreferences.includes(current?.podcast_id ?? '');
   const conflictVersion = useRef<number | null>(null);
   const [podcastSync, setPodcastSync] = useState<'ready' | 'error' | 'conflict'>('ready');
   const preferenceRev = useRef(0);
@@ -843,6 +845,23 @@ export function usePlayer(userId: string) {
     setPodcastQueueItems([]);
     void ensureRemoteQueue().catch(() => {});
   }, [userId]);
+
+  function persistPodcastPreference(show: string, preference: PodcastPreference) {
+    pendingPodcastPreferences.current.set(show, preference);
+    setFailedPodcastPreferences((failed) => failed.filter((id) => id !== show));
+    void saveShowPlaybackPreference(show, preference).then(
+      () => {
+        if (pendingPodcastPreferences.current.get(show) === preference) {
+          pendingPodcastPreferences.current.delete(show);
+        }
+      },
+      () => {
+        if (pendingPodcastPreferences.current.get(show) === preference) {
+          setFailedPodcastPreferences((failed) => [...failed, show]);
+        }
+      },
+    );
+  }
 
   function commitQueue(items: RemoteQueueItem[]) {
     remoteQueue.current.items = items;
@@ -1415,9 +1434,16 @@ export function usePlayer(userId: string) {
     podcastQueueItems,
     podcastPreview,
     podcastSync,
-    retryPodcastQueue: () => {
-      if (remoteQueue.current.hold) return;
-      void commitQueue(remoteQueue.current.items);
+    podcastPreferenceFailed,
+    retryPodcastSync: () => {
+      const show = current?.podcast_id;
+      if (show && podcastPreferenceFailed) {
+        const preference = pendingPodcastPreferences.current.get(show);
+        if (preference) persistPodcastPreference(show, { ...preference });
+      }
+      if (podcastSync === 'error' && !remoteQueue.current.hold) {
+        void commitQueue(remoteQueue.current.items);
+      }
     },
     useServerPodcastQueue: async () => {
       try {
@@ -1465,15 +1491,7 @@ export function usePlayer(userId: string) {
       const next = { ...value, autoContinue: value.order !== 'off' };
       savePodcastPreference(userId, current.podcast_id, next);
       setPodcastPreference(next);
-      const show = current.podcast_id;
-      pendingPodcastPreferences.current.set(show, next);
-      void saveShowPlaybackPreference(show, next)
-        .catch(() => setPodcastSync('error'))
-        .finally(() => {
-          if (pendingPodcastPreferences.current.get(show) === next) {
-            pendingPodcastPreferences.current.delete(show);
-          }
-        });
+      persistPodcastPreference(current.podcast_id, next);
     },
     changeQuality,
     setPlaybackRate,
