@@ -609,7 +609,6 @@ public final class PlaybackService {
 
     @discardableResult
     public func enqueue(items: [Item], next: Bool = false) -> Bool {
-        invalidatePodcastAdvance()
         let playable = items.filter { $0.unavailableReason == nil }
         guard !playable.isEmpty else {
             errorMessage = KitL10n("kit.playback.noPlayableTracks")
@@ -641,7 +640,6 @@ public final class PlaybackService {
             return false
         }
         let wasEmpty = queue.count == 0
-        podcastOverrideItem = nil
         queue.enqueue(music, next: next)
         persistQueueAndProgress()
         if wasEmpty { startCurrent(autoplay: true, startAt: 0) }

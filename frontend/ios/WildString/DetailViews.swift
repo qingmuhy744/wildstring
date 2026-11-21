@@ -35,7 +35,7 @@ struct AlbumDetailView: View {
                     ForEach(sections(model)) { section in
                         Section {
                             ForEach(section.tracks) { track in
-                                TrackActionRow(client: client, track: track) {
+                                TrackActionRow(client: client, playback: playback, track: track) {
                                     Button {
                                         model.play(track, using: playback)
                                     } label: {
@@ -298,7 +298,7 @@ struct ArtistDetailView: View {
                     emptyTitle: L10n("detailView.emptySongs"),
                     emptyIcon: "music.note"
                 ) { track in
-                    TrackActionRow(client: client, track: track) {
+                    TrackActionRow(client: client, playback: playback, track: track) {
                         Button {
                             songsLoader.play(track, using: playback)
                         } label: {

@@ -7,6 +7,7 @@ import SwiftUI
 struct QueueView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    var onClose: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var actionError: String?
@@ -31,24 +32,47 @@ struct QueueView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isPodcast, let cloud = playback.podcastCloud {
-                    podcastQueueList(cloud: cloud)
-                } else {
-                    musicQueueList
+            ScrollViewReader { scroll in
+                Group {
+                    if isPodcast, let cloud = playback.podcastCloud {
+                        podcastQueueList(cloud: cloud)
+                    } else {
+                        musicQueueList
+                    }
                 }
-            }
-            .navigationTitle(isPodcast ? L10n("queueView.podcastQueue") : L10n("queueView.musicQueue"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(L10n("queueView.close")) { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    EditButton()
+                .navigationTitle(isPodcast ? L10n("queueView.podcastQueue") : L10n("queueView.musicQueue"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            if let onClose { onClose() } else { dismiss() }
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel(L10n("queueView.close"))
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            guard let id = currentRowID else { return }
+                            scroll.scrollTo(id, anchor: .center)
+                        } label: {
+                            Image(systemName: "scope")
+                        }
+                        .accessibilityLabel(L10n("queueView.locateCurrent"))
+                        .disabled(currentRowID == nil)
+                        EditButton()
+                    }
                 }
             }
         }
+    }
+
+    private var currentRowID: String? {
+        if isPodcast, let cloud = playback.podcastCloud {
+            return cloud.items.first(where: { $0.episodeId == currentEpisodeID })?.episodeId
+        }
+        guard let index = playback.currentIndex, playback.items.indices.contains(index) else { return nil }
+        return playback.items[index].id.uuidString
     }
 
     private var musicQueueList: some View {
@@ -86,6 +110,8 @@ struct QueueView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .id(item.id.uuidString)
+                .accessibilityAddTraits(playback.currentIndex == index ? .isSelected : [])
             }
             .onMove { offsets, destination in
                 playback.moveQueueEntries(fromOffsets: offsets, toOffset: destination)
@@ -171,6 +197,8 @@ struct QueueView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .id(item.episodeId)
+                        .accessibilityAddTraits(item.episodeId == currentEpisodeID ? .isSelected : [])
                     }
                     .onMove { offsets, destination in
                         cloud.moveItems(from: offsets, to: destination)

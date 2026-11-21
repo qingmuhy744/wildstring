@@ -13,7 +13,7 @@ typealias NowPlayingImage = NSImage
 func activateSystemAudioSession() throws {
     #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default)
+        try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
         try session.setActive(true)
     #endif
 }

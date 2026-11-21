@@ -18,7 +18,7 @@ struct FavoritesView: View {
                     emptyTitle: L10n("favoritesView.emptyTitle"),
                     emptyIcon: "heart"
                 ) { track in
-                    TrackActionRow(client: client, track: track) {
+                    TrackActionRow(client: client, playback: playback, track: track) {
                         Button {
                             loader.play(track, using: playback)
                         } label: {

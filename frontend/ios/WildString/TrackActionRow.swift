@@ -2,16 +2,18 @@ import CoreNetwork
 import CorePlayback
 import SwiftUI
 
-/// Wraps a track row with the shared context menu: favorite toggle,
-/// "add to playlist" and offline download.
+/// Shared playback, catalog and library actions for a track row.
 struct TrackActionRow<Content: View>: View {
     let client: WildstringClient
+    let playback: PlaybackService
     let track: Track
     @ViewBuilder let content: () -> Content
 
     @Environment(FavoritesModel.self) private var favorites
     @Environment(OfflineModel.self) private var offline
     @Environment(\.isAdmin) private var isAdmin
+    @State private var destination: TrackCatalogDestination?
+    @State private var queueError: String?
     @State private var addingToPlaylist = false
     @State private var editingMetadata = false
     @State private var editingLyrics = false
@@ -29,6 +31,39 @@ struct TrackActionRow<Content: View>: View {
     var body: some View {
         content()
             .contextMenu {
+                Button {
+                    enqueue(next: true)
+                } label: {
+                    Label(L10n("trackAction.playNext"), systemImage: "text.insert")
+                }
+                .disabled(!track.isAvailable)
+                Button {
+                    enqueue(next: false)
+                } label: {
+                    Label(L10n("trackAction.appendToQueue"), systemImage: "text.append")
+                }
+                .disabled(!track.isAvailable)
+                if let id = track.albumId {
+                    Button {
+                        destination = .album(id)
+                    } label: {
+                        Label(L10n("trackAction.openAlbum"), systemImage: "opticaldisc")
+                    }
+                }
+                if let name = track.artists.first, track.artists.count == 1 {
+                    Button {
+                        destination = .artist(name)
+                    } label: {
+                        Label(L10n("trackAction.openArtist"), systemImage: "person")
+                    }
+                } else if !track.artists.isEmpty {
+                    Menu(L10n("trackAction.openArtist"), systemImage: "person") {
+                        ForEach(track.artists, id: \.self) { name in
+                            Button(name) { destination = .artist(name) }
+                        }
+                    }
+                }
+                Divider()
                 Button {
                     Haptics.selection()
                     Task { await favorites.toggle(track.id) }
@@ -80,6 +115,17 @@ struct TrackActionRow<Content: View>: View {
                     }
                 }
             }
+            .sheet(item: $destination) {
+                TrackCatalogSheet(client: client, playback: playback, destination: $0)
+            }
+            .alert(
+                L10n("trackAction.queueFailed"),
+                isPresented: Binding(get: { queueError != nil }, set: { if !$0 { queueError = nil } })
+            ) {
+                Button(L10n("queueView.close"), role: .cancel) {}
+            } message: {
+                Text(queueError ?? "")
+            }
             .sheet(isPresented: $addingToPlaylist) {
                 AddToPlaylistSheet(client: client, trackID: track.id)
             }
@@ -95,6 +141,78 @@ struct TrackActionRow<Content: View>: View {
             .sheet(isPresented: $reviewingMetadata) {
                 MetadataReviewView(client: client, initialTrack: track)
             }
+    }
+
+    private func enqueue(next: Bool) {
+        if playback.enqueue(items: [track.playbackItem], next: next) {
+            Haptics.tap()
+            AccessibilityNotification.Announcement(L10n("trackAction.queued")).post()
+        } else {
+            queueError = playback.errorMessage ?? L10n("trackAction.queueFailed")
+        }
+    }
+}
+
+private enum TrackCatalogDestination: Hashable, Identifiable {
+    case album(String)
+    case artist(String)
+
+    var id: Self { self }
+}
+
+private struct TrackCatalogSheet: View {
+    let client: WildstringClient
+    let playback: PlaybackService
+    let destination: TrackCatalogDestination
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var album: Album?
+    @State private var artist: Artist?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let album {
+                    AlbumDetailView(client: client, playback: playback, album: album)
+                } else if let artist {
+                    ArtistDetailView(client: client, playback: playback, artist: artist)
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label(errorMessage, systemImage: "exclamationmark.circle")
+                    } actions: {
+                        Button(L10n("queueView.retry")) { Task { await load() } }
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n("queueView.close")) { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        errorMessage = nil
+        do {
+            switch destination {
+            case .album(let id):
+                album = try await client.album(id: id)
+            case .artist(let name):
+                let page = try await client.artists(query: name)
+                artist = page.items.first { $0.name == name }
+                    ?? page.items.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+                if artist == nil { errorMessage = L10n("trackAction.artistNotFound") }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = ErrorText.message(for: error)
+        }
     }
 }
 
