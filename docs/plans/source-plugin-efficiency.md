@@ -35,7 +35,7 @@
      - `Providers.step()` 按 `ORDER BY interactive DESC, force DESC, created_at, id LIMIT 1` 领取任务，并将 `bool(job["interactive"])` 透传给 `sources.suggestions(track, interactive=...)`。
    - **手动查歌词与同曲批扫的任务及界面状态隔离**（`music_sources.py`、`source-plugins.tsx`、`MusicSourcePlugins.kt`）：
      - 重复点击手动查歌词仍复用已有的**手动** `lyric_lookup_jobs` 记录，但 `enqueue_lyrics()` 不复用批扫自建的 `job_id`；当目标曲目存在排队或进行中的批扫项时，手动请求独立创建并激活高优先级手动 `lyric_lookup_jobs`（并发查全量已启用歌词来源，并直接复用批扫已写入的 `provider_cache` 热缓存），批扫侧在 `claim_job()` 检测到活跃手动任务时让路推迟，待手动任务完成后再继续。
-     - 在后端响应与两端 UI 中区分手动任务与批扫持有的 `job_id`（通过持久化标记或排除 `lyric_scan_items.job_id`）：`GET /api/v1/manage/tracks/{track_id}/online-lyrics` 的候选列表继续展示该曲目的全部已有候选（含批扫已产出的候选），但 Web（`source-plugins.tsx`）与 Android（`OnlineLyricsPanel`）的单曲查询按钮禁用态、加载进度、轮询条件以及 `no_match`/`warnings` 提示**只跟踪手动任务**，确保批扫进行中仍可随时发起手动查询，且手动任务完成后按钮立即恢复。
+     - 在后端响应与两端 UI 中区分手动任务与批扫持有的 `job_id`（通过持久化标记或排除 `lyric_scan_items.job_id`）：`GET /api/v1/manage/tracks/{track_id}/online-lyrics` 由服务端先筛选手动任务，再按创建时间取最近 5 条。候选列表继续按曲目返回手动及批扫结果。Web（`source-plugins.tsx`）与 Android（`OnlineLyricsPanel`）的单曲查询按钮禁用态、加载进度、轮询条件以及 `no_match`/`warnings` 提示**只跟踪手动任务**，确保批扫进行中仍可随时发起手动查询，且两端观察到手动任务完成后恢复按钮并停止轮询。
 
 3. **`source_plugin_busy` 轻推迟重排**（`backend/src/wildstring/lyric_scans.py`）
    - `process_scoped()` 捕获 `source_plugin_busy` 时，不递增真实网络失败 `attempts`，不走 `30/60s` 失败退避，改为短延迟（`2~5s`）重回 `queued`。
@@ -86,7 +86,7 @@
        1. 先查 `lyric_scan_coverage` 覆盖记录（非 `force` 且命中即本地直接推进）；
        2. 未覆盖时进入 `lookup()` / `execute()`，由锁外 `provider_cache` 热缓存快路径在槽位与冷却检查**之前**执行——若搜索、（按需）详情与歌词全部命中热缓存，即使 `cooldown_until > now` 也直接在本地完成该来源；
        3. 仅当缓存未命中、即将向门控申请物理请求并遇到生效冷却（`source_plugin_rate_limited`、`upstream_429=False` 且带 `cooldown_until`）时，在本次巡检中暂缓该来源（不写入 `results`，不消耗 `attempts`），继续尝试同一首歌 `options["providers"]` 中的下一个未查来源；若后续来源达标则原子转入 `ready` 结束，若全部剩余未查来源均因缓存未命中触发冷却，再以 `next_at = min(cooldown_until)` 重新入队等冷却到期后补查。
-       4. **部分候选命中后遇冷却的保留与补查**（`LyricScans.lookup()`）：当同一来源的 `candidates[:2]` 中第 1 条候选已取回可用歌词但**尚未达到 `options["goal"]`**、第 2 条候选缓存未命中并被冷却拦截（或触发新 `429`）时，先持久化保留第 1 条已验证的较优候选（写入 `lyric_candidates` 并更新条目的最佳 `candidate_id` / `quality`），但**不将该来源记入 `results` 已完成集合、也不写入 `lyric_scan_coverage` 终态**，而是将其按“本轮冷却暂缓”处理并继续试下一来源；若整首歌最终仍未达标，冷却到期后重新调度该来源补查第 2 条候选（第 1 条直接命中热缓存跳过请求）。
+       4. **部分候选命中后遇冷却的保留与补查**（`LyricScans.lookup()`）：当同一来源的 `candidates[:2]` 中第 1 条候选已取回可用歌词但**尚未达到 `options["goal"]`**、第 2 条候选缓存未命中并被冷却拦截（或触发新 `429`）时，先持久化保留第 1 条已验证的较优候选（写入 `lyric_candidates` 并更新条目的最佳 `candidate_id` / `quality`），但**不将该来源记入 `results` 已完成集合、也不写入 `lyric_scan_coverage` 终态**，而是将其按“本轮冷却暂缓”处理并继续试下一来源；若整首歌最终仍未达标，冷却到期后重新进入该来源，沿现有查询路径重试。非强制扫描在缓存仍有效时复用结果；缓存过期、被淘汰或强制扫描时，允许重新请求搜索、详情和第 1 条候选。此前已保存的候选仍参与最佳结果比较。
      - 来源槽空闲时通过阶段一的显式优先级条件锁优先让交互式任务（`interactive=True`）领取；每个来源仍只执行一个调用，继续共享原有物理请求门控。
      - 继续复用 `exit` 暂停/取消信号、`checkpoint()` 批次状态检查与 `library_job_scope` 上下文隔离。
 
@@ -119,11 +119,11 @@
   - `make source-plugins`：跑通 `plugins/node-runtime` 单元测试、rolldown 打包与三个 `2.0.0` ZIP 产物生成。
   - `make check` 与 `make test-affected`：覆盖全部更新后的后端、Web 与契约检查。
   - `make test-native-plugin`：验证 Nuitka CPython 3.12 编译扩展在 `api_version = 2` 契约下的导入、调用与升级。
-  - 交付前执行 `make ci` 与 `make android-ci`（常规 push 的 `.github/workflows/android.yml` 触发策略保持不变），在标准 Android 模拟器上**实际执行** `SourceGainWorkspaceTest` 的两个退役入口仪器测试（`retiredPluginRouteDirectsOwnersToWebWithoutLoadingConfiguration`、`retiredAlbumLyricScanRouteDirectsOwnersToWebWithoutStartingWork`）并走通「单曲歌词编辑 → 在线歌词查询 → 预览／应用」，从 Web 与 Android `OnlineLyricsPanel` 界面发起验证“批扫进行中仍可点查询、已有候选保留、手动完成后按钮与轮询立即恢复”，同时按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
+  - 交付前执行 `make ci` 与 `make android-ci`（常规 push 的 `.github/workflows/android.yml` 触发策略保持不变），在标准 Android 模拟器上**实际执行** `SourceGainWorkspaceTest` 的两个退役入口仪器测试（`retiredPluginRouteDirectsOwnersToWebWithoutLoadingConfiguration`、`retiredAlbumLyricScanRouteDirectsOwnersToWebWithoutStartingWork`）并走通「单曲歌词编辑 → 在线歌词查询 → 预览／应用」，从 Web 与 Android `OnlineLyricsPanel` 界面发起验证“批扫进行中仍可点查询、已有候选保留、手动完成后按钮恢复并停止轮询。另以至少 5 条更新的批扫任务覆盖手动任务的场景，验证服务端仍返回活跃手动任务”，同时按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
 - **专项量化与回归场景（隔离合成上游 + 假 HTTP 传输）**：
   - **请求预算**：无歧义曲目歌词冷查询验证 QQ、网易云物理请求降至 2 次、酷狗降至 3 次；隐藏重制版后缀导致同分歧义时触发 1 次批量详情回退并正确区分版本；同专辑 3 候选元数据建议验证专辑详情按 `release_id` 去重，且 `include_release=False/True` 缓存互不污染；批量响应乱序或缺失单条时保留成功项；摘要未达标时可通过详情回退正确匹配。
   - **锁与调度延迟**：同来源持锁慢查询期间热缓存命中耗时 `< 50ms`（不再等待 2s 报错）；批扫连续 4 步已扫覆盖推进总耗时 `< 200ms`；批扫撞到已占用的来源锁时短暂重排，且不消耗 `attempts`；来源槽释放后，显式交互单曲任务（`interactive=True`）先于批量/自动元数据刷新及歌词批扫（`interactive=False`）领取；后台元数据任务先入队 `queued` 后手动单曲刷新同曲目，验证其原地提升为 `interactive=1` 且重启后仍优先执行；批扫排队或进行中对同曲目发起手动查歌词时，走高优先级全量查询而不复用批扫单目标中止语义。
-  - **429 端到端与跨来源并行**：从假 HTTP 层向网易云/酷狗 Node 运行时注入 `HTTP 429` + `Retry-After: 120`，验证 `plugin_request_gates.cooldown_until` 正确写入约 120s，验证冷却期间重复查询不产生上游请求、不续期；验证全部已启用来源均在冷却中但首选来源命中热缓存时，手动查歌词与批扫均以零上游请求在本地完成；验证单来源第 1 条候选命中（未达目标）而第 2 条候选因冷却跳过时，保留第 1 条候选、不将该来源记为已完成，冷却到期后补查第 2 条并成功达标；首选来源冷却且缓存未命中时其余来源继续，达标歌曲不再发后续请求，未达标歌曲到期后可继续查被暂缓的来源。
+  - **429 端到端与跨来源并行**：从假 HTTP 层向网易云/酷狗 Node 运行时注入 `HTTP 429` + `Retry-After: 120`，验证 `plugin_request_gates.cooldown_until` 正确写入约 120s，验证冷却期间重复查询不产生上游请求、不续期；验证全部已启用来源均在冷却中但首选来源命中热缓存时，手动查歌词与批扫均以零上游请求在本地完成；验证单来源第 1 条候选命中（未达目标）而第 2 条候选因冷却跳过时，保留第 1 条候选、不将该来源记为已完成，冷却到期后重新进入该来源并成功达标。分别验证正常热缓存、缓存过期与强制扫描时的实际请求数，以及已保存候选继续参与选择；首选来源冷却且缓存未命中时其余来源继续，达标歌曲不再发后续请求，未达标歌曲到期后可继续查被暂缓的来源。
   - **存量 v1 清理回归**：用带 Cookie、已应用歌词和未完成任务的合成实例验证升级。旧包、旧设置及插件专用 Cookie 被清理；旧任务进入终态，已应用歌词与无关配置仍可用。重复启动无额外影响，重新导入并配置 v2 后查询正常。
 
 ## 风险
