@@ -347,7 +347,8 @@ class AgentWorkspaceTest {
         val deadline = android.os.SystemClock.elapsedRealtime() + 5000
         while (true) {
             val image = instrumentation.uiAutomation.takeScreenshot()!!
-            val pixel = image.getPixel(5, image.height / 2)
+            // A wide soft keyboard can cover the midpoint of the screenshot.
+            val pixel = image.getPixel(5, image.height / 4)
             val presentedDark = android.graphics.Color.red(pixel) < 80 && android.graphics.Color.green(pixel) < 80 && android.graphics.Color.blue(pixel) < 80
             if (!dark || presentedDark) {
                 java.io.File(directory, name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle(); return
