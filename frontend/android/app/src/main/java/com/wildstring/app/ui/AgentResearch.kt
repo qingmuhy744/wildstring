@@ -75,7 +75,7 @@ import kotlinx.coroutines.launch
                 content, { content = it.take(1000) },
                 label = { Text(if (editing == null) stringResource(R.string.research_memory_input) else stringResource(R.string.research_memory_edit)) },
                 placeholder = { Text(stringResource(R.string.research_memory_example)) },
-                modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"), minLines = 2,
+                modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"),
             )
             Row {
                 TextButton({ scope.launch { action.run {

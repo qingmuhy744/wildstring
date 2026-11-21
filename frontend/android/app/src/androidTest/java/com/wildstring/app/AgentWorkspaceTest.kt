@@ -1,5 +1,7 @@
 package com.wildstring.app
 
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -138,11 +140,23 @@ class AgentWorkspaceTest {
             compose.onNodeWithText(uiString(R.string.settings_research)).performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-memory-input").fetchSemanticsNodes().isNotEmpty() }
             compose.runOnIdle { vm.settings.appearance("dark") }
-            compose.onNodeWithTag("agent-memory-input").performScrollTo().performClick().assertIsFocused()
+            val memoryInput = compose.onNodeWithTag("agent-memory-input")
+            memoryInput.performScrollTo().performClick().assertIsFocused()
             compose.onNodeWithText(uiString(R.string.research_memory_example)).assertExists()
             capture("research-memory-input-dark-phone.png", dark = true)
-            compose.onNodeWithTag("agent-memory-input").performTextInput("优先录音室版本")
+            memoryInput.performTextInput("优先录音室版本")
+            memoryInput.assertTextContains("优先录音室版本")
+            val field = memoryInput.captureToImage().toPixelMap()
+            // Sample where the typed glyphs appear, away from the label, caret and outline.
+            val visibleText = (field.height / 2 until field.height * 3 / 4).any { y ->
+                (field.height / 2 until minOf(field.height * 2, field.width / 2)).any { x ->
+                    field[x, y].luminance() > 0.5f
+                }
+            }
+            assertTrue("The entered preference must be visible inside the field", visibleText)
+            capture("research-memory-typed-dark-phone.png", dark = true)
             compose.runOnIdle { vm.settings.appearance("light") }
+            capture("research-memory-typed-light-phone.png")
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
             compose.onNodeWithTag("agent-memory-save").performScrollTo().assertIsEnabled().performClick()
