@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -19,14 +21,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wildstring.app.data.Album
 import com.wildstring.app.data.Track
+import kotlinx.coroutines.flow.Flow
 
 /** New library arrivals and personal listening history have independent ordering and queues. */
-@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (List<com.wildstring.app.data.Track>, Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}, albumActions: (Album) -> Unit = {}) {
+@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, tabReselections: Flow<String>, play: (List<Track>, Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}, albumActions: (Album) -> Unit = {}) {
     val feedback = LocalTactileFeedback.current
+    val list = rememberLazyListState()
+    LaunchedEffect(tabReselections) {
+        tabReselections.collect { if (it == "search") list.requestScrollToItem(0) }
+    }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
         val pad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val columns = pad && maxWidth >= 760.dp
-        LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), state = list, contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "discovery-header") { header() }
             item {
                 SectionHeading(stringResource(R.string.recently_added_albums), stringResource(R.string.view_all)) { vm.recentlyAdded("albums") }

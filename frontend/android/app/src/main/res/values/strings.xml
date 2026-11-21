@@ -502,12 +502,13 @@
     <string name="research_save">Save search settings</string>
     <string name="research_test">Test search (counts toward quota)</string>
     <string name="research_context_memory">Context &amp; long-term memory</string>
-    <string name="research_memory_hint">Long-chat summaries may omit details. View or clear them in chat; each summary uses one model call. Only preferences you explicitly save become memories, up to 50. Deleting a chat keeps saved memories.</string>
+    <string name="research_memory_hint">The assistant uses your saved music preferences in chat.</string>
     <string name="research_summary_auto">Summarize long chats automatically</string>
     <string name="research_memory_use">Use saved memories in chat</string>
-    <string name="research_memory_input">Music preferences to save</string>
+    <string name="research_memory_input">Music preference</string>
+    <string name="research_memory_example">For example, prefer studio recordings</string>
     <string name="research_memory_edit">Edit saved memory</string>
-    <string name="research_memory_save">Save memory</string>
+    <string name="research_memory_save">Save preference</string>
     <string name="research_memory_update">Update memory</string>
     <string name="cancel_edit">Cancel edit</string>
     <string name="research_memory_edit_action">Edit memory</string>
@@ -727,9 +728,9 @@
     <string name="agent_ws_empty_drafts_pending">No pending drafts. Completed items can be viewed in history.</string>
     <string name="agent_ws_empty_history">No history yet.</string>
     <string name="agent_ws_empty_inspections">No inspection tasks yet.</string>
-    <string name="agent_ws_empty_notifications_all">No notifications yet. Background results will appear here next time you open the app.</string>
+    <string name="agent_ws_empty_notifications_all">No notifications yet</string>
     <string name="agent_ws_empty_notifications_read">No read history yet.</string>
-    <string name="agent_ws_empty_notifications_unread">No unread notifications. Processed messages can be viewed in read history.</string>
+    <string name="agent_ws_empty_notifications_unread">No unread notifications</string>
     <string name="agent_ws_enable">Enable</string>
     <string name="agent_ws_enable_connection">Enable connection</string>
     <string name="agent_ws_enable_schedule">Enable schedule</string>
@@ -828,7 +829,6 @@
     <string name="agent_ws_quiet_hours_hint">Quiet hours only affect external delivery; in-app notifications are saved as usual.</string>
     <string name="agent_ws_quiet_start_label">Quiet start HH:mm (optional)</string>
     <string name="agent_ws_quote_prompt">“%1$s”</string>
-    <string name="agent_ws_read_hint">Read notifications are archived for review. Viewing the list does not mark them as read; read status syncs across devices.</string>
     <string name="agent_ws_readonly">Read-only</string>
     <string name="agent_ws_reasoning_effort">Reasoning Effort</string>
     <string name="agent_ws_reasoning_effort_auto">Use model default</string>

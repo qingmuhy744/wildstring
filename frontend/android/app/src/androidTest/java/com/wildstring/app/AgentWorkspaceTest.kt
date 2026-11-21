@@ -1,5 +1,7 @@
 package com.wildstring.app
 
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -137,7 +139,24 @@ class AgentWorkspaceTest {
             openPreferences()
             compose.onNodeWithText(uiString(R.string.settings_research)).performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-memory-input").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
+            compose.runOnIdle { vm.settings.appearance("dark") }
+            val memoryInput = compose.onNodeWithTag("agent-memory-input")
+            memoryInput.performScrollTo().performClick().assertIsFocused()
+            compose.onNodeWithText(uiString(R.string.research_memory_example)).assertExists()
+            capture("research-memory-input-dark-phone.png", dark = true)
+            memoryInput.performTextInput("优先录音室版本")
+            memoryInput.assertTextContains("优先录音室版本")
+            val field = memoryInput.captureToImage().toPixelMap()
+            // Sample where the typed glyphs appear, away from the label, caret and outline.
+            val visibleText = (field.height / 2 until field.height * 3 / 4).any { y ->
+                (field.height / 2 until minOf(field.height * 2, field.width / 2)).any { x ->
+                    field[x, y].luminance() > 0.5f
+                }
+            }
+            assertTrue("The entered preference must be visible inside the field", visibleText)
+            capture("research-memory-typed-dark-phone.png", dark = true)
+            compose.runOnIdle { vm.settings.appearance("light") }
+            capture("research-memory-typed-light-phone.png")
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
             compose.onNodeWithTag("agent-memory-save").performScrollTo().assertIsEnabled().performClick()
@@ -180,7 +199,7 @@ class AgentWorkspaceTest {
                 compose.onAllNodes(isRoot()).onLast().printToLog("ResearchFailure")
             }
             throw error
-        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+        } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
     @Test fun historyRenameDeleteAndBusyFailurePreserveCurrentConversation() {
         val vm = vm()
@@ -251,7 +270,11 @@ class AgentWorkspaceTest {
             capture("agent-notifications-phone.png")
             compose.onNodeWithTag("notice-read-notice-one").performClick()
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
-            compose.onNodeWithText(uiString(R.string.agent_ws_unread_count, 0)).assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_empty_notifications_unread)).assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).assertDoesNotExist()
+            compose.runOnIdle { vm.settings.appearance("dark") }
+            capture("agent-notifications-empty-dark-phone.png", dark = true)
+            compose.runOnIdle { vm.settings.appearance("system") }
             compose.onNodeWithText("新草案待确认").assertDoesNotExist()
             compose.onNodeWithTag("notice-filter-read").performClick()
             compose.onNodeWithText("新草案待确认").assertExists()
@@ -318,12 +341,14 @@ class AgentWorkspaceTest {
     private fun capture(name: String, dark: Boolean = false) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.waitForIdle(350, 5_000)
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let { java.io.File(it) } ?: instrumentation.targetContext.getExternalFilesDir(null)!!
         directory.mkdirs()
         val deadline = android.os.SystemClock.elapsedRealtime() + 5000
         while (true) {
             val image = instrumentation.uiAutomation.takeScreenshot()!!
-            val pixel = image.getPixel(5, image.height / 2)
+            // A wide soft keyboard can cover the midpoint of the screenshot.
+            val pixel = image.getPixel(5, image.height / 4)
             val presentedDark = android.graphics.Color.red(pixel) < 80 && android.graphics.Color.green(pixel) < 80 && android.graphics.Color.blue(pixel) < 80
             if (!dark || presentedDark) {
                 java.io.File(directory, name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle(); return

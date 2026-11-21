@@ -35,6 +35,10 @@ extension MacAssistantTests {
             let host = NSHostingView(rootView: GlyphFixture(state: state, reduced: reduced))
             let window = presentationWindow(host, size: CGSize(width: 120, height: 120))
             defer { window.close() }
+            window.styleMask.insert(.titled)
+            window.center()
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
             var previousImage: Data?
             var stableFrames = 0
             for _ in 0..<120 {
@@ -131,7 +135,7 @@ private struct GlyphFixture: View {
     let reduced: Bool
     var body: some View {
         PlaybackTransportGlyph(playing: state.phase != 0, buffering: state.phase == 2, size: 24,
-            foreground: MacTheme.onAccent, motionAllowed: !reduced)
+            foreground: MacTheme.onAccent, reduceMotionOverride: reduced)
             .frame(width: 64, height: 64).background(.orange, in: Circle())
             .frame(width: 120, height: 120).background(.white)
             .preferredColorScheme(.light)

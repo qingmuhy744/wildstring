@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -58,7 +59,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
 
 /** One absolute slot per server result. Placeholders cannot start playback or open an item. */
 @Composable internal fun CatalogBrowser(
-    vm: MusicViewModel, state: MusicState, header: @Composable () -> Unit,
+    vm: MusicViewModel, state: MusicState, tabReselections: Flow<String>, header: @Composable () -> Unit,
     play: (Track, Int) -> Unit, actions: (Track) -> Unit, select: (Track) -> Unit,
     selectedIds: Set<String>?, selectionEnabled: Boolean, toggleSelection: (Track) -> Unit,
     playlistActions: (Playlist) -> Unit = {},
@@ -75,6 +76,14 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
     val indexed = groups.isNotEmpty() && WindowInsets.ime.getBottom(LocalDensity.current) == 0
     val albumGrid = state.kind == "albums"
     var jumpJob by remember { mutableStateOf<Job?>(null) }
+    LaunchedEffect(tabReselections, state.tab) {
+        tabReselections.collect { tab ->
+            if (tab == state.tab) {
+                jumpJob?.cancel()
+                grid.requestScrollToItem(0)
+            }
+        }
+    }
     val firstPosition by remember(albumGrid) { derivedStateOf {
         (grid.firstVisibleItemIndex - 1).coerceAtLeast(0)
     } }

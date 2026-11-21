@@ -133,19 +133,23 @@ internal fun SimpleNotificationsSheet(
     Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize().testTag("agent-notifications"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.agent_ws_unread_count, if (valid) state.unread else 0), Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_notifications)) }
-                TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy && valid && state.unread > 0) { Text(stringResource(R.string.agent_ws_mark_all_read)) }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("unread" to stringResource(R.string.agent_ws_filter_unread), "read" to stringResource(R.string.agent_ws_filter_read), "all" to stringResource(R.string.agent_ws_filter_all)).forEach { (key, label) ->
-                    FilterChip(filter == key, { filter = key }, { Text(label) }, modifier = Modifier.testTag("notice-filter-$key"))
+            if (valid && state.unread > 0) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.agent_ws_unread_count, state.unread), Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                    TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_mark_all_read)) }
                 }
             }
-            Text(stringResource(R.string.agent_ws_read_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("unread" to stringResource(R.string.agent_ws_filter_unread), "read" to stringResource(R.string.agent_ws_filter_read), "all" to stringResource(R.string.agent_ws_filter_all)).forEach { (key, label) ->
+                        FilterChip(filter == key, { filter = key }, { Text(label) }, modifier = Modifier.testTag("notice-filter-$key"))
+                    }
+                }
+                IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_notifications)) }
+            }
             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            AgentError(state.error); ActionStatus(action)
+            AgentError(state.error)
+            if (action.message != stringResource(R.string.completed)) ActionStatus(action)
         }
         items(visible, key = { it.text("id") }) { notice ->
             AgentCard {

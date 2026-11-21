@@ -8,12 +8,7 @@ on:
       - "frontend/apple-shared/**"
       - ".github/workflows/ios.yml"
       - "Makefile"
-  pull_request:
-    paths:
-      - "frontend/ios/**"
-      - "frontend/apple-shared/**"
-      - ".github/workflows/ios.yml"
-      - "Makefile"
+  workflow_call:
   workflow_dispatch:
 
 permissions:

@@ -298,10 +298,10 @@ function Upcoming({ player }: { player: Player }) {
           </label>
         </div>
       </header>
-      {player.podcastSync === 'error' && (
+      {(player.podcastSync === 'error' || player.podcastPreferenceFailed) && (
         <div className="programme-sync" role="status">
           <p>{t('podcastStage.syncFailedNotice')}</p>
-          <button type="button" onClick={() => player.retryPodcastQueue()}>
+          <button type="button" onClick={player.retryPodcastSync}>
             {t('podcastStage.retry')}
           </button>
         </div>

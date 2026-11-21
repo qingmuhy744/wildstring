@@ -394,24 +394,37 @@ class MusicViewModel @Inject constructor(
     fun navigate(tab: String) {
         if (tab == mutable.value.tab) return
         tabs[mutable.value.tab] = query()
-        val target = tabs[tab] ?: CatalogQuery(
-            tab = tab,
-            kind = when (tab) {
-                "mine" -> "playlists"
-                "search" -> "discover"
-                "podcast" -> "podcast"
-                "assistant" -> "assistant"
-                else -> "albums"
-            },
-            title = when (tab) {
-                "mine" -> AppLanguage.string(R.string.vm_title_mine)
-                "search" -> AppLanguage.string(R.string.vm_title_discover)
-                "podcast" -> AppLanguage.string(R.string.vm_title_podcast)
-                "assistant" -> AppLanguage.string(R.string.vm_title_assistant)
-                else -> AppLanguage.string(R.string.vm_title_music)
-            }
-        )
-        show(target)
+        show(tabs[tab] ?: tabHome(tab))
+    }
+
+    private fun tabHome(tab: String) = CatalogQuery(
+        tab = tab,
+        kind = when (tab) {
+            "mine" -> "playlists"
+            "search" -> "discover"
+            "podcast" -> "podcast"
+            "assistant" -> "assistant"
+            else -> "albums"
+        },
+        title = when (tab) {
+            "mine" -> AppLanguage.string(R.string.vm_title_mine)
+            "search" -> AppLanguage.string(R.string.vm_title_discover)
+            "podcast" -> AppLanguage.string(R.string.vm_title_podcast)
+            "assistant" -> AppLanguage.string(R.string.vm_title_assistant)
+            else -> AppLanguage.string(R.string.vm_title_music)
+        }
+    )
+
+    internal fun returnToCatalogHome(): Boolean {
+        val current = mutable.value
+        cancelAlbumNavigation()
+        val home = history.remove(current.tab)?.firstOrNull()
+        if (current.tab == "search" && current.kind != "discover") {
+            show(home?.takeIf { it.kind == "discover" } ?: tabHome(current.tab))
+        } else if (home != null) {
+            show(home)
+        } else return false
+        return true
     }
 
     fun refreshLibraries(recheck: Boolean = false) = viewModelScope.launch {

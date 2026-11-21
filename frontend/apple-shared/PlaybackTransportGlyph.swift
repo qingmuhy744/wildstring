@@ -7,8 +7,10 @@ struct PlaybackTransportGlyph: View {
     var size: CGFloat
     var foreground: Color = .primary
     var motionAllowed = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var reduceMotionOverride: Bool? = nil
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
+    private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
     private var phase: Int { buffering ? 2 : (playing ? 1 : 0) }
 
     var body: some View {

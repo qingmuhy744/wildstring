@@ -502,12 +502,13 @@
     <string name="research_save">保存搜索设置</string>
     <string name="research_test">测试搜索（计入额度）</string>
     <string name="research_context_memory">上下文与长期记忆</string>
-    <string name="research_memory_hint">长对话摘要可能有遗漏，可在聊天中查看或清除；摘要占用本轮一次模型调用。记忆只保存你明确提交的偏好，最多 50 条，删除对话不会删除记忆。</string>
+    <string name="research_memory_hint">助手在聊天时会参考已保存的音乐偏好。</string>
     <string name="research_summary_auto">长对话自动摘要</string>
     <string name="research_memory_use">在聊天中使用已保存记忆</string>
-    <string name="research_memory_input">明确保存的音乐偏好</string>
+    <string name="research_memory_input">音乐偏好</string>
+    <string name="research_memory_example">例如：优先推荐录音室版本</string>
     <string name="research_memory_edit">编辑长期记忆</string>
-    <string name="research_memory_save">保存长期记忆</string>
+    <string name="research_memory_save">保存偏好</string>
     <string name="research_memory_update">更新记忆</string>
     <string name="cancel_edit">取消编辑</string>
     <string name="research_memory_edit_action">编辑记忆</string>
@@ -727,9 +728,9 @@
     <string name="agent_ws_empty_drafts_pending">没有待处理草案。已完成的内容可在处理记录中查看。</string>
     <string name="agent_ws_empty_history">暂无历史。</string>
     <string name="agent_ws_empty_inspections">还没有巡检任务。</string>
-    <string name="agent_ws_empty_notifications_all">还没有通知。后台结果会在你下次打开时出现在这里。</string>
+    <string name="agent_ws_empty_notifications_all">暂无通知</string>
     <string name="agent_ws_empty_notifications_read">暂无已读记录。</string>
-    <string name="agent_ws_empty_notifications_unread">没有未读通知。已处理的消息可在已读记录中查看。</string>
+    <string name="agent_ws_empty_notifications_unread">暂无未读通知</string>
     <string name="agent_ws_enable">启用</string>
     <string name="agent_ws_enable_connection">启用连接</string>
     <string name="agent_ws_enable_schedule">启用计划</string>
@@ -828,7 +829,6 @@
     <string name="agent_ws_quiet_hours_hint">静默时间只影响外部投递，站内通知照常保存。</string>
     <string name="agent_ws_quiet_start_label">静默开始 HH:mm（可选）</string>
     <string name="agent_ws_quote_prompt">“%1$s”</string>
-    <string name="agent_ws_read_hint">已读通知收进记录，随时可查。查看列表不会标记已读，已读状态会在设备间同步。</string>
     <string name="agent_ws_readonly">只读</string>
     <string name="agent_ws_reasoning_effort">推理强度</string>
     <string name="agent_ws_reasoning_effort_auto">沿用模型默认</string>
