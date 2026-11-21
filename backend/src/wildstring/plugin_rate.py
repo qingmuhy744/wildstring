@@ -26,7 +26,7 @@ def permit(policy, clock=None):
         ).fetchone()
         next_at, cooldown, reason, last_at = row if row else (0, 0, None, 0)
         if cooldown > now:
-            raise PluginError(reason or "source_plugin_rate_limited")
+            raise PluginError(reason or "source_plugin_rate_limited", cooldown_until=cooldown)
         interval = max(1, min(120, float(policy.get("interval_seconds", 5))))
         next_at = max(next_at, last_at + interval) if row else 0
         if next_at > now:
@@ -58,6 +58,10 @@ def cooldown(policy, delay=900, reason="source_plugin_rate_limited"):
                 "INSERT INTO plugin_request_gates(plugin_id,cooldown_until,reason) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET cooldown_until=max(cooldown_until,excluded.cooldown_until),reason=excluded.reason",
                 (policy["plugin_id"], time.time() + max(1, min(86400, delay)), reason),
             )
+            return db.execute(
+                "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id=?",
+                (policy["plugin_id"],),
+            ).fetchone()[0]
 
 
 def main():
@@ -65,7 +69,7 @@ def main():
         wait(json.loads(sys.stdin.buffer.read(8192)))
         print(json.dumps({"ok": True}))
     except PluginError as error:
-        print(json.dumps({"error": error.code}))
+        print(json.dumps({"error": error.code, "cooldown_until": error.cooldown_until}))
 
 
 if __name__ == "__main__":

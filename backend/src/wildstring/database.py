@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 54
+SCHEMA_VERSION = 55
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -705,6 +705,35 @@ class Database:
                 from wildstring.podcast_resume import SCHEMA as PODCAST_RESUME_SCHEMA
 
                 connection.executescript(PODCAST_RESUME_SCHEMA)
+            if current < 55:
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    for table, column, declaration in (
+                        ("provider_jobs", "interactive", "INTEGER NOT NULL DEFAULT 0"),
+                        ("provider_jobs", "busy_deferrals", "INTEGER NOT NULL DEFAULT 0"),
+                        ("provider_jobs", "next_at", "REAL NOT NULL DEFAULT 0"),
+                        ("provider_refresh_intents", "interactive", "INTEGER NOT NULL DEFAULT 0"),
+                        ("lyric_scan_items", "busy_deferrals", "INTEGER NOT NULL DEFAULT 0"),
+                    ):
+                        if not any(
+                            row[1] == column
+                            for row in connection.execute(f"PRAGMA table_info({table})")
+                        ):
+                            connection.execute(  # nosec B608 -- fixed table and column names above
+                                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+                            )
+                    # Manual and scan jobs may coexist for one track. Each queue
+                    # deduplicates its own work while holding the writer lock.
+                    connection.execute("DROP INDEX IF EXISTS lyric_lookup_active")
+                    connection.execute(
+                        "CREATE INDEX lyric_lookup_active ON lyric_lookup_jobs(track_id) "
+                        "WHERE status IN ('queued','running')"
+                    )
+                    connection.execute(
+                        "CREATE INDEX IF NOT EXISTS lyric_scan_active_track ON "
+                        "lyric_scan_items(track_id) WHERE status='running'"
+                    )
+                    connection.execute("PRAGMA user_version = 55")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
             )

@@ -3900,7 +3900,7 @@
     "filterWord": "Word-timed only ({{count}})",
     "fineTune": "Offset: ",
     "importAction": "Import Plugin",
-    "importDescription": "Source plugins are not pre-installed by default; manually import ZIP packages, configure, and enable them. Server upgrades retain installed plugins and configurations. Plugins execute code, so only import trusted WildString plugin packages.",
+    "importDescription": "Import a trusted plugin ZIP, configure it, and enable it. Compatible protocol upgrades retain plugins and settings; a major protocol change removes incompatible packages, which must be imported and configured again. Plugin management, lyric scans, library management, and metadata candidate review are available on the web.",
     "importSuccess": "Plugin imported; configure and enable it below.",
     "importTitle": "Import New Plugin",
     "installedTitle": "Installed Plugins",

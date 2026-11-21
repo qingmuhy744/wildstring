@@ -1,10 +1,7 @@
 package com.wildstring.app.ui
 
-import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -438,187 +435,6 @@ internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
 }
 
 @Composable
-internal fun SuggestionsPanel(vm: MusicViewModel, track: Track) { MetadataReviewPanel(vm, track) }
-internal fun statusName(value: String): String = when(value) {
-    "queued" -> AppLanguage.string(R.string.lib_mgmt_status_queued)
-    "running" -> AppLanguage.string(R.string.lib_mgmt_status_running)
-    "completed" -> AppLanguage.string(R.string.lib_mgmt_status_completed)
-    "completed_with_errors" -> AppLanguage.string(R.string.lib_mgmt_status_completed_with_errors)
-    "failed" -> AppLanguage.string(R.string.lib_mgmt_status_failed)
-    "interrupted" -> AppLanguage.string(R.string.lib_mgmt_status_interrupted)
-    "review" -> AppLanguage.string(R.string.lib_mgmt_status_review)
-    "conflict" -> AppLanguage.string(R.string.lib_mgmt_status_conflict)
-    "ready" -> AppLanguage.string(R.string.lib_mgmt_status_ready)
-    "waiting" -> AppLanguage.string(R.string.lib_mgmt_status_waiting)
-    "no_match" -> AppLanguage.string(R.string.lib_mgmt_status_no_match)
-    else -> value
-}
-
-@Composable
-internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null, initialAlbumId: String? = null) {
-    var reviewOpen by remember { mutableStateOf(initialBatchId != null || initialAlbumId != null) }
-    if (reviewOpen) { Column(Modifier.fillMaxSize()) { TextButton({ reviewOpen = false }) { Text(stringResource(R.string.lib_mgmt_back_to_management)) }; MetadataReviewPanel(vm, initialBatchId = initialBatchId, initialAlbumId = initialAlbumId) }; return }
-    val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
-    var overview by remember { mutableStateOf<JsonObject?>(null) }; var jobs by remember { mutableStateOf<JsonObject?>(null) }
-    var intake by remember { mutableStateOf<JsonObject?>(null) }; var automatic by remember { mutableStateOf<JsonObject?>(null) }
-    var selected by remember { mutableStateOf<JsonObject?>(null) }; var confirmJob by remember { mutableStateOf<String?>(null) }
-    var pendingOffset by remember { mutableIntStateOf(0) }
-    var jobOffset by remember { mutableIntStateOf(0) }
-    var editImport by remember { mutableStateOf(false) }
-    var folders by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var folderDetail by remember { mutableStateOf<JsonObject?>(null) }
-    var folderPicker by remember { mutableStateOf(false) }
-    var folderConfirm by remember { mutableStateOf(false) }
-    var folderAlbum by remember { mutableStateOf("") }
-    var folderArtists by remember { mutableStateOf("") }
-    val folderAction = remember { FeatureAction() }
-    suspend fun load() {
-        overview = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "overview"))
-        jobs = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "jobs") + "?limit=20&offset=$jobOffset")
-        intake = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "intake", "items") + "?limit=20&offset=$pendingOffset")
-        automatic = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "intake", "settings"))
-    }
-    suspend fun loadFolders() {
-        folders = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "metadata", "folders") + "?limit=200")
-            .getAsJsonArray("items")?.map { it.asJsonObject }.orEmpty()
-    }
-    suspend fun openFolder(folder: String) {
-        val detail = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "metadata", "folders") + "?folder=${java.net.URLEncoder.encode(folder, "UTF-8")}")
-        folderDetail = detail
-        folderAlbum = detail.getAsJsonArray("album_variants")?.firstOrNull()?.asString.orEmpty()
-        folderArtists = detail.getAsJsonArray("album_artist_variants")?.joinToString(" / ") { it.asString }.orEmpty()
-    }
-    LaunchedEffect(pendingOffset, jobOffset) { action.run { load() }; while (true) { delay(4000); if (!action.busy && selected == null) runCatching { load() } } }
-    LaunchedEffect(Unit) { folderAction.run { loadFolders() }; folderAction.message = null }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.lib_mgmt_library_overview), style = MaterialTheme.typography.titleLarge)
-        Button({ reviewOpen = true }) { Text(stringResource(R.string.lib_mgmt_batch_review_metadata)) }
-        overview?.let { info ->
-            val counts = info.getAsJsonObject("counts")
-            Text(stringResource(R.string.lib_mgmt_overview_counts, counts?.text("tracks").orEmpty(), info.text("albums"), info.text("artists")))
-            Text(stringResource(R.string.lib_mgmt_overview_audio_size, counts?.get("size_bytes")?.asLong?.div(1024 * 1024) ?: 0))
-        }
-        Text(stringResource(R.string.lib_mgmt_folder_organize_title), style = MaterialTheme.typography.titleMedium)
-        Text(stringResource(R.string.lib_mgmt_folder_organize_hint), style = MaterialTheme.typography.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(if (folders.isEmpty()) stringResource(R.string.lib_mgmt_folders_loading) else stringResource(R.string.lib_mgmt_folders_discovered, folders.size), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-            TextButton({ folderPicker = true }, enabled = !folderAction.busy && folders.isNotEmpty()) { Text(stringResource(R.string.lib_mgmt_select_folder)) }
-        }
-        ActionStatus(folderAction)
-        folderDetail?.let { detail ->
-            val tracks = detail.getAsJsonArray("tracks")?.map { it.asJsonObject }.orEmpty()
-            Text(detail.text("folder"), style = MaterialTheme.typography.titleSmall)
-            Text(stringResource(R.string.lib_mgmt_folder_tracks_summary, tracks.size, detail.arrayText("album_variants").ifBlank { stringResource(R.string.lib_mgmt_unnamed_album) }), style = MaterialTheme.typography.bodySmall)
-            if (detail.get("warning")?.asBoolean == true) Text(stringResource(R.string.lib_mgmt_folder_warning), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(folderAlbum, { folderAlbum = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.lib_mgmt_unify_album)) }, enabled = !folderAction.busy)
-            OutlinedTextField(folderArtists, { folderArtists = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.lib_mgmt_unify_album_artists)) }, enabled = !folderAction.busy)
-            Text(
-                if (tracks.size > 8) stringResource(R.string.lib_mgmt_tracks_summary_with_more, tracks.take(8).joinToString("、") { it.text("title") }, tracks.size)
-                else stringResource(R.string.lib_mgmt_tracks_summary, tracks.take(8).joinToString("、") { it.text("title") }),
-                style = MaterialTheme.typography.bodySmall
-            )
-            Button({ folderConfirm = true }, enabled = !folderAction.busy && (folderAlbum.isNotBlank() || folderArtists.isNotBlank())) { Text(stringResource(R.string.lib_mgmt_apply_to_folder)) }
-        }
-        Row { Button({ confirmJob = "import" }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_import_music)) }; Spacer(Modifier.width(12.dp)); OutlinedButton({ confirmJob = "scan" }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_scan_library)) } }
-        TextButton({ scope.launch { action.run { val result = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "providers", "refresh"), obj("scope" to "library", "mode" to "missing", "force" to false)); action.message = AppLanguage.string(R.string.lib_mgmt_refresh_queued_message, result.text("queued")) } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_refresh_missing_metadata)) }
-        automatic?.let { options -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(options.get("enabled")?.asBoolean == true, { enabled -> scope.launch { action.run { automatic = vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "intake", "settings"), obj("version" to options.get("version"), "enabled" to enabled, "interval_seconds" to options.get("interval_seconds"), "stable_seconds" to options.get("stable_seconds"))); action.message = AppLanguage.string(R.string.lib_mgmt_auto_discover_saved) } } }, enabled = !action.busy)
-            Text(stringResource(R.string.lib_mgmt_auto_discover_sources), Modifier.padding(start = 12.dp))
-        } }
-        if (automatic?.has("download_policy") == true) TextButton({ editImport = true }) { Text(stringResource(R.string.lib_mgmt_download_import_settings)) }
-        ActionStatus(action)
-        Text(stringResource(R.string.lib_mgmt_pending_intake), style = MaterialTheme.typography.titleLarge)
-        intake?.getAsJsonArray("items")?.forEach { node -> val item = node.asJsonObject
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-                Text(item.text("source_path")); Text(statusName(item.text("state")), style = MaterialTheme.typography.bodySmall)
-                Text(item.getAsJsonArray("issues")?.joinToString("、") { if (it.asString == "download_incomplete") AppLanguage.string(R.string.lib_mgmt_issue_download_incomplete) else it.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
-                Row {
-                    if (item.get("can_approve")?.asBoolean == true) TextButton({ selected = item }) { Text(stringResource(R.string.lib_mgmt_fill_and_approve)) }
-                    if (item.text("state") == "failed") TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "intake", "items", item.text("id"), "retry"), obj("version" to item.get("version"))); load() } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_retry)) }
-                    TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "intake", "items", item.text("id"), "ignore"), obj("version" to item.get("version"))); load() } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_ignore)) }
-                }
-            } }
-        }
-        Row {
-            TextButton({ pendingOffset = (pendingOffset - 20).coerceAtLeast(0) }, enabled = pendingOffset > 0 && !action.busy) { Text(stringResource(R.string.lib_mgmt_prev_page)) }
-            TextButton({ pendingOffset += 20 }, enabled = pendingOffset + 20 < (intake?.get("total")?.asInt ?: 0) && !action.busy) { Text(stringResource(R.string.lib_mgmt_next_page)) }
-        }
-        Text(stringResource(R.string.lib_mgmt_background_jobs), style = MaterialTheme.typography.titleLarge)
-        jobs?.getAsJsonArray("items")?.forEach { node -> val item = node.asJsonObject
-            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Text((if (item.text("kind") == "import") stringResource(R.string.lib_mgmt_job_kind_import) else stringResource(R.string.lib_mgmt_job_kind_scan)) + " · " + statusName(item.text("status")))
-                item.get("result")?.takeIf { it.isJsonObject }?.asJsonObject?.get("counts")?.takeIf { it.isJsonObject }?.asJsonObject?.let { counts ->
-                    Text(counts.entrySet().joinToString(" · ") { (key, value) -> (when(key) {
-                        "discovered" -> AppLanguage.string(R.string.lib_mgmt_count_discovered)
-                        "imported" -> AppLanguage.string(R.string.lib_mgmt_count_imported)
-                        "scanned" -> AppLanguage.string(R.string.lib_mgmt_count_scanned)
-                        "added" -> AppLanguage.string(R.string.lib_mgmt_count_added)
-                        "updated" -> AppLanguage.string(R.string.lib_mgmt_count_updated)
-                        "unchanged" -> AppLanguage.string(R.string.lib_mgmt_count_unchanged)
-                        "errors" -> AppLanguage.string(R.string.lib_mgmt_count_errors)
-                        "missing" -> AppLanguage.string(R.string.lib_mgmt_count_missing)
-                        "unreadable" -> AppLanguage.string(R.string.lib_mgmt_count_unreadable)
-                        "skipped" -> AppLanguage.string(R.string.lib_mgmt_count_skipped)
-                        else -> key
-                    }) + " " + value.asString }, style = MaterialTheme.typography.bodySmall)
-                }
-                if (item.text("error").isNotBlank()) Text(item.text("error"), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Row {
-            TextButton({ jobOffset = (jobOffset - 20).coerceAtLeast(0) }, enabled = jobOffset > 0 && !action.busy) { Text(stringResource(R.string.lib_mgmt_newer_jobs)) }
-            TextButton({ jobOffset += 20 }, enabled = jobOffset + 20 < (jobs?.get("total")?.asInt ?: 0) && !action.busy) { Text(stringResource(R.string.lib_mgmt_older_jobs)) }
-        }
-    }
-    confirmJob?.let { kind -> AlertDialog(onDismissRequest = { confirmJob = null }, title = { Text(if (kind == "import") stringResource(R.string.lib_mgmt_confirm_import_title) else stringResource(R.string.lib_mgmt_confirm_scan_title)) }, text = { Text(if (kind == "import") stringResource(R.string.lib_mgmt_confirm_import_message) else stringResource(R.string.lib_mgmt_confirm_scan_message)) }, confirmButton = { TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "jobs"), obj("kind" to kind, "full" to false)); confirmJob = null; load(); action.message = AppLanguage.string(R.string.lib_mgmt_job_submitted_message) } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_start)) } }, dismissButton = { TextButton({ confirmJob = null }) { Text(stringResource(R.string.lib_mgmt_cancel)) } }) }
-    if (editImport) automatic?.let { options -> ImportSettingsDialog(vm, options, { editImport = false }) { result -> automatic = result; editImport = false } }
-    selected?.let { item -> IntakeApprovalDialog(vm, item, { selected = null }) { scope.launch { action.run { load() } } } }
-    if (folderPicker) AlertDialog(
-        onDismissRequest = { folderPicker = false },
-        title = { Text(stringResource(R.string.lib_mgmt_select_folder_title)) },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(folders, key = { it.text("folder") }) { item ->
-                    TextButton({ folderPicker = false; scope.launch { folderAction.run { openFolder(item.text("folder")) } } }, enabled = !folderAction.busy, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                            Text(item.text("folder"))
-                            Text(stringResource(R.string.lib_mgmt_folder_tracks_summary, item.text("track_count").toIntOrNull() ?: 0, item.asJsonObject.arrayText("album_variants").ifBlank { stringResource(R.string.lib_mgmt_unnamed_album) }), style = MaterialTheme.typography.bodySmall)
-                            if (item.get("warning")?.asBoolean == true) Text(stringResource(R.string.lib_mgmt_folder_multi_album_warning), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton({ folderPicker = false }) { Text(stringResource(R.string.lib_mgmt_close)) } },
-    )
-    if (folderConfirm) {
-        val detail = folderDetail
-        AlertDialog(
-            onDismissRequest = { if (!folderAction.busy) folderConfirm = false },
-            title = { Text(stringResource(R.string.lib_mgmt_confirm_folder_title)) },
-            text = {
-                val albumText = folderAlbum.takeIf { it.isNotBlank() }?.let { stringResource(R.string.lib_mgmt_album_field_name) }
-                val artistsText = folderArtists.takeIf { it.isNotBlank() }?.let { stringResource(R.string.lib_mgmt_album_artists_field_name) }
-                val joined = listOfNotNull(albumText, artistsText).joinToString(stringResource(R.string.lib_mgmt_and_separator))
-                Text(stringResource(R.string.lib_mgmt_confirm_folder_message, detail?.getAsJsonArray("tracks")?.size() ?: 0, joined))
-            },
-            confirmButton = { TextButton({
-                scope.launch { folderAction.run {
-                    val current = detail ?: return@run
-                    val overrides = JsonObject()
-                    folderAlbum.trim().takeIf { it.isNotBlank() }?.let { overrides.addProperty("album", it) }
-                    folderArtists.split(Regex("[/,，、]")).map { it.trim() }.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { values -> overrides.add("album_artists", JsonArray().apply { values.forEach(::add) }) }
-                    val tracks = current.getAsJsonArray("tracks") ?: JsonArray()
-                    vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "metadata", "folders"), obj("folder" to current.text("folder"), "tracks" to JsonArray().apply { tracks.forEach { track -> add(obj("track_id" to track.asJsonObject.text("track_id"), "version" to track.asJsonObject.get("metadata_version"))) } }, "overrides" to overrides))
-                    openFolder(current.text("folder")); loadFolders(); vm.load(); folderConfirm = false; folderAction.message = AppLanguage.string(R.string.lib_mgmt_folder_updated_message, tracks.size())
-                } }
-            }, enabled = !folderAction.busy) { Text(stringResource(R.string.lib_mgmt_confirm_modify)) } },
-            dismissButton = { TextButton({ folderConfirm = false }, enabled = !folderAction.busy) { Text(stringResource(R.string.lib_mgmt_cancel)) } },
-        )
-    }
-}
-
-@Composable
 internal fun AlbumMetadataPanel(vm: MusicViewModel, albumId: String, dismiss: () -> Unit) {
     val action = remember { FeatureAction() }
     var detail by remember { mutableStateOf<JsonObject?>(null) }
@@ -672,26 +488,6 @@ internal fun AlbumMetadataPanel(vm: MusicViewModel, albumId: String, dismiss: ()
 }
 
 @Composable
-private fun IntakeApprovalDialog(vm: MusicViewModel, item: JsonObject, dismiss: () -> Unit, saved: () -> Unit) {
-    val fields = remember(item.text("id")) { mutableStateMapOf<String, String>().apply {
-        val effective = item.getAsJsonObject("metadata") ?: JsonObject()
-        metadataFields.take(4).forEach { (key, _) -> put(key, fieldText(item.getAsJsonObject("overrides")?.get(key) ?: effective.get(key))) }
-    } }
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(stringResource(R.string.lib_mgmt_intake_approval_title)) }, text = {
-        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            metadataFields.take(4).forEach { (key, titleRes) -> OutlinedTextField(fields[key].orEmpty(), { fields[key] = it.take(8000) }, label = { Text(stringResource(titleRes)) }, enabled = !action.busy) }
-            ActionStatus(action)
-        }
-    }, confirmButton = { TextButton({ scope.launch { action.run {
-        val overrides = item.getAsJsonObject("overrides")?.deepCopy() ?: JsonObject()
-        fields.forEach { (key, value) -> overrides.add(key, parseField(key, value)) }
-        vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "intake", "items", item.text("id"), "approve"), obj("version" to item.get("version"), "overrides" to overrides))
-        dismiss(); saved()
-    } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_confirm_and_import)) } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_cancel)) } })
-}
-
-@Composable
 internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: String?, dismiss: () -> Unit) {
     var missing by remember { mutableStateOf(true) }; var force by remember { mutableStateOf(false) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
@@ -711,30 +507,4 @@ internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: St
             AppLanguage.string(R.string.lib_mgmt_refresh_queued_summary, queued, active) + if (upgraded + intents > 0) AppLanguage.string(R.string.lib_mgmt_refresh_intents_suffix, upgraded + intents) else ""
         }; vm.notify(action.message!!); dismiss()
     } } }, enabled = !action.busy) { Text(if (action.busy) stringResource(R.string.lib_mgmt_submitting) else stringResource(R.string.lib_mgmt_start_refresh)) } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_cancel)) } })
-}
-
-@Composable
-private fun ImportSettingsDialog(vm: MusicViewModel, initial: JsonObject, dismiss: () -> Unit, saved: (JsonObject) -> Unit) {
-    var interval by remember { mutableStateOf(initial.text("interval_seconds")) }
-    var stable by remember { mutableStateOf(initial.text("stable_seconds")) }
-    val policy = initial.getAsJsonObject("download_policy")
-    var waitAlbum by remember { mutableStateOf(policy.get("wait_for_album").asBoolean) }
-    var suffixes by remember { mutableStateOf(policy.getAsJsonArray("partial_suffixes").joinToString(", ") { it.asString }) }
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(stringResource(R.string.lib_mgmt_import_settings_title)) }, text = {
-        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(interval, { interval = it }, label = { Text(stringResource(R.string.lib_mgmt_interval_label)) })
-            OutlinedTextField(stable, { stable = it }, label = { Text(stringResource(R.string.lib_mgmt_stable_label)) })
-            Row(Modifier.fillMaxWidth().clickable { waitAlbum = !waitAlbum }, verticalAlignment = Alignment.CenterVertically) { Checkbox(waitAlbum, { waitAlbum = it }); Text(stringResource(R.string.lib_mgmt_wait_for_album)) }
-            OutlinedTextField(suffixes, { suffixes = it }, label = { Text(stringResource(R.string.lib_mgmt_partial_suffixes_label)) })
-            Text(stringResource(R.string.lib_mgmt_import_settings_hint), style = MaterialTheme.typography.bodySmall)
-            ActionStatus(action)
-        }
-    }, confirmButton = { TextButton({ scope.launch { action.run {
-        val check = interval.toIntOrNull(); val duration = stable.toIntOrNull()
-        require(check != null && check in 15..86400 && duration != null && duration in 5..86400) { AppLanguage.string(R.string.lib_mgmt_time_range_error) }
-        val endings = JsonArray().apply { suffixes.split(Regex("[,\\s]+" )).filter { it.isNotBlank() }.forEach { add(it) } }
-        val body = initial.deepCopy().apply { addProperty("interval_seconds", check); addProperty("stable_seconds", duration); add("download_policy", obj("wait_for_album" to waitAlbum, "partial_suffixes" to endings)) }
-        saved(vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "intake", "settings"), body))
-    } } }, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_save_settings)) } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text(stringResource(R.string.lib_mgmt_cancel)) } })
 }

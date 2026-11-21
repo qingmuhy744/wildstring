@@ -6,6 +6,8 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from importlib.machinery import PathFinder
 
+API_VERSION = 2
+
 
 @dataclass(frozen=True)
 class Manifest:
@@ -14,7 +16,7 @@ class Manifest:
     upstream: str
     license: str
     version: str = "1.0.0"
-    api_version: int = 1
+    api_version: int = API_VERSION
     capabilities: tuple = ("metadata", "lyrics", "cover")
     settings: tuple = field(default_factory=tuple)
     entrypoint: str = "adapter:Plugin"
@@ -28,8 +30,18 @@ class Manifest:
 
 
 class PluginError(Exception):
-    def __init__(self, code="source_plugin_unavailable"):
+    def __init__(
+        self,
+        code="source_plugin_unavailable",
+        *,
+        upstream_429=False,
+        retry_after=None,
+        cooldown_until=None,
+    ):
         self.code = code
+        self.upstream_429 = upstream_429
+        self.retry_after = retry_after
+        self.cooldown_until = cooldown_until
         super().__init__(code)
 
 
@@ -64,8 +76,8 @@ class InstalledPlugin:
     def search(self, context, query):
         return self.invoke(context, "search", query)
 
-    def metadata(self, context, candidate):
-        return self.invoke(context, "metadata", candidate)
+    def metadata(self, context, request):
+        return self.invoke(context, "metadata", request)
 
     def lyrics(self, context, candidate):
         return self.invoke(context, "lyrics", candidate)

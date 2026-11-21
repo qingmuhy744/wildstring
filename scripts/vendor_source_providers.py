@@ -27,7 +27,10 @@ REPLACEMENTS = {
     "node-forge": "@wildstring/native-rsa",
     "pac-proxy-agent": "@wildstring/no-pac",
 }
-DEPENDENCY_OVERRIDES = {"kugou": {"pako": "^3.0.2"}}
+DEPENDENCY_OVERRIDES = {
+    "kugou": {"axios": "^1.21.0", "pako": "^3.0.3"},
+    "netease": {"axios": "^1.21.0"},
+}
 REQUIRE = re.compile(r"require\(['\"]([^'\"]+)['\"]\)")
 UNSUPPORTED = {"module/register_checktoken_v2.js", "module/register_checktoken_v3.js"}
 SURFACE = {
@@ -255,8 +258,8 @@ def main():
         cache = args.cache / (provider + ".tar.gz")
         if not cache.exists():
             with urlopen(config["url"], timeout=45) as response:  # nosec B310 -- fixed HTTPS sources above
-                raw = response.read(16_000_001)
-            if len(raw) > 16_000_000:
+                raw = response.read(20_000_001)
+            if len(raw) > 20_000_000:
                 raise ValueError("Upstream archive too large")
             cache.write_bytes(raw)
         output = subset(provider, cache.read_bytes())

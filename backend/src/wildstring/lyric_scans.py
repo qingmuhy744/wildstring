@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 from uuid import uuid4
 
@@ -79,6 +80,8 @@ class LyricScans:
         self.exit = threading.Event()
         self.thread = None
         self.lifecycle_lock = threading.Lock()
+        self.claim_lock = threading.Lock()
+        self.active_sources = set()
 
     def settings(self, body=None):
         with self.database.connect(write=body is not None) as db:
@@ -119,11 +122,28 @@ class LyricScans:
             thread.join(timeout=2)
 
     def run(self):
-        while not self.exit.wait(0.5):
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="lyric-source") as pool:
+            workers = [pool.submit(self.run_worker) for _ in range(3)]
+            for worker in workers:
+                worker.result()
+
+    def run_worker(self):
+        delay = 0.02
+        while not self.exit.wait(delay):
             try:
                 self.sources.providers.check_storage()
-                self.step()
+                if self.step():
+                    delay = 0.02
+                else:
+                    with self.database.connect() as db:
+                        due = db.execute(
+                            "SELECT MIN(i.next_at) FROM lyric_scan_items i JOIN lyric_scan_batches b "
+                            "ON b.id=i.batch_id WHERE b.status='running' AND i.status='queued' AND i.next_at>?",
+                            (time.time(),),
+                        ).fetchone()[0]
+                    delay = min(0.5, max(0.02, due - time.time())) if due else 0.5
             except Exception as error:
+                delay = 0.5
                 from wildstring.diagnostics import record_event
 
                 record_event(
@@ -285,7 +305,7 @@ class LyricScans:
                 )
             elif action == "retry_failed" and batch["status"] != "running":
                 db.execute(
-                    "UPDATE lyric_scan_items SET status='queued',provider_index=0,attempts=0,next_at=0,error=NULL,results='{}' WHERE batch_id=? AND (status='failed' OR error IS NOT NULL) AND status NOT IN ('applied','restored')",
+                    "UPDATE lyric_scan_items SET status='queued',provider_index=0,attempts=0,busy_deferrals=0,next_at=0,error=NULL,results='{}' WHERE batch_id=? AND (status='failed' OR error IS NOT NULL) AND status NOT IN ('applied','restored')",
                     (identity,),
                 )
                 db.execute(
@@ -395,11 +415,21 @@ class LyricScans:
 
     def step(self):
         now = time.time()
-        with self.database.connect(write=True) as db:
+        with self.claim_lock, self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT i.*,b.options FROM lyric_scan_items i JOIN lyric_scan_batches b ON b.id=i.batch_id WHERE b.status='running' AND i.status='queued' AND i.next_at<=? ORDER BY i.updated_at,i.rowid LIMIT 1",
-                (now,),
+                """SELECT i.*,b.options,
+                    (SELECT json_extract(p.value,'$.id') FROM json_each(b.options,'$.providers') p
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM json_each(i.results) r WHERE r.key=json_extract(p.value,'$.id')
+                     ) ORDER BY p.key LIMIT 1) AS source
+                    FROM lyric_scan_items i JOIN lyric_scan_batches b ON b.id=i.batch_id
+                    WHERE b.status='running' AND i.status='queued' AND i.next_at<=?
+                      AND NOT EXISTS (SELECT 1 FROM lyric_scan_items active
+                                      WHERE active.track_id=i.track_id AND active.status='running')
+                      AND (source IS NULL OR source NOT IN (SELECT value FROM json_each(?)))
+                    ORDER BY i.updated_at,i.rowid LIMIT 1""",
+                (now, json.dumps(sorted(self.active_sources))),
             ).fetchone()
             if not row:
                 batches = [
@@ -408,6 +438,8 @@ class LyricScans:
                 ]
             else:
                 db.execute("UPDATE lyric_scan_items SET status='running' WHERE id=?", (row["id"],))
+                if row["source"]:
+                    self.active_sources.add(row["source"])
                 batches = []
         if not row:
             for identity in batches:
@@ -437,6 +469,9 @@ class LyricScans:
                 exception_type=type(error).__name__,
             )
             self.failed(item, "lyric_scan_failed")
+        finally:
+            with self.claim_lock:
+                self.active_sources.discard(item["source"])
         self.complete(item["batch_id"])
         return True
 
@@ -494,9 +529,9 @@ class LyricScans:
         ):
             self.finish_item(item, "skipped_goal")
             return
-        providers = options["providers"]
-        if item["provider_index"] >= len(providers):
-            result = json.loads(item["results"])
+        result = json.loads(item["results"])
+        providers = [provider for provider in options["providers"] if provider["id"] not in result]
+        if not providers:
             status = (
                 "ready"
                 if item["candidate_id"]
@@ -510,7 +545,21 @@ class LyricScans:
             )
             self.finish_item(item, status)
             return
-        provider = providers[item["provider_index"]]
+        deferred = []
+        for provider in providers:
+            deadline = self.process_provider(item, track, record, provider, options)
+            if deadline is None:
+                return
+            deferred.append(deadline)
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.checkpoint(db, item["batch_id"])
+            db.execute(
+                "UPDATE lyric_scan_items SET status='queued',next_at=?,updated_at=? WHERE id=? AND status='running'",
+                (min(deferred), time.time(), item["id"]),
+            )
+
+    def process_provider(self, item, track, record, provider, options):
         identity = provider["id"]
         config = self.sources.current(identity, provider["version"])
         if (
@@ -524,11 +573,11 @@ class LyricScans:
         with self.database.connect() as db:
             covered = db.execute(
                 "SELECT * FROM lyric_scan_coverage WHERE track_id=? AND plugin_id=? AND fingerprint=? AND target=?",
-                (track["id"], identity, fingerprint, target),
+                (track["id"], identity, item["fingerprint"], target),
             ).fetchone()
         if covered and not options["force"]:
             self.advance(item, identity, "skipped_scanned", covered["candidate_id"])
-            return
+            return None
         if not self.claim_job(item):
             return
         try:
@@ -536,20 +585,35 @@ class LyricScans:
         except PluginError as error:
             if error.code == "lyric_scan_paused":
                 raise
-            with self.database.connect() as db:
-                gate = db.execute(
-                    "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id=?", (identity,)
-                ).fetchone()
+            if error.code == "source_plugin_rate_limited":
+                with self.database.connect() as db:
+                    gate = db.execute(
+                        "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id=?",
+                        (identity,),
+                    ).fetchone()
+                if gate and gate[0] > time.time():
+                    return gate[0]
+            if error.code == "source_plugin_busy":
+                if item["busy_deferrals"] < 10:
+                    with self.database.connect(write=True) as db:
+                        db.execute(
+                            "UPDATE lyric_scan_items SET status='queued',busy_deferrals=busy_deferrals+1,next_at=?,error=?,updated_at=? WHERE id=? AND status='running'",
+                            (time.time() + 3, error.code, time.time(), item["id"]),
+                        )
+                    return None
+                self.advance(item, identity, "failed", error=error.code)
+                return None
             transient = error.code not in {
                 "source_plugin_auth_or_rejected",
                 "source_plugin_dependency_missing",
                 "source_plugin_configuration_changed",
             }
-            if transient and item["attempts"] < 2:
-                due = max(time.time() + 30 * (2 ** item["attempts"]), gate[0] if gate else 0)
+            attempts = item["attempts"]
+            if transient and attempts < 2:
+                due = time.time() + 30 * (2**attempts)
                 with self.database.connect(write=True) as db:
                     db.execute(
-                        "UPDATE lyric_scan_items SET status='queued',attempts=attempts+1,next_at=?,error=?,updated_at=? WHERE id=? AND status='running'",
+                        "UPDATE lyric_scan_items SET status='queued',attempts=attempts+1,busy_deferrals=0,next_at=?,error=?,updated_at=? WHERE id=? AND status='running'",
                         (due, error.code, time.time(), item["id"]),
                     )
             else:
@@ -592,6 +656,7 @@ class LyricScans:
             force=options["force"],
             batch_id=item["batch_id"],
             interval_seconds=options["interval_seconds"],
+            include_release=False,
         )
         outcome, best_id, best_quality = "no_match", None, None
         before = json.loads(item["baseline"])
@@ -601,6 +666,12 @@ class LyricScans:
             except PluginError as error:
                 if error.code == "source_plugin_no_lyrics":
                     continue
+                if error.code in {"source_plugin_rate_limited", "source_plugin_busy"}:
+                    if best_id:
+                        self.advance(item, identity, None, best_id, best_quality)
+                    raise
+                if error.code == "lyric_scan_paused":
+                    raise
                 if best_id or outcome == "review":
                     self.advance(
                         item,
@@ -664,15 +735,13 @@ class LyricScans:
                 (track["id"], identity, item["fingerprint"], target, outcome, best_id, time.time()),
             )
         self.advance(item, identity, outcome, best_id, best_quality)
-        if best_quality and reaches(best_quality, options["goal"]):
-            item["candidate_id"] = best_id
-            self.finish_item(item, "ready")
 
     def advance(
         self, item, identity, status, candidate_id=None, candidate_quality=None, error=None
     ):
         results = json.loads(item["results"])
-        results[identity] = {"status": status, "error": error}
+        if status is not None:
+            results[identity] = {"status": status, "error": error}
         current = json.loads(item["quality"]) if item["quality"] else None
         options = json.loads(item["options"])
         if candidate_id and candidate_quality is None:
@@ -695,9 +764,19 @@ class LyricScans:
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             self.checkpoint(db, item["batch_id"])
+            if status is None:
+                db.execute(
+                    "UPDATE lyric_scan_items SET candidate_id=?,quality=? WHERE id=?",
+                    (item["candidate_id"], item["quality"], item["id"]),
+                )
+                return
+            best = json.loads(item["quality"]) if item["quality"] else None
+            ready = best is not None and reaches(best, options["goal"])
             db.execute(
-                "UPDATE lyric_scan_items SET status='queued',provider_index=provider_index+1,attempts=0,next_at=0,candidate_id=?,quality=?,results=?,error=?,updated_at=? WHERE id=? AND status!='cancelled'",
+                "UPDATE lyric_scan_items SET status=?,provider_index=?,attempts=0,busy_deferrals=0,next_at=0,candidate_id=?,quality=?,results=?,error=?,updated_at=? WHERE id=? AND status='running'",
                 (
+                    "ready" if ready else "queued",
+                    len(results),
                     item["candidate_id"],
                     item["quality"],
                     json.dumps(results),
@@ -706,6 +785,11 @@ class LyricScans:
                     item["id"],
                 ),
             )
+            if ready and item["job_id"]:
+                db.execute(
+                    "UPDATE lyric_lookup_jobs SET status='completed',updated_at=? WHERE id=?",
+                    (time.time(), item["job_id"]),
+                )
 
     def apply(self, identity, item_ids):
         output = []

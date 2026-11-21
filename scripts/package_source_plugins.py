@@ -49,7 +49,8 @@ class Plugin({name}):
         path = args.output_dir / f"wildstring-{plugin.manifest.id}-{plugin.manifest.version}.zip"
         with ZipFile(path, "w", ZIP_DEFLATED) as archive:
             archive.writestr(
-                "manifest.json", json.dumps(plugin.manifest.public(), ensure_ascii=False, indent=2)
+                "manifest.json",
+                json.dumps(plugin.manifest.public(), ensure_ascii=False, indent=2),
             )
             archive.writestr("adapter.py", adapter + "\n")
             if plugin.manifest.id in {"kugou", "netease"}:
@@ -63,7 +64,7 @@ class Plugin({name}):
             archive.write(ROOT / "LICENSE", "LICENSE")
             archive.writestr(
                 "README.txt",
-                f"WildString source plugin API v1\nUpstream: {plugin.manifest.upstream}\nLicense: {plugin.manifest.license}\nOfficial image: Python 3.12 + Node 22 + QQ SDK. Import and enable; external service URL is optional.\nOnly metadata and lyrics; no audio download.\n",
+                f"WildString source plugin API v2\nUpstream: {plugin.manifest.upstream}\nLicense: {plugin.manifest.license}\nOfficial image: Python 3.12 + Node 22 + QQ SDK. Import and enable; external service URL is optional.\nOnly metadata and lyrics; no audio download.\n",
             )
         print(path.name)
 

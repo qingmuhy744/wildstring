@@ -375,3 +375,30 @@ def test_failed_provider_job_promotes_pending_refresh_intent_and_diagnostics_use
             promoted["refresh_mode"],
             promoted["force"],
         ) == (2, "queued", "all", 1)
+
+
+def test_single_track_refresh_promotes_queued_background_job(settings, authenticated_client):
+    seed(settings)
+    with authenticated_client(settings) as client:
+        service, track = setup_service(client)
+        service.enqueue([track["id"]])
+        service.suggestions = lambda *args, **kwargs: ([], ["fixture-source:source_plugin_busy"])
+        service.step()
+        with service.database.connect() as db:
+            old = db.execute(
+                "SELECT id, interactive, status, next_at FROM provider_jobs"
+            ).fetchone()
+            assert old["interactive"] == 0 and old["status"] == "queued"
+            assert old["next_at"] > time.time()
+        response = client.post(
+            BASE + "/refresh",
+            headers=HEADERS,
+            json={"scope": "track", "id": track["id"]},
+        )
+        assert response.status_code == 200, response.text
+        with Database(settings.data_dir).connect() as db:
+            jobs = [
+                tuple(row)
+                for row in db.execute("SELECT id, interactive, next_at FROM provider_jobs")
+            ]
+            assert jobs == [(old["id"], 1, 0)]

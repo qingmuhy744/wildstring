@@ -27,9 +27,9 @@ import io,json,zipfile,sys
 t=json.load(sys.stdin); b=io.BytesIO()
 detail={'id':'song','title':t['title'],'artists':t['artists'],'duration_ms':t['duration_ms'],'fields':{'title':t['title'],'artists':t['artists']},'source_url':'https://example.com/song'}
 lyrics={'kind':'synced','format':'krc','lines':[{'time_ms':1000,'text':'Synthetic lyric','words':[{'start_ms':1000,'end_ms':2000,'text':'Synthetic lyric'}]}],'layers':{'translation':[{'time_ms':1000,'text':'合成中文译文'}]}}
-adapter='class Plugin:\\n def search(self,c,q): return [{"id":"song"}]\\n def metadata(self,c,v): return '+repr(detail)+'\\n def lyrics(self,c,v): return '+repr({'original':'synthetic','normalized':lyrics})+'\\n'
+adapter='class Plugin:\\n def search(self,c,q): return '+repr([detail])+'\\n def metadata(self,c,v): return '+repr([detail])+'\\n def lyrics(self,c,v): return '+repr({'original':'synthetic','normalized':lyrics})+'\\n'
 with zipfile.ZipFile(b,'w') as z:
- z.writestr('manifest.json',json.dumps({'id':t['plugin_id'],'name':'洗版合成来源','version':'1.0.0','request_pacing':True,'license':'GPL-3.0-only','upstream':'https://example.com','settings':[]}))
+ z.writestr('manifest.json',json.dumps({'id':t['plugin_id'],'name':'洗版合成来源','version':'1.0.0','api_version':2,'request_pacing':True,'license':'GPL-3.0-only','upstream':'https://example.com','settings':[]}))
  z.writestr('adapter.py',adapter.replace('\\\\n','\\n'))
 sys.stdout.buffer.write(b.getvalue())
 `,

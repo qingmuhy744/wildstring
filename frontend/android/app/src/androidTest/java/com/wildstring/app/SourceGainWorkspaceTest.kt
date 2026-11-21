@@ -31,6 +31,8 @@ class SourceGainWorkspaceTest {
         @Volatile var analysisStatus = "none"
         @Volatile var cover = ByteArray(0)
         @Volatile var avatar: ByteArray? = null
+        @Volatile var lyricJobStatus: String? = null
+        @Volatile var lyricApplyBody: JsonObject? = null
         fun avatarVersion() = avatar?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) } }
         fun json(text: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(text)
         fun gain() = """{"track_id":"song-one","album_id":"album-one","factor":1,"requested_db":${album+track},"applied_db":${album+track},"limited":false,"peak_known":true,"settings":$gainSettings,"album":{"version":$albumVersion,"gain_db":$album},"track":{"version":$trackVersion,"gain_db":$track},"analysis":{"status":"$analysisStatus","error":null}}"""
@@ -53,6 +55,16 @@ class SourceGainWorkspaceTest {
                     path.endsWith("/auth/status") -> json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"source-alice","username":"alice","profile":"owner"}}""")
                     path.endsWith("/auth/login") -> json("{}").setHeader("Set-Cookie", "wildstring_session=source-alice; Path=/; Max-Age=3600")
                     path == "/api/v1/auth/avatar/info" -> json("""{"version":${avatarVersion()?.let { "\"$it\"" } ?: "null"}}""")
+                    path == "/api/v1/manage/tracks/song-one/lyrics" -> json("""{"version":1,"file_version":"fixture-file","text":"","effective":{"kind":"none","lines":[]},"selected_candidate":${if (lyricApplyBody == null) "null" else "{}"}}""")
+                    path == "/api/v1/manage/tracks/song-one/online-lyrics" -> {
+                        if (request.method == "POST") lyricJobStatus = "running"
+                        val jobs = lyricJobStatus?.let { """[{"status":"$it","warnings":[]}]""" } ?: "[]"
+                        json("""{"jobs":$jobs,"items":[{"id":"fixture-lyric","plugin_id":"fixture","source_url":"https://example.com/lyrics","lyrics_version":1,"file_version":"fixture-file","line_count":1,"match":{"title":"合成摇滚","artists":["合成乐队"],"score":1,"version_mismatch":false},"normalized":{"format":"lrc","kind":"synced","lines":[{"time_ms":1000,"text":"合成歌词"}]}}]}""")
+                    }
+                    path == "/api/v1/manage/lyric-candidates/fixture-lyric/apply" -> {
+                        lyricApplyBody = body.deepCopy()
+                        json("{}")
+                    }
                     path == "/api/v1/playback/gain-settings" -> {
                         if (request.method == "PUT") {
                             assertEquals(gainSettings.number("version"), body.number("version"))
@@ -96,6 +108,33 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("合成来源插件").assertDoesNotExist()
             assertFalse(fixture.paths.any { it.contains("/manage/source-plugins") })
             capture("source-plugins-web-guidance.png")
+        }
+    }
+    @Test fun singleTrackOnlineLyricsSearchPreviewAndApply() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            val track = Track("song-one", "合成摇滚", listOf("合成乐队"), "合成专辑", 12000, albumId = "album-one")
+            compose.runOnUiThread { compose.activity.setContent { MaterialTheme { Surface { FeatureDialog(vm, "lyrics", track = track) {} } } } }
+            compose.onNodeWithText(uiString(R.string.lib_mgmt_lyrics_tab_online)).performClick()
+            val find = uiString(R.string.src_plugin_find_online_lyrics)
+            val searching = uiString(R.string.src_plugin_searching_lyrics)
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.src_plugin_preview_and_select_lyrics)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(find).performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(searching).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(searching).assertIsNotEnabled()
+            compose.onNodeWithText(uiString(R.string.src_plugin_preview_and_select_lyrics)).performScrollTo().assertExists()
+            fixture.lyricJobStatus = "completed"
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText(find) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(uiString(R.string.src_plugin_preview_and_select_lyrics)).performScrollTo().performClick()
+            compose.onNodeWithText("合成歌词", substring = true).performScrollTo().assertIsDisplayed()
+            Thread.sleep(500) // Capture after the platform dialog entrance animation.
+            capture("online-lyrics-preview.png")
+            compose.onNodeWithText(uiString(R.string.src_plugin_confirm_use_lyric)).performClick()
+            compose.waitUntil(10_000) { fixture.lyricApplyBody != null }
+            assertEquals(1, fixture.lyricApplyBody!!.number("version").toInt())
+            assertEquals("fixture-file", fixture.lyricApplyBody!!.text("file_version"))
+            assertEquals(0, fixture.lyricApplyBody!!.number("offset_ms").toInt())
+            compose.waitUntil(10_000) { fixture.paths.count { it == "GET /api/v1/manage/tracks/song-one/lyrics" } >= 2 }
         }
     }
     @Test fun manualAlbumAndTrackGainSaveIndependentlyWithVersions() {

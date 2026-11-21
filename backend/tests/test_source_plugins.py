@@ -22,6 +22,7 @@ MANIFEST = {
     "id": "fixture-source",
     "name": "合成社区来源",
     "version": "1.0.0",
+    "api_version": 2,
     "license": "GPL-3.0-only",
     "upstream": "https://example.com/fixture",
     "request_pacing": True,
@@ -30,9 +31,9 @@ MANIFEST = {
 ADAPTER = """
 class Plugin:
     def search(self, context, query):
-        return [{"id": "synthetic-song"}]
-    def metadata(self, context, candidate):
-        return {"id": candidate["id"], "release_id": "synthetic-release", "title": "摇滚", "artists": ["合成乐队"], "duration_ms": 12000, "fields": {"title": "摇滚", "artists": ["合成乐队"], "album": "录音室专辑"}, "source_url": "https://example.com/release?edition=studio"}
+        return [{"id": "synthetic-song", "title": "摇滚", "artists": ["合成乐队"], "duration_ms": 12000, "source_url": "https://example.com/song"}]
+    def metadata(self, context, request):
+        return [{"id": candidate["id"], "release_id": "synthetic-release", "title": "摇滚", "artists": ["合成乐队"], "duration_ms": 12000, "fields": {"title": "摇滚", "artists": ["合成乐队"], "album": "录音室专辑"}, "source_url": "https://example.com/release?edition=studio"} for candidate in request["candidates"]]
     def lyrics(self, context, candidate):
         return {"format": "qrc", "original": '<Lyric_1 LyricType="1" LyricContent="[1000,2000]摇(1000,500)滚(1500,1500)"/>', "normalized": {"format": "qrc", "kind": "synced", "layers": {"translation": [{"time_ms": 1000, "text": "Synthetic translation"}]}, "lines": [{"time_ms": 1000, "end_ms": 3000, "text": "摇滚", "words": [{"start_ms": 1000, "end_ms": 1500, "text": "摇"}, {"start_ms": 1500, "end_ms": 3000, "text": "滚"}]}]}}
 """
@@ -160,7 +161,9 @@ def test_native_module_zip_worker_and_upgrade(settings, authenticated_client, mo
             plugin = manager.plugins["fixture-source"]
             context = PluginContext(manager, "fixture-source", manager.settings("fixture-source"))
             assert (
-                plugin.metadata(context, {"id": "native-song"})["fields"]["title"]
+                plugin.metadata(
+                    context, {"candidates": [{"id": "native-song"}], "include_release": True}
+                )[0]["fields"]["title"]
                 == "Compiled fixture"
             )
             assert (
@@ -346,3 +349,233 @@ def test_zip_rejects_unsupported_compression_and_rate_closes_connections(tmp_pat
         assert permit(rate_cfg) == 0
         cooldown(rate_cfg, 1)
     assert closed == 2
+
+
+def test_upgrade_retires_v1_plugin_and_preserves_library_evidence(
+    settings, authenticated_client, monkeypatch
+):
+    # Keep startup and the worker lock real, but leave synthetic pending work untouched.
+    def idle_worker(providers):
+        try:
+            providers.exit.wait()
+        finally:
+            providers.worker_lock.release()
+
+    monkeypatch.setattr(Providers, "run", idle_worker)
+    music(settings, "摇滚.flac", ["合成乐队"], ["合成乐队"])
+    scan_library(settings)
+    second_manifest = MANIFEST | {"id": "other-source"}
+    with authenticated_client(settings) as client:
+        for identity, source_zip in (
+            ("fixture-source", package()),
+            ("other-source", package(manifest=second_manifest)),
+        ):
+            assert (
+                client.post(BASE + "/import", headers=HEADERS, content=source_zip).status_code
+                == 200
+            )
+            saved = client.put(
+                BASE + "/" + identity,
+                headers=HEADERS,
+                json={"version": 1, "enabled": True, "config": {"cookie": identity + "-secret"}},
+            )
+            assert saved.status_code == 200
+        providers = client.app.state.providers
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        endpoint = f"/api/v1/manage/tracks/{track['id']}/online-lyrics"
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        assert providers.sources.step()
+        candidate = next(
+            item
+            for item in client.get(endpoint).json()["items"]
+            if item["plugin_id"] == "fixture-source"
+        )
+        editor = client.get(f"/api/v1/manage/tracks/{track['id']}/lyrics").json()
+        assert (
+            client.post(
+                f"/api/v1/manage/lyric-candidates/{candidate['id']}/apply",
+                headers=HEADERS,
+                json={"version": editor["version"], "file_version": editor["file_version"]},
+            ).status_code
+            == 200
+        )
+        before_lyrics = client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()
+        providers.secrets({"acoustid_api_key": "unrelated-secret"})
+        db = providers.database
+        with db.connect(write=True) as connection:
+            old = connection.execute(
+                "SELECT sha256,manifest FROM source_plugin_packages WHERE plugin_id='fixture-source'"
+            ).fetchone()
+            old_digest = old["sha256"]
+            connection.execute(
+                "UPDATE source_plugin_packages SET manifest=? WHERE plugin_id='fixture-source'",
+                (json.dumps(json.loads(old["manifest"]) | {"api_version": 1}),),
+            )
+            connection.execute(
+                "INSERT INTO plugin_request_gates(plugin_id,cooldown_until,reason) VALUES (?,?,?)",
+                ("fixture-source", 9999999999, "source_plugin_rate_limited"),
+            )
+            connection.execute(
+                "INSERT INTO provider_cache VALUES (?,?,?,?)",
+                ("plugin:fixture-source", "cached", "{}", 9999999999),
+            )
+            library_id = connection.execute(
+                "SELECT library_id FROM tracks WHERE id=?", (track["id"],)
+            ).fetchone()[0]
+            options = json.dumps({"providers": [{"id": "fixture-source"}]})
+            connection.execute(
+                "INSERT INTO lyric_scan_batches VALUES (?,?,?,'running',1,1,1)",
+                ("old-batch", library_id, options),
+            )
+            connection.execute(
+                "INSERT INTO lyric_lookup_jobs VALUES (?,?,'queued',NULL,'[]',1,1)",
+                ("old-batch-job", track["id"]),
+            )
+            connection.execute(
+                "INSERT INTO lyric_scan_items(id,batch_id,track_id,title,status,job_id,updated_at) VALUES (?,?,?,?,'queued',?,1)",
+                ("old-item", "old-batch", track["id"], track["title"], "old-batch-job"),
+            )
+        old_package = providers.directory / "source-plugins" / old_digest
+        old_state = providers.directory / "plugin-state" / "fixture-source"
+        old_state.mkdir(parents=True, exist_ok=True)
+        (old_state / "synthetic-state").write_text("old")
+        assert old_package.exists()
+
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        assert [item["id"] for item in client.get(BASE).json()["items"]] == ["other-source"]
+        assert not old_package.exists() and not old_state.exists()
+        secrets = providers.secrets()
+        assert "source:fixture-source:cookie" not in secrets
+        assert secrets["source:other-source:cookie"] == "other-source-secret"
+        assert secrets["acoustid_api_key"] == "unrelated-secret"
+        assert client.get(f"/api/v1/tracks/{track['id']}/lyrics").json() == before_lyrics
+        with providers.database.connect() as connection:
+            assert (
+                connection.execute(
+                    "SELECT 1 FROM source_plugin_settings WHERE plugin_id='fixture-source'"
+                ).fetchone()
+                is None
+            )
+            assert (
+                connection.execute(
+                    "SELECT 1 FROM provider_cache WHERE provider='plugin:fixture-source'"
+                ).fetchone()
+                is None
+            )
+            assert (
+                connection.execute(
+                    "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id='fixture-source'"
+                ).fetchone()[0]
+                == 9999999999
+            )
+            assert (
+                connection.execute(
+                    "SELECT status FROM lyric_scan_batches WHERE id='old-batch'"
+                ).fetchone()[0]
+                == "cancelled"
+            )
+            item = connection.execute(
+                "SELECT status,error FROM lyric_scan_items WHERE id='old-item'"
+            ).fetchone()
+            assert tuple(item) == ("cancelled", "source_plugin_incompatible_api")
+            assert (
+                connection.execute(
+                    "SELECT status FROM lyric_lookup_jobs WHERE id='old-batch-job'"
+                ).fetchone()[0]
+                == "cancelled"
+            )
+            assert connection.execute(
+                "SELECT 1 FROM lyric_candidates WHERE id=?", (candidate["id"],)
+            ).fetchone()
+        assert client.post(BASE + "/import", headers=HEADERS, content=package()).status_code == 200
+        assert (
+            client.put(
+                BASE + "/fixture-source",
+                headers=HEADERS,
+                json={"version": 1, "enabled": True, "config": {"cookie": "new-cookie"}},
+            ).status_code
+            == 200
+        )
+        with providers.database.connect(write=True) as connection:
+            connection.execute(
+                "UPDATE plugin_request_gates SET cooldown_until=0 WHERE plugin_id='fixture-source'"
+            )
+        assert client.post(BASE + "/fixture-source/test", headers=HEADERS).json()["ok"] is True
+        lookup = client.post(endpoint, headers=HEADERS).json()
+        assert providers.sources.step()
+        jobs = client.get(endpoint).json()["jobs"]
+        assert next(job for job in jobs if job["id"] == lookup["id"])["status"] == "completed"
+    with authenticated_client(settings) as client:
+        assert client.app.state.providers.secrets()["source:fixture-source:cookie"] == "new-cookie"
+        assert {item["id"] for item in client.get(BASE).json()["items"]} == {
+            "fixture-source",
+            "other-source",
+        }
+        assert client.get(f"/api/v1/tracks/{track['id']}/lyrics").json() == before_lyrics
+
+
+def test_manual_lyric_job_survives_pending_batch_and_newer_batch_history(
+    settings, authenticated_client, monkeypatch
+):
+    monkeypatch.setattr(Providers, "start", lambda self: None)
+    music(settings, "摇滚.flac", ["合成乐队"], ["合成乐队"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        assert client.post(BASE + "/import", headers=HEADERS, content=package()).status_code == 200
+        assert (
+            client.put(
+                BASE + "/fixture-source", headers=HEADERS, json={"version": 1, "enabled": True}
+            ).status_code
+            == 200
+        )
+        providers = client.app.state.providers
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        endpoint = f"/api/v1/manage/tracks/{track['id']}/online-lyrics"
+        # Keep an existing, usable candidate associated with a completed batch lookup.
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        assert providers.sources.step()
+        existing = client.get(endpoint).json()["items"][0]
+        with providers.database.connect(write=True) as connection:
+            library_id = connection.execute(
+                "SELECT library_id FROM tracks WHERE id=?", (track["id"],)
+            ).fetchone()[0]
+            for index in range(6):
+                batch_id, job_id = f"batch-{index}", f"batch-job-{index}"
+                status = "queued" if index == 5 else "completed"
+                connection.execute(
+                    "INSERT INTO lyric_scan_batches VALUES (?,?,?,'running',1,?,?)",
+                    (batch_id, library_id, '{"providers": []}', index + 10, index + 10),
+                )
+                connection.execute(
+                    "INSERT INTO lyric_lookup_jobs VALUES (?,?,?,NULL,'[]',?,?)",
+                    (job_id, track["id"], status, index + 10, index + 10),
+                )
+                connection.execute(
+                    "INSERT INTO lyric_scan_items(id,batch_id,track_id,title,status,job_id,updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        f"item-{index}",
+                        batch_id,
+                        track["id"],
+                        track["title"],
+                        status,
+                        job_id,
+                        index + 10,
+                    ),
+                )
+        response = client.post(endpoint, headers=HEADERS)
+        assert response.status_code == 200, response.text
+        manual_job = response.json()["id"]
+        with providers.database.connect(write=True) as connection:
+            # All six batch jobs are newer than the pending manual job.
+            connection.execute(
+                "UPDATE lyric_lookup_jobs SET created_at=1 WHERE id=?", (manual_job,)
+            )
+            connection.execute(
+                "UPDATE lyric_lookup_jobs SET created_at=0 WHERE id=?", (existing["job_id"],)
+            )
+        result = client.get(endpoint).json()
+        assert [job["id"] for job in result["jobs"]] == [manual_job, existing["job_id"]]
+        assert result["jobs"][0]["status"] == "queued"
+        assert existing["id"] in [item["id"] for item in result["items"]]
+        assert client.post(endpoint, headers=HEADERS).json()["id"] == manual_job

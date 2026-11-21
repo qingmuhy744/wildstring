@@ -111,3 +111,45 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
     fixture.lines[0].translation,
   );
 });
+
+test('单曲联网歌词查询保留已有候选，完成后恢复查询', async ({ page }) => {
+  await login(page);
+  const track = (await (await page.request.get('/api/v1/tracks')).json()).items.find(
+    (value: { title: string }) => value.title === '晴天测试曲',
+  );
+  let submitted = false;
+  let polls = 0;
+  const candidate = {
+    id: 'existing-candidate',
+    plugin_id: 'fixture',
+    source_url: 'https://example.com',
+    lyrics_version: 1,
+    file_version: '0'.repeat(64),
+    line_count: fixture.lines.length,
+    match: { title: track.title, artists: ['合成艺人'], score: 1, version_mismatch: false },
+    normalized: { ...fixture, format: 'krc' },
+  };
+  await page.route(`**/api/v1/manage/tracks/${track.id}/online-lyrics`, (route) => {
+    if (route.request().method() === 'POST') {
+      submitted = true;
+      return route.fulfill({ json: {} });
+    }
+    const status = !submitted ? undefined : polls++ === 0 ? 'running' : 'completed';
+    return route.fulfill({
+      json: { items: [candidate], jobs: status ? [{ status, warnings: [] }] : [] },
+    });
+  });
+  await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '编辑歌曲信息', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: '编辑歌曲信息', exact: true });
+  await editor.getByRole('button', { name: '歌词', exact: true }).click();
+  const panel = editor.locator('.online-lyrics');
+  const search = panel.getByRole('button', { name: '查找联网歌词', exact: true });
+  await expect(panel).toContainText('合成艺人');
+  await expect(search).toBeEnabled();
+  await search.click();
+  await expect(search).toBeDisabled();
+  await expect(panel).toContainText('合成艺人');
+  await expect(search).toBeEnabled({ timeout: 10000 });
+  await expect(panel).toContainText('合成艺人');
+});

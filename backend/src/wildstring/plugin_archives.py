@@ -9,8 +9,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory, TemporaryFile
 from urllib.parse import urlsplit
@@ -18,11 +19,45 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 
 from fastapi import HTTPException
 
-from wildstring.source_plugins import Manifest, PluginError
+from wildstring.source_plugins import API_VERSION, Manifest, PluginError
 
 MAX_ARCHIVE = 16 * 1024 * 1024
 MAX_EXPANDED = 32 * 1024 * 1024
 ALLOWED_COMPRESS_TYPES = {ZIP_STORED, ZIP_DEFLATED}
+
+_slots_lock = threading.Lock()
+_slots = {}
+
+
+class _PrioritySlot:
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.active = False
+        self.interactive_waiters = 0
+
+    @contextmanager
+    def acquire(self, interactive):
+        deadline = time.monotonic() + 2
+        with self.condition:
+            if interactive:
+                self.interactive_waiters += 1
+            try:
+                while self.active or (not interactive and self.interactive_waiters):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise PluginError("source_plugin_busy")
+                    self.condition.wait(remaining)
+                self.active = True
+            finally:
+                if interactive:
+                    self.interactive_waiters -= 1
+                    self.condition.notify_all()
+        try:
+            yield
+        finally:
+            with self.condition:
+                self.active = False
+                self.condition.notify_all()
 
 
 def _verify_and_count_archive(archive: ZipFile) -> None:
@@ -83,8 +118,8 @@ def inspect_package(data):
             raise ValueError
         manifest = Manifest(**values)
         if (
-            type(manifest.api_version) is not int
-            or manifest.api_version != 1
+            type(values.get("api_version")) is not int
+            or manifest.api_version != API_VERSION
             or type(manifest.request_pacing) is not bool
             or not re.fullmatch(r"[a-z][a-z0-9_-]{1,40}", manifest.id)
             or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", manifest.version)
@@ -226,29 +261,45 @@ def install(manager, data, expected_version=None, expected_id=None):
 def execute(plugin, context, method, value):
     from filelock import FileLock, Timeout
 
-    directory = context.directory / "plugin-state"
-    directory.mkdir(parents=True, exist_ok=True)
-    try:
-        with FileLock(str(directory / (plugin.manifest.id + ".request.lock")), timeout=2):
-            return execute_serial(plugin, context, method, value)
-    except Timeout:
-        raise PluginError("source_plugin_busy") from None
-
-
-def execute_serial(plugin, context, method, value):
+    if plugin.manifest.api_version != API_VERSION:
+        raise PluginError("source_plugin_unavailable")
     context.manager.current(context.identity, context.configuration["version"])
     cache_key = hashlib.sha256(
         json.dumps(
             [plugin.sha256, context.configuration["version"], method, value], sort_keys=True
         ).encode()
     ).hexdigest()
+    cached = read_cache(plugin, context, cache_key)
+    if cached is not None:
+        return cached[0]
+    directory = context.directory / "plugin-state"
+    directory.mkdir(parents=True, exist_ok=True)
+    with _slots_lock:
+        slot = _slots.setdefault(plugin.manifest.id, _PrioritySlot())
+    try:
+        with slot.acquire(context.interactive):
+            with FileLock(str(directory / (plugin.manifest.id + ".request.lock")), timeout=2):
+                return execute_serial(plugin, context, method, value, cache_key)
+    except Timeout:
+        raise PluginError("source_plugin_busy") from None
+
+
+def read_cache(plugin, context, cache_key):
+    if context.force:
+        return None
     with context.manager.database.connect() as db:
         cached = db.execute(
             "SELECT payload FROM provider_cache WHERE provider=? AND cache_key=? AND expires_at>?",
             ("plugin:" + plugin.manifest.id, cache_key, time.time()),
         ).fetchone()
-    if cached and not context.force:
-        return json.loads(cached[0])
+    return (json.loads(cached[0]),) if cached else None
+
+
+def execute_serial(plugin, context, method, value, cache_key):
+    context.manager.current(context.identity, context.configuration["version"])
+    cached = read_cache(plugin, context, cache_key)
+    if cached is not None:
+        return cached[0]
     config = context.manager.providers.settings()
     secrets = {
         field["key"]: context.manager.providers.secrets().get(
@@ -278,6 +329,7 @@ def execute_serial(plugin, context, method, value):
         from wildstring.plugin_rate import wait
 
         wait(payload["rate"], context.deadline)
+        payload["cooldown_rate"] = payload["rate"]
         payload["rate"] = None
     remaining = min(
         60 if not context.batch_id else 50 + context.interval_seconds * 8,
@@ -347,7 +399,12 @@ def execute_serial(plugin, context, method, value):
     if not isinstance(result, dict) or "value" not in result:
         code = result.get("error", "") if isinstance(result, dict) else ""
         raise PluginError(
-            code if re.fullmatch(r"[a-z0-9_:-]{1,100}", code) else "source_plugin_worker_failed"
+            code
+            if isinstance(code, str) and re.fullmatch(r"[a-z0-9_:-]{1,100}", code)
+            else "source_plugin_worker_failed",
+            upstream_429=result.get("upstream_429", False) if isinstance(result, dict) else False,
+            retry_after=result.get("retry_after") if isinstance(result, dict) else None,
+            cooldown_until=result.get("cooldown_until") if isinstance(result, dict) else None,
         )
     with context.manager.database.connect(write=True) as db:
         db.execute("DELETE FROM provider_cache WHERE expires_at<?", (time.time(),))
