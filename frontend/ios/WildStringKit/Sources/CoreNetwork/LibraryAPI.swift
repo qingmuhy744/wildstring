@@ -100,6 +100,15 @@ extension WildstringClient {
         )
     }
 
+    public func album(id: String) async throws -> Album {
+        let data = try await perform(Request(
+            method: "GET",
+            path: "api/v1/albums/\(id)",
+            queryItems: [URLQueryItem(name: "include_unavailable", value: "true")]
+        ))
+        return try JSONDecoder().decode(Album.self, from: data)
+    }
+
     /// Album tracks default to disc/track order; callers may request other sorts.
     public func albumTracks(
         albumId: String,

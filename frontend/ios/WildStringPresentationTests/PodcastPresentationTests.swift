@@ -120,6 +120,43 @@ final class PodcastPresentationTests: XCTestCase {
         }
     }
 
+    func testAdaptivePlayerAcrossShortAndWideWindows() async throws {
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PresentationProtocol.self]
+        let server = try ServerAddress(input: "presentation.invalid")
+        let client = WildstringClient(server: server, store: InMemorySessionStore(), configuration: configuration)
+        let playback = PlaybackService(server: server, store: InMemoryQueueStore(), cookieHeader: { nil })
+        defer { playback.shutdown() }
+        let fixtures = [
+            ("phone-landscape", CGSize(width: 844, height: 390)),
+            ("ipad-narrow", CGSize(width: 510, height: 920)),
+            ("ipad-portrait", CGSize(width: 834, height: 1194)),
+            ("ipad-landscape", CGSize(width: 1194, height: 834)),
+        ]
+        for podcast in [false, true] {
+            let item = PlaybackService.Item(
+                trackID: podcast ? "podcast_ep_article-200" : "music-presentation",
+                title: podcast ? "合成播客与长标题：从一段旧磁带说起" : "长途列车",
+                artist: podcast ? "合成播客节目" : "野弦乐队",
+                streamPath: "unused", durationSeconds: 5219
+            )
+            playback.adopt(items: [item], startingAt: 0, position: 31, mode: "sequential")
+            for (name, size) in fixtures {
+                for scheme in [ColorScheme.light, .dark] {
+                    let root = NowPlayingView(client: client, playback: playback, initiallyShowsLyrics: podcast)
+                        .environment(FavoritesModel(client: client))
+                        .preferredColorScheme(scheme)
+                    let (host, window) = present(root, size: size)
+                    window.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
+                    try await Task.sleep(for: .milliseconds(350))
+                    try save(host.view, name: "ios-adaptive-\(name)-\(podcast ? "article" : "music")-\(scheme)")
+                    window.isHidden = true
+                }
+            }
+        }
+    }
+
     func testTransportFramesKeepTheirEdgesAndSettleIncludingReducedMotion() async throws {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         for reduced in [false, true] {
@@ -144,7 +181,8 @@ final class PodcastPresentationTests: XCTestCase {
                         "edges": try buttonEdges(data)])
                     previous = data
                 }
-                let late = samples.filter { ($0["time"] as! Double) > 350 }
+                // "changed" compares with the preceding frame. Both frames must be after the deadline.
+                let late = samples.filter { ($0["time"] as! Double) > 350 }.dropFirst()
                 XCTAssertFalse(late.contains { $0["changed"] as! Bool }, "The landed glyph must stop changing")
                 if reduced { XCTAssertFalse(samples.dropFirst().contains { $0["changed"] as! Bool }) }
                 else { XCTAssertGreaterThan(samples.filter { $0["changed"] as! Bool }.count, 3) }

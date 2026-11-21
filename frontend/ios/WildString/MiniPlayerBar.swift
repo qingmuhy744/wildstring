@@ -33,6 +33,7 @@ struct MiniPlayerBar: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("miniPlayer.expand")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
                         Haptics.tap()

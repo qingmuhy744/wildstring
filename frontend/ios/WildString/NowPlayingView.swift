@@ -8,7 +8,6 @@ struct NowPlayingView: View {
     let playback: PlaybackService
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Environment(FavoritesModel.self) private var favorites
@@ -17,15 +16,12 @@ struct NowPlayingView: View {
     @State private var scrubTime: Double?
     @State private var showingQueue = false
     @State private var showingArtwork = false
-    @State private var layoutWidth: CGFloat = 390
 
     init(client: WildstringClient, playback: PlaybackService, initiallyShowsLyrics: Bool = false) {
         self.client = client
         self.playback = playback
         _showLyrics = State(initialValue: initiallyShowsLyrics)
     }
-
-    private var isRegular: Bool { sizeClass == .regular }
 
     private var playerStyle: PlayerStyle {
         PlayerStyle(rawValue: playerStyleRaw) ?? .vinyl
@@ -39,44 +35,66 @@ struct NowPlayingView: View {
             } else {
                 ArtworkBackdrop(client: client, trackID: playback.currentItem?.trackID)
             }
-            VStack(spacing: 0) {
-                header
-                if isRegular {
-                    HStack(alignment: .top, spacing: 28) {
-                        playerColumn
-                            .frame(maxWidth: 400)
-                        readingPane
-                            .frame(maxWidth: .infinity)
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let height = proxy.size.height
+                let isShort = height < 480
+                let showsReadingAlongside = width >= 720 && !isShort
+                let docksQueue = width >= 1050 && !isShort
+                VStack(spacing: 0) {
+                    header(showsReadingAlongside: showsReadingAlongside, compact: isShort)
+                    HStack(spacing: 24) {
+                        if let item = playback.currentItem {
+                            if showsReadingAlongside || !showLyrics {
+                                stage(item, horizontal: isShort && width > height, canOpenReading: !showsReadingAlongside)
+                                    .frame(maxWidth: showsReadingAlongside ? 400 : .infinity, maxHeight: .infinity)
+                            }
+                            if showsReadingAlongside || showLyrics {
+                                VStack(spacing: 0) {
+                                    if !showsReadingAlongside {
+                                        playbackNotices
+                                            .padding(.horizontal, 24)
+                                    }
+                                    readingPane
+                                }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            if docksQueue && showingQueue {
+                                QueueView(client: client, playback: playback, onClose: { showingQueue = false })
+                                    .frame(width: 320)
+                                    .clipShape(.rect(cornerRadius: 16))
+                            }
+                        } else {
+                            ContentUnavailableView(L10n("nowPlaying.noPlayback"), systemImage: "music.note")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     }
-                    .padding(.horizontal, 28)
-                    if !isPodcast { Spacer(minLength: 0) }
-                } else {
-                    if showLyrics {
-                        readingPane
-                    } else {
-                        playerColumn
+                    .padding(.horizontal, showsReadingAlongside ? 24 : 0)
+                    if playback.currentItem != nil {
+                        VStack(spacing: isShort ? 0 : 8) {
+                            progressSection
+                            controls(compact: isShort)
+                        }
+                        .frame(maxWidth: 720)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, isShort ? 0 : 10)
                     }
-                    if !isPodcast { Spacer(minLength: 0) }
                 }
-                controls
+                .sheet(isPresented: Binding(
+                    get: { showingQueue && !docksQueue },
+                    set: { if !docksQueue { showingQueue = $0 } }
+                )) {
+                    QueueView(client: client, playback: playback)
+                }
             }
         }
         .tint(colorScheme == .dark ? .wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22))
-        .sheet(isPresented: $showingQueue) {
-            QueueView(client: client, playback: playback)
-        }
         .sheet(isPresented: $showingArtwork) {
             if let item = playback.currentItem {
                 ArtworkPreview(client: client, item: item)
                     .presentationDetents([.medium, .large])
             }
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: PlayerWidthKey.self, value: proxy.size.width)
-            }
-        }
-        .onPreferenceChange(PlayerWidthKey.self) { layoutWidth = $0 }
         .task { openQueueForDemoIfNeeded() }
     }
 
@@ -98,7 +116,7 @@ struct NowPlayingView: View {
         #endif
     }
 
-    private var header: some View {
+    private func header(showsReadingAlongside: Bool, compact: Bool) -> some View {
         HStack {
             Button {
                 dismiss()
@@ -114,14 +132,14 @@ struct NowPlayingView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
-            if isRegular {
-                Color.clear.frame(width: 24, height: 1)
+            if showsReadingAlongside {
+                Color.clear.frame(width: 44, height: 1)
             } else {
                 Button {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { showLyrics.toggle() }
                 } label: {
-                    Text(isPodcast ? L10n("podcastArticle.title") : L10n("nowPlaying.lyricsButton"))
-                        .font(.footnote.bold())
+                    Image(systemName: isPodcast ? "doc.text" : "quote.bubble")
+                        .font(.body.bold())
                         .frame(width: 44, height: 44)
                         .background(
                             showLyrics
@@ -131,88 +149,120 @@ struct NowPlayingView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isPodcast ? L10n("podcastArticle.title") : L10n("nowPlaying.lyricsButton"))
+                .accessibilityAddTraits(showLyrics ? .isSelected : [])
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.vertical, compact ? 0 : 10)
     }
 
-    private var playerColumn: some View {
-        VStack(spacing: 16) {
-            if let item = playback.currentItem {
-                playerArtwork(item)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if !isRegular {
-                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { showLyrics = true }
-                        }
+    @ViewBuilder
+    private func stage(_ item: PlaybackService.Item, horizontal: Bool, canOpenReading: Bool) -> some View {
+        if horizontal {
+            GeometryReader { proxy in
+                let size = min(proxy.size.height, proxy.size.width / 2, 340)
+                HStack(spacing: 16) {
+                    artwork(item, size: size, canOpenReading: canOpenReading)
+                    ViewThatFits(in: .vertical) {
+                        metadata(item).fixedSize(horizontal: false, vertical: true)
+                        ScrollView { metadata(item) }
                     }
-                    .onLongPressGesture(minimumDuration: 0.45) {
-                        Haptics.selection()
-                        showingArtwork = true
-                    }
-                    .padding(.top, 8)
-                VStack(spacing: 6) {
-                    Text(item.title)
-                        .font(.system(.title2, design: .serif, weight: .semibold))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(isPodcast ? 3 : 2)
-                    HStack(spacing: 12) {
-                        Text(item.artist)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Button {
-                            Haptics.selection()
-                            Task { await favorites.toggle(item.trackID) }
-                        } label: {
-                            Image(
-                                systemName: favorites.isFavorite(item.trackID)
-                                    ? "heart.fill" : "heart"
-                            )
-                            .foregroundStyle(
-                                favorites.isFavorite(item.trackID)
-                                    ? Color.wildAccent : Color.secondary
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if let album = item.album, !album.isEmpty {
-                        Text(album)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    if let label = playback.currentOutputLabel {
-                        Text(label)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let message = playback.podcastProgressMessage {
-                        Text(message).font(.caption).foregroundStyle(.secondary)
-                        if playback.podcastCanUseLocalProgress {
-                            Button(L10n("podcast.useLocalProgress")) { playback.useLocalPodcastProgress() }
-                        }
-                    }
-                    if let message = playback.errorMessage {
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(maxWidth: 400)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity)
+        } else {
+            PlayerArtworkLayout(maximumSize: isPodcast ? 400 : 340) {
+                GeometryReader { proxy in
+                    if proxy.size.width > 0 {
+                        artwork(item, size: proxy.size.width, canOpenReading: canOpenReading)
                     }
                 }
-                progressSection
-            } else {
-                ContentUnavailableView(L10n("nowPlaying.noPlayback"), systemImage: "music.note")
+                ViewThatFits(in: .vertical) {
+                    metadata(item).fixedSize(horizontal: false, vertical: true)
+                    ScrollView { metadata(item) }
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 24)
-        .frame(maxHeight: isPodcast ? .infinity : nil, alignment: .center)
     }
 
-    private var coverSize: CGFloat {
-        let width = layoutWidth > 0 ? layoutWidth : 390
-        return min(width * 0.72, isRegular ? 320 : 340)
+    private func artwork(_ item: PlaybackService.Item, size: CGFloat, canOpenReading: Bool) -> some View {
+        playerArtwork(item, size: size)
+            .frame(width: size, height: size)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if canOpenReading {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { showLyrics = true }
+                }
+            }
+            .onLongPressGesture(minimumDuration: 0.45) {
+                Haptics.selection()
+                showingArtwork = true
+            }
+    }
+
+    private func metadata(_ item: PlaybackService.Item) -> some View {
+        VStack(spacing: 6) {
+            Text(item.title)
+                .font(.system(.title2, design: .serif, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(isPodcast ? 3 : 2)
+            HStack(spacing: 12) {
+                Text(item.artist)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button {
+                    Haptics.selection()
+                    Task { await favorites.toggle(item.trackID) }
+                } label: {
+                    Image(
+                        systemName: favorites.isFavorite(item.trackID)
+                            ? "heart.fill" : "heart"
+                    )
+                    .foregroundStyle(
+                        favorites.isFavorite(item.trackID)
+                            ? Color.wildAccent : Color.secondary
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            if let album = item.album, !album.isEmpty {
+                Text(album)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let label = playback.currentOutputLabel {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            playbackNotices
+        }
+    }
+
+    private var playbackNotices: some View {
+        VStack(spacing: 6) {
+            if let message = playback.podcastProgressMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                if playback.podcastCanUseLocalProgress {
+                    Button(L10n("podcast.useLocalProgress")) { playback.useLocalPodcastProgress() }
+                }
+            }
+            if let message = playback.errorMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+        }
     }
 
     private var progressSection: some View {
@@ -229,6 +279,7 @@ struct NowPlayingView: View {
                     scrubTime = nil
                 }
             }
+            .accessibilityLabel(L10n("nowPlaying.progress"))
             HStack {
                 Text(timeText(scrubTime ?? playback.currentTime))
                 Spacer()
@@ -240,21 +291,25 @@ struct NowPlayingView: View {
         }
     }
 
-    private var controls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                Button {
-                    Haptics.selection()
-                    playback.toggleShuffle()
-                } label: {
-                    Image(systemName: "shuffle")
-                        .font(.title3)
-                        .foregroundStyle(
-                            playback.isShuffled ? Color.wildAccent : Color.secondary
-                        )
-                        .frame(width: 44, height: 44)
+    private func controls(compact: Bool) -> some View {
+        VStack(spacing: compact ? 0 : 8) {
+            HStack(spacing: 8) {
+                if isPodcast {
+                    episodeButton(.previous)
+                } else {
+                    Button {
+                        Haptics.selection()
+                        playback.toggleShuffle()
+                    } label: {
+                        Image(systemName: "shuffle")
+                            .font(.title3)
+                            .foregroundStyle(
+                                playback.isShuffled ? Color.wildAccent : Color.secondary
+                            )
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
                 Button {
                     Haptics.tap()
                     if isPodcast {
@@ -266,6 +321,7 @@ struct NowPlayingView: View {
                     Image(systemName: isPodcast ? "gobackward.15" : "backward.fill")
                         .font(.title2)
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPodcast ? L10n("nowPlaying.rewind15") : L10n("nowPlaying.previousTrack"))
@@ -275,10 +331,12 @@ struct NowPlayingView: View {
                 } label: {
                     PlaybackTransportGlyph(playing: playback.wantsPlayback, buffering: playback.isBuffering, size: 24,
                         foreground: colorScheme == .dark ? Color(red: 0.13, green: 0.106, blue: 0.09) : Color(red: 1, green: 0.98, blue: 0.953))
-                        .frame(width: 64, height: 64)
+                        .frame(width: compact ? 48 : 64, height: compact ? 48 : 64)
                         .background(colorScheme == .dark ? Color.wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22), in: Circle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("nowPlaying.playPause")
                 .accessibilityLabel(playback.wantsPlayback ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
                 .accessibilityValue(playback.isBuffering ? L10n("nowPlaying.buffering") : "")
                 Button {
@@ -292,29 +350,35 @@ struct NowPlayingView: View {
                     Image(systemName: isPodcast ? "goforward.30" : "forward.fill")
                         .font(.title2)
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPodcast ? L10n("nowPlaying.forward30") : L10n("nowPlaying.nextTrack"))
-                Button {
-                    Haptics.selection()
-                    playback.cycleRepeatMode()
-                } label: {
-                    Image(systemName: playback.repeatMode == .one ? "repeat.1" : "repeat")
-                        .font(.title3)
-                        .foregroundStyle(
-                            playback.repeatMode == .off ? Color.secondary : Color.wildAccent
-                        )
-                        .frame(width: 44, height: 44)
+                if isPodcast {
+                    episodeButton(.next)
+                } else {
+                    Button {
+                        Haptics.selection()
+                        playback.cycleRepeatMode()
+                    } label: {
+                        Image(systemName: playback.repeatMode == .one ? "repeat.1" : "repeat")
+                            .font(.title3)
+                            .foregroundStyle(
+                                playback.repeatMode == .off ? Color.secondary : Color.wildAccent
+                            )
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
-            HStack(spacing: 44) {
+            HStack(spacing: 12) {
                 sleepTimerMenu
+                if isPodcast { playbackRateMenu }
                 AirPlayRouteButton()
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
                     .accessibilityLabel(L10n("nowPlaying.airPlay"))
                 Button {
-                    showingQueue = true
+                    showingQueue.toggle()
                 } label: {
                     let count = (isPodcast && playback.podcastCloud != nil)
                         ? (playback.podcastCloud?.items.count ?? playback.items.count)
@@ -322,12 +386,56 @@ struct NowPlayingView: View {
                     Label(L10n("nowPlaying.queueCount", count), systemImage: "list.bullet")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+    }
+
+    private func episodeButton(_ direction: PodcastContinuation.Skip) -> some View {
+        let isNext = direction == .next
+        return Button {
+            Haptics.tap()
+            playback.skipPodcastEpisode(direction)
+        } label: {
+            Image(systemName: isNext ? "forward.end.fill" : "backward.end.fill")
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n(isNext ? "nowPlaying.nextEpisode" : "nowPlaying.previousEpisode"))
+    }
+
+    private var playbackRateMenu: some View {
+        Menu {
+            ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3], id: \.self) { rate in
+                Button {
+                    playback.setPodcastPlaybackRate(rate)
+                } label: {
+                    if playback.podcastPlaybackRate == rate {
+                        Label(rateText(rate), systemImage: "checkmark")
+                    } else {
+                        Text(rateText(rate))
+                    }
+                }
+            }
+        } label: {
+            Text(rateText(playback.podcastPlaybackRate))
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(L10n("nowPlaying.playbackRate"))
+        .accessibilityValue(rateText(playback.podcastPlaybackRate))
+    }
+
+    private func rateText(_ rate: Float) -> String {
+        rate.formatted(.number.precision(.fractionLength(0...2))) + "×"
     }
 
     private var sleepTimerMenu: some View {
@@ -342,10 +450,17 @@ struct NowPlayingView: View {
                 Button(L10n("nowPlaying.cancelSleepTimer"), role: .destructive) { playback.cancelSleepTimer() }
             }
         } label: {
-            Label(sleepTimerLabel, systemImage: "moon.zzz")
+            Label {
+                if sleepTimerActive { Text(sleepTimerLabel).lineLimit(1) }
+            } icon: {
+                Image(systemName: "moon.zzz")
+            }
                 .font(.footnote)
                 .foregroundStyle(sleepTimerActive ? Color.wildAccent : Color.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
+        .accessibilityLabel(sleepTimerLabel)
     }
 
     private var sleepTimerActive: Bool {
@@ -362,19 +477,18 @@ struct NowPlayingView: View {
     }
 
     @ViewBuilder
-    private func playerArtwork(_ item: PlaybackService.Item) -> some View {
+    private func playerArtwork(_ item: PlaybackService.Item, size: CGFloat) -> some View {
         if isPodcast {
-            CoverImage(client: client, trackID: item.trackID, size: coverSize, flexible: true)
-                .layoutPriority(-1)
+            CoverImage(client: client, trackID: item.trackID, size: size)
         } else {
             switch playerStyle {
             case .cover:
-                CoverImage(client: client, trackID: item.trackID, size: coverSize)
+                CoverImage(client: client, trackID: item.trackID, size: size)
             case .vinyl:
                 VinylArtwork(
                     client: client,
                     trackID: item.trackID,
-                    size: coverSize,
+                    size: size,
                     isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil,
                     reduceMotion: reduceMotion
                 )
@@ -382,7 +496,7 @@ struct NowPlayingView: View {
                 CassetteArtwork(
                     client: client,
                     trackID: item.trackID,
-                    width: coverSize,
+                    width: size,
                     isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil && !reduceMotion,
                     progress: playback.duration > 0 ? playback.currentTime / playback.duration : 0,
                     title: item.title
@@ -392,11 +506,26 @@ struct NowPlayingView: View {
     }
 }
 
-private struct PlayerWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if next > 0 { value = next }
+/// Gives the cover only the space left after the title and notices are measured.
+private struct PlayerArtworkLayout: Layout {
+    let maximumSize: CGFloat
+    private let gap: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? maximumSize
+        let height = proposal.height ?? .infinity
+        let metadata = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let metadataHeight = min(metadata.height, height)
+        let side = min(width, maximumSize, max(0, height - metadataHeight - gap))
+        return CGSize(width: width, height: metadataHeight + (side > 0 ? gap + side : 0))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let metadata = subviews[1].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let metadataHeight = min(metadata.height, bounds.height)
+        let side = max(0, bounds.height - metadataHeight - gap)
+        subviews[0].place(at: CGPoint(x: bounds.midX - side / 2, y: bounds.minY), proposal: ProposedViewSize(width: side, height: side))
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.maxY), anchor: .bottom, proposal: ProposedViewSize(width: bounds.width, height: metadataHeight))
     }
 }
 
