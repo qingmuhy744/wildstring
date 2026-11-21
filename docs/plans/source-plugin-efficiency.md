@@ -1,4 +1,4 @@
-状态：草案
+状态：已确认
 
 # 数据源插件请求缩减与跨来源并行优化
 
@@ -24,10 +24,11 @@
 1. **批扫去固定等待**（`backend/src/wildstring/lyric_scans.py`）
    - 改造 `LyricScans.run()`，复用 `Providers.run()` 的事件循环节奏：`step()` 返回有进展时仅做极短让步（`0.02s`）立即继续处理下一条到期任务或已扫覆盖推进；无到期任务时按最近 `next_at` 计算休眠时长（上限 `0.5s`）并等待 `exit.wait(delay)`，在避免空转的同时消除每步 `0.5s` 固定损耗。
 
-2. **锁外热缓存快路径与后台短等待**（`backend/src/wildstring/plugin_archives.py`）
+2. **锁外热缓存快路径与进程内优先级槽位**（`backend/src/wildstring/plugin_archives.py`）
    - `execute()` 先调用 `context.manager.current(...)` 校验启用状态与配置版本，再按 `[plugin.sha256, config_version, method, value]` 计算缓存键；非 `force` 且 `provider_cache` 未过期时直接在锁外返回结果。
-   - 未命中缓存时再获取 `.request.lock`，并在锁内二次复查缓存（Double-Checked Locking），避免并发冷请求重复击穿上游。
-   - 后台批扫用短锁等待，遇到锁竞争则重新排队。阶段三在来源槽位空闲时安排手动任务优先；已开始的调用执行到返回或超时。
+   - 未命中缓存时先经过每个 `plugin_id` 对应的进程内轻量优先级条件锁，再获取 `.request.lock`，并在锁内二次复查缓存（Double-Checked Locking），避免并发冷请求重复击穿上游：
+     - 交互式调用（`batch_id is None`，优先级 `0`）排在后台批扫（`batch_id is not None`，优先级 `1`）之前唤醒并领取释放后的来源槽，在不耦合 `Providers` 与 `LyricScans` 两套任务表的前提下兑现手动优先；
+     - 后台批扫短等待后仍未拿到槽位则快速让路并重排；已开始的调用执行到返回或超时。
 
 3. **`source_plugin_busy` 轻推迟重排**（`backend/src/wildstring/lyric_scans.py`）
    - `process_scoped()` 捕获 `source_plugin_busy` 时，不递增真实网络失败 `attempts`，不走 `30/60s` 失败退避，改为短延迟（`2~5s`）重回 `queued`。
@@ -35,7 +36,8 @@
 
 4. **Node `429` 与 `Retry-After` 透传**（`plugins/node-runtime/rate.cjs`、`plugins/node-runtime/netease.cjs`、`plugins/node-runtime/kugou.cjs`、`backend/src/wildstring/plugin_worker.py`、`plugins/community_adapters.py`）
    - 在 `rate.cjs` 对共享 `axios` 注册响应拦截器，在 vendor `request.js` 将传输或状态异常统一包装成 `502` 之前，提取原始 HTTP 状态码（`429`、`401`、`403`）与 `Retry-After` 响应头（支持整数秒与 HTTP-date 解析，裁剪至 `60..86400` 秒），同时识别响应体内的限流业务码。
-   - Node 运行时向 stdout 输出 `{wildstring_error: "source_plugin_rate_limited", retry_after}`，由 `bridge()`（携带 `retry_after` 字段或映射到带时长信息的 `PluginError`）与 `plugin_worker.py` 传递给 `plugin_rate.cooldown(rate, delay)`，只有新收到的上游 429 才设置或延长冷却。门控拒绝应返回可区分的已冷却状态和原到期时间，重复查询不延长冷却，也不消耗网络失败重试额度。验收使用最终 ZIP 内的 Node 运行时，确认拦截器捕获的信息能在 vendor 包装成 502 后仍传到 Python。
+   - Node 运行时向 stdout 输出 `{wildstring_error: "source_plugin_rate_limited", retry_after}`，由 `bridge()` 与 `plugin_worker.py` 保留结构化字段（如 `upstream_429=True`、`retry_after`、`cooldown_until`），同时对外继续保持 `error.code == "source_plugin_rate_limited"` 兼容既有 API 与测试契约。
+   - `plugin_worker.py` **仅当** `upstream_429` 为真时调用 `plugin_rate.cooldown(rate, delay)` 写入或延长冷却；门控拒绝只透传既有 `cooldown_until` 与 `source_plugin_rate_limited` 错误码，重复查询不延长冷却，也不消耗网络失败重试额度。验收使用最终 ZIP 内的 Node 运行时，确认拦截器捕获的信息能在 vendor 包装成 502 后仍传到 Python。
 
 ### 阶段二：插件契约升级 `api_version = 2`、搜索预匹配与批量详情去重
 
@@ -73,20 +75,19 @@
 2. **批扫按来源分槽跨歌曲并行**（`backend/src/wildstring/lyric_scans.py`）
    - 将批扫单线程循环升级为“协调器选任务 + 每来源至多 1 个活跃槽位”的并发调度器：
      - 同一 `track_id` 同一时刻只允许一个活跃批扫项，逐来源推进。满足目标时在一个事务内保存结果并转入 `ready`；只有需要继续查询时才重新入队。
-     - 仅在需要新增物理请求时考虑来源冷却，覆盖记录和热缓存仍可使用。若当前来源冷却，可继续尝试同一首歌的下一个可用来源；达标后直接结束，否则在冷却到期后再查被暂缓的来源。被暂缓的来源不记作未匹配。
-     - 来源槽空闲时优先认领已排队的手动任务；每个来源仍只执行一个调用，继续共享原有物理请求门控。
+     - 无需新增数据库列：以现有的 `lyric_scan_items.results` JSON 映射作为已完成来源权威集合（`provider_index` 同步写为 `len(results)`，不再作为单向跳过游标）。每次调度按 `options["providers"]` 优先级选出首个未在 `results` 中且未冷却的来源；仅在需要新增物理请求时受冷却约束，覆盖记录和热缓存仍可直接命中。若当前所有剩余未查来源均处于冷却中，则以 `next_at = min(cooldown_until)` 重新入队，等冷却到期后再补查，不把暂缓来源记作未匹配；若后续已达标则直接结束。
+     - 来源槽空闲时通过阶段一的进程内优先级条件锁优先让手动任务领取；每个来源仍只执行一个调用，继续共享原有物理请求门控。
      - 继续复用 `exit` 暂停/取消信号、`checkpoint()` 批次状态检查与 `library_job_scope` 上下文隔离。
 
 ### 阶段四：插件打包器、Nuitka 原生扩展与文档契约同步
 
 - 更新 `scripts/package_source_plugins.py` 的 AST 导出符号清单与 `README.txt`（声明 `WildString source plugin API v2`），核验 `make source-plugins`。
 - 更新原生编译插件夹具 `tests/fixtures/plugins/native_core.py` 至 v2 方法签名，核验 `make test-native-plugin`。
-- 更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`、`frontend/web/src/source-plugins.tsx`）与 Android（`frontend/android/app/src/main/res/values/strings.xml`、`frontend/android/app/src/main/res/values-zh/strings.xml`、`frontend/android/app/src/main/java/com/wildstring/app/data/AgentPlatform.kt`、`frontend/android/app/src/main/java/com/wildstring/app/ui/MusicSourcePlugins.kt`）的 v2 导入与空状态提示，说明服务升级后需要导入新 ZIP、重新配置并启用。
-- 同步更新 `docs/architecture/source-plugins.md` 契约说明。
+- 遵循 `AGENTS.md` §2 界面降噪原则同步文档与简明文案：更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`）中的 `sourcePlugins.importDescription` 以及 `docs/architecture/source-plugins.md`，取消对跨主协议版本无条件保留旧包的承诺，简明写清“兼容协议升级保留插件与配置，协议大版本变更会清理不兼容旧包并需重新导入与配置”。不为新安装空状态堆砌常驻迁移横幅；Android 端现有的 `src_plugin_empty_hint`（`frontend/android/app/src/main/res/values-zh/strings.xml`、`frontend/android/app/src/main/res/values/strings.xml`）已足够简洁准确，若无需调整映射或代码则保持不改。
 
 ## 验收（按 AGENTS.md §3 定级）
 
-- **验收级别**：L3（插件协议、后端调度及 Web／Android 提示跨端变更）。
+- **验收级别**：L2（触及后端插件协议、调度与 Web 导入文案；若实施过程修改了 `frontend/android/**` 文件，则按 L3 补充 `make android-ci` 与 Android 端截图验收）。
 - **前置断言清点**：修改规则前使用 `git grep` 清点并列出需要同步更新的现有断言（`api_version == 1`、旧三方法签名、`source_plugin_busy` 重试次数、错误码文案）：
   - `backend/tests/test_plugin_contract.py`
   - `backend/tests/test_source_plugins.py`
@@ -100,7 +101,7 @@
   - `make source-plugins`：跑通 `plugins/node-runtime` 单元测试、rolldown 打包与三个 `2.0.0` ZIP 产物生成。
   - `make check` 与 `make test-affected`：覆盖全部更新后的后端、Web 与契约检查。
   - `make test-native-plugin`：验证 Nuitka CPython 3.12 编译扩展在 `api_version = 2` 契约下的导入、调用与升级。
-  - 交付前执行 `make ci` 与 `make android-ci`。按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题以及对应 Android 改动的截图，覆盖升级后空状态、导入 v2 和正常启用。
+  - 交付前执行 `make ci`（若修改了 `frontend/android/**` 则同步执行 `make android-ci` 并核对 Android 截图），并按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
 - **专项量化与回归场景（隔离合成上游 + 假 HTTP 传输）**：
   - **请求预算**：无歧义曲目歌词冷查询验证 QQ、网易云物理请求降至 2 次、酷狗降至 3 次；隐藏重制版后缀导致同分歧义时触发 1 次批量详情回退并正确区分版本；同专辑 3 候选元数据建议验证专辑详情按 `release_id` 去重，且 `include_release=False/True` 缓存互不污染；批量响应乱序或缺失单条时保留成功项；摘要未达标时可通过详情回退正确匹配。
   - **锁与调度延迟**：同来源持锁慢查询期间热缓存命中耗时 `< 50ms`（不再等待 2s 报错）；批扫连续 4 步已扫覆盖推进总耗时 `< 200ms`；批扫撞到已占用的来源锁时短暂重排，且不消耗 `attempts`；来源槽释放后，排队中的手动任务先于后台领取。
