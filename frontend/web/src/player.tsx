@@ -1836,7 +1836,7 @@ export function PodcastSkipButton({
 
 export function PlaybackControls({ player, active = true }: { player: Player; active?: boolean }) {
   const { t } = useTranslation();
-  const { current, playing, index, queue, duration } = player;
+  const { current, index, queue, duration } = player;
   const position = usePlaybackPosition(player.position, active);
   const podcast = !!current?.podcast_id;
   return (

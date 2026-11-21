@@ -572,7 +572,7 @@ class LyricScans:
                 (min(deferred), time.time(), item["id"]),
             )
 
-    def process_provider(self, item, track, record, provider, options):
+    def process_provider(self, item, track, record, provider, options) -> float | None:
         identity = provider["id"]
         config = self.sources.current(identity, provider["version"])
         if (
@@ -592,7 +592,7 @@ class LyricScans:
             self.advance(item, identity, "skipped_scanned", covered["candidate_id"])
             return None
         if not self.claim_job(item):
-            return
+            return None
         try:
             self.lookup(item, track, record, provider, options, target)
         except PluginError as error:
@@ -631,6 +631,7 @@ class LyricScans:
                     )
             else:
                 self.advance(item, identity, "failed", error=error.code)
+        return None
 
     def claim_job(self, item):
         with self.database.connect(write=True) as db:
