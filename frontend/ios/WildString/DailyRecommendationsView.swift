@@ -102,7 +102,7 @@ struct DailyRecommendationsView: View {
 
     private var recommendationRows: some View {
         ForEach(items) { item in
-            TrackActionRow(client: client, track: item.track) {
+            TrackActionRow(client: client, playback: playback, track: item.track) {
                 Button {
                     play(item)
                 } label: {

@@ -7923,6 +7923,23 @@
         }
       }
     },
+    "nowPlaying.nextEpisode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next episode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一集"
+          }
+        }
+      }
+    },
     "nowPlaying.nextTrack": {
       "extractionState": "manual",
       "localizations": {
@@ -7991,6 +8008,40 @@
         }
       }
     },
+    "nowPlaying.playbackRate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playback speed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放倍速"
+          }
+        }
+      }
+    },
+    "nowPlaying.previousEpisode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous episode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一集"
+          }
+        }
+      }
+    },
     "nowPlaying.previousTrack": {
       "extractionState": "manual",
       "localizations": {
@@ -8004,6 +8055,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "上一首"
+          }
+        }
+      }
+    },
+    "nowPlaying.progress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playback progress"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放进度"
           }
         }
       }
@@ -10180,6 +10248,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "关闭"
+          }
+        }
+      }
+    },
+    "queueView.locateCurrent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locate current item"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定位当前"
           }
         }
       }
@@ -13019,6 +13104,40 @@
         }
       }
     },
+    "trackAction.appendToQueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add to Queue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入播放队列"
+          }
+        }
+      }
+    },
+    "trackAction.artistNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artist not found. Check the artist name in the music library."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到该艺人。请检查曲库中的艺人名称。"
+          }
+        }
+      }
+    },
     "trackAction.batchReview": {
       "extractionState": "manual",
       "localizations": {
@@ -13155,6 +13274,57 @@
         }
       }
     },
+    "trackAction.openAlbum": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Album"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往专辑"
+          }
+        }
+      }
+    },
+    "trackAction.openArtist": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Artist"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往艺人"
+          }
+        }
+      }
+    },
+    "trackAction.playNext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play Next"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一首播放"
+          }
+        }
+      }
+    },
     "trackAction.playlistConflict": {
       "extractionState": "manual",
       "localizations": {
@@ -13185,6 +13355,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "歌单名称"
+          }
+        }
+      }
+    },
+    "trackAction.queueFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t add to queue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法加入播放队列"
+          }
+        }
+      }
+    },
+    "trackAction.queued": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added to queue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加入播放队列"
           }
         }
       }

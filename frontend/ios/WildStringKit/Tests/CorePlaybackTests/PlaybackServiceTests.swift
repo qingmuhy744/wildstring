@@ -272,6 +272,39 @@ struct PlaybackServiceTests {
         #expect(restored.currentTime == 42)
     }
 
+    @Test func enqueueMusicKeepsContinuedEpisodeAndPersistsNewSongs() async throws {
+        let store = InMemoryQueueStore()
+        let service = try makeService(store: store)
+        defer { service.shutdown() }
+        service.configurePodcastContinuation(
+            episodes: [
+                .init(id: "ep2", title: "Episode 2", chronologicalIndex: 1, isCompleted: false),
+                .init(id: "ep1", title: "Episode 1", chronologicalIndex: 0, isCompleted: false),
+            ],
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+        service.playPodcastEpisode(.init(
+            trackID: "podcast_ep_ep2", title: "Episode 2", artist: "Show", streamPath: "unused"
+        ))
+        service.handleItemEnded()
+        let playingEpisode = try #require(service.currentItem)
+        #expect(playingEpisode.trackID == "podcast_ep_ep1")
+        service.pause()
+        let position = service.currentTime
+        let first = PlaybackService.Item(trackID: "first", title: "First", artist: "Artist", streamPath: "unused")
+        let last = PlaybackService.Item(trackID: "last", title: "Last", artist: "Artist", streamPath: "unused")
+        #expect(service.enqueue(items: [last]))
+        #expect(service.enqueue(items: [first], next: true))
+        #expect(service.currentItem?.id == playingEpisode.id)
+        #expect(service.currentTime == position)
+        #expect(!service.wantsPlayback)
+        await service.flushPersistence()
+        let restored = try makeService(store: store)
+        defer { restored.shutdown() }
+        await restored.restore()
+        #expect(restored.items.map(\.trackID) == ["podcast_ep_ep1", "first", "last"])
+    }
+
     @Test func restoreWithoutPersistedQueueKeepsEmptyState() async throws {
         let service = try makeService(store: InMemoryQueueStore())
         await service.restore()

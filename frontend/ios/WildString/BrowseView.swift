@@ -198,7 +198,7 @@ struct BrowseView: View {
                     emptyTitle: L10n("browse.emptySongs"),
                     emptyIcon: "music.note.list"
                 ) { track in
-                    TrackActionRow(client: client, track: track) {
+                    TrackActionRow(client: client, playback: playback, track: track) {
                         Button {
                             songsLoader.play(track, using: playback)
                         } label: {
