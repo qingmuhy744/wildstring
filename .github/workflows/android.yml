@@ -92,9 +92,9 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
           else
-            echo "android=true" | tee -a "$GITHUB_OUTPUT"
+            echo "android=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Skip the Android build
         if: steps.areas.outputs.android != 'true'

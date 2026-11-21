@@ -39,9 +39,9 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+            python3 scripts/ci_changed_areas.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
           else
-            printf 'backend=true\nweb=true\ncontainer=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'backend=true\nweb=true\ncontainer=true\n' >> "$GITHUB_OUTPUT"
           fi
 
   quality:

@@ -48,7 +48,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-        run: python3 scripts/release_verify_scope.py | tee -a "$GITHUB_OUTPUT"
+        run: python3 scripts/release_verify_scope.py >> "$GITHUB_OUTPUT"
       - name: Compare native build numbers with the previous release
         env:
           PREVIOUS_RELEASE: ${{ steps.scope.outputs.previous_release }}
@@ -312,6 +312,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref_name }}
           persist-credentials: false
       - name: Find the highest published stable version
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
