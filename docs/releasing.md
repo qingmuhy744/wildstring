@@ -55,6 +55,8 @@ python3 scripts/package_release.py --tag vX.Y.Z --previous-tag vA.B.C --check-on
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。
 
+核心发布完成后，若稳定渠道同步失败或被跳过，可用 `gh workflow run release-channels.yml --ref main` 单独重试同步。该流程会重新选择最高的已发布稳定版本。
+
 发布产物：
 
 - `wildstring-X.Y.Z-release.apk`：固定签名、R8 优化、无内置测试曲库的 Android 安装包。
