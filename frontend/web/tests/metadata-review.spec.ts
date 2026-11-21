@@ -140,6 +140,9 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
   });
   await login(page);
   await section(page, '管理');
+  // The management switcher selects the default library after its first load.
+  // Wait for that selection before opening a dialog owned by the selected library.
+  await expect(page.locator('.music-library-switcher-management')).toBeVisible();
   await page.getByRole('button', { name: '批量核对资料', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '批量核对资料', exact: true });
   await expect(dialog.getByRole('heading', { name: '摇滚测试 1', exact: true })).toBeVisible();
