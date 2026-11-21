@@ -540,7 +540,7 @@ class Providers:
                     )
                     if changed:
                         connection.execute(
-                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,interactive=MAX(interactive,?),next_at=CASE WHEN ? THEN 0 ELSE next_at END,updated_at=? WHERE id=?",
+                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,interactive=MAX(interactive,?),next_attempt=CASE WHEN ? THEN 0 ELSE next_attempt END,updated_at=? WHERE id=?",
                             (
                                 current["version"],
                                 merged_mode,
@@ -572,11 +572,21 @@ class Providers:
                     )
                     intents += 1
                 else:
-                    changed = merged_mode != job["refresh_mode"] or bool(force) and not job["force"]
+                    changed = (
+                        merged_mode != job["refresh_mode"]
+                        or (bool(force) and not job["force"])
+                        or (interactive and not job["interactive"])
+                    )
                     if changed:
                         connection.execute(
-                            "UPDATE provider_jobs SET refresh_mode=?,force=?,updated_at=? WHERE id=?",
-                            (merged_mode, int(bool(force or job["force"])), clock, job["id"]),
+                            "UPDATE provider_jobs SET refresh_mode=?,force=?,interactive=MAX(interactive,?),updated_at=? WHERE id=?",
+                            (
+                                merged_mode,
+                                int(bool(force or job["force"])),
+                                interactive,
+                                clock,
+                                job["id"],
+                            ),
                         )
                         upgraded += 1
             connection.executemany(
@@ -894,7 +904,7 @@ class Providers:
             ):
                 connection.execute(
                     "UPDATE provider_jobs SET status='queued',busy_deferrals=busy_deferrals+1,"
-                    "next_at=?,updated_at=? WHERE id=? AND status='running'",
+                    "next_attempt=CASE WHEN interactive THEN 0 ELSE ? END,updated_at=? WHERE id=? AND status='running'",
                     (time.time() + 3, time.time(), job["id"]),
                 )
                 return
@@ -1069,7 +1079,7 @@ class Providers:
                 # automatic/backfill queue.  Keep FIFO ordering within each class,
                 # while letting explicit `force` refreshes provide timely feedback.
                 job = connection.execute(
-                    "SELECT * FROM provider_jobs WHERE status='queued' AND next_at<=? "
+                    "SELECT * FROM provider_jobs WHERE status='queued' AND next_attempt<=? "
                     "ORDER BY interactive DESC, force DESC, created_at, id LIMIT 1",
                     (clock,),
                 ).fetchone()

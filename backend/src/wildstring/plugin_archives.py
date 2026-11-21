@@ -36,8 +36,11 @@ class _PrioritySlot:
         self.interactive_waiters = 0
 
     @contextmanager
-    def acquire(self, interactive):
-        deadline = time.monotonic() + 2
+    def acquire(self, interactive, deadline=None):
+        if deadline is None:
+            deadline = time.monotonic() + 2
+        elif not interactive:
+            deadline = min(deadline, time.monotonic() + 2)
         with self.condition:
             if interactive:
                 self.interactive_waiters += 1
@@ -277,8 +280,15 @@ def execute(plugin, context, method, value):
     with _slots_lock:
         slot = _slots.setdefault(plugin.manifest.id, _PrioritySlot())
     try:
-        with slot.acquire(context.interactive):
-            with FileLock(str(directory / (plugin.manifest.id + ".request.lock")), timeout=2):
+        with slot.acquire(context.interactive, context.deadline):
+            remaining = context.deadline - time.monotonic()
+            if not context.interactive:
+                remaining = min(2, remaining)
+            if remaining <= 0:
+                raise PluginError("source_plugin_busy")
+            with FileLock(
+                str(directory / (plugin.manifest.id + ".request.lock")), timeout=remaining
+            ):
                 return execute_serial(plugin, context, method, value, cache_key)
     except Timeout:
         raise PluginError("source_plugin_busy") from None

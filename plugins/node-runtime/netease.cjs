@@ -2,7 +2,8 @@
 global.deviceId = 'WildStringSourcePlugin';
 console.log = console.info = console.warn = console.error = () => {};
 const request = require('@wildstring/netease-metadata/util/request');
-const { paced } = require('./rate.cjs');
+const { paced, observeAxios } = require('./rate.cjs');
+observeAxios(require('axios'));
 const methods = {
   '/cloudsearch': require('@wildstring/netease-metadata/module/cloudsearch'),
   '/song/detail': require('@wildstring/netease-metadata/module/song_detail'),

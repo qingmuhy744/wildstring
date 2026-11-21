@@ -1,6 +1,7 @@
 // Only metadata and lyrics endpoints are included in this provider-owned executable bundle.
 const request = require('@wildstring/kugou-metadata/util/request').createRequest;
-const { paced } = require('./rate.cjs');
+const { paced, observeAxios } = require('./rate.cjs');
+observeAxios(require('axios'));
 const methods = {
   '/search': require('@wildstring/kugou-metadata/module/search'),
   '/krm/audio': require('@wildstring/kugou-metadata/module/krm_audio'),

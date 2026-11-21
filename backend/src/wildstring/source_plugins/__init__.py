@@ -61,6 +61,8 @@ class InstalledPlugin:
         self.manifest, self.path, self.sha256 = manifest, path, sha256
 
     def available(self):
+        if self.manifest.api_version != API_VERSION:
+            return False
         paths = [str(self.path / "lib"), str(self.path)]
         return all(
             PathFinder.find_spec(name, paths) is not None

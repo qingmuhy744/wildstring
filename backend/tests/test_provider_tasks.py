@@ -2,6 +2,7 @@
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from test_personal_library import music
 from test_providers import HEADERS, RECORDING, enable
@@ -377,7 +378,10 @@ def test_failed_provider_job_promotes_pending_refresh_intent_and_diagnostics_use
         ) == (2, "queued", "all", 1)
 
 
-def test_single_track_refresh_promotes_queued_background_job(settings, authenticated_client):
+@pytest.mark.parametrize("running", [False, True])
+def test_single_track_refresh_promotes_queued_background_job(
+    settings, authenticated_client, running
+):
     seed(settings)
     with authenticated_client(settings) as client:
         service, track = setup_service(client)
@@ -386,10 +390,16 @@ def test_single_track_refresh_promotes_queued_background_job(settings, authentic
         service.step()
         with service.database.connect() as db:
             old = db.execute(
-                "SELECT id, interactive, status, next_at FROM provider_jobs"
+                "SELECT id, interactive, status, next_attempt FROM provider_jobs"
             ).fetchone()
             assert old["interactive"] == 0 and old["status"] == "queued"
-            assert old["next_at"] > time.time()
+            assert old["next_attempt"] > time.time()
+        if running:
+            with service.database.connect(write=True) as db:
+                db.execute(
+                    "UPDATE provider_jobs SET status='running',next_attempt=0 WHERE id=?",
+                    (old["id"],),
+                )
         response = client.post(
             BASE + "/refresh",
             headers=HEADERS,
@@ -399,6 +409,6 @@ def test_single_track_refresh_promotes_queued_background_job(settings, authentic
         with Database(settings.data_dir).connect() as db:
             jobs = [
                 tuple(row)
-                for row in db.execute("SELECT id, interactive, next_at FROM provider_jobs")
+                for row in db.execute("SELECT id, interactive, next_attempt FROM provider_jobs")
             ]
             assert jobs == [(old["id"], 1, 0)]

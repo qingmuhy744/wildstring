@@ -1,7 +1,8 @@
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
-const { paced } = require('../rate.cjs');
+const { paced, observeAxios } = require('../rate.cjs');
+observeAxios(require('axios'));
 const { createRequest } = require('@wildstring/kugou-metadata/util/request');
 
 test('preserves 429 and Retry-After through the vendor 502 wrapper', async () => {
@@ -51,6 +52,26 @@ test('preserves a NetEase 429 despite its 502 wrapper', async () => {
       cloudsearch({ keywords: 'fixture', domain: `http://127.0.0.1:${server.address().port}` }, paced({}, request)),
       (error) => error.upstream_429 === true && error.retry_after === 60,
     );
+  } finally {
+    server.close();
+  }
+});
+
+test('successful follow-up request clears an earlier authentication response', async () => {
+  const axios = require('axios');
+  const server = http.createServer((req, res) => {
+    res.writeHead(req.url === '/first' ? 401 : 200, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const baseURL = `http://127.0.0.1:${server.address().port}`;
+    const result = await paced({}, async () => {
+      await axios.get(baseURL + '/first').catch(() => {});
+      await axios.get(baseURL + '/second');
+      return { status: 200, body: { ok: true } };
+    })();
+    assert.equal(result.body.ok, true);
   } finally {
     server.close();
   }

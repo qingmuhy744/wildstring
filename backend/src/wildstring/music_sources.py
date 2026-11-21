@@ -319,7 +319,15 @@ class MusicSources:
         candidates = plugin.search(context, query)
         if not isinstance(candidates, list):
             raise PluginError("source_plugin_invalid_response")
-        summaries = [self.candidate(track, row) for row in candidates[:3]]
+        valid_candidates = []
+        summaries = []
+        for row in candidates[:3]:
+            try:
+                summary = self.candidate(track, row)
+            except (PluginError, ValidationError):
+                continue
+            valid_candidates.append(row)
+            summaries.append(summary)
         ranked = sorted(summaries, key=lambda row: -row["match"]["score"])
         if not ranked:
             return [], context
@@ -341,7 +349,7 @@ class MusicSources:
         ):
             return [row for row in ranked if matched(row)], context
         details = plugin.metadata(
-            context, {"candidates": candidates[:3], "include_release": include_release}
+            context, {"candidates": valid_candidates, "include_release": include_release}
         )
         if not isinstance(details, list):
             raise PluginError("source_plugin_invalid_response")
@@ -354,10 +362,13 @@ class MusicSources:
                 continue
             if detail["id"] in valid_ids:
                 result[detail["id"]] = detail
-        return sorted(
+        ranked = sorted(
             (result[row["id"]] for row in summaries if row["id"] in result),
             key=lambda row: -row["match"]["score"],
-        ), context
+        )
+        if not include_release:
+            ranked = [row for row in ranked if matched(row)] or ranked
+        return ranked, context
 
     @staticmethod
     def candidate(track, detail, *, full=False):

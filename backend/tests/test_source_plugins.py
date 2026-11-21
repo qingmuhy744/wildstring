@@ -579,3 +579,38 @@ def test_manual_lyric_job_survives_pending_batch_and_newer_batch_history(
         assert result["jobs"][0]["status"] == "queued"
         assert existing["id"] in [item["id"] for item in result["items"]]
         assert client.post(endpoint, headers=HEADERS).json()["id"] == manual_job
+
+
+@pytest.mark.parametrize("needs_details", [False, True])
+def test_lyric_candidates_skip_invalid_rows_and_prefer_accepted_versions(
+    monkeypatch, needs_details
+):
+    from types import SimpleNamespace
+
+    from wildstring.music_sources import MusicSources
+
+    track = {"title": "稻香", "artists": ["周杰伦"], "duration_ms": 223000}
+    studio = track | {"id": "studio", "source_url": "https://example.com/studio"}
+    live = studio | {"id": "live", "title": "稻香 (Live)", "source_url": "https://example.com/live"}
+    summary = studio | {"duration_ms": None} if needs_details else studio
+    detail_requests = []
+
+    def metadata(_context, request):
+        detail_requests.append(request)
+        return [
+            item | {"fields": {"title": item["title"], "artists": item["artists"]}}
+            for item in (live, studio)
+        ]
+
+    plugin = SimpleNamespace(
+        search=lambda *_: [{"id": "invalid", "source_url": []}, summary, live],
+        metadata=metadata,
+    )
+    service = MusicSources(SimpleNamespace(database=None, directory=Path(".")))
+    monkeypatch.setattr(service, "settings", lambda _identity: {})
+    monkeypatch.setattr(MusicSources, "plugins", property(lambda _self: {"fixture-source": plugin}))
+    candidates, _context = service.candidates(track, "fixture-source", include_release=False)
+    assert [candidate["id"] for candidate in candidates] == ["studio"]
+    assert detail_requests == (
+        [{"candidates": [summary, live], "include_release": False}] if needs_details else []
+    )

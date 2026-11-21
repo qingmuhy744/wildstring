@@ -711,7 +711,6 @@ class Database:
                     for table, column, declaration in (
                         ("provider_jobs", "interactive", "INTEGER NOT NULL DEFAULT 0"),
                         ("provider_jobs", "busy_deferrals", "INTEGER NOT NULL DEFAULT 0"),
-                        ("provider_jobs", "next_at", "REAL NOT NULL DEFAULT 0"),
                         ("provider_refresh_intents", "interactive", "INTEGER NOT NULL DEFAULT 0"),
                         ("lyric_scan_items", "busy_deferrals", "INTEGER NOT NULL DEFAULT 0"),
                     ):

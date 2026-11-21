@@ -547,6 +547,19 @@ class LyricScans:
             return
         deferred = []
         for provider in providers:
+            identity = provider["id"]
+            with self.claim_lock:
+                if item["source"] != identity:
+                    self.active_sources.discard(item["source"])
+                    item["source"] = None
+                    if identity not in self.active_sources:
+                        self.active_sources.add(identity)
+                        item["source"] = identity
+            if item["source"] is None:
+                # Keep source priority when another scan owns this source.
+                # This is scheduler contention, not a provider failure.
+                deferred.append(time.time() + 0.5)
+                break
             deadline = self.process_provider(item, track, record, provider, options)
             if deadline is None:
                 return

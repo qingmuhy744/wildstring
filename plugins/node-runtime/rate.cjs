@@ -1,6 +1,5 @@
 // Every physical request uses the same gate as the Python SDK adapter.
 const { spawn } = require('node:child_process');
-const axios = require('axios');
 
 let upstreamError;
 function inspectResponse(response) {
@@ -22,15 +21,19 @@ function inspectResponse(response) {
     };
   } else if (status.includes(401) || status.includes(403)) {
     upstreamError = { wildstring_error: 'source_plugin_auth_or_rejected' };
+  } else {
+    upstreamError = undefined;
   }
 }
-axios.interceptors.response.use((response) => {
-  inspectResponse(response);
-  return response;
-}, (error) => {
-  inspectResponse(error.response);
-  return Promise.reject(error);
-});
+exports.observeAxios = (axios) => {
+  axios.interceptors.response.use((response) => {
+    inspectResponse(response);
+    return response;
+  }, (error) => {
+    inspectResponse(error.response);
+    return Promise.reject(error);
+  });
+};
 function gate(data) {
   if (!data.rate) return Promise.resolve();
   return new Promise((resolve, reject) => {

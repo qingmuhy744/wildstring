@@ -593,3 +593,80 @@ def test_workers_claim_distinct_sources_and_tracks(settings, authenticated_clien
             finally:
                 release.set()
             assert first.result(5)
+
+
+def test_cooldown_releases_source_slot_for_other_tracks(
+    settings, authenticated_client, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    prepare(settings, monkeypatch)
+    music(settings, "第二首.flac", ["合成艺人"], ["合成艺人"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        _, scans = setup(settings, client)
+        batch = client.post(BASE, headers=HEADERS, json={}).json()
+        options = batch["options"]
+        options["providers"].extend([{"id": "source-b"}, {"id": "source-c"}])
+        with scans.database.connect(write=True) as db:
+            db.execute(
+                "UPDATE lyric_scan_batches SET options=? WHERE id=?",
+                (json.dumps(options), batch["id"]),
+            )
+
+        active_b = threading.Event()
+        active_first_source = threading.Event()
+        release_b = threading.Event()
+        release_first_source = threading.Event()
+        calls = []
+        call_lock = threading.Lock()
+
+        def process_provider(item, _track, _record, provider, _options):
+            identity = provider["id"]
+            with scans.claim_lock:
+                assert item["source"] == identity
+                assert identity in scans.active_sources
+            with call_lock:
+                calls.append((item["track_id"], identity))
+            if identity == "fixture-source":
+                with call_lock:
+                    count = sum(source == identity for _, source in calls)
+                if count == 2:
+                    active_first_source.set()
+                    assert release_first_source.wait(5)
+                return time.time() + 120
+            assert identity == "source-b"
+            active_b.set()
+            assert release_b.wait(5)
+            scans.advance(item, identity, "no_match")
+            return None
+
+        monkeypatch.setattr(scans, "process_provider", process_provider)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(scans.step)
+            try:
+                assert active_b.wait(5)
+                second = pool.submit(scans.step)
+                assert active_first_source.wait(5)
+                with scans.claim_lock:
+                    assert scans.active_sources == {"fixture-source", "source-b"}
+                release_first_source.set()
+                assert second.result(5)
+            finally:
+                release_first_source.set()
+                release_b.set()
+            assert first.result(5)
+        assert [identity for _, identity in calls].count("fixture-source") == 2
+        assert [identity for _, identity in calls].count("source-b") == 1
+        assert [identity for _, identity in calls].count("source-c") == 0
+        with scans.database.connect() as db:
+            rows = db.execute(
+                "SELECT status, results, attempts, busy_deferrals FROM lyric_scan_items "
+                "WHERE batch_id=?",
+                (batch["id"],),
+            ).fetchall()
+        assert len(rows) == 2
+        for row in rows:
+            assert row["status"] == "queued"
+            assert row["attempts"] == row["busy_deferrals"] == 0
+            assert "fixture-source" not in json.loads(row["results"])

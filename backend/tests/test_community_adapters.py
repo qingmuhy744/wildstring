@@ -13,6 +13,8 @@ spec.loader.exec_module(adapters)
 
 
 def test_qq_gather_combines_song_requests_and_propagates_failure(tmp_path):
+    pytest.importorskip("qqmusic_api")
+
     class Context:
         directory = tmp_path
         requests = []

@@ -177,6 +177,7 @@ def test_http_business_rate_code_preserves_retry_after(tmp_path, monkeypatch):
 
 
 def test_qq_cgi_partial_rate_limit_does_not_return_partial_success(tmp_path):
+    pytest.importorskip("qqmusic_api")
     import importlib.util
     from pathlib import Path
 
@@ -198,3 +199,91 @@ def test_qq_cgi_partial_rate_limit_does_not_return_partial_success(tmp_path):
         adapters.QQPlugin().call(Context(), "song", ["a", "b"])
     assert failure.value.upstream_429 is True
     assert failure.value.retry_after == 900
+
+
+def test_interactive_request_waits_for_active_source_and_precedes_background(tmp_path, monkeypatch):
+    from filelock import FileLock
+
+    from wildstring.plugin_archives import _slots
+
+    database = Database(tmp_path)
+    database.initialize()
+    manager = SimpleNamespace(database=database, current=lambda *_: None)
+    plugin = InstalledPlugin(
+        Manifest("fixture-wait", "Fixture", "https://example.com", "MIT"), tmp_path, "digest"
+    )
+    directory = tmp_path / "plugin-state"
+    directory.mkdir()
+    lock = FileLock(str(directory / "fixture-wait.request.lock"))
+    order = []
+
+    def invoke(interactive, value):
+        context = SimpleNamespace(
+            manager=manager,
+            identity="fixture-wait",
+            configuration={"version": 1},
+            directory=tmp_path,
+            deadline=time.monotonic() + 7,
+            force=False,
+            interactive=interactive,
+        )
+        return execute(plugin, context, "search", value)
+
+    def completed(_plugin, _context, _method, value, _key):
+        order.append(value)
+        return value
+
+    monkeypatch.setattr("wildstring.plugin_archives.execute_serial", completed)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        with lock:
+            holder = pool.submit(invoke, False, "holder")
+            deadline = time.monotonic() + 1
+            while (
+                not _slots.get("fixture-wait") or not _slots["fixture-wait"].active
+            ) and time.monotonic() < deadline:
+                time.sleep(0.001)
+            assert _slots["fixture-wait"].active
+            interactive = pool.submit(invoke, True, "manual")
+            deadline = time.monotonic() + 1
+            while _slots["fixture-wait"].interactive_waiters != 1 and time.monotonic() < deadline:
+                time.sleep(0.001)
+            assert _slots["fixture-wait"].interactive_waiters == 1
+            # The background attempt reaches its short lock deadline. A manual
+            # request waiting for the slot must survive that full two seconds.
+            with pytest.raises(PluginError, match="source_plugin_busy"):
+                holder.result(timeout=4)
+            background = pool.submit(invoke, False, "background")
+            time.sleep(0.1)
+        assert interactive.result(timeout=2) == "manual"
+        assert background.result(timeout=2) == "background"
+    assert order == ["manual", "background"]
+
+
+def test_installed_v1_package_reports_unavailable(tmp_path):
+    plugin = InstalledPlugin(
+        Manifest("fixture", "Fixture", "https://example.com", "MIT", api_version=1),
+        tmp_path,
+        "digest",
+    )
+    assert not plugin.available()
+
+
+def test_node_gate_runs_without_axios_dependency(tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[2] / "plugins/node-runtime/rate.cjs"
+    shutil.copy(source, tmp_path / "rate.cjs")
+    subprocess.run(
+        [
+            "node",
+            "-e",
+            "require('./rate.cjs').paced({}, async () => ({status:200}))()"
+            ".then(result => { if (result.status !== 200) process.exit(1); })",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
