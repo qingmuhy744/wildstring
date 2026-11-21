@@ -57,7 +57,7 @@ struct NowPlayingView: View {
                                     }
                                     readingPane
                                 }
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                             if docksQueue && showingQueue {
                                 QueueView(client: client, playback: playback, onClose: { showingQueue = false })
@@ -266,24 +266,27 @@ struct NowPlayingView: View {
     }
 
     private var progressSection: some View {
-        VStack(spacing: 4) {
+        let duration = playback.duration
+        let canSeek = duration > 0
+        return VStack(spacing: 4) {
             Slider(
                 value: Binding(
-                    get: { scrubTime ?? playback.currentTime },
+                    get: { canSeek ? (scrubTime ?? playback.currentTime) : 0 },
                     set: { scrubTime = $0 }
                 ),
-                in: 0...max(playback.duration, 1)
+                in: 0...max(duration, 1)
             ) { editing in
                 if !editing, let time = scrubTime {
                     playback.seek(to: time)
                     scrubTime = nil
                 }
             }
+            .disabled(!canSeek)
             .accessibilityLabel(L10n("nowPlaying.progress"))
             HStack {
                 Text(timeText(scrubTime ?? playback.currentTime))
                 Spacer()
-                Text(timeText(playback.duration))
+                Text(canSeek ? timeText(duration) : "—")
             }
             .font(.caption2)
             .monospacedDigit()
