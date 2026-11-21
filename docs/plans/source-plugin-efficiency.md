@@ -83,11 +83,17 @@
 
 - 更新 `scripts/package_source_plugins.py` 的 AST 导出符号清单与 `README.txt`（声明 `WildString source plugin API v2`），核验 `make source-plugins`。
 - 更新原生编译插件夹具 `tests/fixtures/plugins/native_core.py` 至 v2 方法签名，核验 `make test-native-plugin`。
-- 遵循 `AGENTS.md` §2 界面降噪原则同步文档与简明文案：更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`）中的 `sourcePlugins.importDescription` 以及 `docs/architecture/source-plugins.md`，取消对跨主协议版本无条件保留旧包的承诺，简明写清“兼容协议升级保留插件与配置，协议大版本变更会清理不兼容旧包并需重新导入与配置”。不为新安装空状态堆砌常驻迁移横幅；Android 端现有的 `src_plugin_empty_hint`（`frontend/android/app/src/main/res/values-zh/strings.xml`、`frontend/android/app/src/main/res/values/strings.xml`）已足够简洁准确，若无需调整映射或代码则保持不改。
+- 遵循 `AGENTS.md` §2 界面降噪原则同步文档与简明文案：更新 Web（`frontend/web/src/locales/zh-CN.json`、`frontend/web/src/locales/en.json`）中的 `sourcePlugins.importDescription` 以及 `docs/architecture/source-plugins.md`，明确插件与候选管理仅在 Web 提供，取消对跨主协议版本无条件保留旧包的承诺，简明写清“兼容协议升级保留插件与配置，协议大版本变更会清理不兼容旧包并需重新导入与配置”；不为新安装空状态堆砌常驻迁移横幅。
+- **Android 历史残留死代码清理**（插件管理、批扫管理、管理中心与资料候选审阅入口已在 `MobileFeatures.kt` `"source-plugins"`、`"lyric-scans"`、`"management"`、`"suggestions"` 路由退役并引导至 Web，清理下列未挂载死代码及孤立资源，严禁误删仍在使用的面板与路由）：
+  - `frontend/android/app/src/main/java/com/wildstring/app/ui/MusicSourcePlugins.kt`：删除未挂载的 `SourcePluginsPanel`（以及仅由它引用的 `uploadPlugin` / `downloadPlugin` 等 API 辅助方法）；**保留同一文件内的 `OnlineLyricsPanel`**（仍被 `"lyrics"` 路由下的 `LyricsEditorPanel` 挂载）。
+  - `frontend/android/app/src/main/java/com/wildstring/app/ui/LyricScans.kt`：删除未挂载的 `LyricScansPanel`；**保留 `lyricLevelLabel`**（或将其移至 `AgentWorkspace.kt` 旁），因 `AgentWorkspace.kt` 仍在调用。
+  - `frontend/android/app/src/main/java/com/wildstring/app/ui/LibraryManagementTools.kt`：删除未挂载的 `ManagementPanel` 与 `SuggestionsPanel`；**保留 `MetadataPanel`、`LyricsEditorPanel`、`AlbumMetadataPanel` 与 `MetadataRefreshPrompt`**。
+  - `frontend/android/app/src/main/java/com/wildstring/app/ui/MetadataReview.kt`：删除未挂载的 `MetadataReviewPanel`（及该文件内不再被引用的残留代码）。
+  - `frontend/android/app/src/main/res/values/strings.xml` 与 `values-zh/strings.xml`：清理上述死代码移除后不再被引用的孤立字符串资源（如无人引用的 `src_plugin_*`、`lyric_scan_*`、`meta_rev_*`、`lib_mgmt_*`，以 Android Lint `UnusedResources` 检出为准），同时**保留** `MobileFeatures.kt` 中引导前往 Web 的 `"source-plugins"` / `"lyric-scans"` 等路由及 `SourceGainWorkspaceTest` 现有断言。
 
 ## 验收（按 AGENTS.md §3 定级）
 
-- **验收级别**：L2（触及后端插件协议、调度与 Web 导入文案；若实施过程修改了 `frontend/android/**` 文件，则按 L3 补充 `make android-ci` 与 Android 端截图验收）。
+- **验收级别**：L3（插件协议、后端调度、Web 文案以及 Android 历史残留死代码与资源清理）。
 - **前置断言清点**：修改规则前使用 `git grep` 清点并列出需要同步更新的现有断言（`api_version == 1`、旧三方法签名、`source_plugin_busy` 重试次数、错误码文案）：
   - `backend/tests/test_plugin_contract.py`
   - `backend/tests/test_source_plugins.py`
@@ -101,7 +107,7 @@
   - `make source-plugins`：跑通 `plugins/node-runtime` 单元测试、rolldown 打包与三个 `2.0.0` ZIP 产物生成。
   - `make check` 与 `make test-affected`：覆盖全部更新后的后端、Web 与契约检查。
   - `make test-native-plugin`：验证 Nuitka CPython 3.12 编译扩展在 `api_version = 2` 契约下的导入、调用与升级。
-  - 交付前执行 `make ci`（若修改了 `frontend/android/**` 则同步执行 `make android-ci` 并核对 Android 截图），并按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
+  - 交付前执行 `make ci` 与 `make android-ci`（运行 `:app:lintDebug` 检查无孤立字符串资源、单元测试、`:app:compileDebugAndroidTestKotlin` 含 `SourceGainWorkspaceTest` 与 Debug APK 打包），并按项目验收规则逐张检查 Web 桌面与 `390px` 手机宽度浅深主题截图，覆盖清理后空状态、导入 v2 与正常启用状态。
 - **专项量化与回归场景（隔离合成上游 + 假 HTTP 传输）**：
   - **请求预算**：无歧义曲目歌词冷查询验证 QQ、网易云物理请求降至 2 次、酷狗降至 3 次；隐藏重制版后缀导致同分歧义时触发 1 次批量详情回退并正确区分版本；同专辑 3 候选元数据建议验证专辑详情按 `release_id` 去重，且 `include_release=False/True` 缓存互不污染；批量响应乱序或缺失单条时保留成功项；摘要未达标时可通过详情回退正确匹配。
   - **锁与调度延迟**：同来源持锁慢查询期间热缓存命中耗时 `< 50ms`（不再等待 2s 报错）；批扫连续 4 步已扫覆盖推进总耗时 `< 200ms`；批扫撞到已占用的来源锁时短暂重排，且不消耗 `attempts`；来源槽释放后，排队中的手动任务先于后台领取。
