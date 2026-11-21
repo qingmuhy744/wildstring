@@ -252,6 +252,7 @@ def test_main_fails_closed_when_published_lookup_fails(monkeypatch, capsys):
 
     monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: (None, "lookup failed"))
     monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+    _mock_git(monkeypatch, tags="v0.8.21\n", changed="")
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("needs_android_emulator should not run when published lookup failed")
@@ -261,6 +262,7 @@ def test_main_fails_closed_when_published_lookup_fails(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "run_android_emulator=true" in out
     assert "run_ci_verify=false" in out
+    assert "previous_release=v0.8.21" in out
 
 
 def test_main_forwards_published_tags(monkeypatch, capsys):
@@ -271,6 +273,7 @@ def test_main_forwards_published_tags(monkeypatch, capsys):
 
     monkeypatch.setattr(scope, "resolve_published_tags", lambda _r, _t: ({"v0.8.20"}, ""))
     monkeypatch.setattr(scope, "needs_ci_verify", lambda _r, _h, _t: (False, "reused CI"))
+    _mock_git(monkeypatch, tags="v0.8.21\nv0.8.20\n", changed="")
 
     seen: dict[str, object] = {}
 
@@ -283,6 +286,7 @@ def test_main_forwards_published_tags(monkeypatch, capsys):
     assert scope.main() == 0
     out = capsys.readouterr().out
     assert "run_android_emulator=false" in out
+    assert "previous_release=v0.8.20" in out
     assert seen == {"release_tag": "v0.8.22", "published_tags": {"v0.8.20"}}
 
 
