@@ -77,7 +77,7 @@ data class EpisodeProgressPrompt(val title: String, val remoteMs: Long, val loca
 data class PodcastPageNotice(val id: Long, val message: String)
 sealed interface PodcastPreparation {
     data class Play(val positionMs: Long) : PodcastPreparation
-    data object Completed : PodcastPreparation
+    object Completed : PodcastPreparation
 }
 
 /** Episode bookmarks live outside the queue. The service owns checkpoints; UI only answers conflicts. */

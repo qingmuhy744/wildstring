@@ -126,7 +126,7 @@ class Plugin:
 
 QQ 包使用 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 0.9.0；酷狗包对应 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)；网易云包对应 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。后两个 ZIP 已包含锁定提交的元数据／歌词模块，官方镜像提供 Node 22 通用运行时，默认无需单独部署上游服务；也可填写外部 HTTP 服务地址。平台 Cookie 为可选配置，覆盖仍取决于上游授权。它们均为社区项目，并非平台官方 API；不提供音频下载。格式处理参考 [LDDC](https://github.com/chenmozhijin/LDDC)，不加载 Qt 桌面程序。上游及平台条款、覆盖和可用性由插件说明和维护者核验。
 
-本仓库参考包源码在 `plugins/`，用 `make source-plugins` 打包。网易云／酷狗包内的 `service.cjs` 由 `plugins/node-runtime/package-lock.json` 锁定上游提交与传递依赖，只包含所用元数据和歌词接口；不用上游登录／反作弊模块、PAC／FTP 代理，不包含音频下载。Node-forge 的已知签名校验通告未覆盖本包仅使用的公钥加密路径；维护者扩展接口前仍应重新审计依赖和可达路径。许可证保留在 `THIRD-PARTY-NOTICES.txt`。
+本仓库参考包源码在 `plugins/`，用 `make source-plugins` 打包。网易云／酷狗包内的 `service.cjs` 由 `plugins/node-runtime/package-lock.json` 锁定上游提交与传递依赖，只包含所用元数据和歌词接口；不用上游登录／反作弊模块、PAC／FTP 代理，不包含音频下载。RSA 公钥加密由 `@wildstring/native-rsa` 调用 Node/OpenSSL。扩展接口前需重新审计依赖和可达路径。许可证保留在 `THIRD-PARTY-NOTICES.txt`。
 
 第三方可独立维护同样格式的 ZIP，不需要向核心增加平台枚举。无需为此部署额外 MCP Server。
 

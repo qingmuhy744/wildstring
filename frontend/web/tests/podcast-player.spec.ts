@@ -405,7 +405,14 @@ test('真实接口：顺序切换、跳过已听完、偏好恢复，收起界�
   await page.reload();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.getByLabel('播客续播顺序')).toHaveValue('off');
+  const savedDescending = page.waitForResponse(
+    (response) =>
+      response.url().includes('/podcasts/queue/preferences') &&
+      response.request().method() === 'PUT' &&
+      (response.request().postData() || '').includes('"order":"desc"'),
+  );
   await page.getByLabel('播客续播顺序').selectOption('desc');
+  expect((await savedDescending).ok()).toBeTruthy();
   await expect(page.locator('.programme-track')).toHaveCount(3);
   await page.getByRole('button', { name: '收起全屏播放' }).click();
   await page.getByRole('button', { name: '下一集', exact: true }).click();

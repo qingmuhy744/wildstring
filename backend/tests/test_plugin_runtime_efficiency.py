@@ -275,13 +275,13 @@ def test_node_gate_runs_without_axios_dependency(tmp_path):
 
     source = Path(__file__).resolve().parents[2] / "plugins/node-runtime/rate.cjs"
     shutil.copy(source, tmp_path / "rate.cjs")
+    script = """
+require('./rate.cjs').paced({}, async () => ({status: 200}))().then(result => {
+  if (result.status !== 200) process.exit(1);
+});
+"""
     subprocess.run(
-        [
-            "node",
-            "-e",
-            "require('./rate.cjs').paced({}, async () => ({status:200}))()"
-            ".then(result => { if (result.status !== 200) process.exit(1); })",
-        ],
+        ["node", "-e", script],
         cwd=tmp_path,
         capture_output=True,
         check=True,

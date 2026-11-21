@@ -51,17 +51,18 @@ def wait(policy, deadline=None):
         time.sleep(delay)
 
 
-def cooldown(policy, delay=900, reason="source_plugin_rate_limited"):
-    if policy:
-        with closing(sqlite3.connect(policy["database"], timeout=10)) as db, db:
-            db.execute(
-                "INSERT INTO plugin_request_gates(plugin_id,cooldown_until,reason) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET cooldown_until=max(cooldown_until,excluded.cooldown_until),reason=excluded.reason",
-                (policy["plugin_id"], time.time() + max(1, min(86400, delay)), reason),
-            )
-            return db.execute(
-                "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id=?",
-                (policy["plugin_id"],),
-            ).fetchone()[0]
+def cooldown(policy, delay=900, reason="source_plugin_rate_limited") -> float | None:
+    if not policy:
+        return None
+    with closing(sqlite3.connect(policy["database"], timeout=10)) as db, db:
+        db.execute(
+            "INSERT INTO plugin_request_gates(plugin_id,cooldown_until,reason) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET cooldown_until=max(cooldown_until,excluded.cooldown_until),reason=excluded.reason",
+            (policy["plugin_id"], time.time() + max(1, min(86400, delay)), reason),
+        )
+        return db.execute(
+            "SELECT cooldown_until FROM plugin_request_gates WHERE plugin_id=?",
+            (policy["plugin_id"],),
+        ).fetchone()[0]
 
 
 def main():

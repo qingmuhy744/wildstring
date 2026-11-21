@@ -141,8 +141,8 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     }
     @Synchronized fun switchScope() { ensureOwner() }
     sealed interface ManualEnqueue {
-        data object Unchanged : ManualEnqueue
-        data object Submitted : ManualEnqueue
+        object Unchanged : ManualEnqueue
+        object Submitted : ManualEnqueue
         data class Confirm(val count: Int) : ManualEnqueue
     }
 
