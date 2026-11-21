@@ -267,6 +267,7 @@ private struct PodcastDetailView: View {
         }
         .navigationTitle(detail?.podcast.title ?? L10n("podcasts.defaultTitle"))
         .navigationBarTitleDisplayMode(.inline)
+        .miniPlayer(playback, client: client)
         .task {
             await load()
             await playback.podcastCloud?.refreshPreferences()
@@ -608,6 +609,7 @@ private struct PodcastUnifiedQueueView: View {
             }
         }
         .navigationTitle(L10n("podcasts.pendingQueue"))
+        .miniPlayer(playback, client: client)
         .task {
             await playback.podcastCloud?.refreshQueue()
             await playback.podcastCloud?.refreshPreferences()
