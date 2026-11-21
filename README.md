@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **版本 [v0.8.24](docs/releases/v0.8.24.md)** · 四端长列表点播最多装入 100 首，播完可接续已有的每日推荐。Web 滚动大曲库时只渲染视口附近的歌曲。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
+- **版本 [v0.8.25](docs/releases/v0.8.25.md)** · 数据源插件支持跨来源并行，歌词匹配减少详情请求。升级首次启动会清理 v1 插件、配置和专用 Cookie。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 
