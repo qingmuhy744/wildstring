@@ -326,6 +326,12 @@
   font-size: 12px;
   box-sizing: border-box;
 }
+.external-version-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-align: start;
+}
 .external-source-link {
   display: inline-flex;
   align-items: center;

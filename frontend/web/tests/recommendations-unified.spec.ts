@@ -252,6 +252,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
     ...outside,
     external_id: 'lastfm:local',
     name: tracks[0].title,
+    album: tracks[0].album,
     local_track: tracks[0],
     reason: '这条线索已经匹配到你的曲库。',
     wanted: true,
@@ -260,6 +261,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
     ...imported,
     external_id: 'lastfm:versions',
     name: '青花瓷',
+    album: null,
     local_track: null,
     local_versions: [
       { ...tracks[0], album: '我很忙' },

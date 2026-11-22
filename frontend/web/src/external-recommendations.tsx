@@ -323,7 +323,7 @@ export function ExternalRecommendations({
                   {versions.length > 0 && (
                     <details>
                       <summary>{t('external.chooseVersion')}</summary>
-                      <div className="external-suggestion-actions">
+                      <div className="external-suggestion-actions external-version-options">
                         {versions.map((track) => (
                           <button key={track.id} onClick={() => player.start([track], 0)}>
                             <Icon name="play" />
