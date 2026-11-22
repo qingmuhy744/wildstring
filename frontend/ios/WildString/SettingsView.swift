@@ -8,6 +8,7 @@ struct SettingsView: View {
     let client: WildstringClient
     let server: String
     let username: String
+    let category: SettingsCategory
 
     @Environment(ConnectionModel.self) private var connection
     @Environment(OfflineModel.self) private var offline
@@ -17,6 +18,8 @@ struct SettingsView: View {
     @State private var playerStyle = PlayerStyle.vinyl.rawValue
     @State private var songListSize = SongListSize.medium.rawValue
     @State private var hapticsEnabled = true
+    @State private var lyricTranslations = true
+    @State private var lyricRomanization = true
     @State private var playbackQuality = "original"
     @State private var syncMode = "ask"
     @State private var allowsCellular = true
@@ -30,17 +33,20 @@ struct SettingsView: View {
         AccountPreferences(server: server, username: username)
     }
 
-    init(playback: PlaybackService, client: WildstringClient, server: String, username: String) {
+    init(playback: PlaybackService, client: WildstringClient, server: String, username: String, category: SettingsCategory) {
         self.playback = playback
         self.client = client
         self.server = server
         self.username = username
+        self.category = category
         let stored = AccountPreferences(server: server, username: username)
         _limitMB = State(initialValue: stored.cacheLimitMB)
         _theme = State(initialValue: stored.string("appearanceTheme", default: ThemeChoice.system.rawValue))
         _playerStyle = State(initialValue: (PlayerStyle(rawValue: stored.string("playerStyle", default: PlayerStyle.vinyl.rawValue)) ?? .vinyl).rawValue)
         _songListSize = State(initialValue: stored.string("songListSize", default: SongListSize.medium.rawValue))
         _hapticsEnabled = State(initialValue: stored.bool("hapticsEnabled", default: true))
+        _lyricTranslations = State(initialValue: stored.bool("lyricTranslations", default: true))
+        _lyricRomanization = State(initialValue: stored.bool("lyricRomanization", default: true))
         _playbackQuality = State(initialValue: stored.qualityRaw)
         _syncMode = State(initialValue: stored.string("playbackSyncMode", default: "ask"))
         _allowsCellular = State(initialValue: stored.allowsCellularDownloads)
@@ -48,7 +54,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            if isAdmin {
+            if category == .server, isAdmin {
                 Section("settings.admin") {
                     Button {
                         showingReview = true
@@ -71,7 +77,7 @@ struct SettingsView: View {
                     MetadataReviewView(client: client)
                 }
             }
-            if let routes = connection.routes {
+            if category == .server, let routes = connection.routes {
                 Section(L10n("settingsView.serverSection")) {
                     TextField(L10n("settingsView.aliasPlaceholder"), text: Binding(get: { connection.servers.first { $0.address == routes.storageAddress }?.alias ?? "" }, set: { value in
                         if let saved = connection.servers.first(where: { $0.address == routes.storageAddress }) { connection.setAlias(value, for: saved) }
@@ -81,114 +87,134 @@ struct SettingsView: View {
                     if let message = routes.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
             }
-            Section("settings.appearance") {
-                Picker("settings.language", selection: languageBinding) {
-                    ForEach(InterfaceLanguage.allCases, id: \.self) { choice in
-                        Text(choice.label).tag(choice.rawValue)
+            if category == .appearance {
+                Section("settings.appearance") {
+                    Picker("settings.language", selection: languageBinding) {
+                        ForEach(InterfaceLanguage.allCases, id: \.self) { choice in
+                            Text(choice.label).tag(choice.rawValue)
+                        }
                     }
-                }
-                .disabled(savingLanguage)
-                Text(languageError ? LocalizedStringKey("settings.language.failed") : LocalizedStringKey("settings.language.hint"))
-                    .font(.footnote)
-                    .foregroundStyle(languageError ? Color.red : Color.secondary)
-                Picker("settings.theme", selection: $theme) {
-                    ForEach(ThemeChoice.allCases, id: \.self) { choice in
-                        Text(choice.label).tag(choice.rawValue)
+                    .disabled(savingLanguage)
+                    Text(languageError ? LocalizedStringKey("settings.language.failed") : LocalizedStringKey("settings.language.hint"))
+                        .font(.footnote)
+                        .foregroundStyle(languageError ? Color.red : Color.secondary)
+                    Picker("settings.theme", selection: $theme) {
+                        ForEach(ThemeChoice.allCases, id: \.self) { choice in
+                            Text(choice.label).tag(choice.rawValue)
+                        }
                     }
-                }
-                Picker("settings.playerStyle", selection: $playerStyle) {
-                    ForEach(PlayerStyle.allCases, id: \.self) { style in
-                        Text(style.label).tag(style.rawValue)
+                    Picker("settings.playerStyle", selection: $playerStyle) {
+                        ForEach(PlayerStyle.allCases, id: \.self) { style in
+                            Text(style.label).tag(style.rawValue)
+                        }
                     }
-                }
-                Picker("settings.songListSize", selection: $songListSize) {
-                    ForEach(SongListSize.allCases, id: \.self) { size in
-                        Text(size.label).tag(size.rawValue)
+                    Picker("settings.songListSize", selection: $songListSize) {
+                        ForEach(SongListSize.allCases, id: \.self) { size in
+                            Text(size.label).tag(size.rawValue)
+                        }
                     }
+                    Toggle("settings.haptics", isOn: $hapticsEnabled)
+                    Toggle(L10n("consumer.lyricTranslations"), isOn: $lyricTranslations)
+                    Toggle(L10n("consumer.lyricRomanization"), isOn: $lyricRomanization)
                 }
-                Toggle("settings.haptics", isOn: $hapticsEnabled)
             }
-            Section("settings.playback") {
-                if let cloud = playback.podcastCloud {
-                    Picker(L10n("podcast.resumeMode"), selection: Binding(
-                        get: { cloud.resumeMode },
-                        set: { value in Task { await cloud.setResumeMode(value) } }
-                    )) {
-                        Text(L10n("podcast.resumeMode.auto")).tag("auto")
-                        Text(L10n("podcast.resumeMode.ask")).tag("ask")
-                        Text(L10n("podcast.resumeMode.restart")).tag("restart")
+            if category == .podcast {
+                Section {
+                    if let cloud = playback.podcastCloud {
+                        Picker(L10n("podcast.resumeMode"), selection: Binding(
+                            get: { cloud.resumeMode },
+                            set: { value in Task { await cloud.setResumeMode(value) } }
+                        )) {
+                            Text(L10n("podcast.resumeMode.auto")).tag("auto")
+                            Text(L10n("podcast.resumeMode.ask")).tag("ask")
+                            Text(L10n("podcast.resumeMode.restart")).tag("restart")
+                        }
+                        if let message = cloud.resumeModeError {
+                            Text(message).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                    if let message = cloud.resumeModeError { Text(message).font(.caption).foregroundStyle(.secondary) }
+                    NavigationLink(L10n("consumer.podcastCache")) {
+                        PodcastCacheSettingsView(client: client)
+                    }
+                    NavigationLink(L10n("consumer.downloadTasks")) {
+                        PodcastDownloadTasksView(client: client, playback: playback)
+                    }
                 }
-                Picker("settings.quality", selection: $playbackQuality) {
-                    Text("settings.quality.original").tag("original")
-                    Text("AAC 128 kbps").tag("128")
-                    Text("AAC 192 kbps").tag("192")
-                    Text("AAC 256 kbps").tag("256")
-                    Text("AAC 320 kbps").tag("320")
-                }
-                Text("settings.quality.hint")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Picker("settings.handoff", selection: $syncMode) {
-                    Text("settings.off").tag("off")
-                    Text("settings.handoff.ask").tag("ask")
-                    Text("settings.handoff.auto").tag("auto")
-                }
-                if syncMode != "off" {
-                    Text("settings.handoff.hint")
+            }
+            if category == .playback {
+                Section("settings.playback") {
+                    Picker("settings.quality", selection: $playbackQuality) {
+                        Text("settings.quality.original").tag("original")
+                        Text("AAC 128 kbps").tag("128")
+                        Text("AAC 192 kbps").tag("192")
+                        Text("AAC 256 kbps").tag("256")
+                        Text("AAC 320 kbps").tag("320")
+                    }
+                    Text("settings.quality.hint")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-            }
-            Section("settings.fragmentCache") {
-                LabeledContent("settings.cache.used", value: byteText(cacheBytes))
-                Picker("settings.cache.limit", selection: $limitMB) {
-                    Text("settings.off").tag(0)
-                    Text("128 MB").tag(128)
-                    Text("256 MB").tag(256)
-                    Text("512 MB").tag(512)
-                    Text("1 GB").tag(1024)
-                    Text("2 GB").tag(2048)
-                }
-                Button("settings.cache.clear") {
-                    Task {
-                        await playback.clearFragmentCache()
-                        await refresh()
+                    Picker("settings.handoff", selection: $syncMode) {
+                        Text("settings.off").tag("off")
+                        Text("settings.handoff.ask").tag("ask")
+                        Text("settings.handoff.auto").tag("auto")
+                    }
+                    if syncMode != "off" {
+                        Text("settings.handoff.hint")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .disabled(cacheBytes == 0)
             }
-            Section("settings.offline") {
-                LabeledContent("settings.offline.downloaded") {
-                    Text("settings.offline.songs \(offline.stats.count)")
+            if category == .storage {
+                Section("settings.fragmentCache") {
+                    LabeledContent("settings.cache.used", value: byteText(cacheBytes))
+                    Picker("settings.cache.limit", selection: $limitMB) {
+                        Text("settings.off").tag(0)
+                        Text("128 MB").tag(128)
+                        Text("256 MB").tag(256)
+                        Text("512 MB").tag(512)
+                        Text("1 GB").tag(1024)
+                        Text("2 GB").tag(2048)
+                    }
+                    Button("settings.cache.clear") {
+                        Task {
+                            await playback.clearFragmentCache()
+                            await refresh()
+                        }
+                    }
+                    .disabled(cacheBytes == 0)
                 }
-                LabeledContent("settings.offline.size", value: byteText(offline.stats.totalBytes))
-                if offline.items.isEmpty {
-                    Text("settings.offline.empty")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(offline.items) { item in
-                        OfflineItemRow(item: item)
-                            .swipeActions(edge: .trailing) {
-                                Button("settings.offline.delete", role: .destructive) {
-                                    Task { await offline.remove(trackID: item.trackID) }
+                Section("settings.offline") {
+                    LabeledContent("settings.offline.downloaded") {
+                        Text("settings.offline.songs \(offline.stats.count)")
+                    }
+                    LabeledContent("settings.offline.size", value: byteText(offline.stats.totalBytes))
+                    if offline.items.isEmpty {
+                        Text("settings.offline.empty")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(offline.items) { item in
+                            OfflineItemRow(item: item)
+                                .swipeActions(edge: .trailing) {
+                                    Button("settings.offline.delete", role: .destructive) {
+                                        Task { await offline.remove(trackID: item.trackID) }
+                                    }
                                 }
-                            }
+                        }
                     }
+                    Button("settings.offline.clearAll", role: .destructive) {
+                        Task { await offline.clearAll() }
+                    }
+                    .disabled(offline.items.isEmpty)
+                    Toggle(L10n("settingsView.allowCellularDownloads"), isOn: $allowsCellular)
+                    Text(L10n("settingsView.cellularDownloadsNotice"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-                Button("settings.offline.clearAll", role: .destructive) {
-                    Task { await offline.clearAll() }
-                }
-                .disabled(offline.items.isEmpty)
-                Toggle(L10n("settingsView.allowCellularDownloads"), isOn: $allowsCellular)
-                Text(L10n("settingsView.cellularDownloadsNotice"))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("settings.title")
+        .navigationTitle(category.label)
         .onChange(of: limitMB) { _, newValue in
             preferences.setInt("fragmentCacheLimitMB", newValue, mirrorGlobal: true)
             playback.setFragmentCacheLimit(Int64(newValue) * 1_048_576)
@@ -209,6 +235,12 @@ struct SettingsView: View {
         .onChange(of: hapticsEnabled) { _, newValue in
             preferences.setBool("hapticsEnabled", newValue, mirrorGlobal: true)
         }
+        .onChange(of: lyricTranslations) { _, value in
+            preferences.setBool("lyricTranslations", value, mirrorGlobal: true)
+        }
+        .onChange(of: lyricRomanization) { _, value in
+            preferences.setBool("lyricRomanization", value, mirrorGlobal: true)
+        }
         .onChange(of: syncMode) { _, newValue in
             preferences.setString("playbackSyncMode", newValue, mirrorGlobal: true)
         }
@@ -223,6 +255,12 @@ struct SettingsView: View {
             await refresh()
             await playback.podcastCloud?.refreshResumeMode()
             await offline.refresh()
+            if category == .storage {
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                    await offline.refresh()
+                }
+            }
         }
         .onChange(of: offline.items) { _, _ in
             Task { await refresh() }

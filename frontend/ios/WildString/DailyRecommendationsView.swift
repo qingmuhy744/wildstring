@@ -8,6 +8,8 @@ struct DailyRecommendationsView: View {
     let playback: PlaybackService
     var embedded = false
 
+    @Environment(\.dismiss) private var dismiss
+    @State private var tracksSelected = TrackSelection()
     @State private var items: [RecommendationItem] = []
     @State private var isLoading = true
     @State private var isRefreshing = false
@@ -52,6 +54,9 @@ struct DailyRecommendationsView: View {
                         .foregroundStyle(.secondary)
                 }
                 recommendationRows
+                if let errorMessage, !items.isEmpty {
+                    Text(errorMessage).foregroundStyle(.secondary)
+                }
                 if isLoading || isRefreshing {
                     HStack {
                         Spacer()
@@ -79,8 +84,19 @@ struct DailyRecommendationsView: View {
                     )
                 }
             }
+            .modifier(TrackSelectionControls(client: client, selection: tracksSelected) { items.map(\.track) })
             .navigationTitle(L10n("dailyRec.title"))
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n("queueView.close")) { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        RecommendationPreferencesView(client: client)
+                    } label: {
+                        Label(L10n("consumer.recommendationPreferences"), systemImage: "slider.horizontal.3")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await refresh() }
@@ -102,24 +118,28 @@ struct DailyRecommendationsView: View {
 
     private var recommendationRows: some View {
         ForEach(items) { item in
-            TrackActionRow(client: client, playback: playback, track: item.track) {
-                Button {
-                    play(item)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        TrackRow(
-                            client: client,
-                            track: item.track,
-                            isCurrent: playback.currentItem?.trackID == item.track.id
-                        )
-                        if !item.reason.isEmpty {
-                            Text(localizedReason(item.reason))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
+            TrackActionRow(client: client, playback: playback, track: item.track, play: {
+                play(item)
+            }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    TrackRow(
+                        client: client,
+                        track: item.track,
+                        isCurrent: playback.currentItem?.trackID == item.track.id
+                    )
+                    if !item.reason.isEmpty {
+                        Text(localizedReason(item.reason))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 }
-                .buttonStyle(.plain)
+            } extraActions: {
+                Button(L10n("consumer.dismissRecommendation")) {
+                    Task { await feedback(item, action: "dismiss_track") }
+                }
+                Button(L10n("consumer.lessArtist")) {
+                    Task { await feedback(item, action: "less_artist") }
+                }
             }
         }
     }
@@ -144,6 +164,19 @@ struct DailyRecommendationsView: View {
         let items = self.items
         guard let index = items.firstIndex(where: { $0.track.id == item.track.id }) else { return }
         playback.play(items: items.map(\.track.playbackItem), startingAt: index)
+    }
+
+    private func feedback(_ item: RecommendationItem, action: String) async {
+        do {
+            try await client.recommendationFeedback(trackID: item.track.id, action: action)
+            items.removeAll { other in
+                other.id == item.id || (action == "less_artist" && !Set(other.track.artists).isDisjoint(with: item.track.artists))
+            }
+            tracksSelected.finish()
+            errorMessage = nil
+        } catch {
+            errorMessage = ErrorText.message(for: error)
+        }
     }
 
     private func load() async {

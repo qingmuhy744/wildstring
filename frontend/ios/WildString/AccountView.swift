@@ -15,9 +15,10 @@ struct AccountView: View {
     @State private var path = NavigationPath()
     @State private var isLoading = true
     @State private var message: String?
+    @State private var showingSettings = false
     @State private var showingCreate = false
+    @State private var editingRules: Playlist?
     @State private var showingNotifications = false
-    @State private var newName = ""
     @State private var renaming: Playlist?
     @State private var renameText = ""
     @State private var deleting: Playlist?
@@ -35,17 +36,26 @@ struct AccountView: View {
                     }
                 }
                 Section(L10n("account.playlistsSection")) {
+                    Button {
+                        showingCreate = true
+                    } label: {
+                        Label(L10n("account.newPlaylist"), systemImage: "plus")
+                    }
                     ForEach(playlists) { playlist in
                         NavigationLink(value: playlist) {
                             PlaylistListRow(client: client, playlist: playlist)
                         }
                         .contextMenu {
-                            if playlist.isEditable {
+                            if !playlist.isFavorites {
                                 Button {
-                                    renameText = playlist.name
-                                    renaming = playlist
+                                    if playlist.isSmart {
+                                        editingRules = playlist
+                                    } else {
+                                        renameText = playlist.name
+                                        renaming = playlist
+                                    }
                                 } label: {
-                                    Label(L10n("account.rename"), systemImage: "pencil")
+                                    Label(L10n(playlist.isSmart ? "consumer.editPlaylist" : "account.rename"), systemImage: "pencil")
                                 }
                                 Button(role: .destructive) {
                                     deleting = playlist
@@ -61,12 +71,6 @@ struct AccountView: View {
                             ProgressView()
                             Spacer()
                         }
-                    }
-                    Button {
-                        newName = ""
-                        showingCreate = true
-                    } label: {
-                        Label(L10n("account.newPlaylist"), systemImage: "plus")
                     }
                 }
                 if let message {
@@ -99,31 +103,25 @@ struct AccountView: View {
                     LabeledContent(L10n("account.server"), value: connection.servers.first { $0.address == server }?.label ?? server)
                 }
                 Section {
-                    NavigationLink(value: SettingsMarker()) {
-                        Label(L10n("account.settings"), systemImage: "gearshape")
-                    }
                     Button(L10n("account.logout"), role: .destructive, action: onLogout)
                 }
             }
             .navigationTitle(L10n("account.title"))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel(L10n("account.settings"))
+                }
+            }
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(client: client, playback: playback, playlist: playlist)
             }
-            .navigationDestination(for: SettingsMarker.self) { _ in
-                SettingsView(
-                    playback: playback,
-                    client: client,
-                    server: server,
-                    username: username
-                )
-            }
-            .navigationDestination(for: AdminDestination.self) { destination in
-                switch destination {
-                case .scans:
-                    ScansView(client: client)
-                case .imports:
-                    ImportsView(client: client)
-                }
+            .fullScreenCover(isPresented: $showingSettings) {
+                SettingsHubView(playback: playback, client: client, server: server, username: username, onLogout: onLogout)
             }
             .miniPlayer(playback, client: client)
             .sheet(isPresented: $showingNotifications) {
@@ -137,10 +135,11 @@ struct AccountView: View {
                     (try? await client.notifications(limit: 1))?.unreadCount ?? 0
             }
             .refreshable { await load() }
-            .alert(L10n("account.createPlaylistTitle"), isPresented: $showingCreate) {
-                TextField(L10n("account.playlistNamePlaceholder"), text: $newName)
-                Button(L10n("account.create")) { Task { await create() } }
-                Button(L10n("account.cancel"), role: .cancel) {}
+            .sheet(isPresented: $showingCreate) {
+                PlaylistRulesView(client: client) { Task { await load() } }
+            }
+            .sheet(item: $editingRules) { playlist in
+                PlaylistRulesView(client: client, playlist: playlist) { Task { await load() } }
             }
             .alert(L10n("account.renamePlaylistTitle"), isPresented: renamingActive) {
                 TextField(L10n("account.playlistNamePlaceholder"), text: $renameText)
@@ -194,11 +193,11 @@ struct AccountView: View {
                 return
             }
             if environment["WILDSTRING_DEMO_OPEN_SETTINGS"] == "1" {
-                path.append(SettingsMarker())
+                showingSettings = true
                 return
             }
             if environment["WILDSTRING_DEMO_OPEN_SCANS"] == "1" {
-                path.append(SettingsMarker())
+                showingSettings = true
                 path.append(AdminDestination.scans)
                 return
             }
@@ -207,17 +206,6 @@ struct AccountView: View {
             else { return }
             path.append(first)
         #endif
-    }
-
-    private func create() async {
-        let name = newName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        do {
-            _ = try await client.createPlaylist(name: name)
-            await load()
-        } catch {
-            message = ErrorText.message(for: error)
-        }
     }
 
     private func rename() async {
@@ -255,8 +243,6 @@ struct AccountView: View {
         }
     }
 }
-
-private struct SettingsMarker: Hashable {}
 
 private struct PlaylistListRow: View {
     let client: WildstringClient

@@ -96,6 +96,8 @@ struct AccountPreferences {
         defaults.set(quality, forKey: "playbackQuality")
         defaults.set(sync, forKey: "playbackSyncMode")
         defaults.set(bool("hapticsEnabled", default: true), forKey: "hapticsEnabled")
+        defaults.set(bool("lyricTranslations", default: true), forKey: "lyricTranslations")
+        defaults.set(bool("lyricRomanization", default: true), forKey: "lyricRomanization")
         defaults.set(cacheLimitMB, forKey: "fragmentCacheLimitMB")
     }
 }

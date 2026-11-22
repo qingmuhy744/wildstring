@@ -24,6 +24,7 @@ struct BrowseView: View {
         }
     }
 
+    @State private var tracksSelected = TrackSelection()
     @State private var section: Section = Self.demoSection
     @State private var path = NavigationPath()
     @State private var songsLoader: PagedListModel<Track>?
@@ -142,6 +143,7 @@ struct BrowseView: View {
         .task { await loadLibraries() }
         .task { openSearchForDemoIfNeeded() }
         .onChange(of: section) { _, _ in
+            tracksSelected.finish()
             Task { await ensureSectionLoaded() }
         }
         .onChange(of: artistRole) { _, _ in
@@ -163,6 +165,7 @@ struct BrowseView: View {
     }
 
     private func selectLibrary(_ id: String?) {
+        tracksSelected.finish()
         playback.clearMusicContinuation()
         client.selectLibrary(id)
         AccountPreferences(server: server, username: username).setLibraryID(id)
@@ -198,19 +201,20 @@ struct BrowseView: View {
                     emptyTitle: L10n("browse.emptySongs"),
                     emptyIcon: "music.note.list"
                 ) { track in
-                    TrackActionRow(client: client, playback: playback, track: track) {
-                        Button {
-                            songsLoader.play(track, using: playback)
-                        } label: {
-                            TrackRow(
-                                client: client,
-                                track: track,
-                                isCurrent: playback.currentItem?.trackID == track.id
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    TrackActionRow(client: client, playback: playback, track: track, play: {
+                        songsLoader.play(track, using: playback)
+                    }) {
+                        TrackRow(
+                            client: client,
+                            track: track,
+                            isCurrent: playback.currentItem?.trackID == track.id
+                        )
                     }
                 }
+                .safeAreaPadding(.trailing, songSort == .name && songOrder == .asc && !browseGroups.isEmpty ? 28 : 0)
+                .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                    try await songsLoader.allItems()
+                })
                 .overlay(alignment: .trailing) {
                     if songSort == .name, songOrder == .asc, !browseGroups.isEmpty {
                         LetterIndexBar(groups: browseGroups) { group in
@@ -227,15 +231,37 @@ struct BrowseView: View {
             }
         case .albums:
             if let albumsLoader {
-                LoadedList(
-                    loader: albumsLoader,
-                    emptyTitle: L10n("browse.emptyAlbums"),
-                    emptyIcon: "square.stack"
-                ) { album in
-                    NavigationLink(value: album) {
-                        AlbumRow(client: client, album: album)
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 16)], spacing: 16) {
+                        ForEach(albumsLoader.items) { album in
+                            NavigationLink(value: album) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    CoverImage(client: client, trackID: album.coverTrackId, flexible: true)
+                                    Text(album.title).font(.headline).lineLimit(2)
+                                    Text(album.artistDisplay).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .onAppear {
+                                if album.id == albumsLoader.items.last?.id {
+                                    Task { await albumsLoader.loadMore() }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 1180)
+                    .padding(16)
+                    .frame(maxWidth: .infinity)
+                    if albumsLoader.isLoading { ProgressView() }
+                    if let error = albumsLoader.errorMessage {
+                        Text(error).foregroundStyle(.secondary)
+                        Button(L10n("notifications.retry")) { Task { await albumsLoader.loadMore() } }
+                    } else if albumsLoader.didLoadOnce, albumsLoader.items.isEmpty {
+                        ContentUnavailableView(L10n("browse.emptyAlbums"), systemImage: "square.stack")
                     }
                 }
+                .refreshable { await albumsLoader.loadInitial() }
             } else {
                 ProgressView()
             }
@@ -374,6 +400,7 @@ struct BrowseView: View {
     }
 
     private func choose(songSort sort: TrackSort) {
+        tracksSelected.finish()
         playback.cancelMusicSelection()
         guard sort != songSort else { return }
         songSort = sort
@@ -385,6 +412,7 @@ struct BrowseView: View {
     }
 
     private func toggleSongOrder() {
+        tracksSelected.finish()
         playback.cancelMusicSelection()
         songOrder = songOrder == .asc ? .desc : .asc
         preferences.songOrder = songOrder

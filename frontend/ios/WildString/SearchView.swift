@@ -7,9 +7,11 @@ struct SearchView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    @State private var tracksSelected = TrackSelection()
     @State private var query = ""
     @State private var tracks: [Track] = []
     @State private var total = 0
+    @State private var loadedOffset = 0
     @State private var isSearching = false
     @State private var hasSearched = false
     @State private var errorMessage: String?
@@ -19,17 +21,19 @@ struct SearchView: View {
         NavigationStack {
             List {
                 ForEach(tracks) { track in
-                    TrackActionRow(client: client, playback: playback, track: track) {
-                        Button {
-                            play(track)
-                        } label: {
-                            TrackRow(
-                                client: client,
-                                track: track,
-                                isCurrent: playback.currentItem?.trackID == track.id
-                            )
+                    TrackActionRow(client: client, playback: playback, track: track, play: {
+                        play(track)
+                    }) {
+                        TrackRow(
+                            client: client,
+                            track: track,
+                            isCurrent: playback.currentItem?.trackID == track.id
+                        )
+                    }
+                    .onAppear {
+                        if track.id == tracks.last?.id, loadedOffset < total {
+                            Task { await loadNextSearchPage() }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 if isSearching {
@@ -55,9 +59,26 @@ struct SearchView: View {
                         description: Text(L10n("searchView.emptyDescription"))
                     )
                 } else if hasSearched, tracks.isEmpty, !isSearching {
-                    ContentUnavailableView.search(text: query)
+                    if let errorMessage {
+                        ContentUnavailableView {
+                            Label(L10n("favoritesView.loadFailed"), systemImage: "exclamationmark.circle")
+                        } description: {
+                            Text(errorMessage)
+                        } actions: {
+                            Button(L10n("notifications.retry")) { Task { await runSearch() } }
+                        }
+                    } else {
+                        ContentUnavailableView.search(text: query)
+                    }
                 }
             }
+            .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                let text = query.trimmingCharacters(in: .whitespaces)
+                let loader = PagedListModel<Track> { limit, offset in
+                    try await client.tracks(limit: limit, offset: offset, query: text)
+                }
+                return try await loader.allItems()
+            })
             .navigationTitle(L10n("searchView.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -72,7 +93,7 @@ struct SearchView: View {
                 AssistantView(client: client)
             }
             .searchable(text: $query, prompt: Text(L10n("searchView.prompt")))
-            .task(id: query) { await runSearch() }
+            .task(id: query) { tracksSelected.finish(); await runSearch() }
             .onDisappear { playback.cancelMusicSelection() }
             .task { await openAssistantForDemoIfNeeded() }
             .miniPlayer(playback, client: client)
@@ -119,8 +140,33 @@ struct SearchView: View {
         #endif
     }
 
+    private func loadNextSearchPage() async {
+        guard !isSearching, loadedOffset < total else { return }
+        let requested = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let offset = loadedOffset
+        isSearching = true
+        defer {
+            if query.trimmingCharacters(in: .whitespacesAndNewlines) == requested { isSearching = false }
+        }
+        do {
+            let page = try await client.tracks(limit: 100, offset: offset, query: requested)
+            guard !Task.isCancelled, requested == query.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            var seen = Set(tracks.map(\.id))
+            tracks.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
+            loadedOffset = page.items.isEmpty ? page.total : offset + page.items.count
+            total = page.total
+            errorMessage = nil
+        } catch {
+            if requested == query.trimmingCharacters(in: .whitespacesAndNewlines) { errorMessage = ErrorText.message(for: error) }
+        }
+    }
+
     private func runSearch() async {
         playback.cancelMusicSelection()
+        tracks = []
+        loadedOffset = 0
+        total = 0
+        isSearching = false
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             tracks = []
@@ -141,9 +187,11 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             tracks = page.items
             total = page.total
+            loadedOffset = page.items.count
             hasSearched = true
             errorMessage = nil
         } catch {
+            guard !Task.isCancelled else { return }
             errorMessage = ErrorText.message(for: error)
             hasSearched = true
         }
