@@ -11,6 +11,7 @@ struct AssistantView: View {
     @State private var input = ""
     @State private var isSending = false
     @State private var errorMessage: String?
+    @State private var showingMusicPreferences = false
     @State private var showingDrafts = false
     @State private var pendingDrafts = 0
 
@@ -39,6 +40,11 @@ struct AssistantView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        showingMusicPreferences = true
+                    } label: {
+                        Label(L10n("assistantMusic.title"), systemImage: "slider.horizontal.3")
+                    }
+                    Button {
                         Task { await newConversation() }
                     } label: {
                         Image(systemName: "square.and.pencil")
@@ -62,6 +68,9 @@ struct AssistantView: View {
             .safeAreaInset(edge: .bottom) { inputBar }
             .sheet(isPresented: $showingDrafts) {
                 DraftsView(client: client)
+            }
+            .sheet(isPresented: $showingMusicPreferences) {
+                AssistantMusicPreferencesView(client: client)
             }
             .task { await prepare() }
         }

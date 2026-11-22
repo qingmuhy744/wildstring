@@ -599,6 +599,82 @@ struct PlaybackServiceTests {
         #expect(bobOffline.showPreference("show-a").continuation.autoContinue == true)
     }
 
+    @Test(.timeLimit(.minutes(1))) func showPreferenceAppliesBeforeSaveAndRetriesAfter503() async throws {
+        defer { StubURLProtocol.reset() }
+        final class PreferencesServer: @unchecked Sendable {
+            let lock = NSLock()
+            var preferences = PodcastQueuePreferences(shows: [
+                "show-a": PodcastShowPreference(),
+                "show-b": PodcastShowPreference(order: "asc", skipCompleted: false),
+            ])
+            var writes = 0
+        }
+
+        let serverState = PreferencesServer()
+        let (writes, signal) = AsyncStream<Void>.makeStream()
+        let completeFirstWrite = DispatchSemaphore(value: 0)
+        defer { completeFirstWrite.signal() }
+        StubURLProtocol.respond { request in
+            #expect(request.url?.path == "/api/v1/podcasts/queue/preferences")
+            if request.httpMethod == "PUT" {
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let value = try JSONDecoder().decode(PodcastQueuePreferences.self, from: body)
+                let attempt = serverState.lock.withLock {
+                    serverState.writes += 1
+                    return serverState.writes
+                }
+                if attempt == 1 {
+                    signal.finish()
+                    #expect(completeFirstWrite.wait(timeout: .now() + 5) == .success)
+                    return .empty(status: 503)
+                }
+                serverState.lock.withLock { serverState.preferences = value }
+            }
+            let data = try serverState.lock.withLock { try JSONEncoder().encode(serverState.preferences) }
+            return .init(statusCode: 200, headers: [:], body: data)
+        }
+        let client = WildstringClient(
+            server: try ServerAddress(input: "music.example.com"),
+            store: InMemorySessionStore(),
+            configuration: StubURLProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "ios")
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+        await cloud.refreshPreferences()
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: [
+                .init(id: "a2", title: "A2", chronologicalIndex: 1, isCompleted: false),
+                .init(id: "a1", title: "A1", chronologicalIndex: 0, isCompleted: false),
+            ],
+            preference: cloud.showPreference("show-a").continuation
+        )
+        #expect(!service.podcastAutoPreview(anchorTrackID: "podcast_ep_a2").isEmpty)
+
+        let save = Task {
+            await cloud.updateShow(podcastID: "show-a", action: "queue_last", autoLimit: 3, order: "off")
+        }
+        var write = writes.makeAsyncIterator()
+        _ = await write.next()
+        #expect(serverState.lock.withLock { serverState.preferences.shows["show-a"]?.order } == "follow")
+        #expect(cloud.showPreference("show-a").order == "off")
+        #expect(service.podcastAutoPreview(anchorTrackID: "podcast_ep_a2").isEmpty)
+        completeFirstWrite.signal()
+        await save.value
+
+        #expect(cloud.showPreferenceSaveError("show-a") != nil)
+        #expect(cloud.showPreferenceSaveError("show-b") == nil)
+        await cloud.refreshPreferences()
+        #expect(!cloud.showPreference("show-a").continuation.autoContinue)
+        await cloud.retryShowPreference("show-a")
+        let stored = try await client.podcastQueuePreferences()
+        #expect(stored.shows["show-a"]?.order == "off")
+        #expect(stored.shows["show-b"] == .init(order: "asc", skipCompleted: false))
+        #expect(cloud.showPreferenceSaveError("show-a") == nil)
+    }
+
     @Test func showLineFollowsTheShowAndDoesNotFallIntoTheQueue() async throws {
         defer { StubURLProtocol.reset() }
 

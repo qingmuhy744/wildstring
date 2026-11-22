@@ -38,6 +38,20 @@ public struct AssistantRun: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct AssistantMemory: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let content: String
+    public let version: Int
+}
+
+private struct AssistantMemoryUsage: Codable {
+    let longTermMemory: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case longTermMemory = "long_term_memory"
+    }
+}
+
 public struct AssistantConnection: Decodable, Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
@@ -232,6 +246,47 @@ extension WildstringClient {
             )
         )
         return try JSONDecoder().decode(ConversationDetail.self, from: data)
+    }
+
+    // MARK: - Music preferences
+
+    public func assistantMemories() async throws -> [AssistantMemory] {
+        let data = try await perform(Request(method: "GET", path: "api/v1/agent/memories"))
+        return try JSONDecoder().decode(Page<AssistantMemory>.self, from: data).items
+    }
+
+    public func saveAssistantMemory(content: String, replacing memory: AssistantMemory? = nil) async throws -> AssistantMemory {
+        struct Body: Encodable {
+            let content: String
+            let version: Int?
+        }
+        let path = memory.map { "api/v1/agent/memories/\($0.id)" } ?? "api/v1/agent/memories"
+        let data = try await perform(Request(
+            method: memory == nil ? "POST" : "PATCH",
+            path: path,
+            body: try JSONEncoder().encode(Body(content: content, version: memory?.version)),
+            contentType: "application/json"
+        ))
+        return try JSONDecoder().decode(AssistantMemory.self, from: data)
+    }
+
+    public func deleteAssistantMemory(id: String) async throws {
+        _ = try await perform(Request(method: "DELETE", path: "api/v1/agent/memories/\(id)"))
+    }
+
+    public func assistantUsesMemories() async throws -> Bool {
+        let data = try await perform(Request(method: "GET", path: "api/v1/agent/assistant-preferences"))
+        return try JSONDecoder().decode(AssistantMemoryUsage.self, from: data).longTermMemory
+    }
+
+    public func setAssistantUsesMemories(_ enabled: Bool) async throws -> Bool {
+        let data = try await perform(Request(
+            method: "PUT",
+            path: "api/v1/agent/assistant-preferences",
+            body: try JSONEncoder().encode(AssistantMemoryUsage(longTermMemory: enabled)),
+            contentType: "application/json"
+        ))
+        return try JSONDecoder().decode(AssistantMemoryUsage.self, from: data).longTermMemory
     }
 
     // MARK: - Drafts

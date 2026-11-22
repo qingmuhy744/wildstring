@@ -616,9 +616,7 @@ struct MacPodcastsView: View {
                         .foregroundStyle(MacTheme.accentDeep)
                 }
             }
-            PodcastIntakeSettings(playback: playback, podcastID: detail.podcast.id) {
-                applyContinuation(detail.episodes, show: detail.podcast)
-            }
+            PodcastIntakeSettings(playback: playback, podcastID: detail.podcast.id)
             if let cloud = playback.podcastCloud {
                 PodcastCloudStatus(cloud: cloud)
             }
@@ -1136,7 +1134,6 @@ func macPodcastDate(_ value: String) -> String {
 struct PodcastIntakeSettings: View {
     let playback: PlaybackService
     let podcastID: String
-    var onSaved: () -> Void = {}
 
     @State private var action = "queue_last"
     @State private var order = "follow"
@@ -1156,6 +1153,7 @@ struct PodcastIntakeSettings: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
+                .disabled(!ready)
             }
             HStack(spacing: 12) {
                 Text(L10n("macPodcasts.autoContinue"))
@@ -1170,11 +1168,13 @@ struct PodcastIntakeSettings: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
+                .disabled(!ready)
             }
-            if let message = playback.podcastCloud?.preferenceError {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(message).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    Button(L10n("macPodcasts.retry")) { Task { await save() } }.buttonStyle(.plain).font(.caption)
+            if let cloud = playback.podcastCloud {
+                MacPodcastShowPreferenceFeedback(cloud: cloud, podcastID: podcastID)
+                if cloud.showPreferenceSaveError(podcastID) == nil, let message = cloud.preferenceError {
+                    Text(message).font(.callout).foregroundStyle(MacTheme.danger).fixedSize(horizontal: false, vertical: true)
+                    Button(L10n("macPodcasts.retry")) { Task { await load() } }.buttonStyle(.plain).font(.caption)
                 }
             }
         }
@@ -1194,14 +1194,25 @@ struct PodcastIntakeSettings: View {
 
     private func save() async {
         guard ready, let cloud = playback.podcastCloud else { return }
-        if !cloud.hasResolvedPreferences {
-            await cloud.refreshPreferences()
-        }
         let current = cloud.showPreference(podcastID)
-        let effective = (current.autoContinue == false || current.order == "off") ? "off" : current.order
-        guard cloud.preferenceError != nil || current.action != action || effective != order else { return }
+        let effective = current.autoContinue ? current.order : "off"
+        guard current.action != action || effective != order else { return }
         await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: current.autoLimit, order: order)
-        onSaved()
+    }
+}
+
+private struct MacPodcastShowPreferenceFeedback: View {
+    let cloud: PodcastCloudQueue
+    let podcastID: String
+
+    var body: some View {
+        if let message = cloud.showPreferenceSaveError(podcastID) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message).font(.callout).foregroundStyle(MacTheme.danger).fixedSize(horizontal: false, vertical: true)
+                Button(L10n("macPodcasts.retry")) { Task { await cloud.retryShowPreference(podcastID) } }
+                    .buttonStyle(.plain).font(.caption)
+            }
+        }
     }
 }
 
@@ -1441,20 +1452,23 @@ private struct MacShowDeliveryRow: View {
     @State private var action: String = "queue_last"
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(show.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MacTheme.ink)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(show.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(MacTheme.ink)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            Picker(L10n("macPodcasts.intakeRulePicker"), selection: $action) {
-                Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")
-                Text(L10n("macPodcasts.intakeQueueLast")).tag("queue_last")
-                Text(L10n("macPodcasts.intakeQueueNext")).tag("queue_next")
+                Picker(L10n("macPodcasts.intakeRulePicker"), selection: $action) {
+                    Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")
+                    Text(L10n("macPodcasts.intakeQueueLast")).tag("queue_last")
+                    Text(L10n("macPodcasts.intakeQueueNext")).tag("queue_next")
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
             }
-            .pickerStyle(.menu)
-            .fixedSize()
+            MacPodcastShowPreferenceFeedback(cloud: cloud, podcastID: show.id)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
