@@ -99,31 +99,52 @@ public actor OfflineDownloads {
         )
     }
 
+    public enum BatchResult: Sendable, Equatable {
+        case started
+        case confirmationRequired(Int)
+    }
+
     public func download(_ track: TrackInfo) async {
+        _ = try? await downloadBatch([track], confirmed: true)
+    }
+
+    public func downloadBatch(_ tracks: [TrackInfo], confirmed: Bool) async throws -> BatchResult {
+        let cookie = await cookieHeader()
         var index = load()
-        if let existing = index.items[track.id], existing.isDownloading || existing.isCompleted {
-            return
+        var seen = Set<String>()
+        let pending = tracks.filter { track in
+            guard seen.insert(track.id).inserted else { return false }
+            let existing = index.items[track.id]
+            return existing?.isDownloading != true && existing?.isCompleted != true
         }
-        index.items[track.id] = Item(
-            trackID: track.id,
-            title: track.title,
-            artist: track.artist,
-            fileName: Self.fileName(for: track.id),
-            receivedBytes: 0,
-            expectedBytes: 0,
-            sizeBytes: 0,
-            state: "downloading"
-        )
+        if pending.count > 100, !confirmed { return .confirmationRequired(pending.count) }
+        guard !pending.isEmpty else { return .started }
+        for track in pending {
+            index.items[track.id] = Item(
+                trackID: track.id,
+                title: track.title,
+                artist: track.artist,
+                fileName: Self.fileName(for: track.id),
+                receivedBytes: 0,
+                expectedBytes: 0,
+                sizeBytes: 0,
+                state: "downloading"
+            )
+        }
+        try save(index)
         self.index = index
-        try? save(index)
-        var request = URLRequest(url: server.appending(path: track.streamPath))
-        request.timeoutInterval = 120
-        if let cookie = await cookieHeader() {
-            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        let session = activeSession()
+        for track in pending {
+            var request = URLRequest(url: server.appending(path: track.streamPath))
+            request.timeoutInterval = 120
+            if let cookie {
+                request.setValue(cookie, forHTTPHeaderField: "Cookie")
+            }
+            let task = session.downloadTask(with: request)
+            task.taskDescription = track.id
+            task.resume()
         }
-        let task = activeSession().downloadTask(with: request)
-        task.taskDescription = track.id
-        task.resume()
+        return .started
     }
 
     public func remove(trackID: String) async {

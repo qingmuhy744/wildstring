@@ -79,6 +79,18 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
         }
     }
 
+    func allItems() async throws -> [Element] {
+        var offset = 0
+        var result: [Element] = []
+        while true {
+            try Task.checkCancellation()
+            let page = try await fetchPage(pageSize, offset)
+            result.append(contentsOf: page.items)
+            offset += page.items.count
+            if page.items.isEmpty || offset >= page.total { return result }
+        }
+    }
+
     func play(_ track: Track, using playback: PlaybackService) where Element == Track {
         guard let index = items.firstIndex(where: { $0.id == track.id }) else { return }
         let token = playback.beginMusicSelection()

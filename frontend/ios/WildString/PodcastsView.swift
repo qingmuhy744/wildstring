@@ -23,17 +23,27 @@ struct PodcastsView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    private enum Route: Hashable {
+        case show(String), queue, explore, publishers, favorites, downloads
+    }
+
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var route: Route?
+    @State private var onlyFollowed = true
     @State private var shows: [PodcastSummary] = []
     @State private var isLoading = true
     @State private var message: String?
 
     var body: some View {
-        NavigationStack {
-            List {
+        NavigationSplitView {
+            List(selection: $route) {
+                Picker(L10n("consumer.showFilter"), selection: $onlyFollowed) {
+                    Text(L10n("consumer.followedShows")).tag(true)
+                    Text(L10n("consumer.allShows")).tag(false)
+                }
+                .pickerStyle(.segmented)
                 let pendingCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
-                NavigationLink {
-                    PodcastUnifiedQueueView(client: client, playback: playback)
-                } label: {
+                NavigationLink(value: Route.queue) {
                     HStack {
                         Label(L10n("podcasts.pendingQueue"), systemImage: "list.bullet")
                         Spacer()
@@ -62,10 +72,19 @@ struct PodcastsView: View {
                         description: Text(L10n("podcasts.emptyShowsDescription"))
                     )
                 }
+                Section {
+                    NavigationLink(value: Route.publishers) {
+                        Label(L10n("consumer.publishers"), systemImage: "building.2")
+                    }
+                    NavigationLink(value: Route.favorites) {
+                        Label(L10n("consumer.favoriteEpisodes"), systemImage: "heart")
+                    }
+                    NavigationLink(value: Route.downloads) {
+                        Label(L10n("consumer.downloadTasks"), systemImage: "arrow.down.circle")
+                    }
+                }
                 ForEach(shows) { show in
-                    NavigationLink {
-                        PodcastDetailView(client: client, playback: playback, podcastID: show.id)
-                    } label: {
+                    NavigationLink(value: Route.show(show.id)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(show.title).lineLimit(1)
                             Text(subtitle(show))
@@ -84,9 +103,7 @@ struct PodcastsView: View {
             .navigationTitle(L10n("podcasts.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        PodcastDiscoverView(client: client, playback: playback)
-                    } label: {
+                    NavigationLink(value: Route.explore) {
                         Label(L10n("podcasts.discover"), systemImage: "safari")
                     }
                 }
@@ -95,11 +112,43 @@ struct PodcastsView: View {
                 if isLoading, shows.isEmpty { ProgressView() }
             }
             .miniPlayer(playback, client: client)
-            .task {
+            .task(id: onlyFollowed) {
                 await load()
                 await playback.podcastCloud?.refreshPreferences()
             }
+            .onChange(of: route) { _, selected in
+                if selected == nil { Task { await load() } }
+            }
             .refreshable { await load() }
+            .navigationSplitViewColumnWidth(ideal: 260)
+        } detail: {
+            if sizeClass == .regular {
+                NavigationStack { radioDetail }
+                    .id(route)
+            } else {
+                radioDetail
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder private var radioDetail: some View {
+        switch route {
+        case .show(let id):
+            PodcastDetailView(client: client, playback: playback, podcastID: id)
+                .id(id)
+        case .queue:
+            PodcastUnifiedQueueView(client: client, playback: playback)
+        case .explore:
+            PodcastDiscoverView(client: client, playback: playback)
+        case .publishers:
+            PodcastPublishersView(client: client, playback: playback)
+        case .favorites:
+            PodcastFavoritesView(client: client, playback: playback)
+        case .downloads:
+            PodcastDownloadTasksView(client: client, playback: playback)
+        case nil:
+            ContentUnavailableView(L10n("consumer.selectShow"), systemImage: "antenna.radiowaves.left.and.right")
         }
     }
 
@@ -114,7 +163,9 @@ struct PodcastsView: View {
         isLoading = shows.isEmpty
         defer { isLoading = false }
         do {
-            shows = try await client.podcasts(followed: true)
+            let result = onlyFollowed ? try await client.podcasts(followed: true) : try await client.allPodcasts()
+            guard !Task.isCancelled else { return }
+            shows = result
             message = nil
         } catch {
             message = ErrorText.message(for: error)
@@ -132,12 +183,14 @@ struct PodcastsView: View {
 }
 
 @MainActor
-private struct PodcastDetailView: View {
+struct PodcastDetailView: View {
     let client: WildstringClient
     let playback: PlaybackService
     let podcastID: String
 
     @Environment(FavoritesModel.self) private var favorites
+    @Environment(\.canEditMetadata) private var canEditMetadata
+    @State private var editingPublisher = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var lastLoaded = Date.distantPast
     @State private var detail: PodcastDetail?
@@ -160,6 +213,19 @@ private struct PodcastDetailView: View {
                 }
                 Section {
                     PodcastIntakeSettingsIOS(playback: playback, podcastID: detail.podcast.id)
+                    if detail.podcast.followed {
+                        NavigationLink(L10n("consumer.autoDownload")) {
+                            PodcastDownloadPolicyView(client: client, podcastID: detail.podcast.id)
+                        }
+                    }
+                    if let publisher = detail.podcast.publisher {
+                        NavigationLink(publisher.name) {
+                            PodcastPublisherShowsView(client: client, playback: playback, publisher: publisher)
+                        }
+                    }
+                    if canEditMetadata {
+                        Button(L10n("consumer.editPublisher")) { editingPublisher = true }
+                    }
                 }
                 if let cloud = playback.podcastCloud {
                     Section {
@@ -172,8 +238,9 @@ private struct PodcastDetailView: View {
                         Text(L10n("podcasts.filterUnplayed")).tag("unplayed")
                         Text(L10n("podcasts.filterCompleted")).tag("completed")
                         Text(L10n("podcasts.filterFavorite")).tag("favorite")
+                        Text(L10n("consumer.downloadTasks")).tag("saved")
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                 }
                 Section(L10n("podcasts.episodesSection")) {
                     let displayedEpisodes = filteredEpisodes(detail.episodes)
@@ -238,6 +305,9 @@ private struct PodcastDetailView: View {
                                         enqueue(episode, next: false)
                                     }
                                 }
+                                PodcastDownloadActions(client: client, episode: episode, podcastTitle: detail.podcast.title) {
+                                    await load()
+                                } failed: { message = $0 }
                                 Divider()
                                 Button(completed ? L10n("podcasts.markUnplayed") : L10n("podcasts.markCompleted")) {
                                     Task { await toggleCompleted(episode) }
@@ -261,6 +331,13 @@ private struct PodcastDetailView: View {
             }
             if let message {
                 Text(message).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .sheet(isPresented: $editingPublisher) {
+            if let show = detail?.podcast {
+                PodcastPublisherEditor(client: client, show: show) {
+                    detail = $0
+                }
             }
         }
         .navigationTitle(detail?.podcast.title ?? L10n("podcasts.defaultTitle"))
@@ -352,6 +429,8 @@ private struct PodcastDetailView: View {
             return episodes.filter(isCompleted)
         case "favorite":
             return episodes.filter(isFavorite)
+        case "saved":
+            return episodes.filter { $0.resourceSaved || $0.resourceAutomatic || $0.resourcePlaybackCached }
         default:
             return episodes
         }

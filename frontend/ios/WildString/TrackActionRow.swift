@@ -3,14 +3,31 @@ import CorePlayback
 import SwiftUI
 
 /// Shared playback, catalog and library actions for a track row.
-struct TrackActionRow<Content: View>: View {
+struct TrackActionRow<Content: View, ExtraActions: View>: View {
     let client: WildstringClient
     let playback: PlaybackService
     let track: Track
+    let play: () -> Void
     @ViewBuilder let content: () -> Content
+    @ViewBuilder let extraActions: () -> ExtraActions
+
+    init(client: WildstringClient, playback: PlaybackService, track: Track, play: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content, @ViewBuilder extraActions: @escaping () -> ExtraActions) {
+        self.client = client
+        self.playback = playback
+        self.track = track
+        self.play = play
+        self.content = content
+        self.extraActions = extraActions
+    }
+
+    init(client: WildstringClient, playback: PlaybackService, track: Track, play: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) where ExtraActions == EmptyView {
+        self.init(client: client, playback: playback, track: track, play: play, content: content) { EmptyView() }
+    }
 
     @Environment(FavoritesModel.self) private var favorites
     @Environment(OfflineModel.self) private var offline
+    @Environment(\.trackSelection) private var selection
+    @Environment(\.canEditMetadata) private var canEditMetadata
     @Environment(\.isAdmin) private var isAdmin
     @State private var destination: TrackCatalogDestination?
     @State private var queueError: String?
@@ -29,92 +46,7 @@ struct TrackActionRow<Content: View>: View {
     }
 
     var body: some View {
-        content()
-            .contextMenu {
-                Button {
-                    enqueue(next: true)
-                } label: {
-                    Label(L10n("trackAction.playNext"), systemImage: "text.insert")
-                }
-                .disabled(!track.isAvailable)
-                Button {
-                    enqueue(next: false)
-                } label: {
-                    Label(L10n("trackAction.appendToQueue"), systemImage: "text.append")
-                }
-                .disabled(!track.isAvailable)
-                if let id = track.albumId {
-                    Button {
-                        destination = .album(id)
-                    } label: {
-                        Label(L10n("trackAction.openAlbum"), systemImage: "opticaldisc")
-                    }
-                }
-                if let name = track.artists.first, track.artists.count == 1 {
-                    Button {
-                        destination = .artist(name)
-                    } label: {
-                        Label(L10n("trackAction.openArtist"), systemImage: "person")
-                    }
-                } else if !track.artists.isEmpty {
-                    Menu(L10n("trackAction.openArtist"), systemImage: "person") {
-                        ForEach(track.artists, id: \.self) { name in
-                            Button(name) { destination = .artist(name) }
-                        }
-                    }
-                }
-                Divider()
-                Button {
-                    Haptics.selection()
-                    Task { await favorites.toggle(track.id) }
-                } label: {
-                    Label(
-                        favorites.isFavorite(track.id) ? L10n("trackAction.unfavorite") : L10n("trackAction.favorite"),
-                        systemImage: favorites.isFavorite(track.id) ? "heart.slash" : "heart"
-                    )
-                }
-                Button {
-                    addingToPlaylist = true
-                } label: {
-                    Label(L10n("trackAction.addToPlaylist"), systemImage: "text.badge.plus")
-                }
-                if isDownloaded {
-                    Button(role: .destructive) {
-                        Task { await offline.remove(trackID: track.id) }
-                    } label: {
-                        Label(L10n("trackAction.removeDownload"), systemImage: "arrow.down.circle.slash")
-                    }
-                } else {
-                    Button {
-                        Task { await offline.download(track) }
-                    } label: {
-                        Label(L10n("trackAction.download"), systemImage: "arrow.down.circle")
-                    }
-                    .disabled(isDownloading)
-                }
-                if isAdmin {
-                    Button {
-                        editingMetadata = true
-                    } label: {
-                        Label(L10n("trackAction.editMetadata"), systemImage: "square.and.pencil")
-                    }
-                    Button {
-                        editingLyrics = true
-                    } label: {
-                        Label(L10n("trackAction.editLyrics"), systemImage: "text.quote")
-                    }
-                    Button {
-                        editingSuggestions = true
-                    } label: {
-                        Label(L10n("trackAction.updateSuggestions"), systemImage: "sparkles")
-                    }
-                    Button {
-                        reviewingMetadata = true
-                    } label: {
-                        Label(L10n("trackAction.batchReview"), systemImage: "checklist")
-                    }
-                }
-            }
+        row
             .sheet(item: $destination) {
                 TrackCatalogSheet(client: client, playback: playback, destination: $0)
             }
@@ -141,6 +73,144 @@ struct TrackActionRow<Content: View>: View {
             .sheet(isPresented: $reviewingMetadata) {
                 MetadataReviewView(client: client, initialTrack: track)
             }
+    }
+
+    @ViewBuilder private var row: some View {
+        if let selection, selection.isActive {
+            Button {
+                selection.toggle(track)
+            } label: {
+                HStack {
+                    TrackRow(client: client, track: track, isCurrent: playback.currentItem?.trackID == track.id)
+                    Image(systemName: selection.ids.contains(track.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selection.ids.contains(track.id) ? Color.wildAccentText : .secondary)
+                        .frame(width: 44, height: 44)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!track.isAvailable)
+            .accessibilityAddTraits(selection.ids.contains(track.id) ? .isSelected : [])
+        } else if let selection {
+            HStack(spacing: 0) {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .gesture(LongPressGesture().exclusively(before: TapGesture()).onEnded { result in
+                        switch result {
+                        case .first: selection.toggle(track)
+                        case .second: play()
+                        }
+                    })
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { play() }
+                    .accessibilityAction(named: L10n("bulk.select")) { selection.toggle(track) }
+                Menu {
+                    Button(L10n("bulk.select"), systemImage: "checkmark.circle") { selection.toggle(track) }
+                        .disabled(!track.isAvailable)
+                    actions
+                } label: {
+                    Image(systemName: "ellipsis").foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(L10n("bulk.actions"))
+            }
+        } else {
+            Button(action: play, label: content)
+                .buttonStyle(.plain)
+                .contextMenu { actions }
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        Button {
+            enqueue(next: true)
+        } label: {
+            Label(L10n("trackAction.playNext"), systemImage: "text.insert")
+        }
+        .disabled(!track.isAvailable)
+        Button {
+            enqueue(next: false)
+        } label: {
+            Label(L10n("trackAction.appendToQueue"), systemImage: "text.append")
+        }
+        .disabled(!track.isAvailable)
+        if let id = track.albumId {
+            Button {
+                destination = .album(id)
+            } label: {
+                Label(L10n("trackAction.openAlbum"), systemImage: "opticaldisc")
+            }
+        }
+        if let name = track.artists.first, track.artists.count == 1 {
+            Button {
+                destination = .artist(name)
+            } label: {
+                Label(L10n("trackAction.openArtist"), systemImage: "person")
+            }
+        } else if !track.artists.isEmpty {
+            Menu(L10n("trackAction.openArtist"), systemImage: "person") {
+                ForEach(track.artists, id: \.self) { name in
+                    Button(name) { destination = .artist(name) }
+                }
+            }
+        }
+        Divider()
+        Button {
+            Haptics.selection()
+            Task { await favorites.toggle(track.id) }
+        } label: {
+            Label(
+                favorites.isFavorite(track.id) ? L10n("trackAction.unfavorite") : L10n("trackAction.favorite"),
+                systemImage: favorites.isFavorite(track.id) ? "heart.slash" : "heart"
+            )
+        }
+        Button {
+            addingToPlaylist = true
+        } label: {
+            Label(L10n("trackAction.addToPlaylist"), systemImage: "text.badge.plus")
+        }
+        if isDownloaded {
+            Button(role: .destructive) {
+                Task { await offline.remove(trackID: track.id) }
+            } label: {
+                Label(L10n("trackAction.removeDownload"), systemImage: "arrow.down.circle.slash")
+            }
+        } else {
+            Button {
+                Task { await offline.download(track) }
+            } label: {
+                Label(L10n("trackAction.download"), systemImage: "arrow.down.circle")
+            }
+            .disabled(isDownloading)
+        }
+        if canEditMetadata {
+            Button {
+                editingMetadata = true
+            } label: {
+                Label(L10n("trackAction.editMetadata"), systemImage: "square.and.pencil")
+            }
+            Button {
+                editingLyrics = true
+            } label: {
+                Label(L10n("trackAction.editLyrics"), systemImage: "text.quote")
+            }
+            Button {
+                editingSuggestions = true
+            } label: {
+                Label(L10n("trackAction.updateSuggestions"), systemImage: "sparkles")
+            }
+        }
+        if isAdmin {
+            Button {
+                reviewingMetadata = true
+            } label: {
+                Label(L10n("trackAction.batchReview"), systemImage: "checklist")
+            }
+        }
+        extraActions()
     }
 
     private func enqueue(next: Bool) {
@@ -219,13 +289,25 @@ private struct TrackCatalogSheet: View {
 /// Sheet that appends one track to a manual playlist (or creates a new one).
 struct AddToPlaylistSheet: View {
     let client: WildstringClient
-    let trackID: String
+    let trackIDs: [String]
+    var onAdded: () -> Void = {}
+
+    init(client: WildstringClient, trackID: String) {
+        self.init(client: client, trackIDs: [trackID])
+    }
+
+    init(client: WildstringClient, trackIDs: [String], onAdded: @escaping () -> Void = {}) {
+        self.client = client
+        self.trackIDs = trackIDs
+        self.onAdded = onAdded
+    }
 
     @Environment(\.dismiss) private var dismiss
     @State private var playlists: [Playlist] = []
     @State private var newName = ""
     @State private var message: String?
     @State private var isBusy = false
+    @State private var createdPlaylist: Playlist?
 
     var body: some View {
         NavigationStack {
@@ -281,14 +363,20 @@ struct AddToPlaylistSheet: View {
 
     private func load() async {
         do {
-            let page = try await client.playlists()
-            playlists = page.items.filter(\.isEditable)
+            let loader = PagedListModel<Playlist> { [client] limit, offset in
+                try await client.playlists(limit: limit, offset: offset)
+            }
+            playlists = try await loader.allItems().filter(\.isEditable)
         } catch {
             message = ErrorText.message(for: error)
         }
     }
 
     private func add(to playlist: Playlist) async {
+        guard (1...5000).contains(trackIDs.count) else {
+            message = L10n("consumer.playlistLimit")
+            return
+        }
         isBusy = true
         message = nil
         defer { isBusy = false }
@@ -296,9 +384,10 @@ struct AddToPlaylistSheet: View {
             let fresh = try await client.playlist(id: playlist.id)
             try await client.addTracks(
                 playlistID: fresh.id,
-                trackIDs: [trackID],
+                trackIDs: trackIDs,
                 version: fresh.version
             )
+            onAdded()
             dismiss()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
@@ -309,17 +398,28 @@ struct AddToPlaylistSheet: View {
     }
 
     private func createAndAdd() async {
+        guard (1...5000).contains(trackIDs.count) else {
+            message = L10n("consumer.playlistLimit")
+            return
+        }
         isBusy = true
         message = nil
         defer { isBusy = false }
         do {
             let name = newName.trimmingCharacters(in: .whitespaces)
-            let created = try await client.createPlaylist(name: name)
+            let created: Playlist
+            if let createdPlaylist, createdPlaylist.name == name {
+                created = try await client.playlist(id: createdPlaylist.id)
+            } else {
+                created = try await client.createPlaylist(name: name)
+                createdPlaylist = created
+            }
             try await client.addTracks(
                 playlistID: created.id,
-                trackIDs: [trackID],
+                trackIDs: trackIDs,
                 version: created.version
             )
+            onAdded()
             dismiss()
         } catch {
             message = ErrorText.message(for: error)

@@ -58,6 +58,8 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
     public let totalEpisodes: Int
     public let unplayedEpisodes: Int
     public let followed: Bool
+    public let publisher: PodcastPublisher?
+    public let publisherVersion: Int
     public let coverURL: URL?
     public let feedURL: URL?
 
@@ -70,6 +72,8 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
         totalEpisodes = try container.decodeIfPresent(Int.self, forKey: .totalEpisodes) ?? 0
         unplayedEpisodes = try container.decodeIfPresent(Int.self, forKey: .unplayedEpisodes) ?? 0
         followed = try container.decodeIfPresent(Bool.self, forKey: .followed) ?? false
+        publisher = try container.decodeIfPresent(PodcastPublisher.self, forKey: .publisher)
+        publisherVersion = try container.decodeIfPresent(Int.self, forKey: .publisherVersion) ?? 1
         coverURL = Self.remoteURL(from: container, key: .coverURL)
         feedURL = Self.remoteURL(from: container, key: .feedURL)
     }
@@ -82,7 +86,8 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, author, description, followed
+        case id, title, author, description, followed, publisher
+        case publisherVersion = "publisher_version"
         case totalEpisodes = "total_episodes"
         case unplayedEpisodes = "unplayed_episodes"
         case coverURL = "cover_url"
@@ -101,6 +106,9 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
     public let completed: Bool
     public let loved: Bool
     public let lastListenedAt: String?
+    public let resourceSaved: Bool
+    public let resourceAutomatic: Bool
+    public let resourcePlaybackCached: Bool
 
     public init(
         id: String,
@@ -124,6 +132,9 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         self.completed = completed
         self.loved = loved
         self.lastListenedAt = lastListenedAt
+        resourceSaved = false
+        resourceAutomatic = false
+        resourcePlaybackCached = false
     }
 
     public init(from decoder: Decoder) throws {
@@ -137,6 +148,9 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate) ?? ""
         completed = try container.decodeIfPresent(Bool.self, forKey: .completed) ?? false
         lastListenedAt = try container.decodeIfPresent(String.self, forKey: .lastListenedAt)
+        resourceSaved = try container.decodeIfPresent(Bool.self, forKey: .resourceSaved) ?? false
+        resourceAutomatic = try container.decodeIfPresent(Bool.self, forKey: .resourceAutomatic) ?? false
+        resourcePlaybackCached = try container.decodeIfPresent(Bool.self, forKey: .resourcePlaybackCached) ?? false
         if let lovedVal = try container.decodeIfPresent(Bool.self, forKey: .loved) {
             loved = lovedVal
         } else if let favVal = try container.decodeIfPresent(Bool.self, forKey: .favorite) {
@@ -153,6 +167,9 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         case positionSeconds = "position_seconds"
         case pubDate = "pub_date"
         case lastListenedAt = "last_listened_at"
+        case resourceSaved = "resource_saved"
+        case resourceAutomatic = "resource_automatic"
+        case resourcePlaybackCached = "resource_playback_cached"
     }
 }
 

@@ -9,7 +9,7 @@ struct MainTabView: View {
     let favorites: FavoritesModel
     let offline: OfflineModel
     let sharing: PlaybackSharingModel
-    let isAdmin: Bool
+    let profile: String
     let server: String
     let username: String
     var autoPlayFirst = false
@@ -54,7 +54,9 @@ struct MainTabView: View {
         }
         .environment(favorites)
         .environment(offline)
-        .environment(\.isAdmin, isAdmin)
+        .environment(\.isAdmin, profile == "owner")
+        .environment(\.canManageLibrary, ["owner", "librarian"].contains(profile))
+        .environment(\.canEditMetadata, ["owner", "librarian", "editor"].contains(profile))
         .overlay(alignment: .top) {
             if let handoff = sharing.handoff {
                 handoffBanner(handoff)

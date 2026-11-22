@@ -27,6 +27,13 @@ public struct User: Decodable, Equatable, Sendable {
     public let enabled: Bool
     /// Interface language stored on the account: "auto", "zh" or "en". Older servers omit it.
     public let language: String?
+    public let displayName: String?
+    public let email: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, profile, version, enabled, language, email
+        case displayName = "display_name"
+    }
 }
 
 public struct ServerInfo: Decodable, Equatable, Sendable {

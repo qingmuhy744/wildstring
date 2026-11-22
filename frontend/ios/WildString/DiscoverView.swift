@@ -7,6 +7,7 @@ struct DiscoverView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    @State private var showingDailyRecommendations = false
     @State private var summary: ListeningSummary?
     @State private var rankings: [RankingRow] = []
     @State private var recent: [Track] = []
@@ -17,6 +18,14 @@ struct DiscoverView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Button(L10n("consumer.allRecommendations"), systemImage: "list.bullet") { showingDailyRecommendations = true }
+                    NavigationLink {
+                        ExternalMusicView(client: client, playback: playback)
+                    } label: {
+                        Label(L10n("consumer.externalMusic"), systemImage: "sparkle.magnifyingglass")
+                    }
+                }
                 Section(L10n("discoverView.listeningSection")) {
                     if let summary {
                         LabeledContent(L10n("discoverView.playCount"), value: "\(summary.playCount)")
@@ -88,6 +97,7 @@ struct DiscoverView: View {
                 }
                 Section(L10n("discoverView.dailyRecommendations")) {
                     DailyRecommendationsView(client: client, playback: playback, embedded: true)
+
                 }
                 if let message {
                     Section {
@@ -96,6 +106,9 @@ struct DiscoverView: View {
                             .foregroundStyle(.red)
                     }
                 }
+            }
+            .sheet(isPresented: $showingDailyRecommendations) {
+                DailyRecommendationsView(client: client, playback: playback)
             }
             .navigationTitle(L10n("discoverView.title"))
             .miniPlayer(playback, client: client)
