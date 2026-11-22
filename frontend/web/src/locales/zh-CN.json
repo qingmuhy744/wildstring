@@ -1081,6 +1081,8 @@
     "filterAria": "收歌建议分类",
     "get": "获取收歌建议",
     "inLibrary": "已在曲库",
+    "inLibraryVersions": "已收录 · {{count}} 个版本",
+    "chooseVersion": "选择版本",
     "introAction": "设置收歌建议",
     "introBody": "开启后按你选择的频率更新，只提供歌曲信息和来源。下载由你安排，放进导入文件夹后再交给曲库处理。",
     "introTitle": "给下一次收歌，留一点灵感。",

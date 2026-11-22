@@ -232,6 +232,7 @@ test('个人与大家排行按真实范围请求，跨页队列完整且不展�
 });
 
 test('库外收歌建议只给线索，想收跨批保留，失败回滚与库内播放区分', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
   const { tracks, getPreferences, setPreferences } = await fixture(page);
   setPreferences({ ...getPreferences(), external_enabled: true, external_refresh_days: 0 });
   await section(page, '全部歌曲');
@@ -251,13 +252,26 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
     ...outside,
     external_id: 'lastfm:local',
     name: tracks[0].title,
+    album: tracks[0].album,
     local_track: tracks[0],
     reason: '这条线索已经匹配到你的曲库。',
+    wanted: true,
   };
-  let wanted: any[] = [];
+  const versions = {
+    ...imported,
+    external_id: 'lastfm:versions',
+    name: '青花瓷',
+    album: null,
+    local_track: null,
+    local_versions: [
+      { ...tracks[0], album: '我很忙' },
+      { ...tracks[1], album: '地表最强演唱会' },
+    ],
+  };
+  let wanted: any[] = [imported, versions];
   let batch: any = {
     id: 'external-1',
-    items: [outside, imported],
+    items: [outside, imported, versions],
     wanted_items: wanted,
     generated_at: '2026-10-18T08:00:00Z',
     next_refresh_at: null,
@@ -303,7 +317,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
   });
   await page.getByRole('button', { name: '库外推荐', exact: true }).click();
   const panel = page.getByRole('region', { name: '库外推荐', exact: true });
-  await expect(panel.locator('.external-suggestion')).toHaveCount(2);
+  await expect(panel.locator('.external-suggestion')).toHaveCount(1);
   const card = panel
     .locator('.external-suggestion')
     .filter({ has: page.getByRole('heading', { name: outside.name, exact: true }) });
@@ -312,9 +326,22 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
     'href',
     outside.source_url,
   );
+  await panel.getByRole('button', { name: '我想收 · 2', exact: true }).click();
   await expect(
     panel.getByRole('button', { name: `播放已入库 ${tracks[0].title}`, exact: true }),
   ).toBeVisible();
+  const versionCard = panel.locator('article').filter({
+    has: page.getByRole('heading', { name: versions.name, exact: true }),
+  });
+  await expect(versionCard.getByText('已收录 · 2 个版本', { exact: true })).toBeVisible();
+  await versionCard.getByText('选择版本', { exact: true }).click();
+  await expect(versionCard.getByRole('button', { name: /我很忙/ })).toBeVisible();
+  const livePlayback = page.waitForRequest((request) =>
+    request.url().includes(`/tracks/${tracks[1].id}/stream`),
+  );
+  await versionCard.getByRole('button', { name: /地表最强演唱会/ }).click();
+  await livePlayback;
+  await panel.getByRole('button', { name: '全部线索', exact: true }).click();
   await page.evaluate(() =>
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -334,7 +361,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
   await expect(panel.getByRole('status')).toContainText('已记在想收清单');
   await panel.getByRole('button', { name: '换一批收歌建议', exact: true }).click();
   await expect.poll(() => refreshCount).toBe(1);
-  await panel.getByRole('button', { name: '我想收 · 1', exact: true }).click();
+  await panel.getByRole('button', { name: '我想收 · 3', exact: true }).click();
   await expect(panel.getByRole('heading', { name: outside.name, exact: true })).toBeVisible();
   await panel.getByRole('button', { name: '全部线索', exact: true }).click();
   failDismiss = true;
@@ -344,13 +371,13 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
   await other.getByRole('button', { name: '不再推荐', exact: true }).click();
   await expect(panel.getByRole('alert')).toContainText('trace-external-feedback');
   await expect(other).toBeVisible();
-  await expect(panel.getByRole('button', { name: '我想收 · 1', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '我想收 · 3', exact: true })).toBeVisible();
   await panel.getByText('推荐来自哪里', { exact: true }).click();
   await expect(panel).toContainText('未匹配 2 首');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await panel.evaluate((element) =>
-    window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 24),
-  );
+  await panel.getByRole('button', { name: '我想收 · 3', exact: true }).click();
+  await versionCard.getByText('选择版本', { exact: true }).click();
+  await versionCard.scrollIntoViewIfNeeded();
   await page.screenshot({
     path: `../../artifacts/recommendations-external-${info.project.name}-light.png`,
     fullPage: false,

@@ -20,6 +20,9 @@ class RecommendationExperienceTest {
     private class Fixture(val canAddPodcasts: Boolean = true, val profile: String = "owner", val directoryCount: Int = 1) : java.io.Closeable {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, String>>()
         val track = """{"id":"local-a","title":"真实本库歌曲","artists":["合成艺人"],"album":"合成专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
+        val concert = """{"id":"local-b","title":"真实本库歌曲","artists":["合成艺人"],"album":"现场专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
+        @Volatile var summaryStatus = 200
+        @Volatile var noListening = false
         // Written on the MockWebServer thread after the request is recorded; read by the test.
         @Volatile var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
         private val directoryCover = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888).let { bitmap ->
@@ -37,7 +40,7 @@ class RecommendationExperienceTest {
         val warnings = """[{"source":"ai","code":"budget_exhausted"}]"""
         val sources = """[{"id":"personal","status":"ok","matched":1},{"id":"lastfm_charts","status":"unavailable","matched":0,"error_code":"source_unavailable"}]"""
         fun daily() = """{"id":"daily","date":"2026-10-17","engine":"local","connection_id":"local","source_status":$sources,"warnings":$warnings,"degraded":true,"items":[{"track":$track,"reason":"很久没听的收藏","source_ids":["revisit"]}]}"""
-        fun external() = """{"id":"external-batch","status":"ready","connection_id":"local","generated_at":"2026-10-17T00:00:00Z","next_refresh_at":"2026-10-24T00:00:00Z","cached":true,"stale":false,"warnings":[],"source_status":[{"id":"lastfm_charts","status":"ok","matched":1,"candidate_count":2,"unmatched":1}],"items":[{"external_id":"outside","name":"想去寻找的新声音","artists":["库外艺人"],"album":null,"source_url":"https://www.last.fm/music/Synthetic/song","reason":"公共榜单中的真实候选","evidence":[{"source":"lastfm_charts","summary":"公共榜单资料"}],"local_track":null,"wanted":$wanted},{"external_id":"inside","name":"真实本库歌曲","artists":["合成艺人"],"source_url":"https://www.last.fm/music/Local/song","reason":"本地匹配","evidence":[],"local_track":$track,"wanted":false}]}"""
+        fun external() = """{"id":"external-batch","status":"ready","connection_id":"local","generated_at":"2026-10-17T00:00:00Z","next_refresh_at":"2026-10-24T00:00:00Z","cached":true,"stale":false,"warnings":[],"source_status":[{"id":"lastfm_charts","status":"ok","matched":1,"candidate_count":2,"unmatched":1}],"items":[{"external_id":"outside","name":"想去寻找的新声音","artists":["库外艺人"],"album":null,"source_url":"https://www.last.fm/music/Synthetic/song","reason":"公共榜单中的真实候选","evidence":[{"source":"lastfm_charts","summary":"公共榜单资料"}],"local_track":null,"wanted":$wanted},{"external_id":"inside","name":"真实本库歌曲","artists":["合成艺人"],"source_url":"https://www.last.fm/music/Local/song","reason":"本地匹配","evidence":[],"local_track":null,"local_versions":[$track,$concert],"wanted":true}]}"""
         init {
             val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
             server.dispatcher = object : Dispatcher() {
@@ -72,7 +75,31 @@ class RecommendationExperienceTest {
                         return@synchronized json(preferences)
                     }
                     if (path.contains("/recommendations/daily")) return@synchronized json(daily())
-                    if (path.endsWith("/recommendations/rankings")) return@synchronized json("""{"scope":"${request.requestUrl!!.queryParameter("scope")}","period":"30d","metric":"plays","items":[{"rank":1,"track":$track,"play_count":8,"listened_ms":120000,"reason":"汇总"}],"total":1,"limit":20,"offset":0}""")
+                    if (path.endsWith("/listening/summary")) {
+                        if (summaryStatus != 200) {
+                            return@synchronized json("""{"detail":"unavailable"}""").setResponseCode(summaryStatus)
+                        }
+                        return@synchronized json(if (noListening) "{}" else """{"play_count":279,"listened_ms":73560000,"tracks_played":136,"favorites":51}""")
+                    }
+                    if (path.endsWith("/recommendations/rankings")) {
+                        if (noListening) return@synchronized json("""{"items":[]}""")
+                        val period = request.requestUrl!!.queryParameter("period")
+                        val coveredTrack = track.replace("\"has_cover\":false", "\"has_cover\":true")
+                        if (period == "all") {
+                            val other = coveredTrack.replace("local-a", "local-b")
+                                .replace("真实本库歌曲", "在城市尽头的深夜电台录音")
+                            return@synchronized json(
+                                """{"scope":"personal","period":"all","metric":"plays","items":[
+                                    {"rank":1,"track":$coveredTrack,"play_count":38},
+                                    {"rank":2,"track":$other,"play_count":27}
+                                ],"total":2,"limit":5,"offset":0}"""
+                            )
+                        }
+                        return@synchronized json("""{"scope":"${request.requestUrl!!.queryParameter("scope")}","period":"$period","metric":"plays","items":[{"rank":1,"track":$coveredTrack,"play_count":8,"listened_ms":120000,"reason":"汇总"}],"total":1,"limit":20,"offset":0}""")
+                    }
+                    if (path.endsWith("/tracks/local-a/cover") || path.endsWith("/tracks/local-b/cover")) {
+                        return@synchronized MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(directoryCover))
+                    }
                     if (path.endsWith("/recommendations/external/feedback")) { wanted = JsonParser.parseString(body).asJsonObject.text("action") == "want"; return@synchronized json("""{"ok":true}""") }
                     if (path.contains("/recommendations/external")) return@synchronized json(external())
                     if (path.endsWith("/ai/discover")) return@synchronized json("""{"title":"本地候选歌单","mode":"local","connection_id":"personal-one","source_status":$sources,"warnings":$warnings,"degraded":true,"items":[{"track":$track,"reason":"本地检索","source_ids":["personal"]}]}""")
@@ -394,6 +421,7 @@ class RecommendationExperienceTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("想去寻找的新声音").fetchSemanticsNodes().isNotEmpty() }
                 compose.onAllNodes(hasText(uiString(R.string.play), substring = false) and hasAnyAncestor(hasTestTag("external-item-outside"))).assertCountEquals(0)
                 compose.onNodeWithText("库外音乐 · 需自行获取后导入").assertExists()
+                compose.onNodeWithTag("external-item-inside").assertDoesNotExist()
                 capture("recommendation-external-phone.png")
                 compose.onAllNodesWithText("复制歌名").onFirst().performClick()
                 compose.onNodeWithText("已复制艺人和歌名").assertExists()
@@ -407,6 +435,60 @@ class RecommendationExperienceTest {
                 compose.waitUntil(10_000) { JsonParser.parseString(fixture.preferences).asJsonObject.number("external_refresh_days") == 0L }
                 val prefs = JsonParser.parseString(fixture.preferences).asJsonObject
                 assertFalse(prefs.flag("external_use_ai")); assertEquals("local", prefs.text("connection_id"))
+                compose.onNodeWithTag("external-music").performScrollToIndex(0)
+                compose.onNode(hasText(uiString(R.string.ext_music_want_to_listen), substring = false) and hasClickAction())
+                    .performClick()
+                compose.onNodeWithTag("external-music").performScrollToNode(hasTestTag("external-item-inside"))
+                compose.onNodeWithText(uiString(R.string.ext_music_in_library_versions, 2), substring = false).assertExists()
+                compose.onNodeWithText(uiString(R.string.ext_music_choose_version), substring = false).performClick()
+                capture("recommendation-external-version-picker.png")
+                compose.onNodeWithTag("external-version-local-b").performClick()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "local-b" }
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun listeningStatisticsShowsTotalsPlaysRankedTrackAndRetries() {
+        Fixture().use { fixture ->
+            fixture.summaryStatus = 503
+            val vm = connect(fixture)
+            try {
+                compose.onNodeWithTag("nav-mine").performClick()
+                val entry = hasText(uiString(R.string.listening_statistics), substring = false) and hasClickAction()
+                compose.waitUntil(10_000) { compose.onAllNodes(entry).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNode(entry).performClick()
+                val retry = hasText(uiString(R.string.retry), substring = false) and
+                    hasAnyAncestor(hasTestTag("listening-statistics"))
+                compose.waitUntil(10_000) { compose.onAllNodes(retry).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.statistics_summary_unavailable)).assertIsDisplayed()
+                capture("listening-statistics-error.png")
+                fixture.summaryStatus = 200
+                compose.onNode(retry).performClick()
+                val duration = uiString(R.string.statistics_hours_minutes, 20, 26)
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(duration).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("279", substring = false).assertIsDisplayed()
+                compose.onNodeWithText("136", substring = false).assertIsDisplayed()
+                compose.onNodeWithText("51", substring = false).assertIsDisplayed()
+                assertTrue(fixture.requests.any { it.first.contains("/rankings?scope=personal&period=all&metric=plays&limit=5") })
+                compose.onNodeWithTag("statistics-track-local-a").assertIsDisplayed()
+                capture("listening-statistics-light.png")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                capture("listening-statistics-dark.png")
+                compose.onNodeWithTag("statistics-track-local-b").performClick()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "local-b" }
+                compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
+                fixture.noListening = true
+                compose.onNode(entry).performClick()
+                val empty = uiString(R.string.statistics_no_records)
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(empty).fetchSemanticsNodes().isNotEmpty() }
+                capture("listening-statistics-empty.png")
+                compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
+                fixture.summaryStatus = 403
+                compose.onNode(entry).performClick()
+                val denied = uiString(R.string.statistics_access_denied)
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(denied).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNode(retry).assertDoesNotExist()
+                capture("listening-statistics-permission.png")
             } finally { cleanup(vm) }
         }
     }

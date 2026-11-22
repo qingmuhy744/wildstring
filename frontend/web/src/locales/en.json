@@ -1081,6 +1081,8 @@
     "filterAria": "Suggestion categories",
     "get": "Get suggestions",
     "inLibrary": "In library",
+    "inLibraryVersions": "In library · {{count}} versions",
+    "chooseVersion": "Choose a version",
     "introAction": "Set up suggestions",
     "introBody": "Once enabled, suggestions refresh at your chosen frequency and only include track details and sources. You handle the download, place it in the import folder, and let the library process it.",
     "introTitle": "A little inspiration for your next find.",

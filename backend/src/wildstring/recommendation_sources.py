@@ -257,31 +257,45 @@ class LastfmSources:
         return list({item["external_id"]: item for item in results}.values())[:100], cached
 
 
-def local_matches(repository, items):
-    """One local title scan; exact credited artist, ambiguous versions stay external."""
+def local_track_ids(repository, items, *, use_browsing_scope=False):
+    """Find available recordings by exact title and credited artist in one catalog query."""
     by_title = {}
     for item in items:
         by_title.setdefault(normalize(item["name"]), []).append(
-            (item["external_id"], {normalize(name) for name in item["artists"]})
+            (
+                item["external_id"],
+                {normalize(name) for name in item["artists"]},
+                normalize(item.get("album") or "") if use_browsing_scope else "",
+            )
         )
     if not by_title:
         return {}
     candidates = {}
+    library_id = repository.library_id()
     with repository.database.connect() as connection:
         connection.create_function("recommend_normalized", 1, normalize)
         rows = connection.execute(
-            "SELECT id,title,artists FROM tracks WHERE library_id=? AND status='available' AND recommend_normalized(title) IN (SELECT value FROM json_each(?))",
-            (repository.library_id(), json.dumps(list(by_title))),
+            """SELECT id,title,artists,album FROM tracks
+               WHERE (? OR library_id=?) AND library_selected(library_id,?)
+                 AND status='available'
+                 AND recommend_normalized(title) IN (SELECT value FROM json_each(?))
+               ORDER BY album_sort,id""",
+            (use_browsing_scope, library_id, library_id, json.dumps(list(by_title))),
         )
         for row in rows:
             credited = {normalize(name) for name in json.loads(row["artists"])}
-            for identity, artists in by_title[normalize(row["title"])]:
-                if credited.intersection(artists):
-                    choices = candidates.setdefault(identity, [])
-                    if len(choices) < 2:
-                        choices.append(row["id"])
+            for identity, artists, album in by_title[normalize(row["title"])]:
+                if credited.intersection(artists) and (
+                    not album or album == normalize(row["album"] or "")
+                ):
+                    candidates.setdefault(identity, []).append(row["id"])
+    return candidates
+
+
+def local_matches(repository, items):
+    """Daily recommendations attach a source to an unambiguous recording."""
     matched = {}
-    for identity, choices in candidates.items():
+    for identity, choices in local_track_ids(repository, items).items():
         if len(choices) == 1:
             track = repository.track(choices[0])
             if track and track["status"] == "available":

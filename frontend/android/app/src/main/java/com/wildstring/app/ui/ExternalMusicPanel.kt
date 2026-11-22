@@ -2,6 +2,7 @@
 package com.wildstring.app.ui
 
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.clickable
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.foundation.layout.*
@@ -57,6 +58,7 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
     var result by remember { mutableStateOf<ExternalMusicResult?>(null) }; var preferences by remember { mutableStateOf<RecommendationPreferences?>(null) }
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connectionsError by remember { mutableStateOf<String?>(null) }
     var settings by remember { mutableStateOf(false) }; var wantedOnly by remember { mutableStateOf(false) }
+    var versionSelection by remember { mutableStateOf<ExternalMusicItem?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager }
@@ -69,7 +71,7 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
         }
         if (action.message == DONE_STATUS) action.message = null
     }
-    val entries = result?.items.orEmpty().filter { !wantedOnly || it.wanted }
+    val entries = result?.items.orEmpty().filter { if (wantedOnly) it.wanted else !it.inLibrary }
     LazyColumn(Modifier.fillMaxSize().testTag("external-music"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             back?.let { TextButton(it) { Text(stringResource(R.string.ext_music_back_daily_rec)) } }
@@ -92,14 +94,24 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
             }
         }
         items(entries, key = { it.externalId }) { item ->
+            val versions = item.localVersions.orEmpty()
             OutlinedCard(Modifier.fillMaxWidth().testTag("external-item-${item.externalId}")) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(item.name, style = MaterialTheme.typography.titleMedium)
                     Text(item.artists.joinToString(" / "), style = MaterialTheme.typography.bodyMedium)
                     item.album?.takeIf(String::isNotBlank)?.let { Text(stringResource(R.string.ext_music_album_prefix, it), style = MaterialTheme.typography.bodySmall) }
-                    Text(localizeExternalReason(item.reason), style = MaterialTheme.typography.bodySmall)
+                    if (!item.inLibrary) {
+                        Text(localizeExternalReason(item.reason), style = MaterialTheme.typography.bodySmall)
+                    }
                     item.evidence.forEach { Text("${externalSourceLabels()[it.source] ?: recommendationSource(it.source)} · ${localizeExternalSummary(it.summary)}", style = MaterialTheme.typography.labelSmall) }
-                    Text(if (item.localTrack == null) stringResource(R.string.ext_music_external_unimported) else stringResource(R.string.ext_music_in_library), style = MaterialTheme.typography.labelMedium)
+                    Text(when {
+                        versions.isNotEmpty() -> stringResource(R.string.ext_music_in_library_versions, versions.size)
+                        item.inLibrary -> stringResource(R.string.ext_music_in_library)
+                        else -> stringResource(R.string.ext_music_external_unimported)
+                    }, style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"))
+                    if (versions.isNotEmpty()) {
+                        TextButton({ versionSelection = item }) { Text(stringResource(R.string.ext_music_choose_version)) }
+                    }
                     Row {
                         TextButton({ clipboard?.setPrimaryClip(ClipData.newPlainText("track", item.artists.joinToString(" / ") + " - " + item.name)); action.message = AppLanguage.string(R.string.ext_music_copied_artist_title) }) { Text(stringResource(R.string.ext_music_copy_title)) }
                         musicSourceUrl(item.sourceUrl)?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = AppLanguage.string(R.string.ext_music_cannot_open_source) } }) { Text(stringResource(R.string.ext_music_view_source)) } }
@@ -118,6 +130,33 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
             result?.status == "unavailable" -> stringResource(R.string.ext_music_empty_unavailable)
             else -> stringResource(R.string.ext_music_empty_default)
         }, Modifier.padding(vertical = 16.dp)) }
+    }
+    versionSelection?.let { item ->
+        AlertDialog(
+            onDismissRequest = { versionSelection = null },
+            title = { Text(item.name) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    item.localVersions.orEmpty().forEach { track ->
+                        ListItem(
+                            headlineContent = { Text(track.album ?: track.title) },
+                            supportingContent = {
+                                Text(
+                                    "${track.format.uppercase()} · ${formatTime(track.durationMs)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                                )
+                            },
+                            leadingContent = { Icon(Icons.Default.PlayArrow, null) },
+                            modifier = Modifier.clickable {
+                                versionSelection = null
+                                vm.play(listOf(track))
+                            }.testTag("external-version-${track.id}"),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton({ versionSelection = null }) { Text(stringResource(R.string.ext_music_cancel)) } },
+        )
     }
     if (settings) preferences?.let { original -> ExternalMusicSettings(original, connections, connectionsError, action.busy, action.message, { settings = false }) { updated -> scope.launch { action.run {
         preferences = vm.repository.api().saveRecommendationPreferences(updated); settings = false

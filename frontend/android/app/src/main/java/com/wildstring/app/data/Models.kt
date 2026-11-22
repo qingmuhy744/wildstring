@@ -153,7 +153,10 @@ data class ExternalMusicEvidence(val source: String = "", val summary: String = 
 data class ExternalMusicItem(@SerializedName("external_id") val externalId: String, val name: String,
     val artists: List<String>, val album: String? = null, @SerializedName("source_url") val sourceUrl: String? = null,
     val reason: String = "", val evidence: List<ExternalMusicEvidence> = emptyList(),
-    @SerializedName("local_track") val localTrack: Track? = null, val wanted: Boolean = false)
+    @SerializedName("local_track") val localTrack: Track? = null, val wanted: Boolean = false,
+    @SerializedName("local_versions") val localVersions: List<Track>? = null) {
+    val inLibrary: Boolean get() = localTrack != null || !localVersions.isNullOrEmpty()
+}
 data class ExternalMusicResult(val id: String? = null, val items: List<ExternalMusicItem> = emptyList(), val status: String = "disabled",
     @SerializedName("generated_at") val generatedAt: String? = null, @SerializedName("next_refresh_at") val nextRefreshAt: String? = null,
     val cached: Boolean = false, val stale: Boolean = false, val warnings: List<RecommendationWarning> = emptyList(), val degraded: Boolean = false,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from test_recommendation_connections import chart, save, source_provider
 
 from wildstring.database import Database
 from wildstring.library.scanner import scan_library
@@ -123,6 +124,53 @@ def test_grants_filter_catalog_and_block_direct_objects_and_assets(catalog):
             other.get("/api/v1/tracks", headers={"X-Wildstring-Library": first["id"]}).status_code
             == 404
         )
+    finally:
+        other.close()
+
+
+def test_external_matching_and_personal_rankings_follow_selected_visible_libraries(
+    catalog, settings, monkeypatch
+):
+    client, first, second, tracks, _ = catalog
+    track = next(track for track in tracks if track["library_id"] == second["id"])
+    with Database(settings.data_dir).connect(write=True) as db:
+        db.execute(
+            "UPDATE tracks SET title='青花瓷', artists='[\"周杰伦\"]', search_text='青花瓷 周杰伦' WHERE id=?",
+            (track["id"],),
+        )
+        db.execute(
+            "INSERT INTO user_track_state(user_id,track_id,play_count) VALUES ('admin',?,8)",
+            (track["id"],),
+        )
+    source_provider(monkeypatch, lambda *_: chart("青花瓷", "周杰伦"))
+    save(client, external_enabled=True, external_sources=["lastfm_charts"])
+    external = "/api/v1/recommendations/external"
+    all_libraries = HEADERS | {"X-Wildstring-Library": "all"}
+    assert client.get("/api/v1/tracks?q=青花瓷", headers=all_libraries).json()["total"] == 1
+    result = client.post(external + "/refresh", headers=all_libraries, json={}).json()
+    assert result["items"] == [] and result["source_status"][0]["matched"] == 1
+    assert (
+        client.get("/api/v1/recommendations/rankings?period=all", headers=all_libraries).json()[
+            "items"
+        ][0]["track"]["id"]
+        == track["id"]
+    )
+
+    only_first = HEADERS | {"X-Wildstring-Library": first["id"]}
+    assert client.get(external, headers=only_first).json()["source_status"][0]["matched"] == 0
+    assert (
+        client.get("/api/v1/recommendations/rankings?period=all", headers=only_first).json()[
+            "items"
+        ]
+        == []
+    )
+    other, _ = listener(client, [first["id"]])
+    try:
+        save(other, external_enabled=True, external_sources=["lastfm_charts"])
+        result = other.post(external + "/refresh", headers=all_libraries, json={}).json()
+        assert result["source_status"][0]["matched"] == 0
+        assert result["items"][0]["local_track"] is None
+        assert result["items"][0]["local_versions"] == []
     finally:
         other.close()
 
