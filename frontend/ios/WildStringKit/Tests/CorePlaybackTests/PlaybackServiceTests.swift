@@ -1688,21 +1688,27 @@ struct PlaybackServiceTests {
         #expect(service.podcastProgressMessage != nil)
     }
 
-    @Test func podcastWaitsForRemoteProgressBeforePreparingAudio() async throws {
+    @Test(.timeLimit(.minutes(1))) func podcastWaitsForRemoteProgressBeforePreparingAudio() async throws {
         let service = try makeService(store: InMemoryQueueStore())
         defer { service.shutdown() }
+        let (requests, signalRequest) = AsyncStream<Void>.makeStream()
+        let (responses, reply) = AsyncStream<PodcastProgressSnapshot>.makeStream()
+        defer { reply.finish() }
         service.loadPodcastProgress = { _ in
-            try? await Task.sleep(for: .milliseconds(120))
-            return PodcastProgressSnapshot(version: 4, positionSeconds: 300, durationSeconds: 2400, completed: false)
+            signalRequest.finish()
+            var response = responses.makeAsyncIterator()
+            return await response.next()
         }
         service.submitPodcastProgress = { _, write in write.event == "ended" ? .completed : .ok }
         let item = PlaybackService.Item(trackID: "podcast_ep_slow", title: "Slow", artist: "Host",
                                         streamPath: "api/v1/podcasts/episodes/slow/stream",
                                         resumePositionSeconds: 50, durationSeconds: 2400)
         service.playPodcastEpisode(item)
-        try await Task.sleep(for: .milliseconds(30))
+        var request = requests.makeAsyncIterator()
+        _ = await request.next()
         #expect(service.player.currentItem == nil)
         #expect(service.isBuffering)
+        reply.yield(PodcastProgressSnapshot(version: 4, positionSeconds: 300, durationSeconds: 2400, completed: false))
         await service.waitForPodcastTasks()
         #expect(service.currentTime == 300)
     }

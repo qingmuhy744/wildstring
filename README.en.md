@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Version [v0.8.25](docs/releases/v0.8.25.md)** · Source plugins query providers in parallel and fetch song details when lyric matching needs them. The first startup after upgrading removes v1 plugins, their settings, and their cookies. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
+- **Version [v0.8.26](docs/releases/v0.8.26.md)** · Android fixes the system Previous button and music preference input. Tap the current tab again to return to its home screen. Web podcast playback settings can be retried after a failed save. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
