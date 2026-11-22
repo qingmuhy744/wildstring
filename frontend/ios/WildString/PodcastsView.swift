@@ -159,9 +159,7 @@ private struct PodcastDetailView: View {
                     }
                 }
                 Section {
-                    PodcastIntakeSettingsIOS(playback: playback, podcastID: detail.podcast.id) {
-                        applyContinuation(detail.episodes, show: detail.podcast)
-                    }
+                    PodcastIntakeSettingsIOS(playback: playback, podcastID: detail.podcast.id)
                 }
                 if let cloud = playback.podcastCloud {
                     Section {
@@ -431,8 +429,6 @@ private struct PodcastCloudStatusIOS: View {
 private struct PodcastIntakeSettingsIOS: View {
     let playback: PlaybackService
     let podcastID: String
-    var onSaved: () -> Void = {}
-
     @State private var action = "queue_last"
     @State private var order = "follow"
     @State private var ready = false
@@ -444,15 +440,22 @@ private struct PodcastIntakeSettingsIOS: View {
                 Text(L10n("podcasts.actionQueueLast")).tag("queue_last")
                 Text(L10n("podcasts.actionQueueNext")).tag("queue_next")
             }
+            .disabled(!ready)
             Picker(L10n("podcasts.autoContinue"), selection: $order) {
                 Text(L10n("podcasts.orderFollow")).tag("follow")
                 Text(L10n("podcasts.orderAsc")).tag("asc")
                 Text(L10n("podcasts.orderDesc")).tag("desc")
                 Text(L10n("podcasts.orderOff")).tag("off")
             }
-            if let message = playback.podcastCloud?.preferenceError {
-                Text(message).font(.footnote).foregroundStyle(.orange)
-                Button(L10n("podcasts.retry")) { Task { await save() } }
+            .disabled(!ready)
+            if let cloud = playback.podcastCloud {
+                PodcastShowPreferenceFeedback(cloud: cloud, podcastID: podcastID)
+                if cloud.showPreferenceSaveError(podcastID) == nil, let message = cloud.preferenceError {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                    Button(L10n("podcasts.retry")) { Task { await load() } }
+                        .buttonStyle(.borderless)
+                        .tint(.wildAccentText)
+                }
             }
         }
         .task(id: podcastID) { await load() }
@@ -472,14 +475,10 @@ private struct PodcastIntakeSettingsIOS: View {
 
     private func save() async {
         guard ready, let cloud = playback.podcastCloud else { return }
-        if !cloud.hasResolvedPreferences {
-            await cloud.refreshPreferences()
-        }
         let current = cloud.showPreference(podcastID)
-        let effective = (current.autoContinue == false || current.order == "off") ? "off" : current.order
-        guard cloud.preferenceError != nil || current.action != action || effective != order else { return }
+        let effective = current.autoContinue ? current.order : "off"
+        guard current.action != action || effective != order else { return }
         await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: current.autoLimit, order: order)
-        onSaved()
     }
 }
 
@@ -637,6 +636,26 @@ private struct PodcastUnifiedQueueView: View {
     }
 }
 
+private struct PodcastShowPreferenceFeedback: View {
+    let cloud: PodcastCloudQueue
+    let podcastID: String
+
+    var body: some View {
+        if let message = cloud.showPreferenceSaveError(podcastID) {
+            Text(message).font(.footnote).foregroundStyle(.secondary)
+            Button {
+                Task { await cloud.retryShowPreference(podcastID) }
+            } label: {
+                Text(L10n("podcasts.retry"))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .tint(.wildAccentText)
+        }
+    }
+}
+
 private struct PodcastDeliveryIOSRow: View {
     let cloud: PodcastCloudQueue
     let show: PodcastSummary
@@ -644,30 +663,33 @@ private struct PodcastDeliveryIOSRow: View {
     var body: some View {
         let pref = cloud.showPreference(show.id)
         let currentAction = (pref.action == "inbox" || pref.action.isEmpty) ? "queue_last" : pref.action
-        HStack {
-            Text(show.title)
-                .lineLimit(1)
-                .font(.subheadline)
-            Spacer()
-            Picker(L10n("podcasts.deliveryAction"), selection: Binding(
-                get: { currentAction },
-                set: { newAction in
-                    Task {
-                        await cloud.updateShow(
-                            podcastID: show.id,
-                            action: newAction,
-                            autoLimit: pref.autoLimit,
-                            order: pref.order
-                        )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(show.title)
+                    .lineLimit(1)
+                    .font(.subheadline)
+                Spacer()
+                Picker(L10n("podcasts.deliveryAction"), selection: Binding(
+                    get: { currentAction },
+                    set: { newAction in
+                        Task {
+                            await cloud.updateShow(
+                                podcastID: show.id,
+                                action: newAction,
+                                autoLimit: pref.autoLimit,
+                                order: pref.order
+                            )
+                        }
                     }
+                )) {
+                    Text(L10n("podcasts.actionIgnore")).tag("ignore")
+                    Text(L10n("podcasts.actionQueueLast")).tag("queue_last")
+                    Text(L10n("podcasts.actionQueueNext")).tag("queue_next")
                 }
-            )) {
-                Text(L10n("podcasts.actionIgnore")).tag("ignore")
-                Text(L10n("podcasts.actionQueueLast")).tag("queue_last")
-                Text(L10n("podcasts.actionQueueNext")).tag("queue_next")
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
+            PodcastShowPreferenceFeedback(cloud: cloud, podcastID: show.id)
         }
     }
 }

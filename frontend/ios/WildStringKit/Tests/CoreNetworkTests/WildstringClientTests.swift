@@ -964,6 +964,33 @@ struct StubbedHTTPTests {
             #expect(value.runs?.first?.draftIDs == ["d1"])
         }
 
+        @Test func musicPreferencesSendEditVersionAndOnlyUpdateTheUsageSwitch() async throws {
+            StubURLProtocol.respond { request in
+                switch (request.httpMethod, request.url?.path) {
+                case ("GET", "/api/v1/agent/memories"):
+                    return .json(body: #"{"items":[{"id":"m1","content":"Studio recordings","version":3}],"total":1,"limit":50,"offset":0}"#)
+                case ("PATCH", "/api/v1/agent/memories/m1"):
+                    let body = try #require(StubURLProtocol.bodyData(of: request))
+                    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                    #expect(json["version"] as? Int == 3)
+                    #expect(json["content"] as? String == "录音室版本")
+                    return .json(body: #"{"id":"m1","content":"录音室版本","version":4}"#)
+                case ("PUT", "/api/v1/agent/assistant-preferences"):
+                    let body = try #require(StubURLProtocol.bodyData(of: request))
+                    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Bool])
+                    #expect(json == ["long_term_memory": false])
+                    return .json(body: #"{"retention_days":90,"context_summary":false,"long_term_memory":false}"#)
+                default:
+                    return .empty(status: 404)
+                }
+            }
+            let client = try makeClient()
+            let memory = try #require(try await client.assistantMemories().first)
+            let updated = try await client.saveAssistantMemory(content: "录音室版本", replacing: memory)
+            #expect(updated.version == 4)
+            #expect(try await client.setAssistantUsesMemories(false) == false)
+        }
+
         @Test func assistantConnectionsDecodeReadOnlySharedConnection() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/agent/connections")

@@ -10,9 +10,18 @@ struct NotificationsView: View {
     @State private var unreadCount = 0
     @State private var highWatermark = 0
     @State private var filter: Filter = .unread
-    @State private var isLoading = true
+    @State private var loadState: LoadState = .idle
     @State private var message: String?
     @State private var showingDrafts = false
+
+    private enum LoadState {
+        case idle, loading, loaded, failed(String)
+    }
+
+    private var isLoading: Bool {
+        if case .loading = loadState { return true }
+        return false
+    }
 
     private enum Filter: String, CaseIterable {
         case unread
@@ -30,12 +39,31 @@ struct NotificationsView: View {
 
     var body: some View {
         List {
-            if filtered.isEmpty, !isLoading {
-                ContentUnavailableView(
-                    emptyTitle,
-                    systemImage: "bell",
-                    description: Text(L10n("notifications.emptyDescription"))
-                )
+            switch loadState {
+            case .idle, .loading:
+                if items.isEmpty {
+                    ProgressView(L10n("notifications.loading"))
+                }
+            case .loaded:
+                if filtered.isEmpty {
+                    ContentUnavailableView(emptyTitle, systemImage: "bell")
+                }
+            case .failed(let reason):
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(L10n("notifications.loadFailed"), systemImage: "exclamationmark.circle")
+                        .font(.headline)
+                    Text(reason).foregroundStyle(.secondary)
+                    Button {
+                        Task { await load() }
+                    } label: {
+                        Text(L10n("notifications.retry"))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .tint(.wildAccentText)
+                }
+                .padding(.vertical, 8)
             }
             ForEach(filtered) { notification in
                 Button {
@@ -108,10 +136,12 @@ struct NotificationsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(L10n("notifications.markAllRead")) {
-                    Task { await markAllRead() }
+                if unreadCount > 0 {
+                    Button(L10n("notifications.markAllRead")) {
+                        Task { await markAllRead() }
+                    }
+                    .disabled(isLoading)
                 }
-                .disabled(unreadCount == 0 || isLoading)
             }
         }
         .task { await load() }
@@ -138,16 +168,17 @@ struct NotificationsView: View {
     }
 
     private func load() async {
-        isLoading = true
-        defer { isLoading = false }
+        guard !isLoading else { return }
+        loadState = .loading
         do {
             let page = try await client.notifications(limit: 100)
             items = page.items
             unreadCount = page.unreadCount
             highWatermark = page.highWatermark
             message = nil
+            loadState = .loaded
         } catch {
-            message = ErrorText.message(for: error)
+            loadState = Task.isCancelled ? .idle : .failed(ErrorText.message(for: error))
         }
     }
 
@@ -164,6 +195,7 @@ struct NotificationsView: View {
         let ids = targets.map(\.id)
         do {
             try await client.markNotificationsRead(ids: ids)
+            let markedUnreadCount = items.count { $0.isUnread && ids.contains($0.id) }
             let now = ISO8601DateFormatter().string(from: Date())
             items = items.map { item in
                 guard ids.contains(item.id) else { return item }
@@ -181,17 +213,22 @@ struct NotificationsView: View {
                     detailRoute: item.detailRoute
                 )
             }
-            unreadCount = max(0, unreadCount - ids.count)
+            unreadCount = max(0, unreadCount - markedUnreadCount)
         } catch {
             message = ErrorText.message(for: error)
         }
     }
 
     private func markAllRead() async {
+        guard !isLoading, unreadCount > 0 else { return }
+        let previousState = loadState
+        loadState = .loading
         do {
             try await client.markAllNotificationsRead(highWatermark: highWatermark)
+            loadState = .idle
             await load()
         } catch {
+            loadState = previousState
             message = ErrorText.message(for: error)
         }
     }

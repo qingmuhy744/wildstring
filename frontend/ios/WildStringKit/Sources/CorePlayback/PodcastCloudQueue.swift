@@ -85,7 +85,15 @@ public final class PodcastCloudQueue {
     private var cachedPreferences: PodcastQueuePreferences?
     var onPreferencesChanged: (@MainActor () -> Void)?
     private var tail: Task<Void, Never>?
+    private struct PendingShowPreference {
+        let id = UUID()
+        let value: PodcastShowPreference
+        var error: String?
+    }
+
     private var preferenceTail: Task<Void, Never>?
+    private var pendingShowPreferences: [String: PendingShowPreference] = [:]
+    private var preferenceSaveRevision = 0
     private var hasLoaded = false
     private var pendingWrite = false
 
@@ -133,7 +141,16 @@ public final class PodcastCloudQueue {
         return Array(items.dropFirst(index + 1))
     }
 
+    func hasResolvedPreference(for podcastID: String) -> Bool {
+        hasResolvedPreferences || pendingShowPreferences[podcastID] != nil
+    }
+
+    public func showPreferenceSaveError(_ podcastID: String) -> String? {
+        pendingShowPreferences[podcastID]?.error
+    }
+
     public func showPreference(_ podcastID: String) -> PodcastShowPreference {
+        if let pending = pendingShowPreferences[podcastID] { return pending.value }
         let source = preferences ?? cachedPreferences
         if !podcastID.isEmpty, let show = source?.shows[podcastID] { return show }
         let accountAutoContinue = source?.autoContinue ?? true
@@ -182,13 +199,13 @@ public final class PodcastCloudQueue {
     }
 
     public func refreshPreferences() async {
+        let revision = preferenceSaveRevision
         do {
             let loaded = try await client.podcastQueuePreferences()
-            preferences = loaded
-            saveCachedPreferences(loaded)
-            preferenceError = nil
-            onPreferencesChanged?()
+            guard revision == preferenceSaveRevision else { return }
+            applyPreferences(loaded)
         } catch {
+            guard revision == preferenceSaveRevision else { return }
             preferenceError = KitL10n("kit.podcast.prefReadFailed", Self.explain(error))
             onPreferencesChanged?()
         }
@@ -328,34 +345,55 @@ public final class PodcastCloudQueue {
         autoLimit: Int,
         order: String
     ) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let previous = preferenceTail
-            let task = Task { @MainActor in
-                await previous?.value
-                do {
-                    var prefs = try await self.client.podcastQueuePreferences()
-                    var show = prefs.shows[podcastID] ?? PodcastShowPreference(
-                        action: prefs.defaultAction,
-                        autoLimit: prefs.autoLimit,
-                        autoContinue: prefs.autoContinue
-                    )
-                    show.action = normalizeDeliveryAction(action)
-                    show.autoLimit = min(100, max(0, autoLimit))
-                    show.order = order
-                    show.autoContinue = order != "off"
-                    prefs.shows[podcastID] = show
-                    let saved = try await self.client.savePodcastQueuePreferences(prefs)
-                    self.preferences = saved
-                    self.saveCachedPreferences(saved)
-                    self.preferenceError = nil
-                    self.onPreferencesChanged?()
-                } catch {
-                    self.preferenceError = KitL10n("kit.podcast.prefSaveFailed", Self.explain(error))
+        let value = PodcastShowPreference(
+            action: action,
+            autoLimit: autoLimit,
+            order: order,
+            skipCompleted: showPreference(podcastID).skipCompleted,
+            autoContinue: order != "off"
+        )
+        await saveShowPreference(value, podcastID: podcastID)
+    }
+
+    public func retryShowPreference(_ podcastID: String) async {
+        guard let pending = pendingShowPreferences[podcastID], pending.error != nil else { return }
+        await saveShowPreference(pending.value, podcastID: podcastID)
+    }
+
+    private func saveShowPreference(_ value: PodcastShowPreference, podcastID: String) async {
+        let pending = PendingShowPreference(value: value)
+        pendingShowPreferences[podcastID] = pending
+        onPreferencesChanged?()
+
+        let previous = preferenceTail
+        let task = Task { @MainActor in
+            await previous?.value
+            do {
+                var prefs = try await self.client.podcastQueuePreferences()
+                var show = value
+                show.skipCompleted = prefs.shows[podcastID]?.skipCompleted ?? value.skipCompleted
+                prefs.shows[podcastID] = show
+                let saved = try await self.client.savePodcastQueuePreferences(prefs)
+                if self.pendingShowPreferences[podcastID]?.id == pending.id {
+                    self.pendingShowPreferences[podcastID] = nil
                 }
-                continuation.resume()
+                self.preferenceSaveRevision += 1
+                self.applyPreferences(saved)
+            } catch {
+                if self.pendingShowPreferences[podcastID]?.id == pending.id {
+                    self.pendingShowPreferences[podcastID]?.error = KitL10n("kit.podcast.prefSaveFailed", Self.explain(error))
+                }
             }
-            preferenceTail = task
         }
+        preferenceTail = task
+        await task.value
+    }
+
+    private func applyPreferences(_ value: PodcastQueuePreferences) {
+        preferences = value
+        saveCachedPreferences(value)
+        preferenceError = nil
+        onPreferencesChanged?()
     }
 
     public func updateAutoContinue(_ enabled: Bool) async {
@@ -367,10 +405,8 @@ public final class PodcastCloudQueue {
                     var prefs = try await self.client.podcastQueuePreferences()
                     prefs.autoContinue = enabled
                     let saved = try await self.client.savePodcastQueuePreferences(prefs)
-                    self.preferences = saved
-                    self.saveCachedPreferences(saved)
-                    self.preferenceError = nil
-                    self.onPreferencesChanged?()
+                    self.preferenceSaveRevision += 1
+                    self.applyPreferences(saved)
                 } catch {
                     self.preferenceError = KitL10n("kit.podcast.prefSaveFailed", Self.explain(error))
                 }
@@ -392,10 +428,10 @@ public final class PodcastCloudQueue {
     }
 
     public func continuationContext(forEpisodeID episodeID: String) async throws -> ContinuationContext {
-        if !hasResolvedPreferences {
+        let showID = try await podcastID(forEpisodeID: episodeID)
+        if !hasResolvedPreference(for: showID) {
             await refreshPreferences()
         }
-        let showID = try await podcastID(forEpisodeID: episodeID)
         let detail = try await client.podcast(id: showID)
         let show = detail.podcast
         let artist = show.author.isEmpty ? KitL10n("kit.podcast.defaultArtist") : show.author
