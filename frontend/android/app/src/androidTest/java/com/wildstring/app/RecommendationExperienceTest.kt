@@ -21,7 +21,7 @@ class RecommendationExperienceTest {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, String>>()
         val track = """{"id":"local-a","title":"真实本库歌曲","artists":["合成艺人"],"album":"合成专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
         val concert = """{"id":"local-b","title":"真实本库歌曲","artists":["合成艺人"],"album":"现场专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
-        @Volatile var summaryFails = false
+        @Volatile var summaryStatus = 200
         @Volatile var noListening = false
         // Written on the MockWebServer thread after the request is recorded; read by the test.
         @Volatile var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
@@ -76,16 +76,30 @@ class RecommendationExperienceTest {
                     }
                     if (path.contains("/recommendations/daily")) return@synchronized json(daily())
                     if (path.endsWith("/listening/summary")) {
-                        if (summaryFails) return@synchronized json("""{"detail":"unavailable"}""").setResponseCode(503)
+                        if (summaryStatus != 200) {
+                            return@synchronized json("""{"detail":"unavailable"}""").setResponseCode(summaryStatus)
+                        }
                         return@synchronized json(if (noListening) "{}" else """{"play_count":279,"listened_ms":73560000,"tracks_played":136,"favorites":51}""")
                     }
                     if (path.endsWith("/recommendations/rankings")) {
                         if (noListening) return@synchronized json("""{"items":[]}""")
                         val period = request.requestUrl!!.queryParameter("period")
                         val coveredTrack = track.replace("\"has_cover\":false", "\"has_cover\":true")
+                        if (period == "all") {
+                            val other = coveredTrack.replace("local-a", "local-b")
+                                .replace("真实本库歌曲", "在城市尽头的深夜电台录音")
+                            return@synchronized json(
+                                """{"scope":"personal","period":"all","metric":"plays","items":[
+                                    {"rank":1,"track":$coveredTrack,"play_count":38},
+                                    {"rank":2,"track":$other,"play_count":27}
+                                ],"total":2,"limit":5,"offset":0}"""
+                            )
+                        }
                         return@synchronized json("""{"scope":"${request.requestUrl!!.queryParameter("scope")}","period":"$period","metric":"plays","items":[{"rank":1,"track":$coveredTrack,"play_count":8,"listened_ms":120000,"reason":"汇总"}],"total":1,"limit":20,"offset":0}""")
                     }
-                    if (path.endsWith("/tracks/local-a/cover")) return@synchronized MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(directoryCover))
+                    if (path.endsWith("/tracks/local-a/cover") || path.endsWith("/tracks/local-b/cover")) {
+                        return@synchronized MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(directoryCover))
+                    }
                     if (path.endsWith("/recommendations/external/feedback")) { wanted = JsonParser.parseString(body).asJsonObject.text("action") == "want"; return@synchronized json("""{"ok":true}""") }
                     if (path.contains("/recommendations/external")) return@synchronized json(external())
                     if (path.endsWith("/ai/discover")) return@synchronized json("""{"title":"本地候选歌单","mode":"local","connection_id":"personal-one","source_status":$sources,"warnings":$warnings,"degraded":true,"items":[{"track":$track,"reason":"本地检索","source_ids":["personal"]}]}""")
@@ -436,7 +450,7 @@ class RecommendationExperienceTest {
 
     @Test fun listeningStatisticsShowsTotalsPlaysRankedTrackAndRetries() {
         Fixture().use { fixture ->
-            fixture.summaryFails = true
+            fixture.summaryStatus = 503
             val vm = connect(fixture)
             try {
                 compose.onNodeWithTag("nav-mine").performClick()
@@ -446,8 +460,9 @@ class RecommendationExperienceTest {
                 val retry = hasText(uiString(R.string.retry), substring = false) and
                     hasAnyAncestor(hasTestTag("listening-statistics"))
                 compose.waitUntil(10_000) { compose.onAllNodes(retry).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.statistics_summary_unavailable)).assertIsDisplayed()
                 capture("listening-statistics-error.png")
-                fixture.summaryFails = false
+                fixture.summaryStatus = 200
                 compose.onNode(retry).performClick()
                 val duration = uiString(R.string.statistics_hours_minutes, 20, 26)
                 compose.waitUntil(10_000) { compose.onAllNodesWithText(duration).fetchSemanticsNodes().isNotEmpty() }
@@ -459,14 +474,21 @@ class RecommendationExperienceTest {
                 capture("listening-statistics-light.png")
                 compose.runOnIdle { vm.settings.appearance("dark") }
                 capture("listening-statistics-dark.png")
-                compose.onNodeWithTag("statistics-track-local-a").performClick()
-                compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
+                compose.onNodeWithTag("statistics-track-local-b").performClick()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "local-b" }
                 compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
                 fixture.noListening = true
                 compose.onNode(entry).performClick()
                 val empty = uiString(R.string.statistics_no_records)
                 compose.waitUntil(10_000) { compose.onAllNodesWithText(empty).fetchSemanticsNodes().isNotEmpty() }
                 capture("listening-statistics-empty.png")
+                compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
+                fixture.summaryStatus = 403
+                compose.onNode(entry).performClick()
+                val denied = uiString(R.string.statistics_access_denied)
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(denied).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNode(retry).assertDoesNotExist()
+                capture("listening-statistics-permission.png")
             } finally { cleanup(vm) }
         }
     }

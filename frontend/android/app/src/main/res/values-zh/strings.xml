@@ -486,6 +486,9 @@
     <string name="statistics_loved_tracks">收藏歌曲</string>
     <string name="statistics_top_tracks">常听歌曲</string>
     <string name="statistics_no_records">有播放记录后，常听歌曲会显示在这里。</string>
+    <string name="statistics_summary_unavailable">暂时无法读取收听概览。</string>
+    <string name="statistics_rankings_unavailable">暂时无法读取常听歌曲。</string>
+    <string name="statistics_access_denied">请切换到有权限的曲库查看统计。</string>
     <string name="daily_recommendations">每日推荐</string>
     <string name="listening_rankings">收听排行</string>
     <string name="discover_new_music">库外推荐</string>

@@ -41,38 +41,40 @@ import androidx.compose.ui.unit.dp
 import com.wildstring.app.R
 import com.wildstring.app.data.ListeningRankingItem
 import com.wildstring.app.data.ListeningSummary
+import kotlinx.coroutines.CancellationException
+import retrofit2.HttpException
 import java.text.NumberFormat
 
 @Composable
 internal fun StatisticsPanel(vm: MusicViewModel) {
-    var summary by remember { mutableStateOf<ListeningSummary?>(null) }
-    var ranking by remember { mutableStateOf<List<ListeningRankingItem>?>(null) }
-    val summaryAction = remember { FeatureAction() }
-    val rankingAction = remember { FeatureAction() }
+    var summary by remember { mutableStateOf<Result<ListeningSummary>?>(null) }
+    var ranking by remember { mutableStateOf<Result<List<ListeningRankingItem>>?>(null) }
     var summaryRequest by remember { mutableIntStateOf(0) }
     var rankingRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(summaryRequest) {
-        summaryAction.run { summary = vm.repository.api().listeningSummary() }
+        summary = null
+        summary = loadStatistics { vm.repository.api().listeningSummary() }
     }
     LaunchedEffect(rankingRequest) {
-        rankingAction.run {
-            ranking = vm.repository.api().listeningRankings(period = "all", limit = 5)
+        ranking = null
+        ranking = loadStatistics {
+            vm.repository.api().listeningRankings(period = "all", limit = 5)
                 .items.filter { it.playCount > 0 }
         }
     }
     val locale = LocalConfiguration.current.locales[0]
     val number = remember(locale) { NumberFormat.getIntegerInstance(locale) }
-    val rows = ranking.orEmpty()
+    val rows = ranking?.getOrNull().orEmpty()
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("listening-statistics"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         ) {
             item {
-                val summaryError = summaryAction.message?.takeUnless { it == DONE_STATUS }
-                ListeningTotals(summary, number)
+                val summaryError = summary?.exceptionOrNull()
+                ListeningTotals(summary?.getOrNull(), number)
                 if (summaryError != null) {
-                    StatisticsRetry(summaryError) { summaryRequest++ }
+                    StatisticsRetry(summaryError, R.string.statistics_summary_unavailable) { summaryRequest++ }
                 } else if (summary == null) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
@@ -119,9 +121,10 @@ internal fun StatisticsPanel(vm: MusicViewModel) {
                 }
             }
             if (rows.isEmpty()) item {
-                val rankingError = rankingAction.message?.takeUnless { it == DONE_STATUS }
+                val rankingError = ranking?.exceptionOrNull()
                 when {
-                    rankingError != null -> StatisticsRetry(rankingError) { rankingRequest++ }
+                    rankingError != null ->
+                        StatisticsRetry(rankingError, R.string.statistics_rankings_unavailable) { rankingRequest++ }
                     ranking == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     else -> Text(
                         stringResource(R.string.statistics_no_records),
@@ -189,9 +192,22 @@ private fun ListeningTotals(summary: ListeningSummary?, number: NumberFormat) {
 }
 
 @Composable
-private fun StatisticsRetry(message: String, retry: () -> Unit) {
+private fun StatisticsRetry(error: Throwable, message: Int, retry: () -> Unit) {
+    val forbidden = (error as? HttpException)?.code() == 403
     Column(Modifier.padding(top = 8.dp)) {
-        Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-        TextButton(retry) { Text(stringResource(R.string.retry)) }
+        Text(
+            stringResource(if (forbidden) R.string.statistics_access_denied else message),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (!forbidden) TextButton(retry) { Text(stringResource(R.string.retry)) }
     }
+}
+
+private suspend fun <T> loadStatistics(load: suspend () -> T): Result<T> = try {
+    Result.success(load())
+} catch (cancel: CancellationException) {
+    throw cancel
+} catch (error: Exception) {
+    Result.failure(error)
 }
