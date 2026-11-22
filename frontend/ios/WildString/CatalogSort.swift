@@ -172,6 +172,18 @@ final class AlbumTracksModel {
         await loadMore()
     }
 
+    func allItems() async throws -> [Track] {
+        var offset = 0
+        var tracks: [Track] = []
+        while true {
+            try Task.checkCancellation()
+            let page = try await fetchPage(pageSize, offset)
+            tracks.append(contentsOf: page.items)
+            offset += page.items.count
+            if page.items.isEmpty || offset >= page.total { return tracks }
+        }
+    }
+
     func play(_ track: Track, using playback: PlaybackService) {
         guard let index = items.firstIndex(where: { $0.id == track.id }) else { return }
         let token = playback.beginMusicSelection()

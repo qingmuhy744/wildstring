@@ -7,6 +7,7 @@ struct FavoritesView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    @State private var tracksSelected = TrackSelection()
     @State private var loader: PagedListModel<Track>?
     @State private var errorMessage: String?
 
@@ -18,19 +19,19 @@ struct FavoritesView: View {
                     emptyTitle: L10n("favoritesView.emptyTitle"),
                     emptyIcon: "heart"
                 ) { track in
-                    TrackActionRow(client: client, playback: playback, track: track) {
-                        Button {
-                            loader.play(track, using: playback)
-                        } label: {
-                            TrackRow(
-                                client: client,
-                                track: track,
-                                isCurrent: playback.currentItem?.trackID == track.id
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    TrackActionRow(client: client, playback: playback, track: track, play: {
+                        loader.play(track, using: playback)
+                    }) {
+                        TrackRow(
+                            client: client,
+                            track: track,
+                            isCurrent: playback.currentItem?.trackID == track.id
+                        )
                     }
                 }
+                .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                    try await loader.allItems()
+                })
             } else if let errorMessage {
                 ContentUnavailableView(
                     L10n("favoritesView.loadFailed"),

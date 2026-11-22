@@ -151,6 +151,7 @@ struct LyricsEditView: View {
     let track: Track
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showingCandidates = false
     @State private var record: ManagedLyrics?
     @State private var text = ""
     @State private var isSaving = false
@@ -191,7 +192,10 @@ struct LyricsEditView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(L10n("adminEdit.cancel")) { dismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button(L10n("consumer.searchLyrics"), systemImage: "magnifyingglass") {
+                        showingCandidates = true
+                    }
                     Menu(L10n("adminEdit.save")) {
                         Button(L10n("adminEdit.saveCurrentLyrics")) { Task { await save(text: text) } }
                         Button(L10n("adminEdit.revertToFileLyrics"), role: .destructive) {
@@ -200,6 +204,9 @@ struct LyricsEditView: View {
                     }
                     .disabled(record == nil || isSaving)
                 }
+            }
+            .sheet(isPresented: $showingCandidates) {
+                OnlineLyricsView(client: client, trackID: track.id) { Task { await load() } }
             }
             .task { await load() }
         }

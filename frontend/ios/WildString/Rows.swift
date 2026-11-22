@@ -43,7 +43,7 @@ struct TrackRow: View {
                     .foregroundStyle(Color.accentColor)
             }
             Text(track.durationText)
-                .font(.caption)
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())
@@ -74,9 +74,6 @@ struct AlbumRow: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
     }
@@ -97,9 +94,6 @@ struct ArtistRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
     }

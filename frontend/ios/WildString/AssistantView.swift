@@ -6,7 +6,13 @@ struct AssistantView: View {
     let client: WildstringClient
     var showsDismiss = true
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dismiss) private var dismiss
+    @State private var showingHistory = false
+    @State private var history: [ConversationSummary] = []
+    @State private var historyTotal = 0
+    @State private var historyError: String?
+    @State private var historyLoading = false
     @State private var conversation: ConversationDetail?
     @State private var input = ""
     @State private var isSending = false
@@ -17,25 +23,25 @@ struct AssistantView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let conversation {
-                    messageList(conversation)
-                } else if let errorMessage {
-                    ContentUnavailableView(
-                        L10n("assistant.unavailableTitle"),
-                        systemImage: "sparkles",
-                        description: Text(errorMessage)
-                    )
-                } else {
-                    ProgressView(L10n("assistant.preparingConversation"))
+            HStack(spacing: 0) {
+                if sizeClass == .regular {
+                    conversationHistory
+                        .frame(width: 240)
+                    Divider()
                 }
+                chat
+                    .safeAreaInset(edge: .bottom) { inputBar }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .navigationTitle(L10n("assistant.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     if showsDismiss {
                         Button(L10n("assistant.close")) { dismiss() }
+                    }
+                    if sizeClass != .regular {
+                        Button(L10n("consumer.conversationHistory"), systemImage: "list.bullet") { showingHistory = true }
                     }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -65,7 +71,17 @@ struct AssistantView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) { inputBar }
+            .sheet(isPresented: $showingHistory) {
+                NavigationStack {
+                    conversationHistory
+                        .navigationTitle(L10n("consumer.conversationHistory"))
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button(L10n("queueView.close")) { showingHistory = false }
+                            }
+                        }
+                }
+            }
             .sheet(isPresented: $showingDrafts) {
                 DraftsView(client: client)
             }
@@ -73,6 +89,82 @@ struct AssistantView: View {
                 AssistantMusicPreferencesView(client: client)
             }
             .task { await prepare() }
+        }
+    }
+
+    private var chat: some View {
+        Group {
+                if let conversation {
+                    messageList(conversation)
+                } else if let errorMessage {
+                    ContentUnavailableView(
+                        L10n("assistant.unavailableTitle"),
+                        systemImage: "sparkles",
+                        description: Text(errorMessage)
+                    )
+                } else {
+                    ProgressView(L10n("assistant.preparingConversation"))
+                }
+            }
+    }
+
+    private var conversationHistory: some View {
+        List {
+            ForEach(history) { item in
+                Button {
+                    Task { await openConversation(item.id) }
+                } label: {
+                    HStack {
+                        Text(item.title).lineLimit(2)
+                        Spacer()
+                        if conversation?.id == item.id { Image(systemName: "checkmark") }
+                    }
+                }
+                .disabled(isSending)
+                .accessibilityAddTraits(conversation?.id == item.id ? .isSelected : [])
+            }
+            if let historyError {
+                Text(historyError).foregroundStyle(.secondary)
+                Button(L10n("notifications.retry")) { Task { await loadHistory() } }
+            } else if historyLoading {
+                ProgressView()
+            } else if history.count < historyTotal {
+                Button(L10n("consumer.loadMore")) { Task { await loadHistory(more: true) } }
+            } else if history.isEmpty {
+                Text(L10n("consumer.noConversations")).foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.plain)
+        .task { await loadHistory() }
+        .refreshable { await loadHistory() }
+    }
+
+    private func loadHistory(more: Bool = false) async {
+        guard !historyLoading else { return }
+        historyLoading = true
+        defer { historyLoading = false }
+        do {
+            let page = try await client.conversations(offset: more ? history.count : 0)
+            if !more { history = [] }
+            var seen = Set(history.map(\.id))
+            history.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
+            historyTotal = page.total
+            historyError = nil
+        } catch {
+            if !Task.isCancelled { historyError = ErrorText.message(for: error) }
+        }
+    }
+
+    private func openConversation(_ id: String) async {
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            conversation = try await client.conversation(id: id)
+            showingHistory = false
+            errorMessage = nil
+        } catch {
+            historyError = ErrorText.message(for: error)
         }
     }
 
@@ -166,6 +258,7 @@ struct AssistantView: View {
     private func newConversation() async {
         do {
             conversation = try await client.createConversation()
+            await loadHistory()
             errorMessage = nil
         } catch {
             errorMessage = ErrorText.message(for: error)

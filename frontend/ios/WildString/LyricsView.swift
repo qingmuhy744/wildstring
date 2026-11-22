@@ -7,6 +7,8 @@ import SwiftUI
 /// and a short lyric block is centered as a whole.
 @MainActor
 struct LyricsPane: View {
+    @AppStorage("lyricTranslations") private var showsTranslation = true
+    @AppStorage("lyricRomanization") private var showsRomanization = true
     let client: WildstringClient
     let playback: PlaybackService
 
@@ -32,9 +34,17 @@ struct LyricsPane: View {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         if let timeline, !failed {
                             ForEach(Array(timeline.lines.enumerated()), id: \.offset) { index, line in
-                                Text(line.text.isEmpty ? " " : line.text)
-                                    .font(.system(size: 17, weight: index == highlightedIndex ? .semibold : .regular))
-                                    .foregroundStyle(index == highlightedIndex ? Color.primary : Color.secondary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(line.text.isEmpty ? " " : line.text)
+                                        .font(.system(size: 17, weight: index == highlightedIndex ? .semibold : .regular))
+                                        .foregroundStyle(index == highlightedIndex ? Color.primary : Color.secondary)
+                                    if showsTranslation, let translation = line.translation {
+                                        Text(translation).font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                    if showsRomanization, let romanization = line.romanization {
+                                        Text(romanization).font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(index)
                                     .contentShape(Rectangle())

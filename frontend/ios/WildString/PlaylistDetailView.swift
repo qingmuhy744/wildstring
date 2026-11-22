@@ -8,6 +8,7 @@ struct PlaylistDetailView: View {
     let playback: PlaybackService
     let playlist: Playlist
 
+    @State private var tracksSelected = TrackSelection()
     @State private var current: Playlist?
     @State private var loader: PagedListModel<Track>?
     @State private var message: String?
@@ -32,26 +33,26 @@ struct PlaylistDetailView: View {
                     emptyIcon: "music.note.list",
                     onMove: onMoveHandler
                 ) { track in
-                    TrackActionRow(client: client, playback: playback, track: track) {
-                        Button {
-                            loader.play(track, using: playback)
-                        } label: {
-                            TrackRow(
-                                client: client,
-                                track: track,
-                                isCurrent: playback.currentItem?.trackID == track.id
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    TrackActionRow(client: client, playback: playback, track: track, play: {
+                        loader.play(track, using: playback)
+                    }) {
+                        TrackRow(
+                            client: client,
+                            track: track,
+                            isCurrent: playback.currentItem?.trackID == track.id
+                        )
                     }
                     .swipeActions(edge: .trailing) {
-                        if detail.isEditable {
+                        if detail.isEditable, !tracksSelected.isActive {
                             Button(L10n("playlistDetail.remove"), role: .destructive) {
                                 Task { await remove(track) }
                             }
                         }
                     }
                 }
+                .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                    try await loader.allItems()
+                })
             } else {
                 ProgressView()
                 Spacer()
@@ -60,7 +61,7 @@ struct PlaylistDetailView: View {
         .navigationTitle(detail.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if detail.isEditable, !(loader?.items.isEmpty ?? true) {
+            if detail.isEditable, !tracksSelected.isActive, !(loader?.items.isEmpty ?? true) {
                 ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
         }

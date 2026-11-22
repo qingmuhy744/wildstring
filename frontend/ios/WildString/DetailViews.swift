@@ -8,6 +8,11 @@ struct AlbumDetailView: View {
     let playback: PlaybackService
     let album: Album
 
+    @State private var tracksSelected = TrackSelection()
+    @Environment(\.canEditMetadata) private var canEditMetadata
+    @State private var editedAlbum: Album?
+    @State private var editingAlbum = false
+    private var currentAlbum: Album { editedAlbum ?? album }
     @State private var model: AlbumTracksModel?
     @State private var sort: TrackSort
     @State private var order: CatalogSortOrder
@@ -35,18 +40,15 @@ struct AlbumDetailView: View {
                     ForEach(sections(model)) { section in
                         Section {
                             ForEach(section.tracks) { track in
-                                TrackActionRow(client: client, playback: playback, track: track) {
-                                    Button {
-                                        model.play(track, using: playback)
-                                    } label: {
-                                        TrackRow(
-                                            client: client,
-                                            track: track,
-                                            isCurrent: playback.currentItem?.trackID == track.id,
-                                            showsDisc: !groupsDiscs
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                                TrackActionRow(client: client, playback: playback, track: track, play: {
+                                    model.play(track, using: playback)
+                                }) {
+                                    TrackRow(
+                                        client: client,
+                                        track: track,
+                                        isCurrent: playback.currentItem?.trackID == track.id,
+                                        showsDisc: !groupsDiscs
+                                    )
                                 }
                                 .onAppear {
                                     if model.items.last?.id == track.id {
@@ -74,6 +76,9 @@ struct AlbumDetailView: View {
                     }
                 }
                 .listStyle(.plain)
+                .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                    try await model.allItems()
+                })
                 .refreshable { playback.cancelMusicSelection(); await model.loadInitial() }
                 .overlay {
                     if !model.didLoadOnce {
@@ -91,11 +96,24 @@ struct AlbumDetailView: View {
                 Spacer()
             }
         }
-        .navigationTitle(album.title)
+        .navigationTitle(currentAlbum.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 sortMenu
+            }
+            if canEditMetadata {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L10n("consumer.editAlbum"), systemImage: "pencil") { editingAlbum = true }
+                }
+            }
+        }
+        .sheet(isPresented: $editingAlbum) {
+            AlbumTagsView(client: client, albumID: currentAlbum.id) { id in
+                Task {
+                    editedAlbum = try? await client.album(id: id)
+                    reload()
+                }
             }
         }
         .onDisappear { playback.cancelMusicSelection() }
@@ -134,9 +152,9 @@ struct AlbumDetailView: View {
         guard model == nil else { return }
         let sort = sort
         let order = order
-        let model = AlbumTracksModel { [client, album] limit, offset in
+        let model = AlbumTracksModel { [client, albumID = currentAlbum.id] limit, offset in
             try await client.albumTracks(
-                albumId: album.id,
+                albumId: albumID,
                 limit: limit,
                 offset: offset,
                 sort: sort,
@@ -190,16 +208,16 @@ struct AlbumDetailView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            CoverImage(client: client, trackID: album.coverTrackId, size: 88)
+            CoverImage(client: client, trackID: currentAlbum.coverTrackId, size: 88)
             VStack(alignment: .leading, spacing: 4) {
-                Text(album.title)
+                Text(currentAlbum.title)
                     .font(.headline)
                     .lineLimit(2)
-                Text(album.artistDisplay)
+                Text(currentAlbum.artistDisplay)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text(L10n("detailView.trackCount", album.trackCount))
+                Text(L10n("detailView.trackCount", currentAlbum.trackCount))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Button {
@@ -240,6 +258,7 @@ struct ArtistDetailView: View {
         }
     }
 
+    @State private var tracksSelected = TrackSelection()
     @State private var section: Section = .songs
     @State private var songsLoader: PagedListModel<Track>?
     @State private var albumsLoader: PagedListModel<Album>?
@@ -285,6 +304,7 @@ struct ArtistDetailView: View {
         .miniPlayer(playback, client: client)
         .task { await ensureSectionLoaded() }
         .onChange(of: section) { _, _ in
+            tracksSelected.finish()
             Task { await ensureSectionLoaded() }
         }
     }
@@ -298,19 +318,19 @@ struct ArtistDetailView: View {
                     emptyTitle: L10n("detailView.emptySongs"),
                     emptyIcon: "music.note"
                 ) { track in
-                    TrackActionRow(client: client, playback: playback, track: track) {
-                        Button {
-                            songsLoader.play(track, using: playback)
-                        } label: {
-                            TrackRow(
-                                client: client,
-                                track: track,
-                                isCurrent: playback.currentItem?.trackID == track.id
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    TrackActionRow(client: client, playback: playback, track: track, play: {
+                        songsLoader.play(track, using: playback)
+                    }) {
+                        TrackRow(
+                            client: client,
+                            track: track,
+                            isCurrent: playback.currentItem?.trackID == track.id
+                        )
                     }
                 }
+                .modifier(TrackSelectionControls(client: client, selection: tracksSelected) {
+                    try await songsLoader.allItems()
+                })
             } else {
                 ProgressView()
             }
