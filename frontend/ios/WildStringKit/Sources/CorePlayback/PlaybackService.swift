@@ -434,8 +434,9 @@ public final class PlaybackService {
     }
 
     private func syncContinuationPreferenceFromCloud() {
-        guard let cloud = podcastCloud, cloud.hasResolvedPreferences else { return }
-        let pref = cloud.showPreference(podcastContinuationShowID ?? "").continuation
+        let showID = podcastContinuationShowID ?? ""
+        guard let cloud = podcastCloud, cloud.hasResolvedPreference(for: showID) else { return }
+        let pref = cloud.showPreference(showID).continuation
         podcastPreference = pref
         podcastAutoContinueEnabled = pref.autoContinue
     }
@@ -1617,7 +1618,8 @@ public final class PlaybackService {
             guard turn == podcastTurn else { return }
         }
         let knownShowID = podcastContinuationShowID ?? cloud.episodes[episodeID]?.podcastId ?? ""
-        if cloud.hasResolvedPreferences {
+        let hasPreference = cloud.hasResolvedPreference(for: knownShowID)
+        if hasPreference {
             let resolved = cloud.showPreference(knownShowID).continuation
             podcastPreference = resolved
             podcastAutoContinueEnabled = resolved.autoContinue
@@ -1626,7 +1628,7 @@ public final class PlaybackService {
         let anyShowEnablesAutoContinue = cloud.preferences?.shows.values.contains(where: \.autoContinue) == true
         let shouldSync = missing && (
             !automatic
-                || !cloud.hasResolvedPreferences
+                || !hasPreference
                 || podcastAutoContinueEnabled
                 || (knownShowID.isEmpty && anyShowEnablesAutoContinue)
         )
