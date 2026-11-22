@@ -36,6 +36,7 @@ interface ExternalSuggestion {
   reason: string;
   evidence: { source: string; summary: string; url?: string }[];
   local_track: Track | null;
+  local_versions?: Track[];
   wanted: boolean;
 }
 interface ExternalBatch {
@@ -211,7 +212,9 @@ export function ExternalRecommendations({
       ]),
     ).values(),
   ];
-  const visible = allItems.filter((item) => filter !== 'wanted' || item.wanted);
+  const visible = allItems.filter((item) =>
+    filter === 'wanted' ? item.wanted : !item.local_track && !item.local_versions?.length,
+  );
   const enabled = !!preferences.external_enabled;
   return (
     <section className="external-recommendations" aria-label={t('external.aria')}>
@@ -293,6 +296,8 @@ export function ExternalRecommendations({
           <div className="external-suggestion-grid">
             {visible.map((item) => {
               const link = sourceLink(item.source_url);
+              const versions = item.local_versions || [];
+              const inLibrary = !!item.local_track || versions.length > 0;
               return (
                 <article className="external-suggestion" key={item.external_id}>
                   <div className="external-suggestion-head">
@@ -305,10 +310,29 @@ export function ExternalRecommendations({
                       {item.album && <small>{item.album}</small>}
                     </div>
                     <span className="workspace-badge">
-                      {item.local_track ? t('external.inLibrary') : t('external.clue')}
+                      {versions.length
+                        ? t('external.inLibraryVersions', { count: versions.length })
+                        : inLibrary
+                          ? t('external.inLibrary')
+                          : t('external.clue')}
                     </span>
                   </div>
-                  <p className="external-reason">{localizeExternalReason(t, item.reason)}</p>
+                  {!inLibrary && (
+                    <p className="external-reason">{localizeExternalReason(t, item.reason)}</p>
+                  )}
+                  {versions.length > 0 && (
+                    <details>
+                      <summary>{t('external.chooseVersion')}</summary>
+                      <div className="external-suggestion-actions">
+                        {versions.map((track) => (
+                          <button key={track.id} onClick={() => player.start([track], 0)}>
+                            <Icon name="play" />
+                            {[track.album || track.title, track.format.toUpperCase()].join(' · ')}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   <details>
                     <summary>{t('external.evidence')}</summary>
                     {item.evidence.map((evidence, index) => (

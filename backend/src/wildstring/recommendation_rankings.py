@@ -10,26 +10,30 @@ Period = Literal["7d", "30d", "90d", "all"]
 Metric = Literal["plays", "listened_ms"]
 
 
-def statistics(repository, scope="personal", period="30d"):
+def statistics(repository, scope="personal", period="30d", *, use_browsing_scope=False):
     user = repository.database.user_id if scope == "personal" else None
+    library_id = repository.library_id()
+    library_selection = (use_browsing_scope, library_id, library_id)
     with repository.database.connect() as connection:
         if period == "all":
             rows = connection.execute(
                 "SELECT s.track_id,sum(s.play_count) AS play_count,sum(s.listened_ms) AS listened_ms "
                 "FROM user_track_state s JOIN tracks t ON t.id=s.track_id JOIN users u ON u.id=s.user_id "
-                "WHERE t.library_id=? AND t.status='available' AND u.enabled=1 AND (? IS NULL OR s.user_id=?) "
+                "WHERE (? OR t.library_id=?) AND library_selected(t.library_id, ?) "
+                "AND t.status='available' AND u.enabled=1 AND (? IS NULL OR s.user_id=?) "
                 "GROUP BY s.track_id HAVING sum(s.play_count)>0 OR sum(s.listened_ms)>0",
-                (repository.library_id(), user, user),
+                (*library_selection, user, user),
             ).fetchall()
         else:
             cutoff = time.time() - {"7d": 7, "30d": 30, "90d": 90}[period] * 86400
             rows = connection.execute(
                 "SELECT s.track_id,sum(s.counted) AS play_count,sum(s.reported_ms) AS listened_ms "
                 "FROM listening_sessions s JOIN tracks t ON t.id=s.track_id JOIN users u ON u.id=s.user_id "
-                "WHERE t.library_id=? AND t.status='available' AND u.enabled=1 AND s.started_at>=? "
+                "WHERE (? OR t.library_id=?) AND library_selected(t.library_id, ?) "
+                "AND t.status='available' AND u.enabled=1 AND s.started_at>=? "
                 "AND (? IS NULL OR s.user_id=?) GROUP BY s.track_id "
                 "HAVING sum(s.counted)>0 OR sum(s.reported_ms)>0",
-                (repository.library_id(), cutoff, user, user),
+                (*library_selection, cutoff, user, user),
             ).fetchall()
     return {
         row["track_id"]: {"play_count": row["play_count"], "listened_ms": row["listened_ms"]}
@@ -49,7 +53,7 @@ def is_english_user(repository) -> bool:
 
 
 def rankings(repository, scope="personal", period="30d", metric="plays", limit=20, offset=0):
-    stats = statistics(repository, scope, period)
+    stats = statistics(repository, scope, period, use_browsing_scope=scope == "personal")
     field = "play_count" if metric == "plays" else "listened_ms"
     identities = sorted(
         stats,

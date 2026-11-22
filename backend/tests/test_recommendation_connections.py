@@ -265,7 +265,59 @@ def test_external_optin_manual_cache_feedback_rematching_and_account_isolation(
             conn.execute("UPDATE tracks SET title='库外真实歌曲' WHERE path LIKE '%imported.flac'")
         refreshed = admin.get(BASE + "/recommendations/external").json()
         assert refreshed["wanted_items"][0]["local_track"]["title"] == "库外真实歌曲"
+        assert refreshed["source_status"][0]["matched"] == 1
+        assert refreshed["source_status"][0]["unmatched"] == 0
+        assert "尚未与本库精确匹配" not in refreshed["wanted_items"][0]["reason"]
         assert len(calls) == 1  # Import rematch is local only.
+
+        music(settings, "concert.flac", ["真实歌手"], [], album="现场专辑")
+        scan_library(settings)
+        with db.connect(write=True) as conn:
+            conn.execute("UPDATE tracks SET title='库外真实歌曲' WHERE path LIKE '%concert.flac'")
+        cached = admin.get(BASE + "/recommendations/external").json()
+        saved = cached["wanted_items"][0]
+        assert cached["cached"] and saved["local_track"] is None
+        assert {entry["album"] for entry in saved["local_versions"]} == {"正式专辑", "现场专辑"}
+        assert all("path" not in entry for entry in saved["local_versions"])
+        assert cached["source_status"][0]["matched"] == 1
+        current = admin.post(BASE + "/recommendations/external/refresh", headers=HEADERS, json={})
+        assert current.json()["wanted_items"][0]["local_versions"] == saved["local_versions"]
+        assert current.json()["status"] == "empty"
+        assert len(calls) == 1
+        assert (
+            admin.post(
+                BASE + "/recommendations/external/feedback",
+                headers=HEADERS,
+                json={"external_id": item["external_id"], "action": "clear"},
+            ).status_code
+            == 200
+        )
+        result = admin.get(BASE + "/recommendations/external").json()
+        assert result["items"] == result["wanted_items"] == []
+
+
+def test_external_matching_filters_owned_versions_and_honors_explicit_album(
+    settings, authenticated_client, monkeypatch
+):
+    music(settings, "studio.flac", ["周杰伦"], [], album="我很忙")
+    music(settings, "live.flac", ["周杰伦"], [], album="地表最强演唱会")
+    scan_library(settings)
+    payload = chart("青花瓷", "周杰伦")
+    source_provider(monkeypatch, lambda *_: payload)
+    with authenticated_client(settings) as client:
+        with Database(settings.data_dir).connect(write=True) as db:
+            db.execute("UPDATE tracks SET title='青花瓷'")
+        save(client, external_enabled=True, external_sources=["lastfm_charts"])
+        current = client.post(BASE + "/recommendations/external/refresh", headers=HEADERS, json={})
+        assert current.status_code == 200
+        assert current.json()["items"] == []
+        assert current.json()["source_status"][0]["matched"] == 1
+        payload["tracks"]["track"][0]["album"] = {"title": "未收录的指定专辑"}
+        with Database(settings.data_dir).connect(write=True) as db:
+            db.execute("DELETE FROM recommendation_source_cache")
+        current = client.post(BASE + "/recommendations/external/refresh", headers=HEADERS, json={})
+        assert current.json()["items"][0]["album"] == "未收录的指定专辑"
+        assert current.json()["source_status"][0]["matched"] == 0
 
 
 def test_external_round_robin_context_dismiss_before_model_and_wanted_survives_batch(

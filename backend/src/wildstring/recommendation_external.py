@@ -11,7 +11,9 @@ from filelock import FileLock, Timeout
 
 from wildstring.library.repository import now
 from wildstring.recommendation_rankings import is_english_user
-from wildstring.recommendation_sources import LastfmSources, SourceUnavailable, local_matches
+from wildstring.recommendation_sources import LastfmSources, SourceUnavailable, local_track_ids
+
+UNMATCHED_SUFFIX = "；尚未与本库精确匹配"
 
 SOURCE_LABELS_EN = {
     "Last.fm 歌曲相似关系": "Last.fm similar tracks",
@@ -32,7 +34,7 @@ def localize_external_item(item, english: bool):
     if isinstance(reason, str):
         for zh, en in SOURCE_LABELS_EN.items():
             reason = reason.replace(zh, en)
-        reason = reason.replace("；尚未与本库精确匹配", "; not yet matched in local library")
+        reason = reason.replace(UNMATCHED_SUFFIX, "; not yet matched in local library")
     return item | {"evidence": evidence, "reason": reason}
 
 
@@ -55,20 +57,66 @@ class ExternalRecommendations:
             for entry in records
             if entry["action"] == "want" and entry["external_id"] not in present
         )
-        matches = local_matches(repository, items)
+        source_candidates = details.get("source_candidates", {})
+        candidates = {item["external_id"]: item for item in items}
+        candidates.update(source_candidates)
+        matches = local_track_ids(repository, candidates.values(), use_browsing_scope=True)
+        wanted_ids = {
+            track_id
+            for identity, action in feedback.items()
+            if action == "want"
+            for track_id in matches.get(identity, [])
+        }
+        tracks = {}
+        if wanted_ids:
+            with repository.database.connect() as connection:
+                for track in connection.execute(
+                    """SELECT * FROM personal_tracks
+                       WHERE library_visible(library_id) AND status='available'
+                         AND id IN (SELECT value FROM json_each(?))""",
+                    (json.dumps(list(wanted_ids)),),
+                ):
+                    value = repository.public_track(dict(track))
+                    value.pop("path", None)
+                    tracks[track["id"]] = value
         result = []
         for item in items:
-            if feedback.get(item["external_id"]) == "dismiss":
+            identity = item["external_id"]
+            action = feedback.get(identity)
+            track_ids = matches.get(identity, [])
+            if action == "dismiss" or (track_ids and action != "want"):
                 continue
+            versions = [tracks[track_id] for track_id in track_ids if track_id in tracks]
             result.append(
                 localize_external_item(
                     item
                     | {
-                        "local_track": matches.get(item["external_id"]),
-                        "wanted": feedback.get(item["external_id"]) == "want",
+                        "reason": (item.get("reason") or "").removesuffix(UNMATCHED_SUFFIX)
+                        if versions
+                        else item.get("reason"),
+                        "local_track": versions[0] if len(versions) == 1 else None,
+                        "local_versions": versions if len(versions) > 1 else [],
+                        "wanted": action == "want",
                     },
                     english,
                 )
+            )
+        statuses = details.get("source_status", [])
+        for status in statuses:
+            if source_candidates and status["status"] in {"ok", "empty"}:
+                source_ids = {
+                    identity
+                    for identity, candidate in source_candidates.items()
+                    if status["id"] in candidate["sources"]
+                }
+                status["matched"] = len(source_ids.intersection(matches))
+                status["unmatched"] = len(source_ids) - status["matched"]
+        status = details.get("status", "empty")
+        if status in {"ready", "empty"}:
+            status = (
+                "ready"
+                if any(not (item["local_track"] or item["local_versions"]) for item in result)
+                else "empty"
             )
         return {
             "id": row["id"],
@@ -80,10 +128,10 @@ class ExternalRecommendations:
             else None,
             "cached": cached,
             "stale": bool(row["next_refresh_at"] and row["next_refresh_at"] < time.time()),
-            "status": details.get("status", "ready" if result else "empty"),
+            "status": status,
             "warnings": details.get("warnings", []),
             "degraded": details.get("degraded", False),
-            "source_status": details.get("source_status", []),
+            "source_status": statuses,
             "connection_id": details.get("connection_id", "local"),
             "scope": "new_to_library_not_new_release",
         }
@@ -220,18 +268,7 @@ class ExternalRecommendations:
                         )
                         warnings.append({"source": source, "code": failure.code})
                 warnings.extend(adapter.warnings)
-                known = local_matches(repository, list(items.values()))
-                for status in statuses:
-                    if status["status"] in {"ok", "empty"}:
-                        source_ids = {
-                            item["external_id"]
-                            for item in items.values()
-                            if any(
-                                evidence["source"] == status["id"] for evidence in item["evidence"]
-                            )
-                        }
-                        status["matched"] = len(source_ids.intersection(known))
-                        status["unmatched"] = len(source_ids) - status["matched"]
+                known = local_track_ids(repository, items.values(), use_browsing_scope=True)
                 with repository.database.connect() as connection:
                     dismissed = {
                         entry["external_id"]
@@ -272,7 +309,7 @@ class ExternalRecommendations:
                         " / ".join(
                             dict.fromkeys(evidence["summary"] for evidence in item["evidence"])
                         )
-                        + "；尚未与本库精确匹配"
+                        + UNMATCHED_SUFFIX
                     )
                 if options["external_use_ai"] and options["connection_id"] != "local" and selected:
                     try:
@@ -291,6 +328,14 @@ class ExternalRecommendations:
                     "warnings": warnings,
                     "degraded": bool(warnings),
                     "source_status": statuses,
+                    "source_candidates": {
+                        identity: {
+                            field: item[field]
+                            for field in ("external_id", "name", "artists", "album")
+                        }
+                        | {"sources": [entry["source"] for entry in item["evidence"]]}
+                        for identity, item in items.items()
+                    },
                     "connection_id": options["connection_id"],
                     "source_calls": adapter.calls,
                 }

@@ -459,7 +459,6 @@
     <string name="resume_retry">继续 / 重试</string>
     <string name="offline_empty_hint">从歌曲操作或专辑、歌单页面选择“离线保存”。</string>
     <string name="offline_delete_title">删除离线副本？</string>
-    <string name="statistics_sort_hint">歌曲列表中可按播放次数、收听时长、最近播放排序。</string>
     <string name="handoff_mode">自动接续方式</string>
     <string name="handoff_behavior_hint">暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。</string>
     <string name="handoff_ask_option">轻提示（默认）· 发现其他设备暂停时提示接续</string>
@@ -479,8 +478,14 @@
     <string name="download_summary">%1$d 首已完成 · %2$d MiB</string>
     <string name="download_capacity">总容量限额 %1$d GiB</string>
     <string name="download_original_format">原音 · %1$s</string>
-    <string name="statistics_minutes">累计收听 %1$d 分钟</string>
-    <string name="statistics_tracks">听过 %1$d 首 · 收藏 %2$d 首</string>
+    <string name="statistics_total_listening">累计收听</string>
+    <string name="statistics_hours_minutes">%1$d 小时 %2$d 分钟</string>
+    <string name="statistics_duration_minutes">%1$d 分钟</string>
+    <string name="statistics_play_count">播放次数</string>
+    <string name="statistics_played_tracks">听过歌曲</string>
+    <string name="statistics_loved_tracks">收藏歌曲</string>
+    <string name="statistics_top_tracks">常听歌曲</string>
+    <string name="statistics_no_records">有播放记录后，常听歌曲会显示在这里。</string>
     <string name="daily_recommendations">每日推荐</string>
     <string name="listening_rankings">收听排行</string>
     <string name="discover_new_music">库外推荐</string>
@@ -1010,6 +1015,8 @@
     <string name="ext_music_enable_discovery_hint">只提供资料与收藏建议，不下载、不改动音乐文件。</string>
     <string name="ext_music_external_unimported">库外音乐 · 需自行获取后导入</string>
     <string name="ext_music_in_library">已在曲库</string>
+    <string name="ext_music_in_library_versions">已收录 · %1$d 个版本</string>
+    <string name="ext_music_choose_version">选择版本</string>
     <string name="ext_music_interval_14d">每 14 天</string>
     <string name="ext_music_interval_30d">每 30 天</string>
     <string name="ext_music_interval_3d">每 3 天</string>

@@ -459,7 +459,6 @@
     <string name="resume_retry">Resume / retry</string>
     <string name="offline_empty_hint">Choose Save offline from a song, album or playlist.</string>
     <string name="offline_delete_title">Delete offline copy?</string>
-    <string name="statistics_sort_hint">Sort songs by play count, listening time or recently played.</string>
     <string name="handoff_mode">Automatic handoff</string>
     <string name="handoff_behavior_hint">Progress is saved when paused. Other devices prompt once for pauses within the last 30 minutes. Loading a session keeps it paused.</string>
     <string name="handoff_ask_option">Gentle prompt (default) · Resume a pause from another device</string>
@@ -479,8 +478,14 @@
     <string name="download_summary">%1$d songs downloaded · %2$d MiB</string>
     <string name="download_capacity">Capacity limit: %1$d GiB</string>
     <string name="download_original_format">Original · %1$s</string>
-    <string name="statistics_minutes">Total listening: %1$d min</string>
-    <string name="statistics_tracks">Songs played: %1$d · Favorites: %2$d</string>
+    <string name="statistics_total_listening">Total listening</string>
+    <string name="statistics_hours_minutes">%1$d hr %2$d min</string>
+    <string name="statistics_duration_minutes">%1$d min</string>
+    <string name="statistics_play_count">Plays</string>
+    <string name="statistics_played_tracks">Songs heard</string>
+    <string name="statistics_loved_tracks">Favorites</string>
+    <string name="statistics_top_tracks">Most played</string>
+    <string name="statistics_no_records">Your most-played songs will appear here.</string>
     <string name="daily_recommendations">Daily mix</string>
     <string name="listening_rankings">Top played</string>
     <string name="discover_new_music">Outside library</string>
@@ -1010,6 +1015,8 @@
     <string name="ext_music_enable_discovery_hint">Only provides metadata and recommendations without downloading or modifying music files.</string>
     <string name="ext_music_external_unimported">Outside library · Find and import manually</string>
     <string name="ext_music_in_library">In library</string>
+    <string name="ext_music_in_library_versions">In library · %1$d versions</string>
+    <string name="ext_music_choose_version">Choose a version</string>
     <string name="ext_music_interval_14d">Every 14 days</string>
     <string name="ext_music_interval_30d">Every 30 days</string>
     <string name="ext_music_interval_3d">Every 3 days</string>

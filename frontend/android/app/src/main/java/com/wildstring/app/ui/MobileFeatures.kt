@@ -213,18 +213,6 @@ private fun OfflinePanel(vm: MusicViewModel) {
 }
 
 @Composable
-private fun StatisticsPanel(vm: MusicViewModel) {
-    var value by remember { mutableStateOf<ListeningSummary?>(null) }
-    val action = remember { FeatureAction() }
-    LaunchedEffect(Unit) { action.run { value = vm.repository.api().listeningSummary() } }
-    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ActionStatus(action)
-        value?.let { Text(stringResource(R.string.play_count_value, it.playCount)); Text(stringResource(R.string.statistics_minutes, it.listenedMs / 1000 / 60)); Text(stringResource(R.string.statistics_tracks, it.playedTracks, it.lovedTracks)) }
-        Text(stringResource(R.string.statistics_sort_hint), style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
 private fun DevicesPanel(vm: MusicViewModel) {
     val resources = androidx.compose.ui.platform.LocalResources.current
     val player by vm.state.collectAsStateWithLifecycle()

@@ -32,7 +32,7 @@
 
 `GET /recommendations/rankings?scope=personal|community&period=7d|30d|90d|all&metric=plays|listened_ms&limit=20&offset=0`，limit 最大 100。
 
-响应 `{items:[{rank,track,play_count,listened_ms,reason}],total,limit,offset,scope,period,metric,generated_at,evidence}`。近期使用服务端收听 session 的开始时间窗口和实际 counted/reported_ms；all 才使用累计聚合值。只返回曲目与汇总，不返回其他账号 ID、用户名或个人播放明细。
+响应 `{items:[{rank,track,play_count,listened_ms,reason}],total,limit,offset,scope,period,metric,generated_at,evidence}`。近期使用服务端收听 session 的开始时间窗口和实际 counted/reported_ms；all 才使用累计聚合值。个人排行与曲库浏览范围一致。只返回曲目与汇总，不返回其他账号 ID、用户名或个人播放明细。
 
 ## 库外建议
 
@@ -42,9 +42,9 @@
 
 响应 `{id,items,wanted_items,generated_at,next_refresh_at,status,cached,stale,warnings,degraded,source_status,connection_id,scope}`。status 是 `disabled|manual|ready|empty|unavailable`；scope 固定 `new_to_library_not_new_release`，表示发现尚未收藏的音乐，不声称是新发行。
 
-条目 `{external_id,name,artists,album,source_url,reason,evidence:[{source,summary,url}],local_track,wanted}`。external_id 为 `lastfm:` 加艺人/标题归一化摘要；无专辑资料时 album=null。source_url 仅 Last.fm 事实页，无下载链接；没有虚构可播放 track_id。local_track 为零或一首真实本库歌曲，按标题和艺人精确归一化匹配，多个版本歧义时保留 null。导入后读取缓存会重新本地匹配，不触发逐首联网。
+条目 `{external_id,name,artists,album,source_url,reason,evidence:[{source,summary,url}],local_track,local_versions,wanted}`。external_id 为 `lastfm:` 加艺人/标题归一化摘要；无专辑资料时 album=null。source_url 仅 Last.fm 事实页，无下载链接。按标题、署名艺人以及候选提供的专辑匹配所选可见曲库中的可用录音。「全部曲库」按所有可访问的库匹配。任意一首匹配即可排除一条新推荐。一个可播放版本通过 local_track 返回，多个版本通过 local_versions 返回。
 
-want 保存当时安全元数据，换批后仍出现在 items 和独立 wanted_items；dismiss 跨批在模型筛选前生效。want 清单不执行下载、导入或文件操作。
+want 保存当时安全元数据，换批后仍出现在 items 和独立 wanted_items。默认列表隐藏其中已收录的条目，「想听」仍显示并提供播放或选择版本。dismiss 跨批在模型筛选前生效。读取缓存会重新匹配并更新收藏条目的提示。带候选索引的批次可重算来源统计，首次换批以前的旧统计保留生成时的数值。want 清单不执行下载、导入或文件操作。
 
 官方来源：chart.getTopTracks（公共热门榜）、tag.getTopTracks（按标签计数排序，不能声称近期播放榜）、track.getSimilar（关系）、artist.getSimilar/artist.getTopTracks（关联艺人与热门歌曲）。均使用服务器 Last.fm 应用 API key，不表示已经读取用户授权的 Last.fm 个人历史。来源候选先轮转再限量，模型只能返回已提供的 external_id，事实字段全部取来源数据，拒绝伪造 ID 后以规则选择降级。
 
