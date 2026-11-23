@@ -148,14 +148,14 @@ function PublisherEditor({
   return (
     <dialog
       ref={dialog}
-      className="podcasts-modal podcast-publisher-editor"
+      className="podcasts-modal podcast-publisher-editor scroll-dialog"
       aria-labelledby="publisher-editor-title"
       onCancel={(event) => {
         if (busy) event.preventDefault();
         else onClose();
       }}
     >
-      <header className="podcasts-modal-header">
+      <header className="podcasts-modal-header scroll-dialog-header">
         <h3 id="publisher-editor-title">{t('podcastPublishers.dialogTitle')}</h3>
         <DialogCloseButton
           aria-label={t('podcastPublishers.closeDialog')}
@@ -164,7 +164,7 @@ function PublisherEditor({
         />
       </header>
       <form
-        className="podcast-publisher-form"
+        className="podcast-publisher-form scroll-dialog-body"
         onSubmit={(event) => {
           event.preventDefault();
           void save();

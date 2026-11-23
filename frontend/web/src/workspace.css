@@ -112,6 +112,24 @@
   color: var(--muted);
   line-height: 1.6;
 }
+.inspection-progress {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.inspection-progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.inspection-scope-note {
+  align-self: center;
+  margin: 0;
+}
+.inspection-counts span {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .workspace-badge {
   display: inline-flex;
   padding: 5px 10px;

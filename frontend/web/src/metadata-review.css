@@ -91,6 +91,23 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+.review-song-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 8px 0 4px;
+}
+.review-song-heading h3 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.review-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
 .review-diff {
   width: 100%;
   table-layout: fixed;
@@ -452,9 +469,6 @@
 }
 .metadata-review-dialog .review-song-toggle {
   margin: 0;
-}
-.metadata-review-dialog .review-detail > h3 {
-  margin: 8px 0 4px;
 }
 .metadata-review-dialog .review-detail > p {
   margin: 4px 0 10px;

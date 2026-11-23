@@ -32,10 +32,12 @@ export function LyricsEditor({
   track,
   player,
   active,
+  onEditState,
 }: {
   track: Track;
   player: Player;
   active: boolean;
+  onEditState: (state: { dirty: boolean; busy: boolean }) => void;
 }) {
   const { t } = useTranslation();
   const [record, setRecord] = useState<Record | null>(null),
@@ -88,6 +90,12 @@ export function LyricsEditor({
     if (mode === 'timing') selectedRow.current?.scrollIntoView({ block: 'nearest' });
   }, [selected, mode]);
   const content = mode === 'timing' ? lrc(lines) : text;
+  const dirty =
+    !!record &&
+    (restore
+      ? record.override !== null
+      : text !== record.text || (mode === 'timing' && history.length > 0));
+  useEffect(() => onEditState({ dirty, busy }), [dirty, busy, onEditState]);
   function change(next: Line[], target: number) {
     setHistory((items) => [...items.slice(-19), { lines, selected }]);
     setLines(next);

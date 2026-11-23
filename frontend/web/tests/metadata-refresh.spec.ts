@@ -91,16 +91,53 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   const submitted: Record<string, unknown>[] = [];
   let release: (() => void) | undefined;
   await page.route('**/api/v1/manage/providers/refresh', async (route) => {
-    submitted.push(route.request().postDataJSON());
+    const data = route.request().postDataJSON();
+    submitted.push(data);
     await new Promise<void>((resolve) => {
       release = resolve;
     });
-    await route.fulfill({ json: { queued: 1, already_active: 0, total: 1 } });
+    await route.fulfill({
+      json: {
+        queued: 1,
+        already_active: 0,
+        total: 1,
+        ...(data.scope === 'album' ? { batch_id: 'test-album-batch' } : {}),
+      },
+    });
   });
+  await page.route('**/api/v1/manage/providers/refresh/test-album-batch', (route) =>
+    route.fulfill({
+      json: {
+        total: 1,
+        queued: 0,
+        running: 0,
+        completed: 1,
+        failed: 0,
+        no_match: 0,
+        stale: 0,
+        items: [],
+      },
+    }),
+  );
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '更新元数据', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '更新元数据', exact: true });
   await expect(dialog.getByLabel('更新方式')).toHaveValue('missing');
+  const footer = dialog.locator('footer');
+  const alignedGutter = await footer.evaluate((element) => {
+    const body = element.previousElementSibling!;
+    const actions = getComputedStyle(element);
+    const content = getComputedStyle(body);
+    return (
+      parseFloat(content.paddingInlineEnd) > 0 &&
+      actions.paddingInlineStart === content.paddingInlineStart &&
+      actions.paddingInlineEnd === content.paddingInlineEnd
+    );
+  });
+  expect(alignedGutter).toBe(true);
+  await page.screenshot({
+    path: `../../artifacts/metadata-refresh-options-${info.project.name}.png`,
+  });
   await dialog.getByLabel('更新方式').selectOption('all');
   await dialog.getByLabel('重新联网查询', { exact: true }).check();
   const start = dialog.getByRole('button', { name: '开始更新', exact: true });
@@ -128,8 +165,18 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   await expect.poll(() => submitted.length).toBe(2);
   expect(submitted[1]).toMatchObject({ scope: 'album', mode: 'missing', force: false });
   release!();
-  await expect(dialog.getByRole('status')).toContainText('已加入 1 首');
-  await dialog.getByRole('button', { name: '完成', exact: true }).click();
+  const reviewRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      url.pathname.endsWith('/agent/metadata-review') &&
+      url.searchParams.get('batch_id') === 'test-album-batch'
+    );
+  });
+  await dialog.getByRole('button', { name: '查看本批结果', exact: true }).click();
+  await reviewRequest;
+  const review = page.getByRole('dialog', { name: '批量核对资料', exact: true });
+  await expect(review).toBeVisible();
+  await review.getByRole('button', { name: '关闭批量核对', exact: true }).click();
 
   await management(page, info.project.name === 'mobile');
   await manageTab(page, '概览');

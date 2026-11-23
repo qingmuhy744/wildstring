@@ -129,6 +129,12 @@
   text-align: left;
   background: transparent;
 }
+@media (width > 760px) {
+  .is-album .collection-menu > div {
+    left: 0;
+    right: auto;
+  }
+}
 .library-toolbar .toolbar-actions {
   flex-wrap: wrap;
 }
@@ -238,6 +244,8 @@
     margin-left: auto;
   }
   .collection-menu > div {
+    width: max-content;
+    min-width: 0;
     max-width: calc(100vw - 40px);
   }
   .track-row,

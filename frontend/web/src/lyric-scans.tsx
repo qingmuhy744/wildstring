@@ -49,6 +49,7 @@ type Quality = {
   word_coverage: number;
   translation_coverage: number;
 };
+type LyricLock = { locked: boolean; version: number };
 type ScanItem = {
   id: string;
   track_id: string;
@@ -57,6 +58,7 @@ type ScanItem = {
   error: string | null;
   baseline: Quality | null;
   quality: Quality | null;
+  lyric_lock: LyricLock;
   results: Record<string, { status: string; error?: string }>;
 };
 type Scan = {
@@ -86,7 +88,7 @@ export function LyricScans({
   const [defaults, setDefaults] = useState<RateSettings | null>(null);
   const [force, setForce] = useState(false),
     [preview, setPreview] = useState<number | null>(null);
-  const [scans, setScans] = useState<Scan[]>([]),
+  const [scans, setScans] = useState<Scan[] | null>(null),
     [batch, setBatch] = useState<Scan | null>(null);
   const [offset, setOffset] = useState(0),
     [selected, setSelected] = useState<string[]>([]);
@@ -94,6 +96,10 @@ export function LyricScans({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   const [confirmation, setConfirmation] = useState<'apply' | 'cancel' | null>(null);
+  const readyItemIds =
+    batch?.items
+      .filter((item) => item.status === 'ready' && !item.lyric_lock.locked)
+      .map((item) => item.id) ?? [];
   const endpoint = '/manage/lyric-scans';
   const options = {
     scope: albumId ? 'album' : 'library',
@@ -109,8 +115,11 @@ export function LyricScans({
   useEffect(() => setPreview(null), [optionsKey]);
   async function load(id = batch?.id, pageOffset = offset) {
     const list = await api<{ items: Scan[] }>(endpoint);
-    setScans(list.items.filter((s) => !albumId || s.options.scope_id === albumId));
-    if (id) setBatch(await api<Scan>(`${endpoint}/${id}?offset=${pageOffset}&limit=50`));
+    const scoped = list.items.filter((s) => !albumId || s.options.scope_id === albumId);
+    const selectedId = id ?? (albumId ? scoped[0]?.id : undefined);
+    if (selectedId)
+      setBatch(await api<Scan>(`${endpoint}/${selectedId}?offset=${pageOffset}&limit=50`));
+    setScans(scoped);
   }
   useEffect(() => {
     void load(initialBatchId).catch((error) => setMessage(String(error)));
@@ -122,7 +131,7 @@ export function LyricScans({
       .catch((error) => setMessage(String(error)));
   }, [albumId, initialBatchId]);
   useEffect(() => {
-    if (!batch || batch.status !== 'running') return;
+    if (!batch || !['queued', 'running'].includes(batch.status)) return;
     let disposed = false;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible')
@@ -163,10 +172,28 @@ export function LyricScans({
       await load();
     });
   }
-  return (
-    <section className="management-card lyric-scans" aria-label={t('lyricScans.sectionAria')}>
-      <h3>{albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}</h3>
-      <p className="muted">{t('lyricScans.headingMuted')}</p>
+  async function checkScope() {
+    const result = await api<{ total: number }>(`${endpoint}/preview`, {
+      method: 'POST',
+      body: optionsKey,
+    });
+    setPreview(result.total);
+    return result.total;
+  }
+  async function createScan() {
+    const result = await api<Scan>(endpoint, { method: 'POST', body: optionsKey });
+    setBatch(result);
+    setOffset(0);
+    setSelected([]);
+    setExpanded('');
+    await load(result.id, 0);
+  }
+  const optionsDisabled =
+    busy ||
+    !defaults ||
+    (rateProfile === 'custom' && (interval < 1 || interval > 120 || !Number.isInteger(interval)));
+  const scanOptions = (
+    <>
       <fieldset disabled={busy || !defaults} className="lyric-scan-options">
         <label>
           <HelpLabel hint="scanMode">{t('lyricScans.scanMode')}</HelpLabel>
@@ -227,47 +254,60 @@ export function LyricScans({
         </label>
       </fieldset>
       <p className="muted">{t('lyricScans.rateExplanation')}</p>
+    </>
+  );
+  return (
+    <section className="management-card lyric-scans" aria-label={t('lyricScans.sectionAria')}>
+      {!albumId && <h3>{t('lyricScans.libraryHeader')}</h3>}
+      <p className="muted">
+        {t(albumId ? 'lyricScans.albumReviewBeforeApply' : 'lyricScans.headingMuted')}
+      </p>
+      {!albumId && scanOptions}
       <div className="button-row">
         <button
-          disabled={busy || interval < 1 || interval > 120 || !Number.isInteger(interval)}
+          className={albumId ? 'primary' : undefined}
+          disabled={
+            optionsDisabled ||
+            (!!albumId && !scans) ||
+            (!!albumId && !!batch && ['queued', 'running', 'paused'].includes(batch.status))
+          }
           onClick={() =>
             void run(async () => {
-              const result = await api<{ total: number }>(`${endpoint}/preview`, {
-                method: 'POST',
-                body: optionsKey,
-              });
-              setPreview(result.total);
+              const total = await checkScope();
+              if (albumId && total > 0) await createScan();
             })
           }
         >
-          {t('lyricScans.checkScope')}
+          {t(albumId ? 'lyricScans.startAlbumScan' : 'lyricScans.checkScope')}
         </button>
-        {preview !== null && (
+        {!albumId && preview !== null && (
           <>
             <span>{t('lyricScans.scopeCount', { count: preview })}</span>
             <button
               className="primary"
-              disabled={busy || preview === 0}
-              onClick={() =>
-                void run(async () => {
-                  const result = await api<Scan>(endpoint, { method: 'POST', body: optionsKey });
-                  setBatch(result);
-                  setOffset(0);
-                  setSelected([]);
-                  await load(result.id, 0);
-                })
-              }
+              disabled={optionsDisabled || preview === 0}
+              onClick={() => void run(createScan)}
             >
               {t('lyricScans.startScan')}
             </button>
           </>
         )}
-        <button disabled={busy} onClick={() => void run(() => load())}>
-          {t('lyricScans.refreshTasks')}
-        </button>
+        {(!albumId || batch || message) && (
+          <button disabled={busy} onClick={() => void run(() => load())}>
+            {t('lyricScans.refreshTasks')}
+          </button>
+        )}
       </div>
-      <p role="status">{message}</p>
-      {defaults && (
+      {(message || (albumId && preview === 0)) && (
+        <p role="status">{message || t('lyricScans.emptyAlbumScope')}</p>
+      )}
+      {albumId && (
+        <details>
+          <summary>{t('lyricScans.scanOptions')}</summary>
+          {scanOptions}
+        </details>
+      )}
+      {!albumId && defaults && (
         <details>
           <summary>{t('lyricScans.rateDefaultsSummary')}</summary>
           <fieldset disabled={busy} className="lyric-scan-options">
@@ -323,7 +363,7 @@ export function LyricScans({
           </fieldset>
         </details>
       )}
-      {scans.length > 0 && (
+      {scans && scans.length > 0 && (
         <details open={!batch}>
           <summary>{t('lyricScans.recentTasksSummary')}</summary>
           <div className="lyric-scan-history">
@@ -409,10 +449,8 @@ export function LyricScans({
               </button>
             )}
             <button
-              disabled={busy || !batch.items.some((i) => i.status === 'ready')}
-              onClick={() =>
-                setSelected(batch.items.filter((i) => i.status === 'ready').map((i) => i.id))
-              }
+              disabled={busy || !readyItemIds.length}
+              onClick={() => setSelected(readyItemIds)}
             >
               {t('lyricScans.selectReadyOnPage')}
             </button>
@@ -474,7 +512,7 @@ export function LyricScans({
                     <input
                       type="checkbox"
                       aria-label={t('lyricScans.selectTrackAria', { title: item.title })}
-                      disabled={item.status !== 'ready' || busy}
+                      disabled={item.status !== 'ready' || item.lyric_lock.locked || busy}
                       checked={selected.includes(item.id)}
                       onChange={(e) =>
                         setSelected((ids) =>
@@ -504,30 +542,14 @@ export function LyricScans({
                 <div className="button-row">
                   <button
                     disabled={busy}
+                    aria-expanded={expanded === item.id}
                     onClick={() => setExpanded(expanded === item.id ? '' : item.id)}
                   >
-                    {t('lyricScans.previewCandidates')}
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const lock = await api<{ version: number; locked: boolean }>(
-                          `/manage/tracks/${item.track_id}/lyric-lock`,
-                        );
-                        await api(`/manage/tracks/${item.track_id}/lyric-lock`, {
-                          method: 'PUT',
-                          body: JSON.stringify({ ...lock, locked: !lock.locked }),
-                        });
-                        setMessage(
-                          lock.locked
-                            ? t('lyricScans.unlockedNotice')
-                            : t('lyricScans.lockedNotice'),
-                        );
-                      })
-                    }
-                  >
-                    {t('lyricScans.toggleLock')}
+                    {t(
+                      expanded === item.id
+                        ? 'lyricScans.collapseCandidates'
+                        : 'lyricScans.previewCandidates',
+                    )}
                   </button>
                   {item.status === 'applied' && (
                     <button
@@ -549,12 +571,49 @@ export function LyricScans({
                   )}
                 </div>
                 {expanded === item.id && (
-                  <OnlineLyrics
-                    trackId={item.track_id}
-                    applied={() => {
-                      void load();
-                    }}
-                  />
+                  <section
+                    className="lyric-scan-candidates"
+                    aria-label={t('lyricScans.trackCandidates', { title: item.title })}
+                  >
+                    <label className="lyric-scan-protection">
+                      <input
+                        type="checkbox"
+                        checked={item.lyric_lock.locked}
+                        disabled={busy}
+                        onChange={(event) => {
+                          const locked = event.currentTarget.checked;
+                          void run(async () => {
+                            const lock = await api<LyricLock>(
+                              `/manage/tracks/${item.track_id}/lyric-lock`,
+                              {
+                                method: 'PUT',
+                                body: JSON.stringify({ version: item.lyric_lock.version, locked }),
+                              },
+                            );
+                            setBatch(
+                              (current) =>
+                                current && {
+                                  ...current,
+                                  items: current.items.map((row) =>
+                                    row.id === item.id ? { ...row, lyric_lock: lock } : row,
+                                  ),
+                                },
+                            );
+                            if (lock.locked)
+                              setSelected((ids) => ids.filter((id) => id !== item.id));
+                          });
+                        }}
+                      />
+                      <HelpLabel hint="lyricBatchProtection">
+                        {t('lyricScans.skipTrackInBatch')}
+                      </HelpLabel>
+                    </label>
+                    <OnlineLyrics
+                      trackId={item.track_id}
+                      applied={() => void load()}
+                      showHeading={false}
+                    />
+                  </section>
                 )}
               </li>
             ))}
@@ -599,10 +658,12 @@ export function LyricScans({
 
 export function LyricScanDialog({
   albumId,
+  albumTitle,
   batchId,
   onClose,
 }: {
   albumId?: string;
+  albumTitle?: string;
   batchId?: string;
   onClose: () => void;
 }) {
@@ -619,20 +680,25 @@ export function LyricScanDialog({
   return (
     <dialog
       ref={dialog}
-      className="metadata-refresh-dialog lyric-scan-dialog"
+      className="metadata-refresh-dialog lyric-scan-dialog scroll-dialog"
       aria-label={albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}
       onCancel={(e) => {
         e.preventDefault();
         onClose();
       }}
     >
-      <header className="lyric-scan-header">
-        <strong>{albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}</strong>
+      <header className="scroll-dialog-header">
+        <div>
+          <strong>{albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}</strong>
+          {albumTitle && <p className="muted lyric-scan-album-title">{albumTitle}</p>}
+        </div>
         <button onClick={onClose} aria-label={t('lyricScans.closeAria')}>
           {t('lyricScans.close')}
         </button>
       </header>
-      <LyricScans albumId={albumId} initialBatchId={batchId} />
+      <div className="scroll-dialog-body">
+        <LyricScans albumId={albumId} initialBatchId={batchId} />
+      </div>
     </dialog>
   );
 }

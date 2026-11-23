@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { CurationDraftPreview } from './curation-drafts';
+import { MetadataReviewDialog } from './metadata-review';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
 import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
 import {
@@ -492,6 +493,7 @@ export function Drafts({
   onChanged: () => void;
 }) {
   const { t } = useTranslation();
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [filter, setFilter] = useState('pending'),
     [offset, setOffset] = useState(0),
     [selected, setSelected] = useState<AgentDraft | null>(null),
@@ -499,6 +501,12 @@ export function Drafts({
   const list = useWorkspaceResource<AgentPage<AgentDraft>>(
     `/agent/drafts?limit=20&offset=${offset}${filter ? `&status=${filter}` : ''}`,
   );
+  const canReview = user.profile === 'owner' || user.profile === 'librarian';
+  const metadata = useWorkspaceResource<{ total: number }>(
+    canReview && filter === 'pending' ? '/agent/metadata-review/albums?limit=1' : null,
+  );
+  const hasMetadata =
+    filter === 'pending' && canReview && !!(metadata.value?.total || metadata.error);
   useEffect(() => {
     if (!selectedId) return;
     const c = new AbortController();
@@ -515,7 +523,13 @@ export function Drafts({
         title={t('agentWorkbench.headerTitle')}
         description={t('agentWorkbench.headerDescription')}
       >
-        <RefreshWorkspace busy={list.loading} onClick={() => void list.reload()} />
+        <RefreshWorkspace
+          busy={list.loading || (filter === 'pending' && canReview && metadata.loading)}
+          onClick={() => {
+            void list.reload();
+            void metadata.reload();
+          }}
+        />
       </WorkspaceHeader>
       <WorkspaceNotice error={error || list.error} unavailable={list.unsupported} />
       <div className="workspace-tabs">
@@ -557,6 +571,20 @@ export function Drafts({
       )}
       {!selected && (
         <div className="workspace-card">
+          {hasMetadata && (
+            <div className="workspace-row">
+              <div className="workspace-row-main">
+                <strong>{t('agentWorkbench.songMetadata')}</strong>
+                <small>
+                  {metadata.error ||
+                    t('agentWorkbench.albumsWithSuggestions', { count: metadata.value?.total })}
+                </small>
+              </div>
+              <button onClick={() => setReviewOpen(true)}>
+                {t('agentWorkbench.reviewSongMetadata')}
+              </button>
+            </div>
+          )}
           {list.value?.items.map((draft) => (
             <div className="workspace-row" key={draft.id}>
               <div className="workspace-row-main">
@@ -584,9 +612,11 @@ export function Drafts({
               </button>
             </div>
           ))}
-          {!list.value?.items.length && !list.unsupported && (
+          {!hasMetadata && !list.value?.items.length && !list.unsupported && (
             <p className="workspace-empty">
-              {list.loading ? t('agentWorkbench.loadingDrafts') : t('agentWorkbench.emptyDrafts')}
+              {list.loading || (canReview && filter === 'pending' && metadata.loading)
+                ? t('agentWorkbench.loadingDrafts')
+                : t('agentWorkbench.emptyDrafts')}
             </p>
           )}
           <WorkspacePagination
@@ -595,6 +625,18 @@ export function Drafts({
             onOffset={setOffset}
           />
         </div>
+      )}
+      {reviewOpen && (
+        <MetadataReviewDialog
+          onClose={() => {
+            setReviewOpen(false);
+            void metadata.reload();
+          }}
+          onApplied={() => {
+            onChanged();
+            void list.reload();
+          }}
+        />
       )}
     </section>
   );
@@ -633,6 +675,10 @@ export function AgentTasks({
 }) {
   const { t } = useTranslation();
   const [editingSchedule, setEditingSchedule] = useState<AgentSchedule | null>(null);
+  const [scope, setScope] = useState<'recent' | 'library' | 'selection'>('recent');
+  const [resultOffset, setResultOffset] = useState(0);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
+  const revealTask = useRef(false);
   const [tab, setTab] = useState('tasks'),
     [offset, setOffset] = useState(0),
     [selected, setSelected] = useState<string | null>(selectedId || null),
@@ -649,23 +695,47 @@ export function AgentTasks({
       Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
     );
   const tasks = useWorkspaceResource<AgentPage<AgentTask>>(
-      `/agent/tasks?limit=20&offset=${offset}`,
+      `/agent/tasks?limit=20&offset=${offset}&summary=true`,
       5000,
     ),
     schedules = useWorkspaceResource<AgentPage<AgentSchedule>>('/agent/schedules?limit=100'),
     connections = useWorkspaceResource<AgentPage<AgentConnection>>('/agent/connections'),
     detail = useWorkspaceResource<AgentTask>(
-      selected ? `/agent/tasks/${encodeURIComponent(selected)}` : null,
-      5000,
+      selected
+        ? `/agent/tasks/${encodeURIComponent(selected)}?result_offset=${resultOffset}`
+        : null,
+      2000,
     );
-  useEffect(() => setSelected(selectedId || null), [selectedId]);
+  function openTask(id: string | null) {
+    revealTask.current = Boolean(id);
+    setSelected(id);
+    setResultOffset(0);
+    if (id && id === selected && resultHeading.current) {
+      showTaskProgress();
+    }
+  }
+  function showTaskProgress() {
+    revealTask.current = false;
+    resultHeading.current?.focus({ preventScroll: true });
+    resultHeading.current?.scrollIntoView({ block: 'start' });
+  }
+  useEffect(() => openTask(selectedId || null), [selectedId]);
+  useEffect(() => {
+    if (revealTask.current && detail.value?.id === selected && resultHeading.current) {
+      showTaskProgress();
+    }
+  }, [detail.value?.id, selected]);
   async function perform(path: string, method: string, body: unknown, message: string) {
     if (busy) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      await api(path, { method, body: body ? JSON.stringify(body) : undefined });
+      const response = await api<{ id?: string }>(path, {
+        method,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (path === '/agent/tasks' && response.id) openTask(response.id);
       setNotice(message);
       await Promise.all([tasks.reload(), schedules.reload(), detail.reload()]);
       return true;
@@ -677,7 +747,8 @@ export function AgentTasks({
     }
   }
   const params = {
-    max_tracks: maxTracks,
+    ...(scope !== 'selection' ? { scope } : {}),
+    ...(scope !== 'library' ? { max_tracks: maxTracks } : {}),
     max_calls: useAI ? maxCalls : 0,
     use_ai: useAI,
     ...(useAI ? { connection_id: connection } : {}),
@@ -687,6 +758,11 @@ export function AgentTasks({
   );
   const selectedConnectionAvailable = availableConnections.some((c) => c.id === connection);
   const item = detail.value;
+  const scopeNames = {
+    recent: t('agentWorkbench.inspectRecent'),
+    library: t('agentWorkbench.inspectLibrary'),
+    selection: t('agentWorkbench.inspectSelection'),
+  };
   const stageName = (stage: string, status: string) =>
     stage === 'completed' && status !== 'succeeded'
       ? t('agentWorkbench.stageCompletedIncomplete')
@@ -727,6 +803,7 @@ export function AgentTasks({
           onClick={() => {
             setTab('tasks');
             setEditingSchedule(null);
+            if (scope === 'selection') setScope('recent');
           }}
         >
           {t('agentWorkbench.tabTasks')}
@@ -757,7 +834,11 @@ export function AgentTasks({
                       enabled: editingSchedule?.enabled || false,
                       interval_hours: hours,
                       timezone,
-                      parameters: { ...(editingSchedule?.parameters || {}), ...params },
+                      parameters: {
+                        ...(editingSchedule?.parameters || {}),
+                        ...params,
+                        ...(scope !== 'selection' ? { track_ids: null } : {}),
+                      },
                       ...(editingSchedule ? { version: editingSchedule.version } : {}),
                     },
                 tab === 'tasks'
@@ -766,7 +847,10 @@ export function AgentTasks({
                     ? t('agentWorkbench.scheduleUpdated')
                     : t('agentWorkbench.scheduleSavedDisabled'),
               ).then((success) => {
-                if (success) setEditingSchedule(null);
+                if (success && editingSchedule) {
+                  setEditingSchedule(null);
+                  if (scope === 'selection') setScope('recent');
+                }
               });
             }}
           >
@@ -811,17 +895,38 @@ export function AgentTasks({
                 </>
               )}
               <label>
-                {t('agentWorkbench.maxTracksLabel')}
-                <input
-                  aria-label={t('agentWorkbench.maxTracksAriaLabel')}
-                  required
-                  type="number"
-                  min={1}
-                  max={5000}
-                  value={maxTracks}
-                  onChange={(e) => setMaxTracks(Number(e.target.value))}
-                />
+                {t('agentWorkbench.inspectionScope')}
+                <select value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+                  <option value="recent">{scopeNames.recent}</option>
+                  <option value="library">{scopeNames.library}</option>
+                  {editingSchedule?.parameters.track_ids != null && (
+                    <option value="selection">{scopeNames.selection}</option>
+                  )}
+                </select>
               </label>
+              {scope !== 'library' && (
+                <label>
+                  {t(
+                    scope === 'recent'
+                      ? 'agentWorkbench.recentTracksLabel'
+                      : 'agentWorkbench.maxTracksLabel',
+                  )}
+                  <input
+                    aria-label={t('agentWorkbench.maxTracksAriaLabel')}
+                    required
+                    type="number"
+                    min={1}
+                    max={5000}
+                    value={maxTracks}
+                    onChange={(e) => setMaxTracks(Number(e.target.value))}
+                  />
+                </label>
+              )}
+              {scope === 'library' && (
+                <p className="muted inspection-scope-note">
+                  {t('agentWorkbench.inspectLibraryHelp')}
+                </p>
+              )}
               <label className="workspace-check">
                 <input
                   type="checkbox"
@@ -888,7 +993,14 @@ export function AgentTasks({
                         : t('agentWorkbench.saveDisabledSchedule')}
                 </button>
                 {editingSchedule && (
-                  <button type="button" disabled={busy} onClick={() => setEditingSchedule(null)}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingSchedule(null);
+                      if (scope === 'selection') setScope('recent');
+                    }}
+                  >
                     {t('agentWorkbench.cancelEditSchedule')}
                   </button>
                 )}
@@ -904,34 +1016,6 @@ export function AgentTasks({
           </form>
           {tab === 'tasks' ? (
             <>
-              <div className="workspace-card">
-                {tasks.value?.items.map((task) => (
-                  <div className="workspace-row" key={task.id}>
-                    <div className="workspace-row-main">
-                      <strong>
-                        {task.parameters.use_ai
-                          ? t('agentWorkbench.taskAiInspection')
-                          : t('agentWorkbench.taskRuleInspection')}
-                      </strong>
-                      <small>
-                        {localDate(task.created_at)} · {stageName(task.stage, task.status)}
-                      </small>
-                    </div>
-                    <StateBadge state={task.status} />
-                    <button onClick={() => setSelected(task.id)}>
-                      {t('agentWorkbench.viewTask')}
-                    </button>
-                  </div>
-                ))}
-                {!tasks.value?.items.length && (
-                  <p className="workspace-empty">{t('agentWorkbench.emptyTasks')}</p>
-                )}
-                <WorkspacePagination
-                  total={tasks.value?.total || 0}
-                  offset={offset}
-                  onOffset={setOffset}
-                />
-              </div>
               {item && (
                 <article
                   className="workspace-card"
@@ -939,7 +1023,9 @@ export function AgentTasks({
                 >
                   <div className="workspace-card-head">
                     <div>
-                      <h2>{t('agentWorkbench.inspectionResultTitle')}</h2>
+                      <h2 ref={resultHeading} tabIndex={-1}>
+                        {t('agentWorkbench.inspectionResultTitle')}
+                      </h2>
                       <small>
                         {t('agentWorkbench.taskSummaryHeader', {
                           id: item.id,
@@ -949,25 +1035,45 @@ export function AgentTasks({
                     </div>
                     <StateBadge state={item.status} />
                   </div>
-                  <p>
+                  {typeof item.counts.total === 'number' && (
+                    <div className="inspection-progress">
+                      <span>
+                        {t('agentWorkbench.inspectionProgress', {
+                          checked: item.counts.processed ?? 0,
+                          total: item.counts.total,
+                        })}
+                      </span>
+                      {item.counts.total > 0 && (
+                        <progress
+                          aria-label={t('agentWorkbench.inspectionProgressAria')}
+                          value={item.counts.processed ?? 0}
+                          max={item.counts.total}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <p className="workspace-inline inspection-counts">
                     {Object.entries(item.counts)
-                      .map(
-                        ([k, v]) =>
-                          `${
-                            (
-                              {
-                                processed: t('agentWorkbench.countProcessed'),
-                                total: t('agentWorkbench.countTotal'),
-                                issues: t('agentWorkbench.countIssues'),
-                                failed: t('agentWorkbench.countFailed'),
-                                drafts: t('agentWorkbench.countDrafts'),
-                                skipped: t('agentWorkbench.countSkipped'),
-                                calls: t('agentWorkbench.countCalls'),
-                              } as Record<string, string>
-                            )[k] || k
-                          } ${v}`,
+                      .filter(
+                        ([key]) =>
+                          item.counts.total === undefined || !['processed', 'total'].includes(key),
                       )
-                      .join(' · ')}
+                      .map(([k, v]) => (
+                        <span key={k}>
+                          {(
+                            {
+                              processed: t('agentWorkbench.countProcessed'),
+                              total: t('agentWorkbench.countTotal'),
+                              issues: t('agentWorkbench.countIssues'),
+                              failed: t('agentWorkbench.countFailed'),
+                              drafts: t('agentWorkbench.countDrafts'),
+                              skipped: t('agentWorkbench.countSkipped'),
+                              calls: t('agentWorkbench.countCalls'),
+                            } as Record<string, string>
+                          )[k] || k}{' '}
+                          {v}
+                        </span>
+                      ))}
                   </p>
                   {item.error_code && <p role="status">{errorCodeMessage(item.error_code)}</p>}
                   <DiagnosticId id={item.trace_id} />
@@ -1045,8 +1151,41 @@ export function AgentTasks({
                       </div>
                     </div>
                   ))}
+                  <WorkspacePagination
+                    total={item.result_total ?? 0}
+                    offset={resultOffset}
+                    onOffset={setResultOffset}
+                  />
                 </article>
               )}
+              <div className="workspace-card">
+                {tasks.value?.items.map((task) => (
+                  <div className="workspace-row" key={task.id}>
+                    <div className="workspace-row-main">
+                      <strong>
+                        {task.parameters.use_ai
+                          ? t('agentWorkbench.taskAiInspection')
+                          : t('agentWorkbench.taskRuleInspection')}
+                      </strong>
+                      <small>
+                        {localDate(task.created_at)} · {stageName(task.stage, task.status)}
+                      </small>
+                    </div>
+                    <StateBadge state={task.status} />
+                    <button onClick={() => openTask(task.id)}>
+                      {t('agentWorkbench.viewTask')}
+                    </button>
+                  </div>
+                ))}
+                {!tasks.value?.items.length && (
+                  <p className="workspace-empty">{t('agentWorkbench.emptyTasks')}</p>
+                )}
+                <WorkspacePagination
+                  total={tasks.value?.total || 0}
+                  offset={offset}
+                  onOffset={setOffset}
+                />
+              </div>
             </>
           ) : (
             <div className="workspace-card">
@@ -1070,6 +1209,13 @@ export function AgentTasks({
                       setHours(schedule.interval_hours);
                       setTimezone(schedule.timezone);
                       setMaxTracks(Number(schedule.parameters.max_tracks) || 500);
+                      setScope(
+                        schedule.parameters.track_ids != null
+                          ? 'selection'
+                          : schedule.parameters.scope === 'library'
+                            ? 'library'
+                            : 'recent',
+                      );
                       setUseAI(Boolean(schedule.parameters.use_ai));
                       setMaxCalls(Number(schedule.parameters.max_calls) || 4);
                       setConnection(String(schedule.parameters.connection_id || ''));

@@ -125,6 +125,9 @@ export const hints = {
   get lyricGoal(): string {
     return i18n.t('helpContent.lyricGoal');
   },
+  get lyricBatchProtection(): string {
+    return i18n.t('helpContent.lyricBatchProtection');
+  },
   get lyricPreference(): string {
     return i18n.t('helpContent.lyricPreference');
   },

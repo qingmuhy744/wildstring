@@ -18,7 +18,7 @@ test('真实后端：草案确认后应用一次，歌单和通知可从网页�
   });
   expect(created.ok()).toBe(true);
   const draft = await created.json();
-  await section(page, '待确认草案');
+  await section(page, '待确认');
   await page.getByRole('button', { name: `查看草案 ${title}`, exact: true }).click();
   const detail = page.getByRole('article', { name: '草案详情' });
   await expect(detail).toContainText('晴天测试曲');
@@ -60,25 +60,19 @@ test('真实后端：草案确认后应用一次，歌单和通知可从网页�
 
 test('真实后端：纯规则巡检完成、任务回读和关闭的计划可启停删除', async ({ page }, info) => {
   await login(page);
-  await section(page, '巡检与任务');
-  const panel = page.getByRole('region', { name: '巡检与任务', exact: true });
-  await panel.getByRole('button', { name: '提交规则巡检', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('巡检已提交');
-  await expect
-    .poll(
-      async () => {
-        const items = (await (await page.request.get('/api/v1/agent/tasks')).json()).items;
-        return items.some((item: { status: string }) =>
-          ['succeeded', 'partial'].includes(item.status),
-        );
-      },
-      { timeout: 15000 },
-    )
-    .toBe(true);
-  await panel.getByRole('button', { name: '刷新', exact: true }).click();
-  await panel.getByRole('button', { name: '查看任务', exact: true }).first().click();
-  await expect(page.getByRole('article', { name: '巡检任务详情' })).toContainText('巡检结果');
-  await panel.getByRole('button', { name: '定时巡检', exact: true }).click();
+  await section(page, '曲库检查');
+  const panel = page.getByRole('region', { name: '曲库检查', exact: true });
+  await panel.getByLabel('检查歌曲上限', { exact: true }).fill('1');
+  await panel.getByRole('button', { name: '开始检查', exact: true }).click();
+  await expect(panel.getByRole('status')).toContainText('检查已提交');
+  const detail = page.getByRole('article', { name: '检查任务详情' });
+  await expect(detail).toContainText('已检查 1 / 1 首', { timeout: 15000 });
+  const total = (await (await page.request.get('/api/v1/tracks')).json()).total;
+  expect(total).toBeGreaterThan(1);
+  await panel.getByRole('combobox', { name: '检查范围', exact: true }).selectOption('library');
+  await panel.getByRole('button', { name: '开始检查', exact: true }).click();
+  await expect(detail).toContainText(`已检查 ${total} / ${total} 首`, { timeout: 15000 });
+  await panel.getByRole('button', { name: '定时检查', exact: true }).click();
   await panel.getByLabel('计划名称', { exact: true }).fill(`测试计划-${info.project.name}`);
   await panel.getByRole('button', { name: '保存关闭的计划', exact: true }).click();
   await expect(panel.getByRole('button', { name: '开启计划', exact: true }).last()).toBeVisible();

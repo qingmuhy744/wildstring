@@ -180,6 +180,10 @@ export function MetadataReviewWorkbench({
   const [refresh, setRefresh] = useState(false),
     [conflicts, setConflicts] = useState<Record<string, string>>({});
   const [lockBusy, setLockBusy] = useState(false);
+  const reviewPane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    reviewPane.current?.scrollTo(0, 0);
+  }, [active]);
   useEffect(() => {
     onBusy?.(busy);
     return () => onBusy?.(false);
@@ -203,6 +207,7 @@ export function MetadataReviewWorkbench({
     key = useRef({ signature: '', value: eventId() });
   const current = page?.items.find((t) => t.id === active),
     candidate = current?.suggestions.find((s) => s.id === choices[current.id]?.source);
+  const pending = albums.find((album) => album.id === page?.album_id)?.count;
   const selected = page?.items.filter((t) => (choices[t.id]?.fields.length || 0) > 0) || [];
   const fieldCount = selected.reduce((n, t) => n + choices[t.id].fields.length, 0);
   async function loadAlbums(append = false) {
@@ -213,7 +218,7 @@ export function MetadataReviewWorkbench({
     setAlbumTotal(result.total);
     return result.items;
   }
-  async function load(query: string, next?: string, preserveOtherChoices = false) {
+  async function load(query: string, next?: string, mode?: 'preserve' | 'advance') {
     const generation = ++sequence.current;
     setLoading(true);
     setError('');
@@ -226,28 +231,47 @@ export function MetadataReviewWorkbench({
           result.items.map((t) => {
             const choice = previous[t.id];
             if (
-              preserveOtherChoices &&
-              t.id !== next &&
+              mode &&
+              (mode === 'advance' || t.id !== next) &&
               choice &&
               page?.items.find((old) => old.id === t.id)?.metadata_version === t.metadata_version &&
-              t.suggestions.some((source) => source.id === choice.source)
+              t.suggestions.some(
+                (source) => source.id === choice.source && !candidateStale(source, t),
+              )
             )
               return [t.id, choice];
             const fallback = defaultChoice(t);
             return [
               t.id,
-              preserveOtherChoices && t.id === next ? { ...fallback, fields: [] } : fallback,
+              mode === 'preserve' && t.id === next ? { ...fallback, fields: [] } : fallback,
             ];
           }),
         ),
       );
-      setActive(
-        next && result.items.some((t) => t.id === next)
-          ? next
-          : result.items.find((t) => defaultChoice(t).fields.length)?.id ||
-              result.items[0]?.id ||
-              '',
-      );
+      if (mode === 'advance') {
+        const nextIndex = result.items.findIndex((item) => item.id === next) + 1;
+        const ordered = [...result.items.slice(nextIndex), ...result.items.slice(0, nextIndex)];
+        const nextTrack = ordered.find((item) =>
+          item.suggestions.some(
+            (source) =>
+              !candidateStale(source, item) &&
+              (source.cover_url ||
+                Object.entries(source.fields).some(
+                  ([key, value]) => !same(item.current[key], value),
+                )),
+          ),
+        );
+        setActive(nextTrack?.id || '');
+        setTab('fields');
+      } else {
+        setActive(
+          next && result.items.some((t) => t.id === next)
+            ? next
+            : result.items.find((t) => defaultChoice(t).fields.length)?.id ||
+                result.items[0]?.id ||
+                '',
+        );
+      }
       setCover(null);
       setCoverReady(false);
       setConflicts({});
@@ -328,13 +352,19 @@ export function MetadataReviewWorkbench({
     setError('');
     setNotice('');
     try {
-      await api('/agent/metadata-review/reject', {
+      const result = await api<{ already_ignored: boolean }>('/agent/metadata-review/reject', {
         method: 'POST',
         body: JSON.stringify({ track_id: trackId }),
       });
-      await load(pageQuery(page), undefined, true);
+      await load(pageQuery(page), trackId, 'advance');
       await loadAlbums();
-      setNotice(t('metadataReview.rejectTrackNotice'));
+      setNotice(
+        t(
+          result.already_ignored
+            ? 'metadataReview.noPendingTrackSuggestions'
+            : 'metadataReview.rejectTrackNotice',
+        ),
+      );
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -358,7 +388,7 @@ export function MetadataReviewWorkbench({
           candidate_digest: candidate.candidate_digest,
         }),
       });
-      await load(pageQuery(page), active, true);
+      await load(pageQuery(page), active, 'preserve');
       await loadAlbums();
       setNotice(t('metadataReview.rejectCurrentNotice'));
     } catch (reason) {
@@ -368,16 +398,15 @@ export function MetadataReviewWorkbench({
       setBusy(false);
     }
   }
-  async function accept(single = false, goToNextAlbum = false) {
+  async function accept() {
     if (request.current || busy || loading || !page || (cover && !coverReady)) return;
-    const tracks = single ? selected.filter((t) => t.id === active) : selected;
-    if (!tracks.length && !cover) return;
+    if (!selected.length && !cover) return;
     request.current = true;
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const items = tracks.map((t) => {
+      const items = selected.map((t) => {
         const c = t.suggestions.find((s) => s.id === choices[t.id].source)!;
         return {
           track_id: t.id,
@@ -417,29 +446,25 @@ export function MetadataReviewWorkbench({
             idempotency_key: key.current.value,
           }),
         });
-      window.dispatchEvent(new Event('wildstring:artwork-updated'));
-      await onApplied?.();
-      const updatedAlbums = await loadAlbums();
-      if (goToNextAlbum) {
-        const next = updatedAlbums.find((a) => a.id !== page.album_id);
-        if (next) {
-          await load(`album_id=${encodeURIComponent(next.id)}`);
-        } else {
-          setPage(null);
-        }
-      } else {
-        const next = single
-          ? page.items[(page.items.findIndex((t) => t.id === active) + 1) % page.items.length]?.id
-          : undefined;
-        await load(pageQuery(page), next);
-      }
       setNotice(
         t('metadataReview.appliedNotice', {
-          trackCount: tracks.length,
+          trackCount: selected.length,
           fieldCount: items.reduce((n, i) => n + i.fields.length, 0),
           coverSuffix: cover ? t('metadataReview.coverSuffix') : '',
         }),
       );
+      setChoices((previous) => {
+        const remaining = { ...previous };
+        for (const track of selected) delete remaining[track.id];
+        return remaining;
+      });
+      setActive('');
+      setCover(null);
+      setCoverReady(false);
+      await load(pageQuery(page), active, 'advance');
+      await loadAlbums();
+      window.dispatchEvent(new Event('wildstring:artwork-updated'));
+      await onApplied?.();
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -513,7 +538,7 @@ export function MetadataReviewWorkbench({
           }),
         });
       }
-      await load(pageQuery(page), active, true);
+      await load(pageQuery(page), active, 'preserve');
       setNotice(clear ? t('metadataReview.releaseLockCleared') : t('metadataReview.releaseLocked'));
     } catch (reason) {
       setError(errorText(reason));
@@ -567,7 +592,14 @@ export function MetadataReviewWorkbench({
           >
             {t('metadataReview.purgeStale')}
           </button>
-          <button disabled={disabled} onClick={() => page && void load(pageQuery(page), active)}>
+          <button
+            disabled={disabled}
+            onClick={() => {
+              if (!page) return;
+              void load(pageQuery(page), active);
+              void loadAlbums().catch((reason) => setError(errorText(reason)));
+            }}
+          >
             {t('metadataReview.reloadCandidates')}
           </button>
           <button disabled={disabled || !current} onClick={() => setRefresh(true)}>
@@ -619,17 +651,23 @@ export function MetadataReviewWorkbench({
             </button>
           )}
         </aside>
-        <main>
+        <main ref={reviewPane}>
           <div className="review-album">
             <h3>
               {current?.album || page?.items[0]?.album || t('metadataReview.noPendingAlbums')}
             </h3>
-            <p>
-              {t('metadataReview.albumHeaderSummary', {
-                total: page?.total || 0,
-                count: page?.items.length || 0,
-              })}
-            </p>
+            {page?.batch_id ? (
+              <p className="review-count" aria-live="polite">
+                {t('metadataReview.batchTrackCount', { count: page.total })}
+              </p>
+            ) : (
+              page?.album_id &&
+              (pending !== undefined || albums.length === albumTotal) && (
+                <p className="review-count" aria-live="polite">
+                  {t('metadataReview.tracksPending', { count: pending ?? 0 })}
+                </p>
+              )
+            )}
             {!page?.batch_id && page?.release_lock ? (
               <p className="muted">
                 {t('metadataReview.releaseLockedLabel', {
@@ -691,6 +729,9 @@ export function MetadataReviewWorkbench({
             </button>
           </div>
           {loading && <p role="status">{t('metadataReview.loadingDiff')}</p>}
+          {page && !loading && !error && !current && (
+            <p className="muted">{t('metadataReview.noReviewableTracks')}</p>
+          )}
           {showSongs && (
             <div className="review-song-list" aria-label={t('metadataReview.albumSongsAria')}>
               {page?.items.map((trackItem) => (
@@ -731,7 +772,7 @@ export function MetadataReviewWorkbench({
               ))}
             </div>
           )}
-          {page && page.total > page.limit && (
+          {page && (page.offset > 0 || page.total > page.limit) && (
             <div className="workspace-actions">
               <button
                 disabled={disabled || page.offset === 0}
@@ -747,9 +788,17 @@ export function MetadataReviewWorkbench({
               </button>
             </div>
           )}
-          {current && (
+          {page && current && (
             <article className="review-detail" aria-label={t('metadataReview.trackDiffAria')}>
-              <h3>{current.title}</h3>
+              <div className="review-song-heading">
+                <h3>{current.title}</h3>
+                <span className="review-count" aria-live="polite">
+                  {t('metadataReview.trackPosition', {
+                    position: page.offset + page.items.indexOf(current) + 1,
+                    total: page.total,
+                  })}
+                </span>
+              </div>
               <p>{current.artists.join(' / ')}</p>
               <div className="workspace-actions">
                 <label>
@@ -793,7 +842,7 @@ export function MetadataReviewWorkbench({
                   {t('metadataReview.updateMetadata')}
                 </button>
                 <button
-                  disabled={disabled || !current}
+                  disabled={disabled || !current.suggestions.length}
                   className="text-button danger"
                   onClick={() => void rejectTrack(current.id)}
                   title={t('metadataReview.rejectTrackTitle')}

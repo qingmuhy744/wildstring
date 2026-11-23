@@ -22,6 +22,7 @@ RESUMABLE = {
     "cancelled",
     "retry_wait",
 }
+CHECKPOINT_TRACKS = 50
 
 
 def inspection_evidence(results, counts):
@@ -63,20 +64,24 @@ class Automation:
             configuration = self.connection_for(actor, body.connection_id, background=not manual_ai)
             parameters["_manual_ai_authorized"] = manual_ai
         repository = self.repository_for(actor)
+        library_id = repository.library_id()
+        if library_id is None:
+            raise HTTPException(403, "library_access_required")
         identities = body.track_ids
         if identities is None:
-            identities = [
-                track["id"] for track in repository.tracks(limit=body.max_tracks)["items"]
-            ]
-        if len(identities) > body.max_tracks or len(identities) != len(set(identities)):
-            raise HTTPException(422, "inspection_limit")
-        if any(not isinstance(identity, str) for identity in identities):
-            raise HTTPException(404, "track_not_found")
-        versions: dict[str, int] = {}
-        if identities:
-            library_id = repository.library_id()
-            if library_id is None:
-                raise HTTPException(404, "track_not_found")
+            with repository.database.connect() as connection:
+                rows = connection.execute(
+                    "SELECT t.id, m.version FROM tracks t "
+                    "JOIN track_metadata m ON m.track_id = t.id "
+                    "WHERE t.library_id = ? AND library_visible(t.library_id) "
+                    "AND t.status='available' ORDER BY t.added_at DESC, t.id LIMIT ?",
+                    (library_id, -1 if body.scope == "library" else body.max_tracks),
+                ).fetchall()
+            identities = [row["id"] for row in rows]
+        else:
+            parameters["scope"] = "selection"
+            if len(identities) > body.max_tracks or len(identities) != len(set(identities)):
+                raise HTTPException(422, "inspection_limit")
             with repository.database.connect() as connection:
                 rows = connection.execute(
                     "SELECT t.id, m.version FROM tracks t "
@@ -85,24 +90,26 @@ class Automation:
                     "AND t.id IN (SELECT value FROM json_each(?))",
                     (library_id, encoded(identities)),
                 ).fetchall()
-            versions = {row["id"]: row["version"] for row in rows}
-            if len(versions) != len(identities):
+            if len(rows) != len(identities):
                 raise HTTPException(404, "track_not_found")
         parameters["track_ids"] = identities
-        parameters["metadata_versions"] = {identity: versions[identity] for identity in identities}
+        parameters["metadata_versions"] = {row["id"]: row["version"] for row in rows}
         from wildstring.diagnostics import trace_id as current_trace
 
         identity, trace_id = uuid4().hex, current_trace()
         connection_version = configuration["version"] if configuration is not None else None
         with self.database.connect(write=True) as connection:
             connection.execute(
-                "INSERT OR IGNORE INTO agent_tasks(id,user_id,auth_version,credential_id,parameters,created_at,updated_at,trace_id,schedule_key,connection_version) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                """INSERT OR IGNORE INTO agent_tasks(id,user_id,library_id,auth_version,credential_id,parameters,counts,
+                created_at,updated_at,trace_id,schedule_key,connection_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     identity,
                     actor.user_id,
+                    library_id,
                     actor.version,
                     actor.credential_id,
                     encoded(parameters),
+                    encoded({"total": len(identities)}),
                     now(),
                     now(),
                     trace_id,
@@ -116,9 +123,11 @@ class Automation:
                 ).fetchone()[0]
         self.log("agent.task.queued", actor, task_id=identity, trace_id=trace_id)
         self.wake.set()
-        return self.task(actor, identity)
+        return self.task(
+            actor, identity, result_offset=0 if parameters["scope"] == "library" else None
+        )
 
-    def task(self, actor, identity):
+    def task(self, actor, identity, *, result_offset=None):
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM agent_tasks WHERE id=? AND user_id=? AND library_visible(library_id)",
@@ -135,20 +144,42 @@ class Automation:
         for key in ("parameters", "counts", "results"):
             result[key] = json.loads(result[key])
         result["parameters"].pop("_manual_ai_authorized", None)
+        result["counts"].setdefault("total", len(result["parameters"]["track_ids"]))
+        if result_offset is not None:
+            result["result_total"] = len(result["results"])
+            result["results"] = result["results"][result_offset : result_offset + 20]
+            result["parameters"].pop("track_ids")
+            result["parameters"].pop("metadata_versions", None)
         return result
 
-    def tasks(self, actor, limit=50, offset=0):
+    def tasks(self, actor, limit=50, offset=0, *, summary=False):
         with self.database.connect() as connection:
-            rows = connection.execute(
-                "SELECT id FROM agent_tasks WHERE user_id=? AND library_visible(library_id) ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
-                (actor.user_id, limit, offset),
-            ).fetchall()
+            if summary:
+                rows = connection.execute(
+                    """SELECT id,status,stage,created_at,counts,
+                    json_object('scope', json_extract(parameters,'$.scope'),
+                    'use_ai', json_extract(parameters,'$.use_ai')) AS parameters
+                    FROM agent_tasks WHERE user_id=? AND library_visible(library_id)
+                    ORDER BY created_at DESC,id LIMIT ? OFFSET ?""",
+                    (actor.user_id, limit, offset),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT id FROM agent_tasks WHERE user_id=? AND library_visible(library_id) ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
+                    (actor.user_id, limit, offset),
+                ).fetchall()
             total = connection.execute(
                 "SELECT count(*) FROM agent_tasks WHERE user_id=? AND library_visible(library_id)",
                 (actor.user_id,),
             ).fetchone()[0]
         return {
-            "items": [self.task(actor, row["id"]) for row in rows],
+            "items": [
+                dict(row)
+                | {"parameters": json.loads(row["parameters"]), "counts": json.loads(row["counts"])}
+                if summary
+                else self.task(actor, row["id"])
+                for row in rows
+            ],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -237,7 +268,7 @@ class Automation:
         """Recheck cooperative cancellation and authority before another external/tool step."""
         if self.stop_event.is_set():
             raise HTTPException(409, "service_stopping")
-        self.validate_task_actor(job)
+        actor = self.validate_task_actor(job)
         with self.database.connect() as connection:
             current = connection.execute(
                 "SELECT cancel_requested,lease_token FROM agent_tasks WHERE id=? AND user_id=?",
@@ -247,6 +278,7 @@ class Automation:
             raise HTTPException(409, "agent_task_lease_lost")
         if current["cancel_requested"]:
             raise HTTPException(409, "agent_task_cancelled")
+        return actor
 
     def checkpoint_task(self, job, checkpoint, results, counts, *, stage="rules"):
         with self.database.connect(write=True) as connection:
@@ -267,22 +299,26 @@ class Automation:
             if not result.rowcount:
                 raise HTTPException(409, "agent_task_lease_lost")
 
-    def finish_task(self, job, status, counts, *, error_code=None, results=None):
+    def finish_task(self, job, status, counts, *, error_code=None, checkpoint=None, results=None):
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             result = connection.execute(
-                "UPDATE agent_tasks SET status=?,stage=CASE WHEN ?='succeeded' THEN 'completed' ELSE stage END,counts=?,error_code=?,lease_until=NULL,lease_token=NULL,updated_at=?,version=version+1 WHERE id=? AND lease_token=?",
+                """UPDATE agent_tasks SET status=?,stage=CASE WHEN ?='succeeded' THEN 'completed' ELSE stage END,
+                counts=?,error_code=?,checkpoint=COALESCE(?,checkpoint),results=COALESCE(?,results),
+                lease_until=NULL,lease_token=NULL,updated_at=?,version=version+1 WHERE id=? AND lease_token=?""",
                 (
                     status,
                     status,
                     encoded(counts),
                     error_code,
+                    checkpoint,
+                    encoded(results) if results is not None else None,
                     now(),
                     job["id"],
                     job["lease_token"],
                 ),
             )
-            if result.rowcount:
+            if result.rowcount and status != "queued":
                 scheduled = bool(job["schedule_key"])
                 # Unchanged scheduled inspections are quiet. Results still remain in task history.
                 if not (scheduled and status == "succeeded" and not counts.get("issues")):
@@ -334,6 +370,9 @@ class Automation:
 
     def _execute_task(self, job):
         parameters = json.loads(job["parameters"])
+        identities = parameters["track_ids"]
+        full_library = parameters.get("scope") == "library"
+        checkpoint = job["checkpoint"]
         background_ai = not (
             parameters.get("_manual_ai_authorized") is True
             and job["schedule_key"] is None
@@ -343,27 +382,27 @@ class Automation:
         counts = {"processed": 0, "issues": 0, "failed": 0, "skipped": 0, "calls": 0} | json.loads(
             job["counts"]
         )
+        counts["total"] = len(identities)
         try:
-            actor = self.validate_task_actor(job)
+            actor = self.check_task_continuation(job)
             from wildstring.library.scope import require_current_library
 
             require_current_library(self.database)
-            identities = parameters["track_ids"]
             from wildstring.library.inspection import InspectionIndex
 
-            inspection_index = InspectionIndex(self.repository_for(actor))
+            inspection_index = InspectionIndex(
+                self.repository_for(actor), full_library=full_library
+            )
             started = time.monotonic()
-            for index in range(job["checkpoint"], len(identities)):
+            for index in range(checkpoint, len(identities)):
                 if time.monotonic() - started > 1800:
+                    if full_library:
+                        self.finish_task(
+                            job, "queued", counts, checkpoint=checkpoint, results=results
+                        )
+                        return
                     raise HTTPException(429, "agent_task_time_budget_exhausted")
-                if self.stop_event.is_set():
-                    self.finish_task(job, "interrupted", counts, error_code="service_stopping")
-                    return
-                actor = self.validate_task_actor(job)
-                current = self.task(actor, job["id"])
-                if current["cancel_requested"]:
-                    self.finish_task(job, "cancelled", counts)
-                    return
+                actor = self.check_task_continuation(job)
                 identity = identities[index]
                 try:
                     record = self.inspect(
@@ -380,7 +419,9 @@ class Automation:
                     counts["failed"] += 1
                 results.append(record)
                 counts["processed"] += 1
-                self.checkpoint_task(job, index + 1, results, counts)
+                checkpoint = index + 1
+                if checkpoint % CHECKPOINT_TRACKS == 0 or checkpoint == len(identities):
+                    self.checkpoint_task(job, checkpoint, results, counts)
             if parameters.get("use_ai"):
                 if not parameters.get("connection_id"):
                     raise HTTPException(403, "background_connection_required")
@@ -460,14 +501,10 @@ class Automation:
                 self.checkpoint_task(
                     job, len(identities), results, counts, stage="analysis_complete"
                 )
-            cancelled = self.task(actor, job["id"])["cancel_requested"]
+            self.check_task_continuation(job)
             self.finish_task(
                 job,
-                "cancelled"
-                if cancelled
-                else "partial"
-                if counts["failed"] or counts["skipped"]
-                else "succeeded",
+                "partial" if counts["failed"] or counts["skipped"] else "succeeded",
                 counts,
             )
         except HTTPException as failure:
@@ -482,10 +519,24 @@ class Automation:
                 if failure.status_code in {401, 403}
                 else "failed"
             )
-            self.finish_task(job, status, counts, error_code=str(failure.detail))
+            self.finish_task(
+                job,
+                status,
+                counts,
+                error_code=str(failure.detail),
+                checkpoint=checkpoint,
+                results=results,
+            )
         except Exception as error:
             record_event("agent.task.failed", level="ERROR", error=error)
-            self.finish_task(job, "failed", counts, error_code="agent_task_internal_error")
+            self.finish_task(
+                job,
+                "failed",
+                counts,
+                error_code="agent_task_internal_error",
+                checkpoint=checkpoint,
+                results=results,
+            )
 
     def schedules(self, actor):
         with self.database.connect() as connection:
@@ -565,9 +616,12 @@ class Automation:
             try:
                 actor = self.current_actor(row["user_id"])
                 body = validate(Inspection, json.loads(row["parameters"]))
-                identity = self.submit_task(
-                    actor, body, schedule_key=f"{row['id']}:{row['next_run_at']}"
-                )["id"]
+                from wildstring.library.scope import library_context
+
+                with library_context(row["user_id"], row["library_id"]):
+                    identity = self.submit_task(
+                        actor, body, schedule_key=f"{row['id']}:{row['next_run_at']}"
+                    )["id"]
                 with self.database.connect(write=True) as connection:
                     connection.execute(
                         "UPDATE agent_schedules SET next_run_at=? WHERE id=? AND next_run_at=?",

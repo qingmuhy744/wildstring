@@ -1721,6 +1721,8 @@ export function PlayerBar({
   onLyrics,
   lyricsOpen,
   favorites,
+  onOpenArtist,
+  onOpenAlbum,
 }: {
   player: Player;
   onQueue: () => void;
@@ -1728,9 +1730,12 @@ export function PlayerBar({
   onLyrics: () => void;
   lyricsOpen: boolean;
   favorites: Favorites;
+  onOpenArtist: (name: string) => void;
+  onOpenAlbum: (track: Track) => void;
 }) {
   const { t } = useTranslation();
   const { current, queue } = player;
+  const album = current?.album || t('nowPlaying.unknownAlbum');
   const bar = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = bar.current;
@@ -1756,6 +1761,7 @@ export function PlayerBar({
           onClick={onLyrics}
           disabled={!current}
           aria-label={t('playerPage.fullscreenAria')}
+          title={current ? t('playerPage.fullscreenAria') : undefined}
           aria-haspopup="dialog"
           aria-expanded={lyricsOpen}
         >
@@ -1772,13 +1778,56 @@ export function PlayerBar({
           )}
           {current && (
             <span className="expand-art" aria-hidden="true">
-              ⌃
+              <Icon name="up" />
             </span>
           )}
         </button>
-        <div>
-          <strong>{current?.title || t('playerPage.emptyTrackTitle')}</strong>
-          <small>{current ? artist(current) : t('playerPage.emptyTrackArtist')}</small>
+        <div className="now-playing-text">
+          <strong title={current?.title}>
+            {current?.title || t('playerPage.emptyTrackTitle')}
+          </strong>
+          {current && !current.podcast_id ? (
+            <div className="now-playing-credits">
+              <span className="now-playing-artists">
+                {current.artists.length
+                  ? current.artists.map((name, index) => (
+                      <span className="now-playing-artist" key={`${name}-${index}`}>
+                        {index > 0 && <span aria-hidden="true">/</span>}
+                        <button
+                          className="now-playing-link"
+                          title={name}
+                          aria-label={t('library.viewArtistAria', { name })}
+                          onClick={() => onOpenArtist(name)}
+                        >
+                          {name}
+                        </button>
+                      </span>
+                    ))
+                  : artist(current)}
+              </span>
+              {(current.album_id || current.album) && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  {current.album_id ? (
+                    <button
+                      className="now-playing-link"
+                      title={album}
+                      aria-label={t('nowPlaying.viewAlbumAria', { album })}
+                      onClick={() => onOpenAlbum(current)}
+                    >
+                      {album}
+                    </button>
+                  ) : (
+                    <span className="now-playing-album" title={album}>
+                      {album}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <small>{current ? artist(current) : t('playerPage.emptyTrackArtist')}</small>
+          )}
         </div>
         {current && <span className="format">{current.format.toUpperCase()}</span>}
       </div>

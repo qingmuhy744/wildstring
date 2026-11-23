@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, section } from './helpers';
 
 test('歌曲行非按钮区域也可以直接播放', async ({ page }) => {
   await login(page);
@@ -118,6 +118,51 @@ test('播放页点击专辑名后继续播放，队列和进度不重置', async
   expect((await audio(page)).source).toBe(before.source);
   await dialog.getByRole('button', { name: '收起全屏播放', exact: true }).click();
   await page.getByRole('button', { name: '播放队列', exact: true }).last().click();
+  await expect(
+    page.getByRole('complementary', { name: '播放队列', exact: true }).getByRole('listitem'),
+  ).toHaveCount(2);
+});
+
+test('底栏艺人和专辑可从设置跳转及返回，保持当前播放', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole('button', { name: '播放全部', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0);
+  const bar = page.getByRole('region', { name: '音乐播放器', exact: true });
+  const before = await audio(page);
+  await section(page, '管理中心');
+  const artist = bar.getByRole('button', { name: '查看艺人 野弦测试', exact: true });
+  await artist.click();
+  await expect(page.getByRole('heading', { name: '野弦测试', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /返回\s*管理中心/ }).click();
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
+  const album = bar.getByRole('button', { name: '查看所属专辑 合成测试专辑', exact: true });
+  await album.click();
+  await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(before.time);
+  expect((await audio(page)).source).toBe(before.source);
+  expect((await audio(page)).paused).toBe(false);
+  await page.getByRole('button', { name: /返回\s*管理中心/ }).click();
+  await section(page, '个人设置');
+  await album.click();
+  await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /返回\s*个人设置/ }).click();
+  await expect(page.getByRole('heading', { name: '个人设置', exact: true })).toBeVisible();
+  await album.click();
+  await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (value) =>
+        window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value })),
+      theme,
+    );
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.screenshot({
+      path: `../../artifacts/album-player-${info.project.name}-${theme}.png`,
+    });
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await bar.getByRole('button', { name: '播放队列', exact: true }).click();
   await expect(
     page.getByRole('complementary', { name: '播放队列', exact: true }).getByRole('listitem'),
   ).toHaveCount(2);

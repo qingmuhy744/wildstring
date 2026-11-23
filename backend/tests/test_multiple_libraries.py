@@ -61,6 +61,27 @@ def listener(client, library_ids, profile="listener"):
     return other, response.json()["id"]
 
 
+def test_entire_library_inspection_uses_the_selected_library(catalog):
+    client, first, second, tracks, _ = catalog
+    request_headers = HEADERS | {"X-Wildstring-Library": second["id"]}
+    tasks = "/api/v1/agent/tasks"
+    submitted = client.post(tasks, headers=request_headers, json={"scope": "library"})
+    assert submitted.status_code == 200, submitted.text
+    task = submitted.json()
+    assert task["library_id"] == second["id"]
+    assert task["counts"]["total"] == 1
+    endpoint = tasks + "/" + task["id"]
+    expected = next(track["id"] for track in tracks if track["library_id"] == second["id"])
+    assert client.get(endpoint, headers=request_headers).json()["parameters"]["track_ids"] == [
+        expected
+    ]
+    other, _ = listener(client, [first["id"]], profile="librarian")
+    try:
+        assert other.get(endpoint, headers=request_headers).status_code in (403, 404)
+    finally:
+        other.close()
+
+
 def test_folder_preview_only_walks_the_selected_subdirectory(
     settings, authenticated_client, monkeypatch
 ):

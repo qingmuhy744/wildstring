@@ -132,14 +132,23 @@ test('元数据预览、版本冲突、重扫保留、撤销与当前音频连�
 test('导入任务关闭页面继续处理、持久历史与逐文件错误', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
+  await manageTab(page, '导入与整理');
+  const source = page.getByRole('region', { name: '导入来源工作台', exact: true });
   const submitted = page.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v1/manage/jobs') && response.request().method() === 'POST',
+      response.url().endsWith('/api/v1/manage/library/import') &&
+      response.request().method() === 'POST',
   );
-  await page.getByRole('button', { name: '导入音乐', exact: true }).click();
+  await source.getByRole('button', { name: '导入所选文件夹', exact: true }).click();
   const response = await submitted;
   expect(response.ok()).toBe(true);
   const { id } = await response.json();
+  await source.getByRole('button', { name: '查看进度', exact: true }).click();
+  await expect(
+    page
+      .getByRole('region', { name: '导入进度', exact: true })
+      .locator(`details[data-job-id="${id}"]`),
+  ).toHaveAttribute('open', '');
   await page.reload();
   await expect(page.getByRole('table')).toBeVisible();
   await manage(page, info.project.name === 'mobile');
@@ -173,7 +182,8 @@ test('自动导入设置、待整理快照、冲突反馈与手机布局', async
   await manageTab(page, '导入与整理');
   const original = await (await page.request.get('/api/v1/manage/intake/settings')).json();
   try {
-    await page.getByLabel('自动发现并导入新音乐', { exact: true }).check();
+    await page.getByLabel('自动导入新音乐', { exact: true }).check();
+    await page.getByText('检查间隔与下载规则', { exact: true }).click();
     await page.getByLabel('检查间隔（秒）', { exact: true }).fill('15');
     await page.getByLabel('等待文件稳定（秒）', { exact: true }).fill('5');
     await page.getByLabel('同专辑有下载标记时整张等待（含 CD / Disc 子目录）').uncheck();

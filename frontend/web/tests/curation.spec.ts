@@ -31,7 +31,7 @@ test('真实批量草案逐曲展示差异，接受一次保存整批', async ({
   const draft = await response.json();
   expect(draft.before.items).toHaveLength(2);
   try {
-    await section(page, '待确认草案');
+    await section(page, '待确认');
     await page.getByRole('button', { name: '查看草案 专辑逐曲核对', exact: true }).click();
     const detail = page.getByRole('article', { name: '草案详情' });
     await expect(detail).toContainText('2 首歌曲 · 整批应用');
@@ -93,7 +93,7 @@ test('封面草案展示快照，图片失败不能批准，恢复后可批准',
       : route.fulfill({ status: 409, json: { detail: 'cover_snapshot_unavailable' } }),
   );
   await login(page);
-  await section(page, '待确认草案');
+  await section(page, '待确认');
   await page.getByRole('button', { name: '查看草案 封面核对', exact: true }).click();
   const detail = page.getByRole('article', { name: '草案详情' });
   await expect(detail.getByRole('alert')).toContainText('无法显示');
@@ -101,7 +101,7 @@ test('封面草案展示快照，图片失败不能批准，恢复后可批准',
   expect(approvals).toBe(0);
   validImage = true;
   await page.reload();
-  await section(page, '待确认草案');
+  await section(page, '待确认');
   await page.getByRole('button', { name: '查看草案 封面核对', exact: true }).click();
   await expect(detail.getByRole('img', { name: '草案封面快照' })).toBeVisible();
   await expect(detail.getByRole('button', { name: '接受并应用', exact: true })).toBeEnabled();

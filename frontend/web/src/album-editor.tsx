@@ -130,6 +130,24 @@ export function AlbumEditor({
       ? `/api/v1/tracks/${record.cover_track_id}/cover?size=768&t=${record.tracks[0]?.metadata_version || 1}`
       : null;
 
+  function closeEditor() {
+    if (saving) return;
+    const changed =
+      newCoverFile ||
+      coverDeleted ||
+      (record &&
+        (title !== (record.primary_title || initialTitle || '') ||
+          albumArtists !== record.primary_artists.join(', ') ||
+          releaseDate !== (record.release_date || '') ||
+          originalDate !== (record.original_date || '') ||
+          genres !== (record.genres?.join(', ') || '') ||
+          label !== (record.label || '') ||
+          catalogNumber !== (record.catalog_number || '') ||
+          discTotal !== (record.disc_total || record.discs?.length || 1) ||
+          description !== (record.description || '')));
+    if (!changed || window.confirm(t('common.discardUnsavedChanges'))) onClose();
+  }
+
   const handleSave = async () => {
     if (!title.trim()) {
       setError(t('albumEditor.titleRequired'));
@@ -198,315 +216,329 @@ export function AlbumEditor({
   return (
     <dialog
       ref={dialog}
-      className="playlist-editor album-editor-dialog"
+      className="playlist-editor album-editor-dialog scroll-dialog"
+      aria-label={t('albumEditor.title')}
       onCancel={(e) => {
         e.preventDefault();
-        if (!saving) onClose();
+        closeEditor();
       }}
     >
-      <div className="editor-heading">
+      <div className="editor-heading scroll-dialog-header">
         <div>
-          <span className="eyebrow">{t('albumEditor.eyebrow')}</span>
           <h2>{t('albumEditor.title')}</h2>
-          <p className="muted">{initialTitle || record?.primary_title || albumId}</p>
+          <p className="muted ellipsis" title={initialTitle || record?.primary_title}>
+            {initialTitle || record?.primary_title || albumId}
+          </p>
         </div>
         <DialogCloseButton
           disabled={saving}
           aria-label={t('albumEditor.closeAria')}
-          onClick={onClose}
+          onClick={closeEditor}
         />
       </div>
 
-      {loading ? (
-        <div style={{ padding: '40px 0', textAlign: 'center' }} className="muted">
-          {t('albumEditor.loading')}
-        </div>
-      ) : (
-        <div className="album-editor-content">
-          {record?.warning && (
-            <div className="album-warning-banner" role="alert">
-              <Icon name="info" />
-              <span>{t('albumEditor.inconsistentWarning')}</span>
-            </div>
-          )}
-
-          <div className="album-editor-grid">
-            {/* 左侧：封面管理区 */}
-            <div className="album-cover-column">
-              <span className="metadata-field-label">{t('albumEditor.coverLabel')}</span>
-              <div
-                className="album-cover-dropzone"
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {previewCoverUrl ? (
-                  <img
-                    src={previewCoverUrl}
-                    alt={t('albumEditor.newCoverAlt')}
-                    className="album-cover-preview"
-                  />
-                ) : existingCoverUrl && !coverDeleted ? (
-                  <img
-                    src={existingCoverUrl}
-                    alt={t('albumEditor.coverAlt')}
-                    className="album-cover-preview"
-                    onError={() => setExistingFailed(true)}
-                  />
-                ) : (
-                  <DefaultArtwork
-                    title={title || record?.primary_title || initialTitle}
-                    artist={albumArtists}
-                    interactive
-                  />
-                )}
-                <div className="cover-hover-overlay">
-                  <span>{t('albumEditor.coverDropHint')}</span>
+      <div className="scroll-dialog-body">
+        {loading ? (
+          <div style={{ padding: '40px 0', textAlign: 'center' }} className="muted" role="status">
+            {t('albumEditor.loading')}
+          </div>
+        ) : (
+          record && (
+            <div className="album-editor-content">
+              {record?.warning && (
+                <div className="album-warning-banner" role="alert">
+                  <Icon name="info" />
+                  <span>{t('albumEditor.inconsistentWarning')}</span>
                 </div>
-              </div>
+              )}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    handleFileSelect(e.target.files[0]);
-                  }
-                }}
-              />
-
-              <div className="album-cover-actions">
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={saving}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Icon name="download" />
-                  {previewCoverUrl || (existingCoverUrl && !coverDeleted)
-                    ? t('albumEditor.changeCover')
-                    : t('albumEditor.uploadCover')}
-                </button>
-
-                {newCoverFile && (
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={saving}
-                    onClick={handleCancelNewCover}
+              <div className="album-editor-grid">
+                {/* 左侧：封面管理区 */}
+                <div className="album-cover-column">
+                  <span className="metadata-field-label">{t('albumEditor.coverLabel')}</span>
+                  <div
+                    className="album-cover-dropzone"
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onClick={() => fileInputRef.current?.click()}
                   >
-                    {t('albumEditor.cancelNewCover')}
-                  </button>
-                )}
-
-                {!newCoverFile && existingCoverUrl && !coverDeleted && (
-                  <button
-                    type="button"
-                    className="text-button danger-text"
-                    disabled={saving}
-                    onClick={handleRemoveCover}
-                  >
-                    <Icon name="remove" /> {t('albumEditor.removeCover')}
-                  </button>
-                )}
-              </div>
-
-              <label className="sidecar-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={saveSidecar}
-                  onChange={(e) => setSaveSidecar(e.target.checked)}
-                />
-                <span>{t('albumEditor.saveSidecarLabel')}</span>
-              </label>
-              <p className="field-hint">{t('albumEditor.sidecarHint')}</p>
-            </div>
-
-            {/* 右侧：FLAC 元数据表单 */}
-            <div className="album-fields-column">
-              <label className="metadata-field">
-                <span className="metadata-field-label">{t('albumEditor.fieldAlbum')}</span>
-                <input
-                  type="text"
-                  value={title}
-                  placeholder={t('albumEditor.albumPlaceholder')}
-                  disabled={saving}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </label>
-
-              <label className="metadata-field">
-                <span className="metadata-field-label">{t('albumEditor.fieldAlbumArtist')}</span>
-                <input
-                  type="text"
-                  value={albumArtists}
-                  placeholder={t('albumEditor.artistsPlaceholder')}
-                  disabled={saving}
-                  onChange={(e) => setAlbumArtists(e.target.value)}
-                />
-              </label>
-
-              <div className="fields-row-2">
-                <label className="metadata-field">
-                  <span className="metadata-field-label">{t('albumEditor.fieldReleaseDate')}</span>
-                  <input
-                    type="text"
-                    value={releaseDate}
-                    placeholder={t('albumEditor.releaseDatePlaceholder')}
-                    disabled={saving}
-                    onChange={(e) => setReleaseDate(e.target.value)}
-                  />
-                </label>
-
-                <label className="metadata-field">
-                  <span className="metadata-field-label">{t('albumEditor.fieldOriginalDate')}</span>
-                  <input
-                    type="text"
-                    value={originalDate}
-                    placeholder={t('albumEditor.originalDatePlaceholder')}
-                    disabled={saving}
-                    onChange={(e) => setOriginalDate(e.target.value)}
-                  />
-                </label>
-              </div>
-
-              <label className="metadata-field">
-                <span className="metadata-field-label">{t('albumEditor.fieldGenre')}</span>
-                <input
-                  type="text"
-                  value={genres}
-                  placeholder={t('albumEditor.genrePlaceholder')}
-                  disabled={saving}
-                  onChange={(e) => setGenres(e.target.value)}
-                />
-              </label>
-
-              {/* 高级字段折叠区 */}
-              <div className="advanced-fields-toggle">
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                >
-                  <Icon name={showAdvanced ? 'up' : 'down'} />
-                  {showAdvanced
-                    ? t('albumEditor.collapseAdvanced')
-                    : t('albumEditor.expandAdvanced')}
-                </button>
-              </div>
-
-              {showAdvanced && (
-                <div className="advanced-fields-box">
-                  <div className="fields-row-2">
-                    <label className="metadata-field">
-                      <span className="metadata-field-label">{t('albumEditor.fieldLabel')}</span>
-                      <input
-                        type="text"
-                        value={label}
-                        placeholder={t('albumEditor.labelPlaceholder')}
-                        disabled={saving}
-                        onChange={(e) => setLabel(e.target.value)}
+                    {previewCoverUrl ? (
+                      <img
+                        src={previewCoverUrl}
+                        alt={t('albumEditor.newCoverAlt')}
+                        className="album-cover-preview"
                       />
-                    </label>
-
-                    <label className="metadata-field">
-                      <span className="metadata-field-label">
-                        {t('albumEditor.fieldCatalogNumber')}
-                      </span>
-                      <input
-                        type="text"
-                        value={catalogNumber}
-                        placeholder={t('albumEditor.catalogPlaceholder')}
-                        disabled={saving}
-                        onChange={(e) => setCatalogNumber(e.target.value)}
+                    ) : existingCoverUrl && !coverDeleted ? (
+                      <img
+                        src={existingCoverUrl}
+                        alt={t('albumEditor.coverAlt')}
+                        className="album-cover-preview"
+                        onError={() => setExistingFailed(true)}
                       />
-                    </label>
+                    ) : (
+                      <DefaultArtwork
+                        title={title || record?.primary_title || initialTitle}
+                        artist={albumArtists}
+                        interactive
+                      />
+                    )}
+                    <div className="cover-hover-overlay">
+                      <span>{t('albumEditor.coverDropHint')}</span>
+                    </div>
                   </div>
 
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleFileSelect(e.target.files[0]);
+                      }
+                    }}
+                  />
+
+                  <div className="album-cover-actions">
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={saving}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Icon name="download" />
+                      {previewCoverUrl || (existingCoverUrl && !coverDeleted)
+                        ? t('albumEditor.changeCover')
+                        : t('albumEditor.uploadCover')}
+                    </button>
+
+                    {newCoverFile && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={saving}
+                        onClick={handleCancelNewCover}
+                      >
+                        {t('albumEditor.cancelNewCover')}
+                      </button>
+                    )}
+
+                    {!newCoverFile && existingCoverUrl && !coverDeleted && (
+                      <button
+                        type="button"
+                        className="text-button danger-text"
+                        disabled={saving}
+                        onClick={handleRemoveCover}
+                      >
+                        <Icon name="remove" /> {t('albumEditor.removeCover')}
+                      </button>
+                    )}
+                  </div>
+
+                  <label className="sidecar-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={saveSidecar}
+                      onChange={(e) => setSaveSidecar(e.target.checked)}
+                    />
+                    <span>{t('albumEditor.saveSidecarLabel')}</span>
+                  </label>
+                  <p className="field-hint">{t('albumEditor.sidecarHint')}</p>
+                </div>
+
+                {/* 右侧：FLAC 元数据表单 */}
+                <div className="album-fields-column">
+                  <label className="metadata-field">
+                    <span className="metadata-field-label">{t('albumEditor.fieldAlbum')}</span>
+                    <input
+                      type="text"
+                      value={title}
+                      placeholder={t('albumEditor.albumPlaceholder')}
+                      disabled={saving}
+                      onChange={(e) => setTitle(e.target.value)}
+                    />
+                  </label>
+
+                  <label className="metadata-field">
+                    <span className="metadata-field-label">
+                      {t('albumEditor.fieldAlbumArtist')}
+                    </span>
+                    <input
+                      type="text"
+                      value={albumArtists}
+                      placeholder={t('albumEditor.artistsPlaceholder')}
+                      disabled={saving}
+                      onChange={(e) => setAlbumArtists(e.target.value)}
+                    />
+                  </label>
+
                   <div className="fields-row-2">
                     <label className="metadata-field">
                       <span className="metadata-field-label">
-                        {t('albumEditor.fieldDiscTotal')}
+                        {t('albumEditor.fieldReleaseDate')}
                       </span>
                       <input
-                        type="number"
-                        min="1"
-                        max="99"
-                        value={discTotal}
+                        type="text"
+                        value={releaseDate}
+                        placeholder={t('albumEditor.releaseDatePlaceholder')}
                         disabled={saving}
-                        onChange={(e) => setDiscTotal(Math.max(1, parseInt(e.target.value) || 1))}
+                        onChange={(e) => setReleaseDate(e.target.value)}
+                      />
+                    </label>
+
+                    <label className="metadata-field">
+                      <span className="metadata-field-label">
+                        {t('albumEditor.fieldOriginalDate')}
+                      </span>
+                      <input
+                        type="text"
+                        value={originalDate}
+                        placeholder={t('albumEditor.originalDatePlaceholder')}
+                        disabled={saving}
+                        onChange={(e) => setOriginalDate(e.target.value)}
                       />
                     </label>
                   </div>
 
                   <label className="metadata-field">
-                    <span className="metadata-field-label">
-                      {t('albumEditor.fieldDescription')}
-                    </span>
-                    <textarea
-                      rows={3}
-                      value={description}
-                      placeholder={t('albumEditor.descriptionPlaceholder')}
+                    <span className="metadata-field-label">{t('albumEditor.fieldGenre')}</span>
+                    <input
+                      type="text"
+                      value={genres}
+                      placeholder={t('albumEditor.genrePlaceholder')}
                       disabled={saving}
-                      onChange={(e) => setDescription(e.target.value)}
+                      onChange={(e) => setGenres(e.target.value)}
                     />
                   </label>
+
+                  {/* 高级字段折叠区 */}
+                  <div className="advanced-fields-toggle">
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                    >
+                      <Icon name={showAdvanced ? 'up' : 'down'} />
+                      {showAdvanced
+                        ? t('albumEditor.collapseAdvanced')
+                        : t('albumEditor.expandAdvanced')}
+                    </button>
+                  </div>
+
+                  {showAdvanced && (
+                    <div className="advanced-fields-box">
+                      <div className="fields-row-2">
+                        <label className="metadata-field">
+                          <span className="metadata-field-label">
+                            {t('albumEditor.fieldLabel')}
+                          </span>
+                          <input
+                            type="text"
+                            value={label}
+                            placeholder={t('albumEditor.labelPlaceholder')}
+                            disabled={saving}
+                            onChange={(e) => setLabel(e.target.value)}
+                          />
+                        </label>
+
+                        <label className="metadata-field">
+                          <span className="metadata-field-label">
+                            {t('albumEditor.fieldCatalogNumber')}
+                          </span>
+                          <input
+                            type="text"
+                            value={catalogNumber}
+                            placeholder={t('albumEditor.catalogPlaceholder')}
+                            disabled={saving}
+                            onChange={(e) => setCatalogNumber(e.target.value)}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="fields-row-2">
+                        <label className="metadata-field">
+                          <span className="metadata-field-label">
+                            {t('albumEditor.fieldDiscTotal')}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="99"
+                            value={discTotal}
+                            disabled={saving}
+                            onChange={(e) =>
+                              setDiscTotal(Math.max(1, parseInt(e.target.value) || 1))
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <label className="metadata-field">
+                        <span className="metadata-field-label">
+                          {t('albumEditor.fieldDescription')}
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={description}
+                          placeholder={t('albumEditor.descriptionPlaceholder')}
+                          disabled={saving}
+                          onChange={(e) => setDescription(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 包含曲目预览 */}
+              {record?.tracks && record.tracks.length > 0 && (
+                <div className="album-tracks-summary">
+                  <span className="metadata-field-label">
+                    {record.discs && record.discs.length > 1
+                      ? t('albumEditor.tracksSummaryMulti', {
+                          count: record.tracks.length,
+                          discs: record.discs.length,
+                        })
+                      : t('albumEditor.tracksSummary', { count: record.tracks.length })}
+                  </span>
+                  <div className="album-tracks-table-wrap">
+                    <table className="album-tracks-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 44 }}>{t('albumEditor.colDisc')}</th>
+                          <th style={{ width: 50 }}>{t('albumEditor.colTrackNo')}</th>
+                          <th>{t('albumEditor.colTitle')}</th>
+                          <th>{t('albumEditor.colArtists')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {record.tracks.map((t) => (
+                          <tr key={t.track_id}>
+                            <td className="muted">{t.disc_number || 1}</td>
+                            <td className="muted">{t.track_number ?? '-'}</td>
+                            <td className="track-title-cell">{t.title}</td>
+                            <td className="muted">{t.artists.join(', ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-
-          {/* 包含曲目预览 */}
-          {record?.tracks && record.tracks.length > 0 && (
-            <div className="album-tracks-summary">
-              <span className="metadata-field-label">
-                {record.discs && record.discs.length > 1
-                  ? t('albumEditor.tracksSummaryMulti', {
-                      count: record.tracks.length,
-                      discs: record.discs.length,
-                    })
-                  : t('albumEditor.tracksSummary', { count: record.tracks.length })}
-              </span>
-              <div className="album-tracks-table-wrap">
-                <table className="album-tracks-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 44 }}>{t('albumEditor.colDisc')}</th>
-                      <th style={{ width: 50 }}>{t('albumEditor.colTrackNo')}</th>
-                      <th>{t('albumEditor.colTitle')}</th>
-                      <th>{t('albumEditor.colArtists')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {record.tracks.map((t) => (
-                      <tr key={t.track_id}>
-                        <td className="muted">{t.disc_number || 1}</td>
-                        <td className="muted">{t.track_number ?? '-'}</td>
-                        <td className="track-title-cell">{t.title}</td>
-                        <td className="muted">{t.artists.join(', ')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && (
-        <p className="error" role="alert" style={{ marginTop: 16 }}>
-          {error}
-        </p>
-      )}
-
-      <div className="editor-footer">
-        <button type="button" className="text-button" disabled={saving} onClick={onClose}>
+          )
+        )}
+      </div>
+      <div className="editor-footer scroll-dialog-footer">
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        <button type="button" className="text-button" disabled={saving} onClick={closeEditor}>
           {t('albumEditor.cancel')}
         </button>
-        <button type="button" className="primary" disabled={saving || loading} onClick={handleSave}>
+        <button type="button" className="primary" disabled={saving || !record} onClick={handleSave}>
           {saving ? t('albumEditor.saving') : t('albumEditor.save')}
         </button>
       </div>

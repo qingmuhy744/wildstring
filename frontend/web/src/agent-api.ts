@@ -37,6 +37,7 @@ export interface AgentTask {
   updated_at: string;
   trace_id?: string;
   version: number;
+  result_total?: number;
   results?: {
     track_id?: string;
     title?: string;

@@ -77,8 +77,15 @@ def test_review_projects_originals_and_applies_selected_fields_once(curation):
     assert editor.read(track["id"])["effective"]["genres"] == ["Rock"]
     assert editor.read(track["id"])["overrides"] == {"genres": ["Rock"]}
     assert editor.read(page["items"][1]["id"])["version"] == 1
+    assert api.get(BASE + "/albums").json()["items"][0]["count"] == 1
     chosen["items"][0]["fields"] = ["composers"]
     assert api.post(endpoint, headers=HEADERS, json=chosen).status_code == 409
+    reject_target = {"track_id": page["items"][1]["id"]}
+    assert (
+        api.post(BASE + "/reject", headers=HEADERS, json=reject_target).json()["ignored_count"] == 1
+    )
+    assert api.post(BASE + "/reject", headers=HEADERS, json=reject_target).json()["already_ignored"]
+    assert api.get(BASE + "/albums").json()["total"] == 0
 
 
 @pytest.mark.parametrize("change", ["version", "candidate", "status"])

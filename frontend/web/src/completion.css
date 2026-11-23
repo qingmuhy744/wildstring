@@ -374,12 +374,6 @@
   color: var(--muted);
   font-size: 12px;
 }
-.metadata-refresh-dialog footer {
-  position: sticky;
-  bottom: -24px;
-  padding: 16px 0;
-  background: inherit;
-}
 .playlist-tile {
   position: relative;
   min-width: 0;
