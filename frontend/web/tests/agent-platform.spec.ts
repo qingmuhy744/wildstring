@@ -199,7 +199,7 @@ test('通知跨页、已读补拉、快照批量已读与待确认跳转', async
   await expect(panel.getByRole('heading', { name: /待确认草案 / })).toHaveCount(107);
   expect(readPosts).toBe(1);
   await panel.getByRole('button', { name: '查看草案', exact: true }).first().click();
-  await expect(page.getByRole('region', { name: '草案工作台' })).toContainText('轻摇滚候选');
+  await expect(page.getByRole('region', { name: '资料核对' })).toContainText('轻摇滚候选');
   await page.screenshot({
     path: `../../artifacts/agent-drafts-${info.project.name}.png`,
     fullPage: true,
@@ -583,14 +583,22 @@ test('规则巡检不调用模型，计划默认关闭并通过完整版本参�
     const offset = Number(new URL(r.request().url()).searchParams.get('result_offset'));
     reads.push(offset);
     const full = submitted?.scope === 'library';
+    const issue = new URL(r.request().url()).searchParams.get('issue');
+    if (issue) expect(issue).toBe('missing_cover');
     return r.fulfill({
       json: {
         id: 'task',
         status: 'running',
         stage: 'rules',
         counts: { processed: full ? 50 : 1, total: full ? 75 : 2 },
-        result_total: full ? 50 : 1,
-        results: [{ title: offset ? '第二页检查结果' : '第一页检查结果' }],
+        ...(issue
+          ? {
+              result_total: 42,
+              results: [
+                { track_id: 'fixture', title: offset ? '第二页检查结果' : '第一页检查结果' },
+              ],
+            }
+          : { issue_groups: [{ code: 'missing_cover', count: full ? 42 : 1 }] }),
       },
     });
   });
@@ -620,6 +628,10 @@ test('规则巡检不调用模型，计划默认关闭并通过完整版本参�
   const detail = page.getByRole('article', { name: '检查任务详情' });
   await expect(detail).toContainText('已检查 50 / 75 首');
   await expect(detail.getByRole('progressbar')).toHaveAttribute('max', '75');
+  const missingCover = detail.getByRole('button', { name: '缺少封面 42 首', exact: true });
+  await expect(missingCover).toHaveAttribute('aria-expanded', 'false');
+  await missingCover.click();
+  await expect(detail).toContainText('第一页检查结果');
   await detail.getByRole('button', { name: '下一页', exact: true }).click();
   await expect(detail).toContainText('第二页检查结果');
   expect(reads).toContain(20);

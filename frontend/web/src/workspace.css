@@ -57,6 +57,43 @@
   background: var(--workspace-selected);
   color: var(--workspace-text);
 }
+.organize-heading {
+  margin-bottom: 18px;
+}
+.organize-toolbar {
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.inspection-modes button[aria-pressed='true'] {
+  background: var(--workspace-selected);
+  color: var(--workspace-text);
+}
+.inspection-groups {
+  margin-block: 18px;
+}
+.inspection-group {
+  border-top: 1px solid var(--border);
+}
+.inspection-group-toggle.text-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+.inspection-group-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+.inspection-group-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+.inspection-group-tracks {
+  padding-inline: 12px;
+}
 .workspace-card {
   padding: 26px;
   margin: 18px 0;
@@ -111,6 +148,13 @@
   display: block;
   color: var(--muted);
   line-height: 1.6;
+}
+.inspection-result .trace-copy {
+  white-space: nowrap;
+}
+.inspection-result .trace-copy code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .inspection-progress {
   display: grid;

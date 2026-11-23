@@ -276,6 +276,9 @@ class Core:
                 {
                     "track_id": identity,
                     "title": track["title"],
+                    "album_id": track["album_id"],
+                    "album": track["album"],
+                    "artists": track["artists"],
                     "metadata_version": track["metadata_version"],
                     "issues": [finding["code"] for finding in findings],
                     "findings": findings,
@@ -367,6 +370,7 @@ class Core:
         auto_apply=True,
         application_key=None,
         notify_pending=True,
+        cover_preview=False,
     ):
         actor.require("drafts:write")
         if body.kind == "cover" and set(body.payload) - {
@@ -385,7 +389,7 @@ class Core:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
-                "INSERT INTO agent_drafts(id,user_id,library_id,kind,title,payload,evidence,before_values,created_at,updated_at,trace_id,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO agent_drafts(id,user_id,library_id,kind,title,payload,evidence,before_values,created_at,updated_at,trace_id,idempotency_key,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     identity,
                     actor.user_id,
@@ -399,11 +403,12 @@ class Core:
                     now(),
                     trace_id,
                     application_key,
+                    "preview" if cover_preview else "pending",
                 ),
             )
         result = (
             self.maybe_apply_created_draft(actor, identity)
-            if auto_apply
+            if auto_apply and not cover_preview
             else self.draft(actor, identity)
         )
         if result["status"] == "pending" and notify_pending:
@@ -430,7 +435,7 @@ class Core:
             "SELECT * FROM agent_drafts WHERE id=? AND user_id=? AND library_id=?",
             (identity, actor.user_id, self.library_id),
         ).fetchone()
-        if row is None:
+        if row is None or (row["status"] == "preview" and actor.credential_id):
             raise HTTPException(404, "draft_not_found")
         result = {
             key: row[key]
@@ -448,12 +453,12 @@ class Core:
     def drafts(self, actor, limit=50, offset=0, status=None):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND (? IS NULL OR status=?) ORDER BY CASE WHEN status IN ('pending','approved') THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT ? OFFSET ?",
-                (actor.user_id, status, status, limit, offset),
+                "SELECT id FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND status != 'preview' AND (? IS NULL OR status=? OR (?='history' AND status IN ('approved','applied','rejected'))) ORDER BY CASE WHEN status IN ('pending','approved') THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT ? OFFSET ?",
+                (actor.user_id, status, status, status, limit, offset),
             ).fetchall()
             total = connection.execute(
-                "SELECT count(*) FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND (? IS NULL OR status=?)",
-                (actor.user_id, status, status),
+                "SELECT count(*) FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND status != 'preview' AND (? IS NULL OR status=? OR (?='history' AND status IN ('approved','applied','rejected')))",
+                (actor.user_id, status, status, status),
             ).fetchone()[0]
             items = [self.draft(actor, row["id"], connection) for row in rows]
         return {"items": items, "total": total, "limit": limit, "offset": offset}
@@ -483,7 +488,7 @@ class Core:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = self.draft(actor, identity, connection)
-            if existing["status"] == "applied" or existing["version"] != body.version:
+            if existing["status"] in {"applied", "preview"} or existing["version"] != body.version:
                 raise HTTPException(409, "draft_version_conflict")
             connection.execute(
                 "UPDATE agent_drafts SET payload=?,before_values=?,title=?,evidence=?,version=version+1,status='pending',approved_version=NULL,approved_by=NULL,result=NULL,updated_at=? WHERE id=?",
@@ -513,7 +518,7 @@ class Core:
                 and preview_digest != record["preview_digest"]
             ):
                 raise HTTPException(409, "draft_preview_required")
-            if record["version"] != version or record["status"] == "applied":
+            if record["version"] != version or record["status"] in {"applied", "preview"}:
                 raise HTTPException(409, "draft_version_conflict")
             connection.execute(
                 "UPDATE agent_drafts SET status=?,approved_version=?,approved_by=?,updated_at=? WHERE id=?",
@@ -550,7 +555,9 @@ class Core:
                     actor, record, connection
                 )
                 if accept or automatic:
-                    if record["status"] not in {"pending", "approved"}:
+                    if record["status"] not in {"pending", "approved"} and not (
+                        accept and record["status"] == "preview"
+                    ):
                         raise HTTPException(409, "draft_approval_required")
                     if (
                         accept

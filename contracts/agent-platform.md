@@ -49,7 +49,7 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 
 `POST /tasks {scope:recent|library,track_ids:[]?,max_tracks:500,max_calls:0,connection_id?:null,use_ai:false}`。默认使用本地规则。未指定歌曲 ID 时，`recent` 按入库时间倒序检查至多 `max_tracks` 首，`library` 检查提交时当前曲库的全部可用歌曲。显式 `track_ids` 沿用首数、归属及去重校验。每批保存检查位置、累计进度和结果。
 
-`GET /tasks` 返回任务列表，`summary=true` 时返回状态、范围及计数摘要。`GET /tasks/{id}` 返回 `id,status,stage,checkpoint,counts,parameters,error_code,created_at,updated_at,trace_id,version,results:[]`。计数包括 `processed` 与 `total`。传 `result_offset` 时逐页返回至多 20 条结果及 `result_total`，省略内部歌曲 ID 与版本快照。结果 `{track_id,title,issues:[missing_album|missing_cover|missing_lyrics|…],metadata_version}`，不泄漏路径。`POST /tasks/{id}/cancel {}` 协作取消，`POST /tasks/{id}/resume {}` 从原快照及 checkpoint 恢复。状态 `queued,running,retry_wait,paused_authorization,paused_budget,cancel_requested,cancelled,succeeded,partial,failed,interrupted`。
+`GET /tasks` 返回任务列表，`summary=true` 时返回状态、范围及计数摘要。`GET /tasks/{id}` 返回 `id,status,stage,checkpoint,counts,parameters,error_code,created_at,updated_at,trace_id,version,results:[]`。计数包括 `processed` 与 `total`。传 `result_offset` 时逐页返回至多 20 条结果及 `result_total`，省略内部歌曲 ID 与版本快照。结果包含 `track_id,title,issues,metadata_version`，新检查还提供专辑与艺人信息。传 `group_by_issue=true` 返回整次任务当前已保存的 `issue_groups:[{code,count}]` 和独立的 `analyses`。每类按歌曲计数，歌曲可出现在多类。传 `issue` 与 `result_offset` 查看本类歌曲和本类总数，未能读取歌曲归入 `inspection_failed`。`POST /tasks/{id}/cancel {}` 协作取消，`POST /tasks/{id}/resume {}` 从原快照及 checkpoint 恢复。状态 `queued,running,retry_wait,paused_authorization,paused_budget,cancel_requested,cancelled,succeeded,partial,failed,interrupted`。
 
 `GET /schedules`；`POST /schedules {name,enabled:false,interval_hours:24,timezone:Asia/Shanghai,parameters:{…任务参数}}`；`PATCH /schedules/{id}` 同字段加 version；`DELETE /schedules/{id}`。interval 1–720 小时，错过多周期只补一次，任务去重；timezone 校验 IANA，next_run_at 为 UTC。计划默认关闭，AI 后台需连接明确授权。
 
@@ -88,7 +88,7 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 
 管理员会话可读取 `GET /metadata-review/albums` 与 `GET /metadata-review?album_id=...`（或 `track_id`），查看当前、文件原始值、人工覆盖及待核对来源。每个候选带 `candidate_digest`；`POST /metadata-review/accept` 提交 `items[{track_id,suggestion_id,metadata_version,candidate_digest,fields}]`、`idempotency_key` 和可选 `cover_draft_id`，返回 applied 草案或 conflict 列表。最多 500 首，批次所有写入同一事务，重试同键同内容只执行一次。
 
-`POST /metadata-review/cover` 只准备 cover 草案与快照，不受账号自动应用设置影响；可带同专辑 `targets[{track_id,metadata_version}]`。固定封面与文字一起接受时，子草案也原子标记已应用，每曲元数据版本只增加一次。客户端不能提交伪造的 `cover_snapshot`。这些审核路由仅限登录会话；MCP 继续使用现有草案工具。
+`POST /metadata-review/cover` 为登录会话准备状态为 `preview` 的封面快照，可带同专辑 `targets[{track_id,metadata_version}]`。预览不进入 `/drafts` 列表或通知，显式接受后进入处理记录。封面与文字一起接受时，两者原子应用，每曲元数据版本只增加一次。客户端不能提交伪造的 `cover_snapshot`。显式提交的封面草案沿用现有审批规则。`GET /drafts?status=history` 查询待应用、已应用和已拒绝的记录。
 
 ## Web MCP 接入引导（2026-11-05）
 

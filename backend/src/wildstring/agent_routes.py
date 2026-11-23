@@ -156,7 +156,7 @@ def agent_router(service):
     def review_cover(body: DraftCreate, actor: Annotated[object, Depends(session)]):
         if body.kind != "cover":
             raise HTTPException(422, "cover_required")
-        return service.create_draft(actor, body, auto_apply=False, notify_pending=False)
+        return service.create_draft(actor, body, cover_preview=True)
 
     @router.get("/drafts")
     def drafts(
@@ -326,8 +326,12 @@ def agent_router(service):
         identity: str,
         actor: Annotated[object, Depends(session)],
         result_offset: int | None = Query(None, ge=0),
+        group_by_issue: bool = False,
+        issue: str | None = Query(None, max_length=64),
     ):
-        return service.task(actor, identity, result_offset=result_offset)
+        return service.task(
+            actor, identity, result_offset=result_offset, group_by_issue=group_by_issue, issue=issue
+        )
 
     @router.post("/tasks/{identity}/cancel")
     def cancel(identity: str, actor: Annotated[object, Depends(session)]):

@@ -23,17 +23,23 @@ export async function section(page: Page, name: string) {
     await page.getByRole('button', { name, exact: true }).click();
     return;
   }
+  const workbench = name === '待确认' || name === '曲库检查';
+  const entry = workbench ? '整理' : name;
   const mobileSection = page.locator('select.mobile-section');
   if (await mobileSection.isVisible()) {
-    await mobileSection.selectOption({ label: name });
-    return;
+    await mobileSection.selectOption({ label: entry });
+  } else {
+    await page
+      .locator('.sidebar')
+      .getByRole('button', { name: new RegExp(`^${entry}(?: |$)`) })
+      .click();
   }
-  const sidebar = page.locator('.sidebar');
-  const target = sidebar.getByRole('button', { name: new RegExp(`^${name}(?: |$)`) });
-  if (!(await target.isVisible())) {
-    await sidebar.locator('details.sidebar-group > summary').first().click();
+  if (workbench) {
+    await page
+      .getByRole('navigation', { name: '整理', exact: true })
+      .getByRole('button', { name, exact: true })
+      .click();
   }
-  await target.click();
 }
 
 export async function login(page: Page, options: { automaticSync?: boolean } = {}) {

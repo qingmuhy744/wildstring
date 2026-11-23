@@ -8,6 +8,7 @@ from wildstring.agent_curation_models import MetadataBatch
 from wildstring.agent_sources import evidence_url
 from wildstring.library.artwork import CoverSelection, CoverSelections
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+from wildstring.library.repository import now
 
 
 def records(service, body, connection):
@@ -117,7 +118,7 @@ def check(service, actor, kind, payload):
     snapshot = {"items": before, "count": len(before)}
     if body.cover_draft_id:
         cover = service.draft(actor, body.cover_draft_id)
-        if cover["kind"] != "cover" or cover["status"] not in {"pending", "approved"}:
+        if cover["kind"] != "cover" or cover["status"] not in {"pending", "approved", "preview"}:
             raise HTTPException(409, "cover_candidate_changed")
         fixed, cover_before = CoverSelections(service.providers).prepare(
             validate(CoverSelection, cover["payload"])
@@ -149,7 +150,7 @@ def apply(service, actor, connection, kind, payload):
         child = service.draft(actor, body.cover_draft_id, connection)
         if (
             child["kind"] != "cover"
-            or child["status"] not in {"pending", "approved"}
+            or child["status"] not in {"pending", "approved", "preview"}
             or child["payload"] != body.cover_snapshot.model_dump(exclude_unset=True)
         ):
             raise HTTPException(409, "cover_candidate_changed")
@@ -183,11 +184,12 @@ def apply(service, actor, connection, kind, payload):
         )
         versions.update({target.track_id: target.metadata_version + 1 for target in cover_plan[1]})
         connection.execute(
-            "UPDATE agent_drafts SET status='applied',approved_version=version,approved_by=?,result=?,idempotency_key=? WHERE id=?",
+            "UPDATE agent_drafts SET status='applied',approved_version=version,approved_by=?,result=?,idempotency_key=?,updated_at=? WHERE id=?",
             (
                 actor.user_id,
                 json.dumps(cover_result | {"combined_review": True}),
                 "cover-combined:" + body.cover_draft_id,
+                now(),
                 body.cover_draft_id,
             ),
         )

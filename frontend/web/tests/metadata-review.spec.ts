@@ -245,8 +245,8 @@ test('封面必须显示快照后才能随选中字段整批应用，快捷键�
   const { dialog, submissions, releaseCover } = await fixture(page);
   await dialog.getByRole('button', { name: '封面对比', exact: true }).click();
   await dialog.getByLabel('将此封面用于本页同专辑歌曲', { exact: false }).check();
-  await dialog.getByRole('button', { name: '固定并预览此封面', exact: true }).click();
-  await expect(dialog.getByAltText('将采用的固定封面')).toBeVisible();
+  await dialog.getByRole('button', { name: '预览此封面', exact: true }).click();
+  await expect(dialog.getByAltText('待应用的封面')).toBeVisible();
   await expect(dialog.getByRole('button', { name: '接受选中项', exact: true })).toBeDisabled();
   await page.keyboard.press('Control+Enter');
   expect(submissions).toHaveLength(0);

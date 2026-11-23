@@ -284,6 +284,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     'notifications',
     'assistant-settings',
   ].includes(view);
+  const organizing = view === 'drafts' || view === 'tasks';
   const inbox = useNotifications(currentUser.id);
   const [selectedAgentItem, setSelectedAgentItem] = useState<{
     kind: 'drafts' | 'tasks';
@@ -302,7 +303,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     if (action.target === 'draft' && id) return openAgentItem('drafts', id);
     if (action.target === 'task' && id) return openAgentItem('tasks', id);
     if (action.target === 'metadata-center' || action.target === 'metadata-review') {
-      setManagementAction({ type: 'metadata-center', batchId: action.params?.batch_id });
+      const batchId = action.params?.batch_id;
+      if (batchId && action.count !== 0) {
+        openOrganize('drafts');
+        setMetadataReviewBatch(batchId);
+        return;
+      }
+      setManagementAction({ type: 'metadata-center', batchId });
       openManagement('jobs');
       return;
     }
@@ -827,7 +834,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setAlbum(null);
     clearSearch();
   }
-  async function openTrackAlbum(track: Track) {
+  async function openTrackAlbum(track: Pick<Track, 'id' | 'album_id' | 'album' | 'artists'>) {
     if (!track.album_id) return;
     navigationRequest.current?.abort();
     const previousLocation = rememberLocation();
@@ -1115,6 +1122,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         : query
           ? `“${query}”`
           : '';
+  function openOrganize(target: 'drafts' | 'tasks') {
+    setSelectedAgentItem(null);
+    switchView(target);
+  }
   const nav = (target: View) => (
     <button
       key={target}
@@ -1154,13 +1165,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 'offline',
               ] as View[]
             ).map(nav)}
-            <details
-              className="sidebar-group"
-              open={['drafts', 'tasks'].includes(view) || undefined}
+            <button
+              className={`nav-button ${organizing && !manageOpen && !accountOpen ? 'nav-current' : ''}`}
+              aria-current={organizing && !manageOpen && !accountOpen ? 'page' : undefined}
+              onClick={() => openOrganize('drafts')}
             >
-              <summary>{t('nav.assistantTools')}</summary>
-              {(['drafts', 'tasks'] as View[]).map(nav)}
-            </details>
+              <span className="nav-icon" aria-hidden="true">
+                <Icon name={viewIcons.tasks} />
+              </span>
+              <span className="nav-label">{t('nav.organize')}</span>
+            </button>
           </nav>
           <div className="sidebar-bottom">
             {canManage && (
@@ -1245,20 +1259,22 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <select
               className="mobile-section"
               aria-label={t('nav.browseMode')}
-              value={view}
+              value={organizing ? 'drafts' : view}
               onChange={(event) =>
                 event.target.value === 'manage'
                   ? openManagement()
                   : event.target.value === 'account'
                     ? openPersonalSettings()
-                    : switchView(event.target.value as View)
+                    : event.target.value === 'drafts'
+                      ? openOrganize('drafts')
+                      : switchView(event.target.value as View)
               }
             >
               {(Object.keys(labels) as View[])
-                .filter((target) => target !== 'devices' && target !== 'assistant-settings')
+                .filter((target) => !['devices', 'assistant-settings', 'tasks'].includes(target))
                 .map((target) => (
                   <option key={target} value={target}>
-                    {t(`views.${target}`)}
+                    {target === 'drafts' ? t('nav.organize') : t(`views.${target}`)}
                   </option>
                 ))}
               {canManage && <option value="manage">{t('nav.manage')}</option>}
@@ -1378,22 +1394,47 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 onConnections={openModelConnections}
               />
             )}
-            {view === 'drafts' && (
-              <Drafts
-                user={currentUser}
-                selectedId={selectedAgentItem?.kind === 'drafts' ? selectedAgentItem.id : undefined}
-                onChanged={() => {
-                  refreshLibrary();
-                  setCollectionRevision((value) => value + 1);
-                  void inbox.refresh();
-                }}
-              />
-            )}
-            {view === 'tasks' && (
-              <AgentTasks
-                onDraft={(id) => openAgentItem('drafts', id)}
-                selectedId={selectedAgentItem?.kind === 'tasks' ? selectedAgentItem.id : undefined}
-              />
+            {organizing && (
+              <div className="workspace-page">
+                <header className="workspace-heading organize-heading">
+                  <h1>{t('nav.organize')}</h1>
+                </header>
+                <nav className="workspace-tabs" aria-label={t('nav.organize')}>
+                  {(['drafts', 'tasks'] as const).map((target) => (
+                    <button
+                      key={target}
+                      aria-pressed={view === target}
+                      onClick={() => openOrganize(target)}
+                    >
+                      {t(`views.${target}`)}
+                    </button>
+                  ))}
+                </nav>
+                {view === 'drafts' ? (
+                  <Drafts
+                    user={currentUser}
+                    selectedId={
+                      selectedAgentItem?.kind === 'drafts' ? selectedAgentItem.id : undefined
+                    }
+                    onChanged={() => {
+                      refreshLibrary();
+                      setCollectionRevision((value) => value + 1);
+                      void inbox.refresh();
+                    }}
+                  />
+                ) : (
+                  <AgentTasks
+                    onDraft={(id) => openAgentItem('drafts', id)}
+                    onAlbum={(track, id) => {
+                      setSelectedAgentItem({ kind: 'tasks', id });
+                      void openTrackAlbum(track);
+                    }}
+                    selectedId={
+                      selectedAgentItem?.kind === 'tasks' ? selectedAgentItem.id : undefined
+                    }
+                  />
+                )}
+              </div>
             )}
             {view === 'notifications' && (
               <Notifications inbox={inbox} onOpen={openNotificationAction} />

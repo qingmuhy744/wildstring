@@ -155,7 +155,21 @@ def test_cover_and_metadata_apply_atomically_using_frozen_image(curation, monkey
     )
     assert cover.status_code == 200, cover.text
     cover = cover.json()
-    assert cover["status"] == "pending"
+    assert cover["status"] == "preview"
+    for status in (None, "pending", "history", "preview"):
+        draft_list = api.get(
+            "/api/v1/agent/drafts", params={"status": status} if status else {}
+        ).json()
+        assert draft_list["total"] == 0
+    assert api.get(f"/api/v1/agent/drafts/{cover['id']}/cover-preview").status_code == 200
+    assert (
+        api.post(
+            f"/api/v1/agent/drafts/{cover['id']}/approve",
+            headers=HEADERS,
+            json={"version": 1, "preview_digest": cover["preview_digest"]},
+        ).status_code
+        == 409
+    )
     monkeypatch.setattr(
         service.providers, "request", lambda *a, **kw: pytest.fail("Frozen image must be reused")
     )
@@ -190,6 +204,51 @@ def test_cover_and_metadata_apply_atomically_using_frozen_image(curation, monkey
         )
         assert all(r[0] == 2 for r in db.execute("SELECT version FROM track_metadata"))
     assert api.get("/api/v1/agent/drafts/" + cover["id"]).json()["status"] == "applied"
+    assert api.get("/api/v1/agent/drafts", params={"status": "pending"}).json()["total"] == 0
+    assert api.get("/api/v1/agent/drafts", params={"status": "history"}).json()["total"] == 2
+
+
+def test_cover_preview_only_appears_in_history_after_explicit_acceptance(curation, monkeypatch):
+    api, _, service = curation
+    track = seed(api, service)["items"][0]
+    monkeypatch.setattr(service.providers, "request", lambda *args, **kwargs: image("red"))
+    cover = api.post(
+        BASE + "/cover",
+        headers=HEADERS,
+        json={
+            "kind": "cover",
+            "title": "Cover preview",
+            "payload": {
+                "suggestion_id": track["suggestions"][0]["id"],
+                "metadata_version": track["metadata_version"],
+            },
+        },
+    ).json()
+    endpoint = f"/api/v1/agent/drafts/{cover['id']}/accept"
+    chosen = {
+        "version": cover["version"],
+        "preview_digest": cover["preview_digest"],
+        "idempotency_key": "confirm-cover-preview",
+    }
+    assert (
+        api.post(endpoint, headers=HEADERS, json=chosen | {"preview_digest": "a" * 64}).status_code
+        == 409
+    )
+    assert api.get("/api/v1/agent/drafts").json()["total"] == 0
+
+    monkeypatch.setattr(
+        service.providers, "request", lambda *args, **kwargs: pytest.fail("Unexpected download")
+    )
+    accepted = api.post(endpoint, headers=HEADERS, json=chosen)
+    assert accepted.status_code == 200, accepted.text
+    applied = accepted.json()
+    assert applied["status"] == "applied"
+    assert applied["result"]["image_sha256"] == cover["payload"]["image_sha256"]
+    assert api.post(endpoint, headers=HEADERS, json=chosen).json() == applied
+    assert api.get("/api/v1/agent/drafts", params={"status": "pending"}).json()["total"] == 0
+    assert api.get("/api/v1/agent/drafts", params={"status": "history"}).json()["items"] == [
+        applied
+    ]
 
 
 def test_review_is_session_only_and_preserves_unselected_manual_values(curation):

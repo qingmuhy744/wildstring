@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { Icon } from './icons';
 import { CurationDraftPreview } from './curation-drafts';
 import { MetadataReviewDialog } from './metadata-review';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
-import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
+import type {
+  AgentConnection,
+  AgentDraft,
+  AgentPage,
+  AgentSchedule,
+  AgentTask,
+  InspectionResult,
+} from './agent-api';
 import {
   DiagnosticId,
   errorText,
@@ -12,7 +20,6 @@ import {
   RefreshWorkspace,
   StateBadge,
   useWorkspaceResource,
-  WorkspaceHeader,
   WorkspaceNotice,
 } from './workspace-ui';
 
@@ -35,6 +42,7 @@ const fieldKeys: Record<string, string> = {
 const format = (v: unknown, empty = '') =>
   Array.isArray(v) ? v.join(' / ') : v == null ? empty : String(v);
 const issueKeys: Record<string, string> = {
+  inspection_failed: 'agentWorkbench.checkIncompleteError',
   missing_album: 'agentWorkbench.issueMissingAlbum',
   missing_cover: 'agentWorkbench.issueMissingCover',
   missing_lyrics: 'agentWorkbench.issueMissingLyrics',
@@ -506,7 +514,9 @@ export function Drafts({
     canReview && filter === 'pending' ? '/agent/metadata-review/albums?limit=1' : null,
   );
   const hasMetadata =
-    filter === 'pending' && canReview && !!(metadata.value?.total || metadata.error);
+    filter === 'pending' && canReview && !metadata.error && Boolean(metadata.value?.total);
+  const loading = list.loading || (filter === 'pending' && canReview && metadata.loading);
+  const listError = list.error || (filter === 'pending' ? metadata.error : '');
   useEffect(() => {
     if (!selectedId) return;
     const c = new AbortController();
@@ -518,40 +528,51 @@ export function Drafts({
     return () => c.abort();
   }, [selectedId]);
   return (
-    <section className="workspace-page" aria-label={t('agentWorkbench.pageAriaLabel')}>
-      <WorkspaceHeader
-        title={t('agentWorkbench.headerTitle')}
-        description={t('agentWorkbench.headerDescription')}
-      >
+    <section aria-label={t('agentWorkbench.pageAriaLabel')}>
+      <div className="workspace-actions organize-toolbar">
+        <button
+          className="text-button"
+          onClick={() => {
+            setFilter(filter === 'pending' ? 'history' : 'pending');
+            setOffset(0);
+            setSelected(null);
+          }}
+        >
+          {t(
+            filter === 'pending' ? 'agentWorkbench.reviewHistory' : 'agentWorkbench.backToPending',
+          )}
+        </button>
         <RefreshWorkspace
-          busy={list.loading || (filter === 'pending' && canReview && metadata.loading)}
+          busy={loading}
           onClick={() => {
             void list.reload();
             void metadata.reload();
           }}
         />
-      </WorkspaceHeader>
-      <WorkspaceNotice error={error || list.error} unavailable={list.unsupported} />
-      <div className="workspace-tabs">
-        {[
-          ['pending', t('agentWorkbench.tabPending')],
-          ['approved', t('agentWorkbench.tabApproved')],
-          ['applied', t('agentWorkbench.tabApplied')],
-          ['rejected', t('agentWorkbench.tabRejected')],
-          ['', t('agentWorkbench.tabAll')],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            aria-pressed={filter === key}
-            onClick={() => {
-              setFilter(key);
-              setOffset(0);
-            }}
-          >
-            {label}
-          </button>
-        ))}
       </div>
+      <WorkspaceNotice error={error || listError} unavailable={list.unsupported} />
+      {filter !== 'pending' && (
+        <div className="workspace-tabs">
+          {[
+            ['history', t('agentWorkbench.tabAll')],
+            ['approved', t('agentWorkbench.tabApproved')],
+            ['applied', t('agentWorkbench.tabApplied')],
+            ['rejected', t('agentWorkbench.tabRejected')],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              aria-pressed={filter === key}
+              onClick={() => {
+                setFilter(key);
+                setOffset(0);
+                setSelected(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {selected && (
         <>
           <button className="text-button" onClick={() => setSelected(null)}>
@@ -569,7 +590,7 @@ export function Drafts({
           />
         </>
       )}
-      {!selected && (
+      {!selected && !list.unsupported && (!listError || hasMetadata || list.value?.items.length) ? (
         <div className="workspace-card">
           {hasMetadata && (
             <div className="workspace-row">
@@ -612,11 +633,15 @@ export function Drafts({
               </button>
             </div>
           ))}
-          {!hasMetadata && !list.value?.items.length && !list.unsupported && (
+          {!hasMetadata && !list.value?.items.length && (
             <p className="workspace-empty">
-              {list.loading || (canReview && filter === 'pending' && metadata.loading)
+              {loading
                 ? t('agentWorkbench.loadingDrafts')
-                : t('agentWorkbench.emptyDrafts')}
+                : t(
+                    filter === 'pending'
+                      ? 'agentWorkbench.emptyDrafts'
+                      : 'agentWorkbench.emptyReviewHistory',
+                  )}
             </p>
           )}
           <WorkspacePagination
@@ -625,7 +650,7 @@ export function Drafts({
             onOffset={setOffset}
           />
         </div>
-      )}
+      ) : null}
       {reviewOpen && (
         <MetadataReviewDialog
           onClose={() => {
@@ -666,12 +691,155 @@ export function WorkspacePagination({
   ) : null;
 }
 
+type InspectionAlbum = Pick<Track, 'id' | 'album_id' | 'album' | 'artists'>;
+
+function InspectionResultRow({
+  result,
+  issue,
+  onDraft,
+  onAlbum,
+}: {
+  result: InspectionResult;
+  issue?: string;
+  onDraft?: (id: string) => void;
+  onAlbum?: (track: InspectionAlbum) => void;
+}) {
+  const { t } = useTranslation();
+  const { track_id, album_id, album, artists } = result;
+  return (
+    <div className="workspace-row">
+      <div className="workspace-row-main">
+        <strong>
+          {result.analysis
+            ? result.ai_skipped
+              ? t('agentWorkbench.ruleCheckDescription')
+              : t('agentWorkbench.aiAnalysisResult')
+            : result.title || t('agentWorkbench.unreadableTrack')}
+        </strong>
+        {issue && result.album && <small>{result.album}</small>}
+        {result.analysis ? (
+          <p>{localizeAnalysis(t, result.analysis)}</p>
+        ) : result.error_code ? (
+          <small>{errorCodeMessage(result.error_code)}</small>
+        ) : (
+          !issue && (
+            <small>
+              {result.issues
+                ?.map((code) => (issueKeys[code] ? t(issueKeys[code]) : code))
+                .join(' · ') || t('agentWorkbench.noRuleIssues')}
+            </small>
+          )
+        )}
+        {result.findings
+          ?.filter((finding) => !issue || finding.code === issue)
+          .map((finding) => (
+            <p className="muted" key={finding.code}>
+              {findingKeys[finding.code] ? t(findingKeys[finding.code]) : finding.summary}
+            </p>
+          ))}
+        {result.draft_ids?.map((id) => (
+          <button key={id} onClick={() => onDraft?.(id)}>
+            {t('agentWorkbench.viewDraftAndResult')}
+          </button>
+        ))}
+      </div>
+      {onAlbum && track_id && album_id && (
+        <button
+          onClick={() =>
+            onAlbum({
+              id: track_id,
+              album_id,
+              album: album ?? '',
+              artists: artists ?? [],
+            })
+          }
+          aria-label={t('agentWorkbench.openInspectionAlbumLabel', { name: result.album })}
+        >
+          {t('agentWorkbench.openInspectionAlbum')}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function InspectionGroups({
+  task,
+  onAlbum,
+}: {
+  task: AgentTask;
+  onAlbum: (track: InspectionAlbum) => void;
+}) {
+  const { t } = useTranslation();
+  const [issue, setIssue] = useState('');
+  const [offset, setOffset] = useState(0);
+  const results = useWorkspaceResource<AgentTask>(
+    issue
+      ? `/agent/tasks/${encodeURIComponent(task.id)}?issue=${encodeURIComponent(issue)}&result_offset=${offset}`
+      : null,
+    ['queued', 'running', 'retry_wait', 'cancel_requested'].includes(task.status) ? 2000 : 0,
+  );
+  if (!task.issue_groups?.length) {
+    return task.status === 'succeeded' ? (
+      <p role="status" className="muted">
+        {t('agentWorkbench.noInspectionFindings')}
+      </p>
+    ) : null;
+  }
+  return (
+    <div className="inspection-groups">
+      <h3>{t('agentWorkbench.inspectionGroups')}</h3>
+      {task.issue_groups.map(({ code, count }) => (
+        <div className="inspection-group" key={code}>
+          <button
+            className="text-button inspection-group-toggle"
+            aria-expanded={issue === code}
+            onClick={() => {
+              setIssue(issue === code ? '' : code);
+              setOffset(0);
+            }}
+          >
+            <span>{issueKeys[code] ? t(issueKeys[code]) : code}</span>
+            <span className="muted">{t('agentWorkbench.inspectionGroupTracks', { count })}</span>
+            <Icon name="chevron" />
+          </button>
+          {issue === code && (
+            <div className="inspection-group-tracks">
+              <WorkspaceNotice error={results.error} unavailable={results.unsupported} />
+              {results.value ? (
+                <>
+                  {results.value.results?.map((result) => (
+                    <InspectionResultRow
+                      result={result}
+                      issue={code}
+                      key={result.track_id}
+                      onAlbum={onAlbum}
+                    />
+                  ))}
+                  <WorkspacePagination
+                    offset={offset}
+                    total={results.value.result_total ?? count}
+                    onOffset={setOffset}
+                  />
+                </>
+              ) : (
+                results.loading && <p role="status">{t('common.loading')}</p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AgentTasks({
   selectedId,
   onDraft,
+  onAlbum,
 }: {
   selectedId?: string;
   onDraft?: (id: string) => void;
+  onAlbum: (track: InspectionAlbum, taskId: string) => void;
 }) {
   const { t } = useTranslation();
   const [editingSchedule, setEditingSchedule] = useState<AgentSchedule | null>(null);
@@ -702,7 +870,7 @@ export function AgentTasks({
     connections = useWorkspaceResource<AgentPage<AgentConnection>>('/agent/connections'),
     detail = useWorkspaceResource<AgentTask>(
       selected
-        ? `/agent/tasks/${encodeURIComponent(selected)}?result_offset=${resultOffset}`
+        ? `/agent/tasks/${encodeURIComponent(selected)}?group_by_issue=true&result_offset=${resultOffset}`
         : null,
       2000,
     );
@@ -758,6 +926,10 @@ export function AgentTasks({
   );
   const selectedConnectionAvailable = availableConnections.some((c) => c.id === connection);
   const item = detail.value;
+  const resultCounts = Object.entries(item?.counts ?? {}).filter(
+    ([key, count]) =>
+      count > 0 && (item?.counts.total === undefined || !['processed', 'total'].includes(key)),
+  );
   const scopeNames = {
     recent: t('agentWorkbench.inspectRecent'),
     library: t('agentWorkbench.inspectLibrary'),
@@ -778,11 +950,23 @@ export function AgentTasks({
           } as Record<string, string>
         )[stage] || t('agentWorkbench.stageChecking');
   return (
-    <section className="workspace-page" aria-label={t('agentWorkbench.tasksAriaLabel')}>
-      <WorkspaceHeader
-        title={t('agentWorkbench.tasksTitle')}
-        description={t('agentWorkbench.tasksDescription')}
-      >
+    <section aria-label={t('agentWorkbench.tasksAriaLabel')}>
+      <div className="workspace-actions organize-toolbar">
+        <div className="workspace-actions inspection-modes">
+          <button
+            aria-pressed={tab === 'tasks'}
+            onClick={() => {
+              setTab('tasks');
+              setEditingSchedule(null);
+              if (scope === 'selection') setScope('recent');
+            }}
+          >
+            {t('agentWorkbench.tabTasks')}
+          </button>
+          <button aria-pressed={tab === 'schedules'} onClick={() => setTab('schedules')}>
+            {t('agentWorkbench.tabSchedules')}
+          </button>
+        </div>
         <RefreshWorkspace
           busy={tasks.loading}
           onClick={() => {
@@ -791,27 +975,12 @@ export function AgentTasks({
             void schedules.reload();
           }}
         />
-      </WorkspaceHeader>
+      </div>
       <WorkspaceNotice
         error={error || tasks.error || schedules.error || detail.error}
         notice={notice}
         unavailable={tasks.unsupported}
       />
-      <div className="workspace-tabs">
-        <button
-          aria-pressed={tab === 'tasks'}
-          onClick={() => {
-            setTab('tasks');
-            setEditingSchedule(null);
-            if (scope === 'selection') setScope('recent');
-          }}
-        >
-          {t('agentWorkbench.tabTasks')}
-        </button>
-        <button aria-pressed={tab === 'schedules'} onClick={() => setTab('schedules')}>
-          {t('agentWorkbench.tabSchedules')}
-        </button>
-      </div>
       {!tasks.unsupported && (
         <>
           <form
@@ -1018,7 +1187,7 @@ export function AgentTasks({
             <>
               {item && (
                 <article
-                  className="workspace-card"
+                  className="workspace-card inspection-result"
                   aria-label={t('agentWorkbench.detailAriaLabel')}
                 >
                   <div className="workspace-card-head">
@@ -1026,12 +1195,7 @@ export function AgentTasks({
                       <h2 ref={resultHeading} tabIndex={-1}>
                         {t('agentWorkbench.inspectionResultTitle')}
                       </h2>
-                      <small>
-                        {t('agentWorkbench.taskSummaryHeader', {
-                          id: item.id,
-                          stage: stageName(item.stage, item.status),
-                        })}
-                      </small>
+                      <small>{stageName(item.stage, item.status)}</small>
                     </div>
                     <StateBadge state={item.status} />
                   </div>
@@ -1052,13 +1216,9 @@ export function AgentTasks({
                       )}
                     </div>
                   )}
-                  <p className="workspace-inline inspection-counts">
-                    {Object.entries(item.counts)
-                      .filter(
-                        ([key]) =>
-                          item.counts.total === undefined || !['processed', 'total'].includes(key),
-                      )
-                      .map(([k, v]) => (
+                  {resultCounts.length > 0 && (
+                    <p className="workspace-inline inspection-counts">
+                      {resultCounts.map(([k, v]) => (
                         <span key={k}>
                           {(
                             {
@@ -1074,9 +1234,12 @@ export function AgentTasks({
                           {v}
                         </span>
                       ))}
-                  </p>
+                    </p>
+                  )}
                   {item.error_code && <p role="status">{errorCodeMessage(item.error_code)}</p>}
-                  <DiagnosticId id={item.trace_id} />
+                  {(item.error_code || item.counts.failed > 0) && (
+                    <DiagnosticId id={item.trace_id} />
+                  )}
                   <div className="workspace-actions">
                     {['queued', 'running', 'retry_wait'].includes(item.status) && (
                       <button
@@ -1115,47 +1278,33 @@ export function AgentTasks({
                       </button>
                     )}
                   </div>
-                  {item.results?.map((result, index) => (
-                    <div className="workspace-row" key={result.track_id || `analysis-${index}`}>
-                      <div className="workspace-row-main">
-                        <strong>
-                          {result.analysis
-                            ? result.ai_skipped
-                              ? t('agentWorkbench.ruleCheckDescription')
-                              : t('agentWorkbench.aiAnalysisResult')
-                            : result.title || t('agentWorkbench.unreadableTrack')}
-                        </strong>
-                        {result.analysis ? (
-                          <p>{localizeAnalysis(t, result.analysis)}</p>
-                        ) : (
-                          <small>
-                            {result.error_code
-                              ? t('agentWorkbench.checkIncompleteError')
-                              : (result.issues || [])
-                                  .map((issue) => (issueKeys[issue] ? t(issueKeys[issue]) : issue))
-                                  .join(' · ') || t('agentWorkbench.noRuleIssues')}
-                          </small>
-                        )}
-                        {result.findings?.map((finding) => (
-                          <p className="muted" key={finding.code}>
-                            {findingKeys[finding.code]
-                              ? t(findingKeys[finding.code])
-                              : finding.summary}
-                          </p>
-                        ))}
-                        {result.draft_ids?.map((id) => (
-                          <button key={id} onClick={() => onDraft?.(id)}>
-                            {t('agentWorkbench.viewDraftAndResult')}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <WorkspacePagination
-                    total={item.result_total ?? 0}
-                    offset={resultOffset}
-                    onOffset={setResultOffset}
-                  />
+                  {item.issue_groups ? (
+                    <>
+                      <InspectionGroups
+                        key={item.id}
+                        task={item}
+                        onAlbum={(track) => onAlbum(track, item.id)}
+                      />
+                      {item.analyses?.map((result, index) => (
+                        <InspectionResultRow key={index} result={result} onDraft={onDraft} />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {item.results?.map((result, index) => (
+                        <InspectionResultRow
+                          key={result.track_id || index}
+                          result={result}
+                          onDraft={onDraft}
+                        />
+                      ))}
+                      <WorkspacePagination
+                        total={item.result_total ?? 0}
+                        offset={resultOffset}
+                        onOffset={setResultOffset}
+                      />
+                    </>
+                  )}
                 </article>
               )}
               <div className="workspace-card">
