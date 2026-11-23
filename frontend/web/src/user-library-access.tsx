@@ -69,14 +69,14 @@ export function UserLibraryAccessDialog({
   return (
     <dialog
       ref={dialog}
-      className="playlist-editor user-library-dialog"
+      className="playlist-editor user-library-dialog scroll-dialog"
       aria-label={t('userLibraryAccess.dialogAria', { username: user.username })}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
       }}
     >
-      <div className="editor-heading">
+      <div className="editor-heading scroll-dialog-header">
         <div>
           <h2>{t('userLibraryAccess.title')}</h2>
           <p className="muted">{user.username}</p>
@@ -87,46 +87,48 @@ export function UserLibraryAccessDialog({
           onClick={onClose}
         />
       </div>
-      <p className="muted">{t('userLibraryAccess.description')}</p>
-      <form className="account-form" onSubmit={save}>
-        {loading && <p role="status">{t('userLibraryAccess.loading')}</p>}
-        {!loading && access && (
-          <fieldset className="music-library-options" disabled={busy}>
-            <legend>{t('userLibraryAccess.accessibleLibraries')}</legend>
-            {libraries.map((library) => (
-              <label className="music-library-grant-option" key={library.id}>
-                <input
-                  type="checkbox"
-                  checked={access.library_ids.includes(library.id)}
-                  onChange={(event) =>
-                    setAccess({
-                      ...access,
-                      library_ids: event.target.checked
-                        ? [...access.library_ids, library.id]
-                        : access.library_ids.filter((id) => id !== library.id),
-                    })
-                  }
-                />
-                <span>{library.name}</span>
-              </label>
-            ))}
-            {libraries.length === 0 && (
-              <p className="muted">{t('userLibraryAccess.noLibraries')}</p>
-            )}
-            <small>{t('userLibraryAccess.hint')}</small>
-          </fieldset>
-        )}
-        {error && (
-          <div className="error" role="alert">
-            <p>{error}</p>
-            {!loading && !access && (
-              <button type="button" onClick={() => setReload((value) => value + 1)}>
-                {t('userLibraryAccess.reload')}
-              </button>
-            )}
-          </div>
-        )}
-        <div className="editor-footer">
+      <form className="account-form scroll-dialog-frame" onSubmit={save}>
+        <div className="scroll-dialog-body">
+          <p className="muted">{t('userLibraryAccess.description')}</p>
+          {loading && <p role="status">{t('userLibraryAccess.loading')}</p>}
+          {!loading && access && (
+            <fieldset className="music-library-options" disabled={busy}>
+              <legend>{t('userLibraryAccess.accessibleLibraries')}</legend>
+              {libraries.map((library) => (
+                <label className="music-library-grant-option" key={library.id}>
+                  <input
+                    type="checkbox"
+                    checked={access.library_ids.includes(library.id)}
+                    onChange={(event) =>
+                      setAccess({
+                        ...access,
+                        library_ids: event.target.checked
+                          ? [...access.library_ids, library.id]
+                          : access.library_ids.filter((id) => id !== library.id),
+                      })
+                    }
+                  />
+                  <span>{library.name}</span>
+                </label>
+              ))}
+              {libraries.length === 0 && (
+                <p className="muted">{t('userLibraryAccess.noLibraries')}</p>
+              )}
+              <small>{t('userLibraryAccess.hint')}</small>
+            </fieldset>
+          )}
+          {error && (
+            <div className="error" role="alert">
+              <p>{error}</p>
+              {!loading && !access && (
+                <button type="button" onClick={() => setReload((value) => value + 1)}>
+                  {t('userLibraryAccess.reload')}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="editor-footer scroll-dialog-footer">
           <button type="button" disabled={busy} onClick={onClose}>
             {t('userLibraryAccess.cancel')}
           </button>

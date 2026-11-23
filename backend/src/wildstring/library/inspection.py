@@ -57,17 +57,18 @@ def catalog():
 
 
 class InspectionIndex:
-    def __init__(self, repository):
+    def __init__(self, repository, *, full_library=False):
         with repository.database.connect() as db:
             rows = db.execute(
                 "SELECT t.id,t.title,t.artists,t.album,t.album_id,t.album_artists,"
                 "t.track_number,t.disc_number,t.duration_ms,t.extra,m.version "
                 "FROM tracks t JOIN track_metadata m ON m.track_id=t.id "
                 "WHERE t.library_id=? AND t.status='available' ORDER BY t.id LIMIT ?",
-                (repository.library_id(), GROUPING_LIMIT + 1),
+                (repository.library_id(), -1 if full_library else GROUPING_LIMIT + 1),
             ).fetchall()
-        self.truncated = len(rows) > GROUPING_LIMIT
-        rows = rows[:GROUPING_LIMIT]
+        self.truncated = not full_library and len(rows) > GROUPING_LIMIT
+        if self.truncated:
+            rows = rows[:GROUPING_LIMIT]
         self.tracks = {
             r["id"]: dict(r)
             | {

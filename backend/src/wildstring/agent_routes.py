@@ -313,16 +313,21 @@ def agent_router(service):
         actor: Annotated[object, Depends(session)],
         limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0, le=1000000),
+        summary: bool = False,
     ):
-        return service.tasks(actor, limit, offset)
+        return service.tasks(actor, limit, offset, summary=summary)
 
     @router.post("/tasks")
     def submit(body: Inspection, actor: Annotated[object, Depends(session)]):
         return service.submit_task(actor, body, manual=True)
 
     @router.get("/tasks/{identity}")
-    def task(identity: str, actor: Annotated[object, Depends(session)]):
-        return service.task(actor, identity)
+    def task(
+        identity: str,
+        actor: Annotated[object, Depends(session)],
+        result_offset: int | None = Query(None, ge=0),
+    ):
+        return service.task(actor, identity, result_offset=result_offset)
 
     @router.post("/tasks/{identity}/cancel")
     def cancel(identity: str, actor: Annotated[object, Depends(session)]):

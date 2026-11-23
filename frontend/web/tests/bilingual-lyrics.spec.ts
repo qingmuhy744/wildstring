@@ -58,36 +58,45 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
     (value: { title: string }) => value.title === '晴天测试曲',
   );
   let applied = false;
+  const appliedOffsets: number[] = [];
   await page.route(`**/api/v1/tracks/${track.id}/lyrics`, async (route) => {
     if (applied) await route.fulfill({ json: fixture });
     else await route.continue();
   });
+  const previewLines = Array.from({ length: 24 }, (_, index) => ({
+    ...fixture.lines[0],
+    time_ms: index * 180,
+  }));
   await page.route(`**/api/v1/manage/tracks/${track.id}/online-lyrics`, (route) =>
     route.fulfill({
       json: {
         jobs: [],
-        items: [
-          {
-            id: 'synthetic-bilingual',
-            plugin_id: 'fixture',
-            source_url: 'https://example.com',
-            lyrics_version: 1,
-            file_version: '0'.repeat(64),
-            line_count: fixture.lines.length,
-            match: {
-              title: track.title,
-              artists: ['合成艺人'],
-              score: 1,
-              version_mismatch: false,
-              duration_difference_ms: 0,
-            },
-            normalized: { ...fixture, format: 'krc' },
+        items: ['曲库版本', '同名候选', '现场候选', '纯文本候选'].map((title, index) => ({
+          id: index ? `synthetic-alternate-${index}` : 'synthetic-bilingual',
+          plugin_id: 'fixture',
+          source_url: 'https://example.com',
+          lyrics_version: 1,
+          file_version: '0'.repeat(64),
+          line_count: previewLines.length,
+          match: {
+            title,
+            artists: [index ? '另一位艺人' : '合成艺人'],
+            score: index ? 0.55 : 1,
+            version_mismatch: index === 2,
+            duration_difference_ms: index ? 3600 : 0,
           },
-        ],
+          normalized:
+            index === 3
+              ? { kind: 'plain', format: 'txt', lines: [{ text: '纯文本', time_ms: null }] }
+              : { ...fixture, lines: previewLines, format: 'krc' },
+        })),
       },
     }),
   );
-  await page.route('**/api/v1/manage/lyric-candidates/synthetic-bilingual/apply', (route) => {
+  await page.route('**/api/v1/manage/lyric-candidates/*/apply', (route) => {
+    expect(route.request().url()).toContain('/synthetic-bilingual/apply');
+    appliedOffsets.push(route.request().postDataJSON().offset_ms);
+    if (appliedOffsets.length === 1) return route.fulfill({ status: 503, json: {} });
     applied = true;
     return route.fulfill({ json: { ok: true } });
   });
@@ -101,9 +110,66 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
   await page.getByRole('button', { name: '编辑歌曲信息', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '编辑歌曲信息', exact: true });
   await editor.getByRole('button', { name: '歌词', exact: true }).click();
-  await editor.getByRole('button', { name: '预览并选择歌词', exact: true }).click();
-  await expect(editor.locator('.online-lyrics pre')).toContainText(fixture.lines[0].translation);
-  await editor.getByRole('button', { name: '确认使用此歌词', exact: true }).click();
+  const editorBody = editor.locator('.scroll-dialog-body');
+  const cards = editor.locator('.lyric-candidate');
+  const first = cards.filter({ has: page.getByRole('link', { name: '曲库版本' }) });
+  const alternate = cards.filter({ has: page.getByRole('link', { name: '同名候选' }) });
+  const firstPreview = first.getByRole('button', { name: '预览歌词', exact: true });
+  await firstPreview.scrollIntoViewIfNeeded();
+  const beforeOpening = await audio(page);
+  const initialTop = await editorBody.evaluate((node) => node.scrollTop);
+  await firstPreview.click();
+  await expect(first.getByRole('button', { name: '收起预览' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await expect(first.getByRole('list', { name: '预览歌词' })).toContainText(
+    fixture.lines[0].translation,
+  );
+  const positions = await editorBody.evaluate(async (node) => {
+    const samples = [];
+    for (let i = 0; i < 18; i += 1) {
+      await new Promise(requestAnimationFrame);
+      samples.push(node.scrollTop);
+    }
+    return samples;
+  });
+  expect(positions).toEqual(Array(18).fill(initialTop));
+  await expect(alternate).toContainText('匹配 55%');
+  await expect(alternate).toContainText('逐字覆盖 100%');
+  await expect(alternate).toContainText('需核对版本');
+  await alternate.getByRole('button', { name: '预览歌词', exact: true }).click();
+  await expect(editor.getByRole('list', { name: '预览歌词' })).toHaveCount(1);
+  await expect(alternate.getByRole('list', { name: '预览歌词' })).toBeVisible();
+  expect(await audio(page)).toEqual(beforeOpening);
+  expect(appliedOffsets).toEqual([]);
+  await firstPreview.click();
+  const list = first.getByRole('list', { name: '预览歌词' });
+  const row = list.getByRole('listitem').nth(18).getByRole('button');
+  await row.scrollIntoViewIfNeeded();
+  const outerTop = await editorBody.evaluate((node) => node.scrollTop);
+  const innerTop = await list.evaluate((node) => node.scrollTop);
+  await row.click();
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(() => list.evaluate((node) => node.scrollTop)).not.toBe(innerTop);
+  expect(await editorBody.evaluate((node) => node.scrollTop)).toBe(outerTop);
+  await first.getByRole('button', { name: '暂停', exact: true }).click();
+  const offsetControls = first.getByRole('group', { name: '时间偏移', exact: true });
+  const offset = offsetControls.getByRole('spinbutton', { name: '时间偏移（毫秒）' });
+  await expect(offset).toBeVisible();
+  await offset.fill('500');
+  await offsetControls.getByRole('button', { name: '复位到 0 偏移' }).click();
+  await expect(offset).toHaveValue('0');
+  await offsetControls.getByRole('button', { name: '+200ms', exact: true }).click();
+  await expect(offset).toHaveValue('200');
+  const useLyrics = first.getByRole('button', { name: '使用此歌词', exact: true });
+  await useLyrics.click();
+  await expect(first.getByRole('status')).toBeVisible();
+  await expect(useLyrics).toBeEnabled();
+  expect(appliedOffsets).toEqual([200]);
+  await useLyrics.click();
+  await expect(first.getByRole('status')).toContainText('已保存选中的歌词');
+  expect(appliedOffsets).toEqual([200, 200]);
   await expect.poll(() => applied).toBe(true);
   await editor.getByRole('button', { name: '关闭歌曲编辑', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();

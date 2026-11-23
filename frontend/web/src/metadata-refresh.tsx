@@ -21,10 +21,12 @@ export function MetadataRefreshDialog({
   target,
   onClose,
   onQueued,
+  onReviewBatch,
 }: {
   target: RefreshTarget;
   onClose: () => void;
   onQueued?: () => void;
+  onReviewBatch?: (batchId: string) => void;
 }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null),
@@ -42,7 +44,7 @@ export function MetadataRefreshDialog({
   useEffect(() => {
     if (done) {
       progress.current?.focus({ preventScroll: true });
-      if (dialog.current) dialog.current.scrollTop = 0;
+      progress.current?.closest('.scroll-dialog-body')?.scrollTo(0, 0);
     }
   }, [done]);
   useEffect(() => {
@@ -129,7 +131,7 @@ export function MetadataRefreshDialog({
   const finished = batch ? batch.completed + batch.failed + batch.no_match + batch.stale : 0;
   return (
     <dialog
-      className="metadata-refresh-dialog"
+      className="metadata-refresh-dialog scroll-dialog"
       ref={dialog}
       aria-label={t('metadataRefresh.dialogAria')}
       onCancel={(event) => {
@@ -138,7 +140,7 @@ export function MetadataRefreshDialog({
         if (!busy) onClose();
       }}
     >
-      <header>
+      <header className="scroll-dialog-header">
         <h2>{t('metadataRefresh.heading')}</h2>
         <DialogCloseButton
           aria-label={t('metadataRefresh.closeAria')}
@@ -146,96 +148,99 @@ export function MetadataRefreshDialog({
           onClick={onClose}
         />
       </header>
-      <p>{target.label}</p>
-      {!done ? (
-        <fieldset disabled={busy}>
-          <label>
-            {t('metadataRefresh.updateMode')}
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="missing">{t('metadataRefresh.modeMissing')}</option>
-              <option value="all">{t('metadataRefresh.modeAll')}</option>
-            </select>
-          </label>
-          <label className="check-label">
-            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-            {t('metadataRefresh.forceRequery')}
-          </label>
-          <p className="muted">{t('metadataRefresh.forceRequeryHelp')}</p>
-        </fieldset>
-      ) : (
-        <p className="muted">
-          {t('metadataRefresh.currentSettingsSummary', {
-            mode: mode === 'all' ? t('metadataRefresh.modeAll') : t('metadataRefresh.modeMissing'),
-            force: force
-              ? t('metadataRefresh.forceOnlineLabel')
-              : t('metadataRefresh.reuseRecentLabel'),
-          })}
-        </p>
-      )}
-      <p className="muted">{t('metadataRefresh.noticeSuggestionsFirst')}</p>
-      <p ref={progress} tabIndex={-1} role="status" aria-live="polite">
-        {batch ? t('metadataRefresh.batchSubmitted') : message}
-        {batchId && (
-          <>
-            <br />
-            {batch
-              ? t('metadataRefresh.batchProgress', {
-                  total: batch.total,
-                  finished,
-                  queued: batch.queued,
-                  running: batch.running,
-                })
-              : t('metadataRefresh.loadingProgress')}
-            {batch && !active ? t('metadataRefresh.batchCompletedSuffix') : ''}
-          </>
-        )}
-      </p>
-      {batch && (
-        <section
-          className="metadata-batch-results"
-          aria-label={t('metadataRefresh.batchResultsAria')}
-        >
-          <progress
-            aria-label={t('metadataRefresh.batchProgressAria')}
-            max={batch.total || 1}
-            value={finished}
-          />
+      <div className="scroll-dialog-body">
+        <p>{target.label}</p>
+        {!done ? (
+          <fieldset disabled={busy}>
+            <label>
+              {t('metadataRefresh.updateMode')}
+              <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="missing">{t('metadataRefresh.modeMissing')}</option>
+                <option value="all">{t('metadataRefresh.modeAll')}</option>
+              </select>
+            </label>
+            <label className="check-label">
+              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              {t('metadataRefresh.forceRequery')}
+            </label>
+            <p className="muted">{t('metadataRefresh.forceRequeryHelp')}</p>
+          </fieldset>
+        ) : (
           <p className="muted">
-            {t('metadataRefresh.batchStats', {
-              completed: batch.completed,
-              failed: batch.failed,
-              noMatch: batch.no_match,
-              stale: batch.stale,
+            {t('metadataRefresh.currentSettingsSummary', {
+              mode:
+                mode === 'all' ? t('metadataRefresh.modeAll') : t('metadataRefresh.modeMissing'),
+              force: force
+                ? t('metadataRefresh.forceOnlineLabel')
+                : t('metadataRefresh.reuseRecentLabel'),
             })}
           </p>
-          <ul className="metadata-batch-tracks">
-            {batch.items.map((job) => (
-              <li key={job.id}>
-                <strong>{job.title || t('metadataRefresh.defaultTrackTitle')}</strong>
-                <span>{t(jobStatus[job.status] || 'providerDiagnostics.statusUnknown')}</span>
-                <JobDiagnostics job={job} />
-              </li>
-            ))}
-          </ul>
-          {batch.truncated && (
-            <p className="muted">
-              {t('metadataRefresh.truncatedNotice', { count: batch.items.length })}
-            </p>
+        )}
+        <p className="muted">{t('metadataRefresh.noticeSuggestionsFirst')}</p>
+        <p ref={progress} tabIndex={-1} role="status" aria-live="polite">
+          {batch ? t('metadataRefresh.batchSubmitted') : message}
+          {batchId && (
+            <>
+              <br />
+              {batch
+                ? t('metadataRefresh.batchProgress', {
+                    total: batch.total,
+                    finished,
+                    queued: batch.queued,
+                    running: batch.running,
+                  })
+                : t('metadataRefresh.loadingProgress')}
+              {batch && !active ? t('metadataRefresh.batchCompletedSuffix') : ''}
+            </>
           )}
-        </section>
-      )}
-      {statusError && (
-        <div className="error" role="alert">
-          <p>{statusError}</p>
-          <button onClick={() => setRetry((value) => value + 1)}>
-            {t('metadataRefresh.retryProgress')}
-          </button>
-        </div>
-      )}
-      {done && active && (
-        <p className="muted">{t('metadataRefresh.backgroundContinuationNotice')}</p>
-      )}
-      <footer>
+        </p>
+        {batch && (
+          <section
+            className="metadata-batch-results"
+            aria-label={t('metadataRefresh.batchResultsAria')}
+          >
+            <progress
+              aria-label={t('metadataRefresh.batchProgressAria')}
+              max={batch.total || 1}
+              value={finished}
+            />
+            <p className="muted">
+              {t('metadataRefresh.batchStats', {
+                completed: batch.completed,
+                failed: batch.failed,
+                noMatch: batch.no_match,
+                stale: batch.stale,
+              })}
+            </p>
+            <ul className="metadata-batch-tracks">
+              {batch.items.map((job) => (
+                <li key={job.id}>
+                  <strong>{job.title || t('metadataRefresh.defaultTrackTitle')}</strong>
+                  <span>{t(jobStatus[job.status] || 'providerDiagnostics.statusUnknown')}</span>
+                  <JobDiagnostics job={job} />
+                </li>
+              ))}
+            </ul>
+            {batch.truncated && (
+              <p className="muted">
+                {t('metadataRefresh.truncatedNotice', { count: batch.items.length })}
+              </p>
+            )}
+          </section>
+        )}
+        {statusError && (
+          <div className="error" role="alert">
+            <p>{statusError}</p>
+            <button onClick={() => setRetry((value) => value + 1)}>
+              {t('metadataRefresh.retryProgress')}
+            </button>
+          </div>
+        )}
+        {done && active && (
+          <p className="muted">{t('metadataRefresh.backgroundContinuationNotice')}</p>
+        )}
+      </div>
+      <footer className="scroll-dialog-footer">
         <button onClick={onClose} disabled={busy}>
           {done
             ? active
@@ -246,6 +251,11 @@ export function MetadataRefreshDialog({
         {!done && (
           <button className="primary" disabled={busy} onClick={() => void submit()}>
             {busy ? t('metadataRefresh.submittingButton') : t('metadataRefresh.startButton')}
+          </button>
+        )}
+        {batchId && batch && batch.completed > 0 && onReviewBatch && (
+          <button className="primary" onClick={() => onReviewBatch(batchId)}>
+            {t('metadataRefresh.reviewBatch')}
           </button>
         )}
       </footer>

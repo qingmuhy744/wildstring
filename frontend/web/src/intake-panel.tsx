@@ -34,6 +34,11 @@ export function IntakePanel() {
   const { t } = useTranslation();
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [suffixText, setSuffixText] = useState('');
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const [preferencesFeedback, setPreferencesFeedback] = useState<{
+    text: string;
+    error?: boolean;
+  }>();
   const [items, setItems] = useState<Items | null>(null);
   const [offset, setOffset] = useState(0),
     [tick, setTick] = useState(0);
@@ -55,7 +60,8 @@ export function IntakePanel() {
         setSuffixText(value.download_policy?.partial_suffixes.join(', ') || '');
       })
       .catch((reason) => {
-        if (!controller.signal.aborted) setError(reason.message);
+        if (!controller.signal.aborted)
+          setPreferencesFeedback({ text: reason.message, error: true });
       });
     return () => controller.abort();
   }, []);
@@ -151,17 +157,18 @@ export function IntakePanel() {
 
   return (
     <>
-      <section className="management-card">
-        <span className="eyebrow">{t('intakePanel.eyebrow')}</span>
+      <section className="management-card" aria-label={t('intakePanel.title')}>
         <h2>{t('intakePanel.title')}</h2>
         <p className="muted">{t('intakePanel.description')}</p>
         <form
+          onInvalidCapture={(event) =>
+            (event.target as HTMLElement).closest('details')?.setAttribute('open', '')
+          }
           onSubmit={async (event) => {
             event.preventDefault();
             if (!preferences) return;
-            setBusy(true);
-            setError('');
-            setNotice('');
+            setSavingPreferences(true);
+            setPreferencesFeedback(undefined);
             try {
               setPreferences(
                 await api<Preferences>('/manage/intake/settings', {
@@ -179,15 +186,15 @@ export function IntakePanel() {
                   }),
                 }),
               );
-              setNotice(t('intakePanel.savedNotice'));
+              setPreferencesFeedback({ text: t('intakePanel.savedNotice') });
             } catch (reason) {
-              setError((reason as Error).message);
+              setPreferencesFeedback({ text: (reason as Error).message, error: true });
             } finally {
-              setBusy(false);
+              setSavingPreferences(false);
             }
           }}
         >
-          <fieldset disabled={!preferences || busy} className="intake-settings">
+          <fieldset disabled={!preferences || savingPreferences} className="intake-settings">
             <label className="management-checkbox">
               <input
                 type="checkbox"
@@ -198,71 +205,92 @@ export function IntakePanel() {
               />
               {t('intakePanel.enableAutoImport')}
             </label>
-            <label>
-              <HelpLabel hint="importInterval">{t('intakePanel.intervalSeconds')}</HelpLabel>
-              <input
-                type="number"
-                min="15"
-                max="86400"
-                required
-                value={preferences?.interval_seconds ?? 60}
-                onChange={(event) =>
-                  setPreferences(
-                    (value) => value && { ...value, interval_seconds: Number(event.target.value) },
-                  )
-                }
-              />
-            </label>
-            <label>
-              <HelpLabel hint="importStable">{t('intakePanel.stableSeconds')}</HelpLabel>
-              <input
-                type="number"
-                min="5"
-                max="86400"
-                required
-                value={preferences?.stable_seconds ?? 120}
-                onChange={(event) =>
-                  setPreferences(
-                    (value) => value && { ...value, stable_seconds: Number(event.target.value) },
-                  )
-                }
-              />
-            </label>
-            {preferences?.download_policy && (
-              <>
-                <label className="management-checkbox">
+            <details className="intake-advanced">
+              <summary>{t('intakePanel.advancedSettings')}</summary>
+              <div className="intake-advanced-fields">
+                <label>
+                  <HelpLabel hint="importInterval">{t('intakePanel.intervalSeconds')}</HelpLabel>
                   <input
-                    type="checkbox"
-                    checked={preferences.download_policy.wait_for_album}
+                    type="number"
+                    min="15"
+                    max="86400"
+                    required
+                    value={preferences?.interval_seconds ?? 60}
                     onChange={(event) =>
-                      setPreferences((value) =>
-                        value?.download_policy
-                          ? {
-                              ...value,
-                              download_policy: {
-                                ...value.download_policy,
-                                wait_for_album: event.target.checked,
-                              },
-                            }
-                          : value,
+                      setPreferences(
+                        (value) =>
+                          value && { ...value, interval_seconds: Number(event.target.value) },
                       )
                     }
                   />
-                  {t('intakePanel.waitForAlbum')}
                 </label>
                 <label>
-                  <HelpLabel hint="downloadSuffix">{t('intakePanel.downloadSuffixes')}</HelpLabel>
+                  <HelpLabel hint="importStable">{t('intakePanel.stableSeconds')}</HelpLabel>
                   <input
+                    type="number"
+                    min="5"
+                    max="86400"
                     required
-                    value={suffixText}
-                    maxLength={300}
-                    onChange={(event) => setSuffixText(event.target.value)}
+                    value={preferences?.stable_seconds ?? 120}
+                    onChange={(event) =>
+                      setPreferences(
+                        (value) =>
+                          value && { ...value, stable_seconds: Number(event.target.value) },
+                      )
+                    }
                   />
                 </label>
-                <p className="muted">{t('intakePanel.downloadNotice')}</p>
-              </>
-            )}
-            <button className="primary">{t('intakePanel.saveSettings')}</button>
+                {preferences?.download_policy && (
+                  <div className="intake-download-options">
+                    <label className="management-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={preferences.download_policy.wait_for_album}
+                        onChange={(event) =>
+                          setPreferences((value) =>
+                            value?.download_policy
+                              ? {
+                                  ...value,
+                                  download_policy: {
+                                    ...value.download_policy,
+                                    wait_for_album: event.target.checked,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                      />
+                      {t('intakePanel.waitForAlbum')}
+                    </label>
+                    <label>
+                      <HelpLabel hint="downloadSuffix">
+                        {t('intakePanel.downloadSuffixes')}
+                      </HelpLabel>
+                      <input
+                        required
+                        value={suffixText}
+                        maxLength={300}
+                        onChange={(event) => setSuffixText(event.target.value)}
+                      />
+                    </label>
+                    <p className="muted">{t('intakePanel.downloadNotice')}</p>
+                  </div>
+                )}
+              </div>
+            </details>
+            <div className="intake-buttons">
+              <button className="primary" aria-busy={savingPreferences}>
+                {t(savingPreferences ? 'musicLibraries.saving' : 'intakePanel.saveSettings')}
+              </button>
+              {preferencesFeedback && (
+                <span
+                  className={preferencesFeedback.error ? 'error' : 'muted'}
+                  role={preferencesFeedback.error ? 'alert' : 'status'}
+                >
+                  {preferencesFeedback.text}
+                </span>
+              )}
+            </div>
           </fieldset>
         </form>
       </section>

@@ -24,6 +24,7 @@ import { PodcastProgrammesAdmin } from './podcast-programmes-admin';
 import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
 import { useTranslation } from 'react-i18next';
+import { useWorkspaceResource } from './workspace-ui';
 
 type Directory = {
   path: string;
@@ -144,6 +145,46 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
   );
 }
 
+function JobDetail({ job, open }: { job: Job; open?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <details className="management-job" data-job-id={job.id} open={open}>
+      <summary>
+        <div>
+          <strong>
+            {job.kind === 'import' ? t('management.importMusic') : t('management.scanLibrary')}
+            {job.full ? t('management.fullTags') : ''}
+          </strong>
+          <small>{timestamp(job.created_at)}</small>
+        </div>
+        <span className={`job-status ${job.status}`}>{t(statuses[job.status])}</span>
+      </summary>
+      <div className="management-job-body">
+        <p className="muted">
+          {t('management.jobTimes', {
+            start: timestamp(job.started_at),
+            end: timestamp(job.finished_at),
+          })}
+        </p>
+        {job.error && (
+          <p role="status">
+            {job.error === 'waiting_for_library'
+              ? t('management.jobWaitingForLibrary')
+              : job.error === 'worker_interrupted'
+                ? t('management.jobWorkerInterrupted')
+                : t('management.jobIncomplete')}
+          </p>
+        )}
+        <RunDetail title={t('management.runImport')} run={job.import} />
+        <RunDetail title={t('management.runScan')} run={job.scan} />
+        {job.status === 'queued' && !job.error && (
+          <p className="muted">{t('management.jobQueuedNote')}</p>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export type ManagementTab =
   | 'home'
   | 'overview'
@@ -219,11 +260,17 @@ export function Management({
   }, [canPodcastAdmin, downloadPending]);
   function setTab(value: ManagementTab) {
     updateTab(value);
+    if (value !== 'jobs') setFocusedJobId(null);
     onTabChanged?.(value);
   }
   useEffect(() => {
     updateTab(initialTab);
   }, [initialTab]);
+  const [focusedJobId, setFocusedJobId] = useState<string | null>(null);
+  const focusedJob = useWorkspaceResource<Job>(
+    tab === 'jobs' && focusedJobId ? `/manage/jobs/${encodeURIComponent(focusedJobId)}` : null,
+    2000,
+  );
   const [reviewOpen, setReviewOpen] = useState(false);
   const [metadataBatchId, setMetadataBatchId] = useState<string | undefined>(
     initialAction?.batchId,
@@ -479,6 +526,11 @@ export function Management({
                     canDelete={canImport}
                     canPurge={canOwner}
                     onChanged={onChanged}
+                    onViewJob={(id) => {
+                      setFocusedJobId(id);
+                      setJobOffset(0);
+                      setTab('jobs');
+                    }}
                   />
                   <IntakePanel />
                 </>
@@ -668,6 +720,26 @@ export function Management({
                   )}
                 </section>
               )}
+              {tab === 'jobs' && focusedJobId && (
+                <section
+                  className="management-card"
+                  aria-label={t('librarySources.importProgressTitle')}
+                >
+                  <h2>{t('librarySources.importProgressTitle')}</h2>
+                  {focusedJob.value ? (
+                    <JobDetail key={focusedJob.value.id} job={focusedJob.value} open />
+                  ) : focusedJob.error || focusedJob.unsupported ? (
+                    <p className="error" role="alert">
+                      {focusedJob.error || t('librarySources.importProgressUnavailable')}
+                      <button className="text-button" onClick={() => void focusedJob.reload()}>
+                        {t('management.refreshJobs')}
+                      </button>
+                    </p>
+                  ) : (
+                    <p role="status">{t('librarySources.loadingImportProgress')}</p>
+                  )}
+                </section>
+              )}
               {tab === 'jobs' && (
                 <section className="management-card">
                   {canOwner && (
@@ -692,46 +764,11 @@ export function Management({
                       {canImport ? t('management.noJobsImporter') : t('management.noJobsViewer')}
                     </p>
                   )}
-                  {jobs?.items.map((job) => (
-                    <details className="management-job" data-job-id={job.id} key={job.id}>
-                      <summary>
-                        <div>
-                          <strong>
-                            {job.kind === 'import'
-                              ? t('management.importMusic')
-                              : t('management.scanLibrary')}
-                            {job.full ? t('management.fullTags') : ''}
-                          </strong>
-                          <small>{timestamp(job.created_at)}</small>
-                        </div>
-                        <span className={`job-status ${job.status}`}>
-                          {t(statuses[job.status])}
-                        </span>
-                      </summary>
-                      <div className="management-job-body">
-                        <p className="muted">
-                          {t('management.jobTimes', {
-                            start: timestamp(job.started_at),
-                            end: timestamp(job.finished_at),
-                          })}
-                        </p>
-                        {job.error && (
-                          <p role="status">
-                            {job.error === 'waiting_for_library'
-                              ? t('management.jobWaitingForLibrary')
-                              : job.error === 'worker_interrupted'
-                                ? t('management.jobWorkerInterrupted')
-                                : t('management.jobIncomplete')}
-                          </p>
-                        )}
-                        <RunDetail title={t('management.runImport')} run={job.import} />
-                        <RunDetail title={t('management.runScan')} run={job.scan} />
-                        {job.status === 'queued' && !job.error && (
-                          <p className="muted">{t('management.jobQueuedNote')}</p>
-                        )}
-                      </div>
-                    </details>
-                  ))}
+                  {jobs?.items
+                    .filter((job) => !focusedJobId || job.id !== focusedJob.value?.id)
+                    .map((job) => (
+                      <JobDetail key={job.id} job={job} />
+                    ))}
                   {jobs && jobs.total > 10 && (
                     <Pagination
                       page={jobs}

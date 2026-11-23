@@ -1,8 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { login, section } from './helpers';
 
-async function fixture(page: Page, options: { large?: boolean; multiple?: boolean } = {}) {
-  let version = 1;
+async function fixture(
+  page: Page,
+  options: { large?: boolean; multiple?: boolean; fromReview?: boolean } = {},
+) {
+  const versions = [1, 1];
+  const applied = new Set<string>();
   let coverLoaded: (() => void) | undefined;
   const submissions: Record<string, unknown>[] = [];
   let failOnce = false;
@@ -17,55 +21,52 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
       album: '现场录音',
       album_id: 'review-album',
       has_cover: false,
-      metadata_version: version,
+      metadata_version: versions[i],
       current: { title: `摇滚测试 ${i + 1}`, genres: [], composers: ['人工作者'] },
       original: { title: `摇滚测试 ${i + 1}`, genres: [], composers: ['原作者'] },
       overrides: { composers: ['人工作者'] },
-      suggestions:
-        version === 1
+      suggestions: [
+        {
+          id: `candidate-${i}`,
+          metadata_version: 1,
+          provider: 'musicbrainz',
+          source_url: 'https://musicbrainz.org/',
+          fields: {
+            genres: ['Rock'],
+            composers: ['建议作者'],
+            ...(options.multiple ? { album: '原始专辑', release_date: '2011-03-24' } : {}),
+            ...(options.large ? { description: '用于核对滚动的长资料。'.repeat(120) } : {}),
+          },
+          duplicate_count: 2,
+          candidate_digest: 'a'.repeat(64),
+          match: { score: 98 },
+          cover_url: 'https://coverartarchive.org/test.jpg',
+        },
+        ...(options.multiple
           ? [
               {
-                id: `candidate-${i}`,
+                id: `alternate-${i}`,
                 metadata_version: 1,
                 provider: 'musicbrainz',
                 source_url: 'https://musicbrainz.org/',
-                fields: {
-                  genres: ['Rock'],
-                  composers: ['建议作者'],
-                  ...(options.multiple ? { album: '原始专辑', release_date: '2011-03-24' } : {}),
-                  ...(options.large ? { description: '用于核对滚动的长资料。'.repeat(120) } : {}),
-                },
-                duplicate_count: 2,
-                candidate_digest: 'a'.repeat(64),
-                match: { score: 98 },
-                cover_url: 'https://coverartarchive.org/test.jpg',
-              },
-              ...(options.multiple
-                ? [
-                    {
-                      id: `alternate-${i}`,
-                      metadata_version: 1,
-                      provider: 'musicbrainz',
-                      source_url: 'https://musicbrainz.org/',
-                      fields: { album: '演唱会现场版', release_date: '2022-01-01' },
-                      candidate_digest: 'c'.repeat(64),
-                      match: { score: 0.67 },
-                      cover_url: null,
-                    },
-                  ]
-                : []),
-              {
-                id: `stale-${i}`,
-                metadata_version: 0,
-                provider: 'lastfm',
-                source_url: null,
-                fields: { genres: ['Old'] },
-                candidate_digest: 'b'.repeat(64),
-                match: {},
+                fields: { album: '演唱会现场版', release_date: '2022-01-01' },
+                candidate_digest: 'c'.repeat(64),
+                match: { score: 0.67 },
                 cover_url: null,
               },
-            ].filter((candidate) => !rejected.has(candidate.id))
-          : [],
+            ]
+          : []),
+        {
+          id: `stale-${i}`,
+          metadata_version: 0,
+          provider: 'lastfm',
+          source_url: null,
+          fields: { genres: ['Old'] },
+          candidate_digest: 'b'.repeat(64),
+          match: {},
+          cover_url: null,
+        },
+      ].filter((candidate) => !rejected.has(candidate.id) && !applied.has(candidate.id)),
     }));
   await page.route('**/api/v1/agent/metadata-review**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -76,7 +77,11 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
             id: i ? `album-${i}` : 'review-album',
             title: i ? `滚动专辑 ${i}` : '现场录音',
             artists: ['测试乐队'],
-            count: 2,
+            count: rows().filter((row) =>
+              row.suggestions.some(
+                (candidate) => candidate.metadata_version === row.metadata_version,
+              ),
+            ).length,
           })),
           total: options.large ? 60 : 1,
         },
@@ -88,9 +93,14 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
         failRejection = false;
         return route.abort('failed');
       }
-      rejected.add(body.suggestion_id);
+      const ids = body.suggestion_id
+        ? [body.suggestion_id]
+        : rows()
+            .find((row) => row.id === body.track_id)!
+            .suggestions.map((candidate) => candidate.id);
+      for (const id of ids) rejected.add(id);
       return route.fulfill({
-        json: { status: 'ignored', ignored_count: 2, already_ignored: false },
+        json: { status: 'ignored', ignored_count: ids.length, already_ignored: !ids.length },
       });
     }
     if (path.endsWith('/cover'))
@@ -105,12 +115,16 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
         },
       });
     if (path.endsWith('/accept')) {
-      submissions.push(route.request().postDataJSON());
+      const body = route.request().postDataJSON();
+      submissions.push(body);
       if (failOnce) {
         failOnce = false;
         return route.abort('failed');
       }
-      version++;
+      for (const item of body.items) {
+        applied.add(item.suggestion_id);
+        versions[Number(item.track_id.split('-').at(-1))]++;
+      }
       return route.fulfill({
         json: { status: 'applied', draft: { id: 'receipt', status: 'applied' } },
       });
@@ -139,11 +153,15 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
     });
   });
   await login(page);
-  await section(page, '管理');
-  // The management switcher selects the default library after its first load.
-  // Wait for that selection before opening a dialog owned by the selected library.
-  await expect(page.locator('.music-library-switcher-management')).toBeVisible();
-  await page.getByRole('button', { name: '批量核对资料', exact: true }).click();
+  if (options.fromReview) {
+    await section(page, '待确认');
+    await expect(page.getByText('1 张专辑有待核对的资料', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '核对歌曲资料', exact: true }).click();
+  } else {
+    await section(page, '管理');
+    await expect(page.locator('.music-library-switcher-management')).toBeVisible();
+    await page.getByRole('button', { name: '批量核对资料', exact: true }).click();
+  }
   const dialog = page.getByRole('dialog', { name: '批量核对资料', exact: true });
   await expect(dialog.getByRole('heading', { name: '摇滚测试 1', exact: true })).toBeVisible();
   return {
@@ -161,32 +179,50 @@ async function fixture(page: Page, options: { large?: boolean; multiple?: boolea
 }
 
 test('专辑并排核对默认保留人工值，失败重试复用同一凭据，仅一次接受', async ({ page }, info) => {
-  const { dialog, submissions, failNext } = await fixture(page);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  const { dialog, submissions, failNext } = await fixture(page, {
+    multiple: true,
+    fromReview: true,
+  });
+  const albumHeader = dialog.locator('.review-album');
+  await expect(albumHeader.getByText('2 首待核对', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('第 1 首 / 共 2 首', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('checkbox', { name: '采用 风格', exact: true })).toBeChecked();
   await expect(dialog.getByRole('checkbox', { name: '采用 作曲', exact: true })).not.toBeChecked();
   await expect(dialog.getByRole('row').filter({ hasText: '作曲' })).toContainText('人工作者');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (value) =>
+        window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value })),
+      theme,
+    );
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.screenshot({
+      path: `../../artifacts/metadata-review-progress-${info.project.name}-${theme}.png`,
+    });
+  }
   await dialog.getByRole('button', { name: '选择歌曲（已选 2 首）', exact: true }).click();
   await dialog.getByRole('checkbox', { name: '选择 摇滚测试 2', exact: true }).uncheck();
   await dialog.getByLabel('候选来源', { exact: true }).selectOption('stale-0');
   await expect(dialog.getByRole('button', { name: '接受选中项', exact: true })).toBeDisabled();
   await dialog.getByLabel('候选来源', { exact: true }).selectOption('candidate-0');
+  await dialog.getByRole('checkbox', { name: '采用 专辑', exact: true }).uncheck();
+  await dialog.getByRole('checkbox', { name: '采用 发行日期', exact: true }).uncheck();
   await dialog.getByText('文件原始值与匹配依据', { exact: true }).click();
   await expect(dialog.getByText('原作者', { exact: true })).toBeVisible();
-  await page.screenshot({
-    path: `../../artifacts/metadata-review-${info.project.name}.png`,
-    fullPage: true,
-  });
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await page.screenshot({
-    path: `../../artifacts/metadata-review-dark-${info.project.name}.png`,
-    fullPage: true,
-  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   failNext();
   await dialog.getByRole('button', { name: '接受选中项', exact: true }).click();
   await expect(dialog.getByRole('alert')).toBeVisible();
   await dialog.getByRole('button', { name: '接受选中项', exact: true }).click();
-  await expect(dialog.getByRole('status')).toContainText('已应用 1 首的 1 个字段');
+  await expect(
+    dialog.getByRole('status').filter({ hasText: '已应用 1 首的 1 个字段' }),
+  ).toBeVisible();
+  await expect(albumHeader.getByText('1 首待核对', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: '摇滚测试 2', exact: true })).toBeVisible();
+  await expect(dialog.getByText('第 2 首 / 共 2 首', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '接受选中项', exact: true })).toBeDisabled();
+  await expect(dialog.locator('.review-stale-notice')).toHaveCount(0);
   expect(submissions).toHaveLength(2);
   expect(submissions[0]).toEqual(submissions[1]);
   expect(submissions[0].items).toEqual([
@@ -198,6 +234,11 @@ test('专辑并排核对默认保留人工值，失败重试复用同一凭据�
       fields: ['genres'],
     },
   ]);
+  await dialog.getByRole('checkbox', { name: '采用 风格', exact: true }).check();
+  await dialog.getByRole('button', { name: '接受选中项', exact: true }).click();
+  await expect(albumHeader.getByText('0 首待核对', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('本页没有其他可核对的资料。', { exact: true })).toBeVisible();
+  await expect(dialog.locator('.review-stale-notice')).toHaveCount(0);
 });
 
 test('封面必须显示快照后才能随选中字段整批应用，快捷键遵守相同限制', async ({ page }) => {
@@ -212,7 +253,7 @@ test('封面必须显示快照后才能随选中字段整批应用，快捷键�
   releaseCover();
   await expect(dialog.getByRole('button', { name: '接受选中项', exact: true })).toBeEnabled();
   await dialog.getByRole('button', { name: '接受选中项', exact: true }).click();
-  await expect(dialog.getByRole('status')).toContainText('已应用 2 首');
+  await expect(dialog.getByRole('status').filter({ hasText: '已应用 2 首' })).toBeVisible();
   expect(submissions).toHaveLength(1);
   expect(submissions[0].cover_draft_id).toBe('review-cover');
 });
@@ -223,6 +264,10 @@ test('跳过只切换歌曲，拒绝当前候选不应用资料且失败可以�
   });
   await dialog.getByRole('button', { name: '本次跳过 / 下一首', exact: true }).click();
   await expect(dialog.getByRole('heading', { name: '摇滚测试 2', exact: true })).toBeVisible();
+  await expect(dialog.getByText('第 2 首 / 共 2 首', { exact: true })).toBeVisible();
+  await expect(
+    dialog.locator('.review-album').getByText('2 首待核对', { exact: true }),
+  ).toBeVisible();
   expect(rejections).toHaveLength(0);
   await dialog.getByRole('button', { name: '清空选择', exact: true }).click();
   const reject = dialog.getByRole('button', { name: '拒绝当前建议', exact: true });
@@ -247,6 +292,23 @@ test('跳过只切换歌曲，拒绝当前候选不应用资料且失败可以�
   await expect(dialog.getByRole('option').filter({ hasText: '原始专辑' })).toHaveCount(0);
   await dialog.getByRole('button', { name: '本次跳过 / 下一首', exact: true }).click();
   await expect(dialog.getByRole('status')).toHaveCount(0);
+});
+
+test('拒绝整首建议后前进，已处理歌曲不能再次拒绝', async ({ page }) => {
+  const { dialog, rejections } = await fixture(page, { multiple: true });
+  const albumHeader = dialog.locator('.review-album');
+  const reject = dialog.getByRole('button', { name: '拒绝此歌曲建议', exact: true });
+  await reject.click();
+  await expect(albumHeader.getByText('1 首待核对', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: '摇滚测试 2', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: '选择歌曲（已选 1 首）', exact: true }).click();
+  await dialog.getByRole('button', { name: /摇滚测试 1.*无有效候选/ }).click();
+  await expect(reject).toBeDisabled();
+  await dialog.getByRole('button', { name: /摇滚测试 2/ }).click();
+  await reject.click();
+  await expect(albumHeader.getByText('0 首待核对', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('本页没有其他可核对的资料。', { exact: true })).toBeVisible();
+  expect(rejections).toEqual([{ track_id: 'review-0' }, { track_id: 'review-1' }]);
 });
 
 test('候选标注专辑日期匹配度，左右滚动保持标题操作区和背景位置', async ({ page }, info) => {

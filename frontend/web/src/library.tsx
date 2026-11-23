@@ -9,6 +9,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -48,6 +49,7 @@ import { PersonalSettings, type PersonalSection } from './personal-settings';
 import type { AssistantSettingsTab } from './assistant-settings';
 import { MetadataEditor } from './metadata-editor';
 import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
+import { MetadataReviewDialog } from './metadata-review';
 import { LyricScanDialog } from './lyric-scans';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
@@ -176,6 +178,8 @@ const viewIcons: Record<
 
 type CatalogLocation = {
   view: View;
+  manageOpen: boolean;
+  accountOpen: boolean;
   album: Album | null;
   selectedArtist: Artist | null;
   artistRole: string;
@@ -188,8 +192,33 @@ type CatalogLocation = {
   queueOpen: boolean;
 };
 
+function closeCollectionMenu(button: HTMLButtonElement) {
+  const menu = button.closest('details');
+  menu?.removeAttribute('open');
+  menu?.querySelector('summary')?.focus();
+}
+
+function fitCollectionMenu(menu: HTMLDetailsElement | null) {
+  if (!menu?.open || !menu.offsetWidth) return;
+  const panel = menu.querySelector(':scope > div');
+  const toolbar = menu.closest('.library-toolbar');
+  if (!(panel instanceof HTMLElement) || !toolbar) return;
+  const bounds = panel.getBoundingClientRect();
+  const available = toolbar.getBoundingClientRect();
+  const left = bounds.left - (parseFloat(panel.style.translate) || 0);
+  const fitted = Math.min(Math.max(left, available.left), available.right - bounds.width);
+  panel.style.translate = `${fitted - left}px`;
+}
+
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
   const { t } = useTranslation();
+  const collectionMenu = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => fitCollectionMenu(collectionMenu.current));
+  useEffect(() => {
+    const fit = () => fitCollectionMenu(collectionMenu.current);
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
   bindLibraryUser(user.id);
   const [currentUser, setCurrentUser] = useState(user);
   const profile = currentUser.profile;
@@ -214,6 +243,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     section: PersonalSection | null = null,
     assistantTab: AssistantSettingsTab = 'connections',
   ) {
+    navigationRequest.current?.abort();
     setSettingsLocation({ section, assistantTab });
     setConnectionSettingsRevision((value) => value + 1);
     setAccountOpen(true);
@@ -225,6 +255,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     openPersonalSettings('assistant', 'connections');
   }
   function openManagement(tab: ManagementTab = 'home') {
+    navigationRequest.current?.abort();
     setAccountOpen(false);
     setManageOpen(true);
     setManagementTab(tab);
@@ -282,11 +313,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [collectionBusy, setCollectionBusy] = useState(false);
   const savingCollection = useRef(false);
   const collectionRequest = useRef<AbortController | null>(null);
-  const albumRequest = useRef<AbortController | null>(null);
+  const navigationRequest = useRef<AbortController | null>(null);
   useEffect(
     () => () => {
       collectionRequest.current?.abort();
-      albumRequest.current?.abort();
+      navigationRequest.current?.abort();
     },
     [],
   );
@@ -295,6 +326,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [focusPodcastId, setFocusPodcastId] = useState<string | null>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
+  const [metadataReviewBatch, setMetadataReviewBatch] = useState<string | null>(null);
   useEffect(() => {
     if (manageOpen) window.scrollTo({ top: 0 });
   }, [manageOpen]);
@@ -305,12 +337,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       refreshLibrary();
     };
     const accessChanged = () => {
-      albumRequest.current?.abort();
+      navigationRequest.current?.abort();
       collectionRequest.current?.abort();
       setEditingTrack(null);
       setEditingAlbum(null);
       setViewingFileTrack(null);
       setMetadataRefresh(null);
+      setMetadataReviewBatch(null);
       setEditor(null);
       setAlbumMenu(null);
       setPlaylistMenu(null);
@@ -644,6 +677,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   function rememberLocation() {
     const location: CatalogLocation = {
       view,
+      manageOpen,
+      accountOpen,
       album,
       selectedArtist,
       artistRole,
@@ -660,6 +695,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   function restoreLocation(previous: CatalogLocation) {
     setView(previous.view);
+    setManageOpen(previous.manageOpen);
+    setAccountOpen(previous.accountOpen);
     setAlbumLoading(false);
     setAlbum(previous.album);
     setSelectedArtist(previous.selectedArtist);
@@ -684,12 +721,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       else switchView('playlists');
       return;
     }
-    albumRequest.current?.abort();
+    navigationRequest.current?.abort();
     setNavigation((items) => items.slice(0, -1));
     restoreLocation(previous);
   }
   function clearSearch() {
-    albumRequest.current?.abort();
+    navigationRequest.current?.abort();
     setDraft('');
     setQuery('');
     setError('');
@@ -739,21 +776,23 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   function openArtist(item: Artist) {
     rememberLocation();
-    window.scrollTo(0, 0);
+    switchView('artists', false);
     setSelectedArtist(item);
     setArtistView('tracks');
-    setAlbumLoading(false);
-    setAlbum(null);
-    clearSearch();
   }
   async function openArtistName(name: string) {
     const query = name.trim();
     if (!query) return;
+    navigationRequest.current?.abort();
+    const controller = new AbortController();
+    navigationRequest.current = controller;
     setNotice(t('library.openingArtist', { name: query }));
     try {
       const result = await api<ArtistPage>(
         `/artists?q=${encodeURIComponent(query)}&limit=20&offset=0`,
+        { signal: controller.signal },
       );
+      if (controller.signal.aborted) return;
       const item =
         result.items.find((candidate) => candidate.name === query) ||
         result.items.find(
@@ -765,11 +804,17 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         setNotice(t('library.artistNotFound', { name: query }));
         return;
       }
+      openArtist(item);
+      setArtistRole('');
       setLyricsOpen(false);
       setQueueOpen(false);
-      openArtist(item);
+      setNotice('');
     } catch (error) {
-      setNotice(error instanceof ApiError ? error.message : t('library.artistOpenFailed'));
+      if (!controller.signal.aborted) {
+        setNotice(error instanceof ApiError ? error.message : t('library.artistOpenFailed'));
+      }
+    } finally {
+      if (navigationRequest.current === controller) navigationRequest.current = null;
     }
   }
   function openPlaylist(item: Playlist) {
@@ -784,11 +829,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   async function openTrackAlbum(track: Track) {
     if (!track.album_id) return;
-    albumRequest.current?.abort();
+    navigationRequest.current?.abort();
     const previousLocation = rememberLocation();
     switchView('albums', false);
     const controller = new AbortController();
-    albumRequest.current = controller;
+    navigationRequest.current = controller;
     setAlbum({
       id: track.album_id,
       title: track.album || t('library.unknownAlbum'),
@@ -817,18 +862,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         // stable, user-facing retry message. In particular, callers opened
         // from the player need the player dialog restored so the message is
         // visible there instead of being hidden behind the album view.
-        albumRequest.current?.abort();
+        navigationRequest.current?.abort();
         setNavigation((items) => items.slice(0, -1));
         restoreLocation(previousLocation);
         setNotice(t('library.albumGone'));
       }
     } finally {
-      if (albumRequest.current === controller) albumRequest.current = null;
+      if (navigationRequest.current === controller) navigationRequest.current = null;
     }
   }
   function search(event: FormEvent) {
     event.preventDefault();
-    albumRequest.current?.abort();
+    navigationRequest.current?.abort();
     setNavigation([]);
     setError('');
     window.scrollTo(0, 0);
@@ -1365,13 +1410,17 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       ←{' '}
                       {navigation.at(-1)?.playerOpen
                         ? t('library.backToPlayer')
-                        : album
-                          ? selectedArtist
-                            ? t('library.backToName', { name: selectedArtist.name })
-                            : t('library.backToAlbum')
-                          : selectedArtist
-                            ? t('library.backToArtists')
-                            : t('library.backToPlaylists')}
+                        : navigation.at(-1)?.manageOpen
+                          ? t('library.backToName', { name: t('nav.manage') })
+                          : navigation.at(-1)?.accountOpen
+                            ? t('library.backToName', { name: t('nav.account') })
+                            : album
+                              ? selectedArtist
+                                ? t('library.backToName', { name: selectedArtist.name })
+                                : t('library.backToAlbum')
+                              : selectedArtist
+                                ? t('library.backToArtists')
+                                : t('library.backToPlaylists')}
                     </button>
                   )}
                   <h1>{title}</h1>
@@ -1491,7 +1540,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 )}
                 {kind === 'tracks' && (
                   <>
-                    <details className="collection-menu">
+                    <details
+                      className="collection-menu"
+                      ref={collectionMenu}
+                      onToggle={(event) => fitCollectionMenu(event.currentTarget)}
+                    >
                       <summary aria-label={t('library.collectionMoreAria')}>
                         <Icon name="more" />
                       </summary>
@@ -1506,7 +1559,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         {album && canManage && (
                           <button
                             onClick={(event) => {
-                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              closeCollectionMenu(event.currentTarget);
                               setEditingAlbum(album);
                             }}
                           >
@@ -1516,18 +1569,20 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         )}
                         {album && canImport && (
                           <button
+                            disabled={albumLoading}
                             onClick={(event) => {
-                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              closeCollectionMenu(event.currentTarget);
                               setLyricScanAlbum(album.id);
                             }}
                           >
-                            {t('library.lyricTools')}
+                            <Icon name="music" />
+                            {t('library.updateAlbumLyrics')}
                           </button>
                         )}
                         {album && canImport && (
                           <button
                             onClick={(event) => {
-                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              closeCollectionMenu(event.currentTarget);
                               setMetadataRefresh({
                                 scope: 'album',
                                 id: album.id,
@@ -1796,7 +1851,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           className="album-card-main"
                           aria-label={t('library.openAlbumAria', { name: item.title })}
                           onClick={() => {
-                            albumRequest.current?.abort();
+                            navigationRequest.current?.abort();
                             rememberLocation();
                             window.scrollTo(0, 0);
                             setAlbumLoading(false);
@@ -1913,6 +1968,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           }}
           lyricsOpen={lyricsOpen}
           favorites={favorites}
+          onOpenArtist={(name) => void openArtistName(name)}
+          onOpenAlbum={(track) => void openTrackAlbum(track)}
         />
         {notice && !lyricsOpen && (
           <p className="toast" role="status">
@@ -1932,13 +1989,35 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         />
       )}
       {lyricScanAlbum && (
-        <LyricScanDialog albumId={lyricScanAlbum} onClose={() => setLyricScanAlbum(null)} />
+        <LyricScanDialog
+          albumId={lyricScanAlbum}
+          albumTitle={album?.id === lyricScanAlbum ? album.title : undefined}
+          onClose={() => setLyricScanAlbum(null)}
+        />
       )}
       {lyricScanBatch && (
         <LyricScanDialog batchId={lyricScanBatch} onClose={() => setLyricScanBatch(null)} />
       )}
       {metadataRefresh && (
-        <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
+        <MetadataRefreshDialog
+          target={metadataRefresh}
+          onClose={() => setMetadataRefresh(null)}
+          onReviewBatch={(batchId) => {
+            setMetadataRefresh(null);
+            setMetadataReviewBatch(batchId);
+          }}
+        />
+      )}
+      {metadataReviewBatch && (
+        <MetadataReviewDialog
+          batchId={metadataReviewBatch}
+          onClose={() => setMetadataReviewBatch(null)}
+          onApplied={() => {
+            refreshLibrary();
+            setCollectionRevision((value) => value + 1);
+            void inbox.refresh();
+          }}
+        />
       )}
       <PlaybackSync player={player} userId={currentUser.id} />
       <PodcastProgressDialog player={player} />
@@ -1979,7 +2058,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           canManage={canManage}
           onClose={closeAlbumMenu}
           onOpen={() => {
-            albumRequest.current?.abort();
+            navigationRequest.current?.abort();
             rememberLocation();
             window.scrollTo(0, 0);
             setAlbumLoading(false);

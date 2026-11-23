@@ -240,7 +240,7 @@ test('草案接受即应用，网络重试沿用幂等键且保留诊断编号',
     return r.fulfill({ json: draft });
   });
   await login(page);
-  await section(page, '待确认草案');
+  await section(page, '待确认');
   await page.getByRole('button', { name: '查看草案 待确认歌单', exact: true }).click();
   await page.getByRole('button', { name: '接受并应用', exact: true }).click();
   expect(approves).toBe(0);
@@ -536,24 +536,35 @@ test('手动模型可巡检，定时计划仍要求自动使用授权', async ({
     submitted = r.request().postDataJSON();
     return r.fulfill({ json: { id: 'task-manual' } });
   });
+  await page.route('**/api/v1/agent/tasks/task-manual?*', (r) =>
+    r.fulfill({
+      json: { id: 'task-manual', status: 'queued', stage: 'queued', counts: { total: 2 } },
+    }),
+  );
   await login(page);
-  await section(page, '巡检与任务');
-  await page.getByLabel('使用 AI 辅助巡检', { exact: true }).check();
-  const submit = page.getByRole('button', { name: '提交 AI 辅助巡检', exact: true });
+  await section(page, '曲库检查');
+  await page.getByLabel('使用 AI 辅助检查', { exact: true }).check();
+  const submit = page.getByRole('button', { name: '开始 AI 辅助检查', exact: true });
   await expect(submit).toBeDisabled();
-  await expect(page.getByText('请选择用于本次巡检的 AI 连接。', { exact: true })).toBeVisible();
-  await page.getByLabel('巡检模型连接', { exact: true }).selectOption('manual');
+  await expect(page.getByText('请选择用于本次检查的 AI 连接。', { exact: true })).toBeVisible();
+  await page.getByLabel('检查模型连接', { exact: true }).selectOption('manual');
   await expect(submit).toBeEnabled();
   await page.screenshot({ path: info.outputPath('manual-ai-inspection.png'), fullPage: true });
   await submit.click();
   await expect
     .poll(() => submitted)
-    .toEqual({ max_tracks: 500, max_calls: 4, use_ai: true, connection_id: 'manual' });
-  await page.getByRole('button', { name: '定时巡检', exact: true }).click();
+    .toEqual({
+      scope: 'recent',
+      max_tracks: 500,
+      max_calls: 4,
+      use_ai: true,
+      connection_id: 'manual',
+    });
+  await page.getByRole('button', { name: '定时检查', exact: true }).click();
   const save = page.getByRole('button', { name: '保存关闭的计划', exact: true });
   await expect(save).toBeDisabled();
-  await expect(page.getByLabel('巡检模型连接').locator('option[value="legacy"]')).toHaveCount(0);
-  await page.getByLabel('巡检模型连接').selectOption('automatic');
+  await expect(page.getByLabel('检查模型连接').locator('option[value="legacy"]')).toHaveCount(0);
+  await page.getByLabel('检查模型连接').selectOption('automatic');
   await expect(save).toBeEnabled();
 });
 
@@ -566,6 +577,22 @@ test('规则巡检不调用模型，计划默认关闭并通过完整版本参�
   await page.route('**/api/v1/agent/tasks', (r) => {
     submitted = r.request().postDataJSON();
     return r.fulfill({ json: { id: 'task' } });
+  });
+  const reads: number[] = [];
+  await page.route('**/api/v1/agent/tasks/task?*', (r) => {
+    const offset = Number(new URL(r.request().url()).searchParams.get('result_offset'));
+    reads.push(offset);
+    const full = submitted?.scope === 'library';
+    return r.fulfill({
+      json: {
+        id: 'task',
+        status: 'running',
+        stage: 'rules',
+        counts: { processed: full ? 50 : 1, total: full ? 75 : 2 },
+        result_total: full ? 50 : 1,
+        results: [{ title: offset ? '第二页检查结果' : '第一页检查结果' }],
+      },
+    });
   });
   await page.route('**/api/v1/agent/schedules?*', (r) => r.fulfill({ json: list(schedules) }));
   await page.route('**/api/v1/agent/schedules', (r) => {
@@ -580,16 +607,29 @@ test('规则巡检不调用模型，计划默认关闭并通过完整版本参�
     return r.fulfill({ json: schedules[0] });
   });
   await login(page);
-  await section(page, '巡检与任务');
-  await page.getByRole('button', { name: '提交规则巡检', exact: true }).click();
-  await expect.poll(() => submitted).toEqual({ max_tracks: 500, max_calls: 0, use_ai: false });
-  await page.getByRole('button', { name: '定时巡检', exact: true }).click();
+  await section(page, '曲库检查');
+  await page.getByRole('button', { name: '开始检查', exact: true }).click();
+  await expect
+    .poll(() => submitted)
+    .toEqual({ scope: 'recent', max_tracks: 500, max_calls: 0, use_ai: false });
+  const scope = page.getByRole('combobox', { name: '检查范围', exact: true });
+  await scope.selectOption('library');
+  await expect(page.getByLabel('检查歌曲上限', { exact: true })).toBeHidden();
+  await page.getByRole('button', { name: '开始检查', exact: true }).click();
+  await expect.poll(() => submitted).toEqual({ scope: 'library', max_calls: 0, use_ai: false });
+  const detail = page.getByRole('article', { name: '检查任务详情' });
+  await expect(detail).toContainText('已检查 50 / 75 首');
+  await expect(detail.getByRole('progressbar')).toHaveAttribute('max', '75');
+  await detail.getByRole('button', { name: '下一页', exact: true }).click();
+  await expect(detail).toContainText('第二页检查结果');
+  expect(reads).toContain(20);
+  await page.getByRole('button', { name: '定时检查', exact: true }).click();
   await page.getByRole('button', { name: '保存关闭的计划', exact: true }).click();
   await expect(page.getByRole('button', { name: '开启计划', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '开启计划', exact: true }).click();
   await expect.poll(() => changed?.enabled).toBe(true);
   expect(changed).toMatchObject({
-    name: '每日曲库巡检',
+    name: '每日曲库检查',
     version: 1,
     interval_hours: 24,
     parameters: { use_ai: false },
@@ -771,11 +811,11 @@ test('巡检模型超限展示原因和失败阶段，历史 completed 不误示
     results: [{ track_id: 'fixture', title: '合成测试曲', issues: [] }],
   };
   await page.route('**/api/v1/agent/tasks?*', (r) => r.fulfill({ json: list([task]) }));
-  await page.route('**/api/v1/agent/tasks/limited-task', (r) => r.fulfill({ json: task }));
+  await page.route('**/api/v1/agent/tasks/limited-task?*', (r) => r.fulfill({ json: task }));
   await login(page);
-  await section(page, '巡检与任务');
+  await section(page, '曲库检查');
   await page.getByRole('button', { name: '查看任务', exact: true }).click();
-  const detail = page.getByRole('article', { name: '巡检任务详情' });
+  const detail = page.getByRole('article', { name: '检查任务详情' });
   await expect(detail).toContainText('处理结束，未全部完成');
   await expect(detail).toContainText('模型达到输出 Token 上限');
   await expect(detail).toContainText('降低推理强度');
@@ -816,7 +856,7 @@ test('AI 巡检混合结果与草案入口可显示，旧计划编辑保留范�
     ],
   };
   await page.route('**/api/v1/agent/tasks?*', (r) => r.fulfill({ json: list([task]) }));
-  await page.route('**/api/v1/agent/tasks/ai-task', (r) => r.fulfill({ json: task }));
+  await page.route('**/api/v1/agent/tasks/ai-task?*', (r) => r.fulfill({ json: task }));
   await page.route('**/api/v1/agent/schedules?*', (r) => r.fulfill({ json: list([schedule]) }));
   await page.route('**/api/v1/agent/schedules/existing', (r) => {
     changed = r.request().postDataJSON();
@@ -824,13 +864,13 @@ test('AI 巡检混合结果与草案入口可显示，旧计划编辑保留范�
     return r.fulfill({ json: schedule });
   });
   await login(page);
-  await section(page, '巡检与任务');
+  await section(page, '曲库检查');
   await page.getByRole('button', { name: '查看任务', exact: true }).click();
-  await expect(page.getByRole('article', { name: '巡检任务详情' })).toContainText(
+  await expect(page.getByRole('article', { name: '检查任务详情' })).toContainText(
     '依据缺失专辑生成草案',
   );
   await expect(page.getByRole('button', { name: '查看草案与应用结果', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '定时巡检', exact: true }).click();
+  await page.getByRole('button', { name: '定时检查', exact: true }).click();
   await page.getByRole('button', { name: '编辑计划', exact: true }).click();
   await page.getByLabel('计划名称', { exact: true }).fill('已调整的范围巡检');
   await page.getByRole('button', { name: '保存计划修改', exact: true }).click();
@@ -916,7 +956,7 @@ test('工作台视觉验收：前台入口、通知与错误草案在浅色深�
       path: `../../artifacts/agent-notifications-${info.project.name}-${color}.png`,
       fullPage: true,
     });
-    await section(page, '待确认草案');
+    await section(page, '待确认');
     await page.getByRole('button', { name: '查看草案 把明天留给摇滚', exact: true }).click();
     await page.getByRole('button', { name: '接受并应用', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('trace-visual-conflict-040');

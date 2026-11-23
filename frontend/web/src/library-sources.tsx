@@ -25,11 +25,13 @@ export function LibrarySources({
   canDelete,
   canPurge,
   onChanged,
+  onViewJob,
 }: {
   canImport: boolean;
   canDelete: boolean;
   canPurge: boolean;
   onChanged: () => void;
+  onViewJob: (jobId: string) => void;
 }) {
   const { t } = useTranslation();
   const displayPath = (path: string) =>
@@ -40,6 +42,10 @@ export function LibrarySources({
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<
+    { jobId: string } | { error: string } | null
+  >(null);
   const [error, setError] = useState('');
   const [sourceError, setSourceError] = useState('');
   const [notice, setNotice] = useState('');
@@ -78,21 +84,22 @@ export function LibrarySources({
   const source = sources.find((item) => item.id === selection?.source_id);
 
   async function importFolder() {
-    if (!canImport || !selection) return;
-    setBusy(true);
-    setError('');
-    setNotice('');
+    if (!canImport || !selection || submitting) return;
+    setSubmitting(true);
+    setImportFeedback(null);
     try {
-      await api('/manage/library/import', {
+      const job = await api<{ id: string }>('/manage/library/import', {
         method: 'POST',
         body: JSON.stringify(selection),
       });
-      setNotice(t('librarySources.importTaskSubmitted'));
+      setImportFeedback({ jobId: job.id });
       onChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('librarySources.importTaskFailed'));
+      setImportFeedback({
+        error: reason instanceof Error ? reason.message : t('librarySources.importTaskFailed'),
+      });
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   }
 
@@ -149,7 +156,11 @@ export function LibrarySources({
               {selection && selection.path !== '.' ? `/${selection.path}` : ''}
             </small>
           </div>
-          <button type="button" disabled={busy || !selection} onClick={() => setPickerOpen(true)}>
+          <button
+            type="button"
+            disabled={submitting || !selection}
+            onClick={() => setPickerOpen(true)}
+          >
             {t('librarySources.browseFolders')}
           </button>
         </div>
@@ -166,15 +177,33 @@ export function LibrarySources({
           <button
             type="button"
             className="primary"
-            disabled={busy || !canImport || !selection}
+            disabled={submitting || !canImport || !selection}
+            aria-busy={submitting}
             onClick={() => void importFolder()}
           >
-            {busy ? t('librarySources.submitting') : t('librarySources.importSelectedFolder')}
+            {submitting ? t('librarySources.submitting') : t('librarySources.importSelectedFolder')}
           </button>
           <small className="muted">
             {selection ? displayPath(selection.path) : t('librarySources.pleaseSelectFolder')}
           </small>
         </div>
+        {importFeedback &&
+          ('error' in importFeedback ? (
+            <p className="error" role="alert">
+              {importFeedback.error}
+            </p>
+          ) : (
+            <div className="source-actions source-job-feedback">
+              <span role="status">{t('librarySources.importTaskSubmitted')}</span>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onViewJob(importFeedback.jobId)}
+              >
+                {t('librarySources.viewImportProgress')}
+              </button>
+            </div>
+          ))}
         {pickerOpen && selection && (
           <ImportFolderDialog
             sources={sources}
@@ -183,7 +212,7 @@ export function LibrarySources({
             onSelect={(next, result) => {
               setSelection(next);
               setPreview(result);
-              setNotice('');
+              setImportFeedback(null);
               setPickerOpen(false);
             }}
           />

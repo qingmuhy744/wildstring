@@ -577,6 +577,65 @@ def test_restart_leases_preserve_checkpoint_and_model_unknown_is_not_retried(age
     assert result["status"] == "paused_budget" and result["error_code"] == "model_outcome_unknown"
 
 
+def test_inspection_scopes_use_ingest_order_and_resume_the_original_library(
+    agent, settings, monkeypatch
+):
+    client, service = agent
+    for number in range(1, 503):
+        music(settings, f"{number:03}.flac", ["合成艺人"], ["合成艺人"], number=number)
+    scan_library(settings)
+    with service.database.connect(write=True) as connection:
+        connection.execute(
+            "UPDATE tracks SET added_at='2026-01-01T00:00:00.' || substr(title,1,3) || '+00:00' "
+            "WHERE title GLOB '[0-9][0-9][0-9].flac'"
+        )
+        connection.execute("UPDATE tracks SET status='missing' WHERE title='real.flac'")
+
+    recent = post(client, "/tasks", {"scope": "recent", "max_tracks": 2})
+    ids = recent["parameters"]["track_ids"]
+    actor = service.current_actor("admin")
+    repository = service.repository_for(actor)
+    assert [repository.track(identity)["title"] for identity in ids] == ["502.flac", "501.flac"]
+    assert recent["counts"]["total"] == 2
+    post(client, f"/tasks/{recent['id']}/cancel", {})
+
+    full = post(client, "/tasks", {"scope": "library", "max_tracks": 2})
+    assert full["counts"]["total"] == 502
+    assert "track_ids" not in full["parameters"]
+    checkpoint_task = service.checkpoint_task
+
+    def stop_after_first_batch(job, checkpoint, results, counts, *, stage="rules"):
+        checkpoint_task(job, checkpoint, results, counts, stage=stage)
+        if checkpoint == 50:
+            service.stop_event.set()
+
+    monkeypatch.setattr(service, "checkpoint_task", stop_after_first_batch)
+    service.execute_task(service.claim_task())
+    endpoint = BASE + f"/tasks/{full['id']}"
+    first = client.get(endpoint + "?result_offset=0").json()
+    assert first["status"] == "interrupted"
+    assert first["checkpoint"] == first["counts"]["processed"] == first["result_total"] == 50
+    assert len(first["results"]) == 20
+
+    music(settings, "new-after-submission.flac", ["合成艺人"], ["合成艺人"])
+    scan_library(settings)
+    service.stop_event.clear()
+    post(client, f"/tasks/{full['id']}/resume", {})
+    service.execute_task(service.claim_task())
+    result = client.get(endpoint + "?result_offset=500").json()
+    assert result["status"] == "succeeded"
+    assert result["counts"]["processed"] == result["result_total"] == 502
+    assert [item["title"] for item in result["results"]] == ["002.flac", "001.flac"]
+    summary = next(
+        item
+        for item in client.get(BASE + "/tasks?summary=true").json()["items"]
+        if item["id"] == full["id"]
+    )
+    assert summary["counts"]["total"] == 502
+    assert summary["parameters"]["scope"] == "library"
+    assert "results" not in summary
+
+
 def test_notification_retention_expires_cursor_and_preserves_pending(agent):
     client, service = agent
     draft = playlist_draft(client, first_track(client))

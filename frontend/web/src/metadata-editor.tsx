@@ -77,6 +77,7 @@ export function MetadataEditor({
   const { t } = useTranslation();
   const getLabel = (key: keyof MetadataFields) => t(labelKeys[key]);
   const dialog = useRef<HTMLDialogElement>(null);
+  const scrollBody = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<'metadata' | 'lyrics' | 'online'>('metadata');
   const request = useRef<AbortController | null>(null);
   const [record, setRecord] = useState<MetadataRecord | null>(null);
@@ -87,6 +88,10 @@ export function MetadataEditor({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [showFileInfo, setShowFileInfo] = useState(false);
+  const [lyricsState, setLyricsState] = useState({ dirty: false, busy: false });
+  useEffect(() => {
+    scrollBody.current?.scrollTo(0, 0);
+  }, [tab, preview]);
 
   const handleApplyOnlineSuggestion = (fieldsData: Record<string, unknown>) => {
     const nextValues = { ...values };
@@ -213,285 +218,313 @@ export function MetadataEditor({
     }
   }
   const next = record ? { ...record.observed, ...overrides } : null;
+  function closeEditor() {
+    if (busy || lyricsState.busy) return;
+    const metadataChanged =
+      record &&
+      (fields.some((key) => values[key] !== display(record.effective[key])) ||
+        overridden.length !== Object.keys(record.overrides).length ||
+        overridden.some((key) => !Object.hasOwn(record.overrides, key)));
+    if (
+      (!metadataChanged && !lyricsState.dirty) ||
+      window.confirm(t('common.discardUnsavedChanges'))
+    )
+      onClose();
+  }
   return (
     <dialog
-      className="metadata-editor playlist-editor"
+      className="metadata-editor playlist-editor scroll-dialog"
       ref={dialog}
       aria-label={t('metadataEditor.dialogAria')}
       onCancel={(event) => {
         event.preventDefault();
-        if (!busy) onClose();
+        closeEditor();
       }}
     >
-      <div className="editor-heading">
+      <div className="editor-heading scroll-dialog-header">
         <div>
-          <span className="eyebrow">{t('metadataEditor.eyebrow')}</span>
           <h2>{t('metadataEditor.heading')}</h2>
-          <p className="muted">{track.title}</p>
+          <p className="muted ellipsis" title={track.title}>
+            {track.title}
+          </p>
         </div>
         <DialogCloseButton
-          disabled={busy}
+          disabled={busy || lyricsState.busy}
           aria-label={t('metadataEditor.closeAria')}
-          onClick={onClose}
+          onClick={closeEditor}
         />
       </div>
-      <nav className="management-tabs" aria-label={t('metadataEditor.tabsAria')}>
-        <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>
-          {t('metadataEditor.tabMetadata')}
-        </button>
-        <button aria-pressed={tab === 'lyrics'} onClick={() => setTab('lyrics')}>
-          {t('metadataEditor.tabLyrics')}
-        </button>
-      </nav>
-      <div hidden={tab !== 'metadata'}>
-        {record ? (
-          <>
-            <p className="muted">{t('metadataEditor.noticeEffective')}</p>
-            {fillNotice && (
+      <div className="scroll-dialog-body" ref={scrollBody}>
+        <nav className="management-tabs" aria-label={t('metadataEditor.tabsAria')}>
+          <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>
+            {t('metadataEditor.tabMetadata')}
+          </button>
+          <button aria-pressed={tab === 'lyrics'} onClick={() => setTab('lyrics')}>
+            {t('metadataEditor.tabLyrics')}
+          </button>
+        </nav>
+        <div hidden={tab !== 'metadata'}>
+          {record ? (
+            <>
+              <p className="muted">{t('metadataEditor.noticeEffective')}</p>
+              {fillNotice && (
+                <div
+                  style={{
+                    background: 'rgba(144, 238, 144, 0.15)',
+                    border: '1px solid rgba(144, 238, 144, 0.4)',
+                    color: '#98fb98',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    margin: '8px 0',
+                  }}
+                >
+                  ✓ {fillNotice}
+                </div>
+              )}
+              <OnlineMetadataMatcher
+                trackId={track.id}
+                currentTitle={values.title || track.title}
+                currentArtist={
+                  values.artists?.split('\n')[0] || (track.artists && track.artists[0]) || ''
+                }
+                onApply={handleApplyOnlineSuggestion}
+              />
               <div
+                className="metadata-file-row"
                 style={{
-                  background: 'rgba(144, 238, 144, 0.15)',
-                  border: '1px solid rgba(144, 238, 144, 0.4)',
-                  color: '#98fb98',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  margin: '8px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  margin: '8px 0 12px',
                 }}
               >
-                ✓ {fillNotice}
-              </div>
-            )}
-            <OnlineMetadataMatcher
-              trackId={track.id}
-              currentTitle={values.title || track.title}
-              currentArtist={
-                values.artists?.split('\n')[0] || (track.artists && track.artists[0]) || ''
-              }
-              onApply={handleApplyOnlineSuggestion}
-            />
-            <div
-              className="metadata-file-row"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '8px',
-                margin: '8px 0 12px',
-              }}
-            >
-              <span
-                className="metadata-file-path"
-                title={t('metadataEditor.filePathTooltip')}
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              >
-                {t('metadataEditor.filePathPrefix')}
-                <code>{record.path}</code>
-              </span>
-              <button
-                type="button"
-                className="text-button"
-                style={{ flexShrink: 0, padding: '2px 8px' }}
-                onClick={() => setShowFileInfo(true)}
-              >
-                {t('metadataEditor.viewFileAttributes')}
-              </button>
-            </div>
-            {!preview ? (
-              <div className="metadata-fields">
-                {fields.map((key) => (
-                  <label className="metadata-field" key={key}>
-                    <span className="metadata-field-label">
-                      {getLabel(key)}
-                      <span className="metadata-source" data-help={t('metadataEditor.sourceHelp')}>
-                        {overridden.includes(key)
-                          ? record.origins?.[key]?.startsWith('musicbrainz:')
-                            ? 'MusicBrainz'
-                            : record.origins?.[key]?.startsWith('lastfm:')
-                              ? 'Last.fm'
-                              : t('metadataEditor.sourceManual')
-                          : t('metadataEditor.sourceFileTag')}
-                      </span>
-                    </span>
-                    {[
-                      'artists',
-                      'album_artists',
-                      'composers',
-                      'lyricists',
-                      'arrangers',
-                      'vocalists',
-                      'genres',
-                    ].includes(key) ? (
-                      <textarea
-                        aria-label={getLabel(key)}
-                        value={values[key] || ''}
-                        maxLength={10000}
-                        rows={2}
-                        onChange={(e) => {
-                          setValues({ ...values, [key]: e.target.value });
-                          setOverridden((keys) => [...new Set([...keys, key])]);
-                        }}
-                        placeholder={t('metadataEditor.listInputPlaceholder')}
-                      />
-                    ) : (
-                      <input
-                        aria-label={getLabel(key)}
-                        type={key.endsWith('number') || key.endsWith('total') ? 'number' : 'text'}
-                        min={1}
-                        max={99999}
-                        maxLength={1000}
-                        value={values[key] || ''}
-                        onChange={(e) => {
-                          setValues({ ...values, [key]: e.target.value });
-                          setOverridden((keys) => [...new Set([...keys, key])]);
-                        }}
-                      />
-                    )}
-                    <span className="metadata-origin">
-                      {t('metadataEditor.fileValue', {
-                        value:
-                          display(record.observed[key]).replaceAll('\n', ' / ') ||
-                          t('metadataEditor.notFilled'),
-                      })}
-                    </span>
-                    {key === 'title' &&
-                      record.source_stem &&
-                      record.source_stem !== values.title && (
-                        <button
-                          className="text-button"
-                          type="button"
-                          style={{
-                            color: 'var(--accent-text)',
-                            fontSize: '12px',
-                            padding: '2px 6px',
-                            textAlign: 'left',
-                          }}
-                          onClick={() => {
-                            setValues({ ...values, title: record.source_stem! });
-                            setOverridden((keys) => [...new Set([...keys, 'title'])]);
-                          }}
-                        >
-                          {t('metadataEditor.fillFromFilename', { name: record.source_stem })}
-                        </button>
-                      )}
-                    {key === 'track_number' &&
-                      !values.track_number &&
-                      /^[a-zA-Z](\d{1,3})$/.test(String(record.observed.title || '')) && (
-                        <button
-                          className="text-button"
-                          type="button"
-                          style={{
-                            color: 'var(--accent-text)',
-                            fontSize: '12px',
-                            padding: '2px 6px',
-                            textAlign: 'left',
-                          }}
-                          onClick={() => {
-                            const match = /^[a-zA-Z](\d{1,3})$/.exec(
-                              String(record.observed.title || ''),
-                            );
-                            if (match) {
-                              const num = String(parseInt(match[1], 10));
-                              setValues({ ...values, track_number: num });
-                              setOverridden((keys) => [...new Set([...keys, 'track_number'])]);
-                            }
-                          }}
-                        >
-                          {t('metadataEditor.fillFromOriginalCode', {
-                            number: parseInt(
-                              /^[a-zA-Z](\d{1,3})$/.exec(String(record.observed.title || ''))![1],
-                              10,
-                            ),
-                          })}
-                        </button>
-                      )}
-                    {overridden.includes(key) && (
-                      <button
-                        className="text-button"
-                        type="button"
-                        onClick={() => {
-                          setValues({ ...values, [key]: display(record.observed[key]) });
-                          setOverridden((keys) => keys.filter((v) => v !== key));
-                        }}
-                      >
-                        {t('metadataEditor.useFileValueForField', { field: getLabel(key) })}
-                      </button>
-                    )}
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <div className="metadata-diff" aria-label={t('metadataEditor.diffPreviewAria')}>
-                <h3>{t('metadataEditor.confirmChanges')}</h3>
-                {fields.map((key) => (
-                  <div key={key}>
-                    <strong>{getLabel(key)}</strong>
-                    <span>
-                      {display(record.effective[key]).replaceAll('\n', ' / ') ||
-                        t('metadataEditor.notFilled')}
-                    </span>
-                    <span aria-hidden="true">→</span>
-                    <span>
-                      {display(next![key]).replaceAll('\n', ' / ') || t('metadataEditor.notFilled')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {error && (
-              <p className="error" role="alert">
-                {error}{' '}
-                <button className="text-button" disabled={busy} onClick={load}>
-                  {t('metadataEditor.reload')}
+                <span
+                  className="metadata-file-path"
+                  title={t('metadataEditor.filePathTooltip')}
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {t('metadataEditor.filePathPrefix')}
+                  <code>{record.path}</code>
+                </span>
+                <button
+                  type="button"
+                  className="text-button"
+                  style={{ flexShrink: 0, padding: '2px 8px' }}
+                  onClick={() => setShowFileInfo(true)}
+                >
+                  {t('metadataEditor.viewFileAttributes')}
                 </button>
-              </p>
-            )}
-            <div className="editor-footer">
-              <button
-                disabled={busy}
-                onClick={() => {
-                  if (preview) setPreview(false);
-                  else onClose();
-                }}
-              >
-                {preview ? t('metadataEditor.backToEdit') : t('metadataEditor.cancel')}
-              </button>
-              <button
-                className="text-button"
-                disabled={busy}
-                onClick={() => {
-                  setOverridden([]);
-                  setValues(
-                    Object.fromEntries(fields.map((key) => [key, display(record.observed[key])])),
-                  );
-                  setPreview(false);
-                }}
-              >
-                {t('metadataEditor.useAllFileValues')}
-              </button>
-              <button
-                className="primary"
-                disabled={busy}
-                onClick={() => (preview ? void save() : validate())}
-              >
-                {busy
-                  ? t('metadataEditor.saving')
-                  : preview
-                    ? t('metadataEditor.saveChanges')
-                    : t('metadataEditor.previewChanges')}
-              </button>
-            </div>
-          </>
-        ) : error ? (
-          <p className="error" role="alert">
-            {error}
-            <button onClick={load}>{t('metadataEditor.reload')}</button>
-          </p>
-        ) : (
-          <p role="status">{t('metadataEditor.loadingTrackInfo')}</p>
-        )}
+              </div>
+              {!preview ? (
+                <div className="metadata-fields">
+                  {fields.map((key) => (
+                    <label className="metadata-field" key={key}>
+                      <span className="metadata-field-label">
+                        {getLabel(key)}
+                        <span
+                          className="metadata-source"
+                          data-help={t('metadataEditor.sourceHelp')}
+                        >
+                          {overridden.includes(key)
+                            ? record.origins?.[key]?.startsWith('musicbrainz:')
+                              ? 'MusicBrainz'
+                              : record.origins?.[key]?.startsWith('lastfm:')
+                                ? 'Last.fm'
+                                : t('metadataEditor.sourceManual')
+                            : t('metadataEditor.sourceFileTag')}
+                        </span>
+                      </span>
+                      {[
+                        'artists',
+                        'album_artists',
+                        'composers',
+                        'lyricists',
+                        'arrangers',
+                        'vocalists',
+                        'genres',
+                      ].includes(key) ? (
+                        <textarea
+                          aria-label={getLabel(key)}
+                          value={values[key] || ''}
+                          maxLength={10000}
+                          rows={2}
+                          onChange={(e) => {
+                            setValues({ ...values, [key]: e.target.value });
+                            setOverridden((keys) => [...new Set([...keys, key])]);
+                          }}
+                          placeholder={t('metadataEditor.listInputPlaceholder')}
+                        />
+                      ) : (
+                        <input
+                          aria-label={getLabel(key)}
+                          type={key.endsWith('number') || key.endsWith('total') ? 'number' : 'text'}
+                          min={1}
+                          max={99999}
+                          maxLength={1000}
+                          value={values[key] || ''}
+                          onChange={(e) => {
+                            setValues({ ...values, [key]: e.target.value });
+                            setOverridden((keys) => [...new Set([...keys, key])]);
+                          }}
+                        />
+                      )}
+                      <span className="metadata-origin">
+                        {t('metadataEditor.fileValue', {
+                          value:
+                            display(record.observed[key]).replaceAll('\n', ' / ') ||
+                            t('metadataEditor.notFilled'),
+                        })}
+                      </span>
+                      {key === 'title' &&
+                        record.source_stem &&
+                        record.source_stem !== values.title && (
+                          <button
+                            className="text-button"
+                            type="button"
+                            style={{
+                              color: 'var(--accent-text)',
+                              fontSize: '12px',
+                              padding: '2px 6px',
+                              textAlign: 'left',
+                            }}
+                            onClick={() => {
+                              setValues({ ...values, title: record.source_stem! });
+                              setOverridden((keys) => [...new Set([...keys, 'title'])]);
+                            }}
+                          >
+                            {t('metadataEditor.fillFromFilename', { name: record.source_stem })}
+                          </button>
+                        )}
+                      {key === 'track_number' &&
+                        !values.track_number &&
+                        /^[a-zA-Z](\d{1,3})$/.test(String(record.observed.title || '')) && (
+                          <button
+                            className="text-button"
+                            type="button"
+                            style={{
+                              color: 'var(--accent-text)',
+                              fontSize: '12px',
+                              padding: '2px 6px',
+                              textAlign: 'left',
+                            }}
+                            onClick={() => {
+                              const match = /^[a-zA-Z](\d{1,3})$/.exec(
+                                String(record.observed.title || ''),
+                              );
+                              if (match) {
+                                const num = String(parseInt(match[1], 10));
+                                setValues({ ...values, track_number: num });
+                                setOverridden((keys) => [...new Set([...keys, 'track_number'])]);
+                              }
+                            }}
+                          >
+                            {t('metadataEditor.fillFromOriginalCode', {
+                              number: parseInt(
+                                /^[a-zA-Z](\d{1,3})$/.exec(String(record.observed.title || ''))![1],
+                                10,
+                              ),
+                            })}
+                          </button>
+                        )}
+                      {overridden.includes(key) && (
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => {
+                            setValues({ ...values, [key]: display(record.observed[key]) });
+                            setOverridden((keys) => keys.filter((v) => v !== key));
+                          }}
+                        >
+                          {t('metadataEditor.useFileValueForField', { field: getLabel(key) })}
+                        </button>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="metadata-diff" aria-label={t('metadataEditor.diffPreviewAria')}>
+                  <h3>{t('metadataEditor.confirmChanges')}</h3>
+                  {fields.map((key) => (
+                    <div key={key}>
+                      <strong>{getLabel(key)}</strong>
+                      <span>
+                        {display(record.effective[key]).replaceAll('\n', ' / ') ||
+                          t('metadataEditor.notFilled')}
+                      </span>
+                      <span aria-hidden="true">→</span>
+                      <span>
+                        {display(next![key]).replaceAll('\n', ' / ') ||
+                          t('metadataEditor.notFilled')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : error ? (
+            <p className="error" role="alert">
+              {error}
+              <button onClick={load}>{t('metadataEditor.reload')}</button>
+            </p>
+          ) : (
+            <p role="status">{t('metadataEditor.loadingTrackInfo')}</p>
+          )}
+        </div>
+        <LyricsEditor
+          key={track.id}
+          track={track}
+          player={player}
+          active={tab === 'lyrics'}
+          onEditState={setLyricsState}
+        />
       </div>
-      <LyricsEditor key={track.id} track={track} player={player} active={tab === 'lyrics'} />
+      {tab === 'metadata' && record && (
+        <div className="editor-footer scroll-dialog-footer">
+          {error && (
+            <p className="error" role="alert">
+              {error}{' '}
+              <button className="text-button" disabled={busy} onClick={load}>
+                {t('metadataEditor.reload')}
+              </button>
+            </p>
+          )}
+          <button
+            disabled={busy}
+            onClick={() => {
+              if (preview) setPreview(false);
+              else closeEditor();
+            }}
+          >
+            {preview ? t('metadataEditor.backToEdit') : t('metadataEditor.cancel')}
+          </button>
+          <button
+            className="text-button"
+            disabled={busy}
+            onClick={() => {
+              setOverridden([]);
+              setValues(
+                Object.fromEntries(fields.map((key) => [key, display(record.observed[key])])),
+              );
+              setPreview(false);
+            }}
+          >
+            {t('metadataEditor.useAllFileValues')}
+          </button>
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => (preview ? void save() : validate())}
+          >
+            {busy
+              ? t('metadataEditor.saving')
+              : preview
+                ? t('metadataEditor.saveChanges')
+                : t('metadataEditor.previewChanges')}
+          </button>
+        </div>
+      )}
       {showFileInfo && (
         <TrackFileInfoDialog
           track={track}

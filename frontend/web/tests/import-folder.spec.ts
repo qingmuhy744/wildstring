@@ -65,10 +65,32 @@ test('切换来源、浏览子目录、预览与导入保持同一范围，取�
     });
   });
   const imports: unknown[] = [];
-  await page.route('**/api/v1/manage/library/import', (route) => {
+  let acceptImport!: () => void;
+  const pendingImport = new Promise<void>((resolve) => {
+    acceptImport = resolve;
+  });
+  await page.route('**/api/v1/manage/library/import', async (route) => {
     imports.push(route.request().postDataJSON());
+    if (imports.length === 1) return route.fulfill({ status: 503, json: {} });
+    await pendingImport;
     return route.fulfill({ status: 202, json: { id: 'scoped-import', status: 'queued' } });
   });
+  await page.route('**/api/v1/manage/jobs/scoped-import', (route) =>
+    route.fulfill({
+      json: {
+        id: 'scoped-import',
+        kind: 'import',
+        full: false,
+        status: 'running',
+        created_at: '2026-01-01T00:00:00Z',
+        started_at: '2026-01-01T00:00:00Z',
+        finished_at: null,
+        error: null,
+        import: null,
+        scan: null,
+      },
+    }),
+  );
   await login(page);
   await manageTab(page, '导入与整理');
   const workspace = page.getByRole('region', { name: '导入来源工作台', exact: true });
@@ -107,8 +129,21 @@ test('切换来源、浏览子目录、预览与导入保持同一范围，取�
   await expect(dialog.getByLabel('来源内路径', { exact: true })).toHaveValue('.');
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await expect(workspace.locator('.source-folder-selection')).toContainText('/imports/b/新发行');
-  await workspace.getByRole('button', { name: '导入所选文件夹', exact: true }).click();
-  await expect.poll(() => imports).toEqual([{ source_id: 'source-b', path: '新发行' }]);
+  const startImport = workspace.getByRole('button', { name: '导入所选文件夹', exact: true });
+  await startImport.click();
+  await expect(workspace.getByRole('alert')).toBeVisible();
+  await startImport.click();
+  await expect(workspace.getByRole('button', { name: '正在提交…', exact: true })).toBeDisabled();
+  acceptImport();
+  await expect(workspace.getByRole('status')).toHaveText('已提交导入任务。');
+  expect(imports).toEqual(Array(2).fill({ source_id: 'source-b', path: '新发行' }));
+  await workspace.getByRole('button', { name: '查看进度', exact: true }).click();
+  const progress = page.getByRole('region', { name: '导入进度', exact: true });
+  await expect(progress.locator('details[data-job-id="scoped-import"]')).toHaveAttribute(
+    'open',
+    '',
+  );
+  await expect(progress.locator('.job-status')).toHaveText('执行中');
   expect(errors).toEqual([]);
 });
 

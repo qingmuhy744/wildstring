@@ -1,10 +1,8 @@
 import { hints } from './help-content';
 import { HelpLabel } from './desktop-help';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { TFunction } from 'i18next';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackPosition } from './playback-state';
-import i18n from './i18n';
 import { api, time, type Track } from './api';
 import { Icon } from './icons';
 import type { Player } from './player';
@@ -462,73 +460,23 @@ type LyricCandidate = {
   };
 };
 
-function candidateQualityLabel(
-  quality: { word_timed: boolean; bilingual: boolean; level: number; lines: number },
-  t: TFunction,
-) {
-  if (quality.word_timed) {
-    return quality.bilingual
-      ? t('sourcePlugins.qualityBilingualWordTimed')
-      : t('sourcePlugins.qualityWordTimed');
-  }
-  if (quality.level >= 2) {
-    return quality.bilingual
-      ? t('sourcePlugins.qualityBilingualLineTimed')
-      : t('sourcePlugins.qualityLineTimed');
-  }
-  if (quality.lines > 0 || quality.level === 1) {
-    return t('sourcePlugins.qualityStatic');
-  }
-  return t('sourcePlugins.qualityNone');
-}
+function inferCandidateQuality(candidate: LyricCandidate) {
+  const romanized = candidate.normalized.lines.some((line) => Boolean(line.romanization?.trim()));
+  if (candidate.quality) return { ...candidate.quality, romanized };
 
-function inferCandidateQuality(
-  candidate: LyricCandidate,
-  t: TFunction | ((key: string) => string) = i18n.t.bind(i18n),
-) {
-  const hasRoman = candidate.normalized.lines.some((line) => Boolean(line.romanization?.trim()));
-  if (candidate.quality) {
-    return {
-      ...candidate.quality,
-      label: candidateQualityLabel(
-        { ...candidate.quality, lines: candidate.quality.lines ?? 0 },
-        t as TFunction,
-      ),
-      romanized: hasRoman,
-    };
-  }
   const lines = candidate.normalized.lines.filter((line) => line.text.trim().length > 0);
   const count = Math.max(1, lines.length);
   const timedRatio = lines.filter((line) => line.time_ms !== null).length / count;
   const wordRatio = lines.filter((line) => (line.words?.length ?? 0) > 0).length / count;
   const transRatio = lines.filter((line) => Boolean(line.translation?.trim())).length / count;
   const synced = candidate.normalized.kind === 'synced' && timedRatio >= 0.8;
-  const wordTimed = synced && wordRatio >= 0.8;
-  const bilingual = synced && transRatio >= 0.8;
-  const level = wordTimed
-    ? bilingual
-      ? 5
-      : 4
-    : synced
-      ? bilingual
-        ? 3
-        : 2
-      : lines.length > 0
-        ? 1
-        : 0;
-  const label = candidateQualityLabel(
-    { word_timed: wordTimed, bilingual, level, lines: lines.length },
-    t as TFunction,
-  );
   return {
-    level,
-    label,
-    word_timed: wordTimed,
-    bilingual,
+    word_timed: synced && wordRatio >= 0.8,
+    bilingual: synced && transRatio >= 0.8,
+    level: synced ? 2 : 1,
     word_coverage: wordRatio,
     translation_coverage: transRatio,
-    lines: lines.length,
-    romanized: hasRoman,
+    romanized,
   };
 }
 
@@ -542,8 +490,6 @@ function formatCandidateMs(ms: number | null): string {
 
 function InteractiveCandidateAudition({
   candidate,
-  hasWords,
-  showWordSplits,
   offset,
   onOffsetChange,
   trackId,
@@ -551,8 +497,6 @@ function InteractiveCandidateAudition({
   player,
 }: {
   candidate: LyricCandidate;
-  hasWords: boolean;
-  showWordSplits: boolean;
   offset: number;
   onOffsetChange: (offset: number) => void;
   trackId: string;
@@ -560,9 +504,9 @@ function InteractiveCandidateAudition({
   player?: Player;
 }) {
   const { t } = useTranslation();
-  const isPlayingThisTrack = player && player.current?.id === trackId;
-  const position = usePlaybackPosition(player?.position, isPlayingThisTrack);
-  const currentPosMs = isPlayingThisTrack ? position * 1000 - offset : null;
+  const isCurrentTrack = player && player.current?.id === trackId;
+  const position = usePlaybackPosition(player?.position, isCurrentTrack);
+  const currentPosMs = isCurrentTrack ? position * 1000 - offset : null;
 
   const activeIndex = useMemo(() => {
     if (currentPosMs === null) return -1;
@@ -578,13 +522,17 @@ function InteractiveCandidateAudition({
     return found;
   }, [currentPosMs, candidate.normalized.lines]);
 
-  const activeRowRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLDivElement>(null);
+  const following = isCurrentTrack && player.playing;
 
   useEffect(() => {
-    if (activeIndex >= 0 && activeRowRef.current) {
-      activeRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [activeIndex]);
+    const list = listRef.current;
+    const row = activeRowRef.current;
+    if (!following || !list || !row) return;
+    const rowTop = row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    list.scrollTop += rowTop - (list.clientHeight - row.offsetHeight) / 2;
+  }, [activeIndex, following]);
 
   function handleSeek(lineTimeMs: number | null) {
     if (lineTimeMs === null || !player) return;
@@ -622,130 +570,129 @@ function InteractiveCandidateAudition({
 
   return (
     <div className="candidate-audition-container">
-      <div className="candidate-audition-bar">
-        <div className="audition-player-status">
-          {isPlayingThisTrack ? (
-            <div className="status-playing-pill">
-              <span className={`audition-dot ${player.playing ? 'playing' : 'paused'}`} />
-              <span>
-                {player.playing
-                  ? t('sourcePlugins.auditionPlaying')
-                  : t('sourcePlugins.auditionPaused')}
-              </span>
-              <span className="audition-time">({time(position)})</span>
-              <button
-                type="button"
-                className="text-button audition-ctrl-btn"
-                onClick={player.toggle}
-              >
-                {player.playing ? t('sourcePlugins.pause') : t('sourcePlugins.play')}
-              </button>
-            </div>
-          ) : player ? (
-            <button
-              type="button"
-              className="text-button audition-start-btn"
-              onClick={handleStartTrack}
-            >
-              {t('sourcePlugins.startAudition')}
-            </button>
-          ) : null}
+      {isCurrentTrack ? (
+        <div className="status-playing-pill">
+          <span
+            aria-hidden="true"
+            className={`audition-dot ${player.playing ? 'playing' : 'paused'}`}
+          />
+          <span>
+            {player.playing
+              ? t('sourcePlugins.auditionPlaying')
+              : t('sourcePlugins.auditionPaused')}
+          </span>
+          <span className="audition-time">({time(position)})</span>
+          <button type="button" className="text-button" onClick={player.toggle}>
+            {player.playing ? t('sourcePlugins.pause') : t('sourcePlugins.play')}
+          </button>
         </div>
+      ) : player ? (
+        <button type="button" className="text-button" onClick={handleStartTrack}>
+          {t('sourcePlugins.startAudition')}
+        </button>
+      ) : null}
 
-        <div className="audition-offset-controls">
-          <span className="offset-label">{t('sourcePlugins.fineTune')}</span>
-          <div className="nudge-btn-group">
-            <button
-              type="button"
-              onClick={() => onOffsetChange(offset - 500)}
-              title={t('sourcePlugins.earlier500ms')}
+      <div
+        ref={listRef}
+        className="candidate-lyric-list"
+        role="list"
+        aria-label={t('sourcePlugins.previewLyrics')}
+        tabIndex={0}
+      >
+        {candidate.normalized.lines.slice(0, 300).map((line, idx) => {
+          const isActive = idx === activeIndex;
+          const seekable = player && line.time_ms !== null;
+          const RowContent = seekable ? 'button' : 'div';
+          return (
+            <div
+              key={idx}
+              ref={isActive ? activeRowRef : null}
+              role="listitem"
+              aria-current={isActive ? 'true' : undefined}
+              className={`candidate-lyric-row ${isActive ? 'active' : ''}`}
             >
-              -500ms
-            </button>
-            <button
-              type="button"
-              onClick={() => onOffsetChange(offset - 200)}
-              title={t('sourcePlugins.earlier200ms')}
-            >
-              -200ms
-            </button>
-            <button
-              type="button"
-              className={offset === 0 ? 'nudge-zero-active' : ''}
-              onClick={() => onOffsetChange(0)}
-              title={t('sourcePlugins.resetOffset')}
-            >
-              0
-            </button>
-            <button
-              type="button"
-              onClick={() => onOffsetChange(offset + 200)}
-              title={t('sourcePlugins.later200ms')}
-            >
-              +200ms
-            </button>
-            <button
-              type="button"
-              onClick={() => onOffsetChange(offset + 500)}
-              title={t('sourcePlugins.later500ms')}
-            >
-              +500ms
-            </button>
-          </div>
-          <label className="manual-offset-input">
+              <RowContent
+                className="candidate-lyric-content"
+                type={seekable ? 'button' : undefined}
+                onClick={seekable ? () => handleSeek(line.time_ms) : undefined}
+                title={seekable ? t('sourcePlugins.seekLineTitle') : undefined}
+              >
+                <span className="candidate-lyric-time">{formatCandidateMs(line.time_ms)}</span>
+                <span className="candidate-lyric-body">
+                  <span className="candidate-lyric-text">
+                    {line.text || t('sourcePlugins.interlude')}
+                  </span>
+                  {line.translation && (
+                    <span className="candidate-lyric-trans">{line.translation}</span>
+                  )}
+                  {line.romanization && (
+                    <span className="candidate-lyric-roman">{line.romanization}</span>
+                  )}
+                </span>
+              </RowContent>
+            </div>
+          );
+        })}
+      </div>
+      <div
+        className="audition-offset-controls"
+        role="group"
+        aria-label={t('sourcePlugins.fineTune')}
+      >
+        <label className="manual-offset-input">
+          <span>{t('sourcePlugins.fineTune')}</span>
+          <span className="manual-offset-value">
             <input
               type="number"
+              aria-label={t('sourcePlugins.offsetMilliseconds')}
               min="-60000"
               max="60000"
               step="50"
               value={offset}
               onChange={(e) => onOffsetChange(Number(e.target.value))}
             />
-            <span>ms</span>
-          </label>
+            <span aria-hidden="true">ms</span>
+          </span>
+        </label>
+        <div className="nudge-btn-group">
+          <button
+            type="button"
+            onClick={() => onOffsetChange(offset - 500)}
+            title={t('sourcePlugins.earlier500ms')}
+          >
+            -500ms
+          </button>
+          <button
+            type="button"
+            onClick={() => onOffsetChange(offset - 200)}
+            title={t('sourcePlugins.earlier200ms')}
+          >
+            -200ms
+          </button>
+          <button
+            type="button"
+            onClick={() => onOffsetChange(0)}
+            title={t('sourcePlugins.resetOffset')}
+            aria-label={t('sourcePlugins.resetOffset')}
+          >
+            0
+          </button>
+          <button
+            type="button"
+            onClick={() => onOffsetChange(offset + 200)}
+            title={t('sourcePlugins.later200ms')}
+          >
+            +200ms
+          </button>
+          <button
+            type="button"
+            onClick={() => onOffsetChange(offset + 500)}
+            title={t('sourcePlugins.later500ms')}
+          >
+            +500ms
+          </button>
         </div>
       </div>
-
-      <p className="audition-hint">{t('sourcePlugins.auditionTip')}</p>
-
-      <pre className="candidate-lyric-list" role="list">
-        {candidate.normalized.lines.slice(0, 300).map((line, idx) => {
-          const isActive = idx === activeIndex;
-          return (
-            <div
-              key={idx}
-              ref={isActive ? activeRowRef : null}
-              className={`candidate-lyric-row ${isActive ? 'active' : ''}`}
-              onClick={() => handleSeek(line.time_ms)}
-              title={line.time_ms !== null ? t('sourcePlugins.seekLineTitle') : undefined}
-            >
-              <span className="candidate-lyric-time">{formatCandidateMs(line.time_ms)}</span>
-              <div className="candidate-lyric-body">
-                <div className="candidate-lyric-text">
-                  {hasWords && showWordSplits && line.words && line.words.length > 0
-                    ? line.words.map((w, wIdx) => (
-                        <span key={wIdx} className="word-chunk">
-                          {w.text}
-                          {w.start_ms !== undefined && w.start_ms !== null && (
-                            <span className="word-split-chip">
-                              ⟨{(w.start_ms / 1000).toFixed(2)}s⟩
-                            </span>
-                          )}
-                        </span>
-                      ))
-                    : line.text || t('sourcePlugins.interlude')}
-                </div>
-                {line.translation && (
-                  <div className="candidate-lyric-trans">{line.translation}</div>
-                )}
-                {line.romanization && (
-                  <div className="candidate-lyric-roman">{line.romanization}</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </pre>
     </div>
   );
 }
@@ -755,23 +702,42 @@ export function OnlineLyrics({
   track,
   player,
   applied,
+  showHeading = true,
 }: {
   trackId: string;
   track?: Track;
   player?: Player;
   applied: () => void;
+  showHeading?: boolean;
 }) {
   const { t } = useTranslation();
   const [result, setResult] = useState<{
     items: LyricCandidate[];
     jobs: { status: string; warnings: string[] }[];
   } | null>(null);
-  const [selected, setSelected] = useState<LyricCandidate | null>(null),
+  const previewId = useId();
+  const [selectedId, setSelectedId] = useState<string | null>(null),
     [offset, setOffset] = useState(0);
   const [filterMode, setFilterMode] = useState<'all' | 'word' | 'bilingual'>('all');
-  const [showWordSplits, setShowWordSplits] = useState(true);
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [candidateMessageId, setCandidateMessageId] = useState<string | null>(null);
+  const candidates = (result?.items ?? []).map((candidate) => ({
+    candidate,
+    quality: inferCandidateQuality(candidate),
+  }));
+  const words = candidates.filter(({ quality }) => quality.word_timed);
+  const bilingual = candidates.filter(({ quality }) => quality.bilingual);
+  const filters = { all: candidates, word: words, bilingual };
+  const visibleCandidates = filters[filterMode];
+
+  function changeFilter(mode: typeof filterMode) {
+    setFilterMode(mode);
+    if (!filters[mode].some(({ candidate }) => candidate.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }
+
   async function load() {
     setResult(await api(`/manage/tracks/${trackId}/online-lyrics`));
   }
@@ -786,7 +752,8 @@ export function OnlineLyrics({
     }, 2000);
     return () => clearInterval(timer);
   }, [running, trackId]);
-  async function run(work: () => Promise<unknown>) {
+  async function run(work: () => Promise<unknown>, candidateId: string | null = null) {
+    setCandidateMessageId(candidateId);
     setBusy(true);
     setMessage('');
     try {
@@ -800,9 +767,9 @@ export function OnlineLyrics({
   }
   return (
     <section className="online-lyrics">
-      <h3>{t('sourcePlugins.onlineLyricsTitle')}</h3>
-      <p className="muted">{t('sourcePlugins.onlineLyricsDescription')}</p>
+      {showHeading && <h3>{t('sourcePlugins.onlineLyricsTitle')}</h3>}
       <button
+        type="button"
         disabled={busy || running}
         onClick={() =>
           void run(() => api(`/manage/tracks/${trackId}/online-lyrics`, { method: 'POST' }))
@@ -810,246 +777,169 @@ export function OnlineLyrics({
       >
         {t('sourcePlugins.searchOnlineLyrics')}
       </button>
-      {running && (
-        <progress
-          className="query-progress"
-          style={{ width: '100%', height: '4px', margin: '8px 0', display: 'block' }}
-        />
-      )}
-      <p role="status">
-        {message ||
-          (running
-            ? t('sourcePlugins.queryingLyrics')
-            : result?.jobs[0]?.status === 'no_match'
-              ? t('sourcePlugins.noLyricsFound')
-              : '')}
-      </p>
+      {running && <progress className="query-progress" />}
+      {!candidateMessageId &&
+        (message || !result || running || result.jobs[0]?.status === 'no_match') && (
+          <p role="status">
+            {message ||
+              (running || !result
+                ? t('sourcePlugins.queryingLyrics')
+                : t('sourcePlugins.noLyricsFound'))}
+          </p>
+        )}
       {result?.jobs[0]?.warnings?.map((value) => (
         <p className="muted" key={value}>
           {value}
         </p>
       ))}
-      {result && result.items.length > 1 && (
-        <div
-          className="button-row"
-          style={{
-            marginBottom: 8,
-            overflowX: 'auto',
-            display: 'flex',
-            gap: '8px',
-            flexWrap: 'nowrap',
-          }}
-        >
+      {candidates.length > 1 && (
+        <div className="button-row lyric-candidate-filters">
           <button
             type="button"
-            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'all'}
-            onClick={() => setFilterMode('all')}
+            onClick={() => changeFilter('all')}
           >
-            {t('sourcePlugins.filterAll', { count: result.items.length })}
+            {t('sourcePlugins.filterAll', { count: candidates.length })}
           </button>
           <button
             type="button"
-            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'word'}
-            onClick={() => setFilterMode('word')}
+            onClick={() => changeFilter('word')}
           >
-            {t('sourcePlugins.filterWord', {
-              count: result.items.filter((item) => inferCandidateQuality(item).word_timed).length,
-            })}
+            {t('sourcePlugins.filterWord', { count: words.length })}
           </button>
           <button
             type="button"
-            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'bilingual'}
-            onClick={() => setFilterMode('bilingual')}
+            onClick={() => changeFilter('bilingual')}
           >
-            {t('sourcePlugins.filterBilingual', {
-              count: result.items.filter((item) => inferCandidateQuality(item).bilingual).length,
-            })}
+            {t('sourcePlugins.filterBilingual', { count: bilingual.length })}
           </button>
         </div>
       )}
-      {result?.items
-        .filter((candidate) => {
-          const q = inferCandidateQuality(candidate);
-          if (filterMode === 'word') return q.word_timed;
-          if (filterMode === 'bilingual') return q.bilingual;
-          return true;
-        })
-        .map((candidate) => {
-          const q = inferCandidateQuality(candidate, t);
-          return (
-            <article className="suggestion-card" key={candidate.id}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                <a href={candidate.source_url} target="_blank" rel="noreferrer">
-                  {candidate.plugin_id} · {candidate.match.title}
-                </a>
-                <span
-                  style={{
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    background: q.word_timed
-                      ? 'var(--accent, #d96b43)'
-                      : q.level >= 2
-                        ? 'rgba(128, 128, 128, 0.2)'
-                        : 'rgba(128, 128, 128, 0.12)',
-                    color: q.word_timed ? 'var(--on-accent)' : 'inherit',
-                  }}
-                >
-                  {q.word_timed
-                    ? t('sourcePlugins.badgeWordTimed', {
-                        pct: Math.round(q.word_coverage * 100),
-                      })
-                    : q.level >= 2
-                      ? t('sourcePlugins.badgeLineTimed')
-                      : t('sourcePlugins.badgeStatic')}
-                </span>
-                {q.bilingual && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 999,
-                      fontSize: 12,
-                      background: 'rgba(128, 128, 128, 0.18)',
-                    }}
-                  >
-                    {t('sourcePlugins.badgeBilingual', {
-                      pct: Math.round(q.translation_coverage * 100),
-                    })}
-                  </span>
-                )}
-                {q.romanized && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 999,
-                      fontSize: 12,
-                      background: 'rgba(128, 128, 128, 0.18)',
-                    }}
-                  >
-                    {t('sourcePlugins.badgeRomanized')}
-                  </span>
-                )}
-                <span
-                  style={{
-                    padding: '2px 6px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    opacity: 0.75,
-                    border: '1px solid rgba(128, 128, 128, 0.3)',
-                  }}
-                >
-                  {candidate.normalized.format.toUpperCase()}
-                </span>
+      {candidates.length > 0 && visibleCandidates.length === 0 && (
+        <p className="muted">{t('sourcePlugins.noFilteredCandidates')}</p>
+      )}
+      {visibleCandidates.map(({ candidate, quality }) => {
+        const expanded = selectedId === candidate.id;
+        const match = candidate.match;
+        // Use the same match criteria as the automatic lyric scan.
+        const verifyVersion =
+          match.version_mismatch ||
+          match.score < 0.9 ||
+          match.duration_difference_ms === null ||
+          match.duration_difference_ms > 2500;
+        const panelId = `${previewId}-${candidate.id}`;
+
+        return (
+          <article className="suggestion-card lyric-candidate" key={candidate.id}>
+            <div className="lyric-candidate-heading">
+              <div>
+                <h4>
+                  <a href={candidate.source_url} target="_blank" rel="noreferrer">
+                    {match.title}
+                  </a>
+                </h4>
+                <p className="lyric-candidate-identity muted">
+                  {match.artists.join(' / ')} · {candidate.plugin_id}
+                </p>
               </div>
-              <p>
-                {t('sourcePlugins.candidateSummary', {
-                  artists: candidate.match.artists.join(' / '),
-                  label: q.label,
-                  format: candidate.normalized.format.toUpperCase(),
-                  count: candidate.line_count,
-                  score: Math.round(candidate.match.score * 100),
-                })}
-              </p>
-              {candidate.match.version_mismatch && (
-                <p>{t('sourcePlugins.versionMismatchNotice')}</p>
+              {verifyVersion && (
+                <span className="lyric-candidate-badge lyric-candidate-warning">
+                  {t('sourcePlugins.verifyVersion')}
+                </span>
               )}
-              <p>
-                {candidate.match.duration_difference_ms === null
-                  ? t('sourcePlugins.durationDiffUnknown', { id: candidate.source_id })
+            </div>
+            <div className="lyric-candidate-match">
+              <strong>
+                {t('sourcePlugins.candidateMatch', { score: Math.round(match.score * 100) })}
+              </strong>
+              <span>
+                {match.duration_difference_ms === null
+                  ? t('sourcePlugins.durationDiffUnknown')
                   : t('sourcePlugins.durationDiff', {
-                      diff: (candidate.match.duration_difference_ms / 1000).toFixed(1),
-                      id: candidate.source_id,
+                      diff: (match.duration_difference_ms / 1000).toFixed(1),
                     })}
-              </p>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setSelected(candidate);
-                  setOffset(0);
-                }}
-              >
-                {t('sourcePlugins.previewAndSelect')}
-              </button>
-            </article>
-          );
-        })}
-      {selected &&
-        (() => {
-          const selectedQuality = inferCandidateQuality(selected, t);
-          const hasWords = selected.normalized.lines.some((line) => (line.words?.length ?? 0) > 0);
-          return (
-            <div className="management-card">
-              <h4>{t('sourcePlugins.reviewTitle')}</h4>
-              <p>
-                {selected.match.title} · {selected.plugin_id} ·{' '}
-                <strong>{selectedQuality.label}</strong>
-                {selectedQuality.word_timed &&
-                  t('sourcePlugins.selectedQualityWord', {
-                    pct: Math.round(selectedQuality.word_coverage * 100),
+              </span>
+            </div>
+            <div className="lyric-candidate-quality muted">
+              <span>
+                {quality.word_timed
+                  ? t('sourcePlugins.badgeWordTimed', {
+                      pct: Math.round(quality.word_coverage * 100),
+                    })
+                  : quality.level >= 2
+                    ? t('sourcePlugins.badgeLineTimed')
+                    : t('sourcePlugins.badgeStatic')}
+              </span>
+              {quality.bilingual && (
+                <span>
+                  {t('sourcePlugins.badgeBilingual', {
+                    pct: Math.round(quality.translation_coverage * 100),
                   })}
-                {selectedQuality.bilingual &&
-                  t('sourcePlugins.selectedQualityTrans', {
-                    pct: Math.round(selectedQuality.translation_coverage * 100),
-                  })}
-              </p>
-              {hasWords && (
-                <label
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={showWordSplits}
-                    onChange={(e) => setShowWordSplits(e.target.checked)}
-                  />
-                  {t('sourcePlugins.showWordSplits')}
-                </label>
+                </span>
               )}
-              <InteractiveCandidateAudition
-                candidate={selected}
-                hasWords={hasWords}
-                showWordSplits={showWordSplits}
-                offset={offset}
-                onOffsetChange={setOffset}
-                trackId={trackId}
-                track={track}
-                player={player}
-              />
-              <div className="button-row" style={{ marginTop: 12 }}>
+              {quality.romanized && <span>{t('sourcePlugins.badgeRomanized')}</span>}
+              <span>{candidate.normalized.format.toUpperCase()}</span>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              aria-expanded={expanded}
+              aria-controls={expanded ? panelId : undefined}
+              onClick={() => {
+                setSelectedId(expanded ? null : candidate.id);
+                setOffset(0);
+              }}
+            >
+              {t(expanded ? 'sourcePlugins.collapsePreview' : 'sourcePlugins.previewLyrics')}
+            </button>
+            {expanded && (
+              <div className="lyric-candidate-preview" id={panelId}>
+                {match.version_mismatch && (
+                  <p className="lyric-candidate-mismatch">
+                    {t('sourcePlugins.versionMismatchNotice')}
+                  </p>
+                )}
+                <InteractiveCandidateAudition
+                  candidate={candidate}
+                  offset={offset}
+                  onOffsetChange={setOffset}
+                  trackId={trackId}
+                  track={track}
+                  player={player}
+                />
                 <button
+                  type="button"
                   className="primary"
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      await api(`/manage/lyric-candidates/${selected.id}/apply`, {
+                      await api(`/manage/lyric-candidates/${candidate.id}/apply`, {
                         method: 'POST',
                         body: JSON.stringify({
-                          version: selected.lyrics_version,
-                          file_version: selected.file_version,
+                          version: candidate.lyrics_version,
+                          file_version: candidate.file_version,
                           offset_ms: offset,
                         }),
                       });
-                      setSelected(null);
+                      setSelectedId(null);
                       applied();
                       window.dispatchEvent(
                         new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
                       );
                       setMessage(t('sourcePlugins.lyricsSavedNotice'));
-                    })
+                    }, candidate.id)
                   }
                 >
                   {t('sourcePlugins.confirmLyrics')}
                 </button>
-                <button type="button" onClick={() => setSelected(null)}>
-                  {t('sourcePlugins.cancelSelection')}
-                </button>
               </div>
-            </div>
-          );
-        })()}
+            )}
+            {candidateMessageId === candidate.id && message && <p role="status">{message}</p>}
+          </article>
+        );
+      })}
     </section>
   );
 }

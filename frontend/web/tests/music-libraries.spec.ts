@@ -316,7 +316,7 @@ test('没有音乐库授权的听众可以关注节目，取关保留个人进�
   expect(after.episodes.find((item: { id: string }) => item.id === id).position_seconds).toBe(3);
 });
 
-test('网页配置监听、自定义托管目录并提交迁移', async ({ page }, info) => {
+test('网页配置监听、自定义音乐保存位置并提交迁移', async ({ page }, info) => {
   const libraries = await owner(page);
   const primary = libraries.find((item) => item.is_default)! as Library & { managed_root: string };
   const base = primary.managed_root.slice(0, primary.managed_root.lastIndexOf('/'));
@@ -325,7 +325,7 @@ test('网页配置监听、自定义托管目录并提交迁移', async ({ page 
   await panel.getByLabel('库名称', { exact: true }).fill(name);
   await panel.getByLabel('源文件夹，每行一个', { exact: true }).fill(primary.sources[0].root);
   await panel
-    .getByLabel('托管目录（可选）', { exact: true })
+    .getByLabel('音乐保存位置（可选）', { exact: true })
     .fill(`${base}/custom-${info.project.name}`);
   await panel.getByRole('checkbox', { name: primary.sources[0].root, exact: true }).uncheck();
   await panel.getByRole('button', { name: '保存音乐库', exact: true }).click();
@@ -348,7 +348,7 @@ test('网页配置监听、自定义托管目录并提交迁移', async ({ page 
   expect(settings.enabled).toBe(true);
   expect(settings.interval_seconds).toBe(300);
   await storage
-    .getByLabel('新的托管目录', { exact: true })
+    .getByLabel('新的音乐保存位置', { exact: true })
     .fill(`${base}/migrated-${info.project.name}`);
   await storage.getByRole('button', { name: '复制、校验并迁移', exact: true }).click();
   await expect(storage).toContainText('目录已切换，旧文件已保留', { timeout: 15000 });
@@ -522,8 +522,8 @@ test('目录选择器新建文件夹、拒绝重名并直接选用新目录', as
   };
   const parent = primary.managed_root.slice(0, primary.managed_root.lastIndexOf('/'));
   const panel = await manage(page);
-  await panel.getByRole('button', { name: '浏览托管目录', exact: true }).click();
-  const picker = page.getByRole('dialog', { name: '选择托管目录', exact: true });
+  await panel.getByRole('button', { name: '浏览保存位置', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: '选择音乐保存位置', exact: true });
   await expect(picker.getByRole('button', { name: '新建文件夹', exact: true })).toBeDisabled();
   await picker.getByLabel('服务器目录路径', { exact: true }).fill(parent);
   await picker.getByRole('button', { name: '打开路径', exact: true }).click();
@@ -554,7 +554,7 @@ test('目录选择器新建文件夹、拒绝重名并直接选用新目录', as
     });
   }
   await picker.getByRole('button', { name: '选择此文件夹', exact: true }).click();
-  await expect(panel.getByLabel('托管目录（可选）', { exact: true })).toHaveValue(
+  await expect(panel.getByLabel('音乐保存位置（可选）', { exact: true })).toHaveValue(
     `${parent}/${name}`,
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

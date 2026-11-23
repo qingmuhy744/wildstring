@@ -106,6 +106,7 @@ class PlaylistPayload(Input):
 class Inspection(Input):
     rules: list[Rule] | None = Field(default=None, max_length=30)
     track_ids: list[str] | None = Field(default=None, max_length=5000)
+    scope: Literal["recent", "library"] = "recent"
     max_tracks: int = Field(default=500, ge=1, le=5000)
     max_calls: int = Field(default=0, ge=0, le=100)
     connection_id: str | None = Field(default=None, max_length=128)

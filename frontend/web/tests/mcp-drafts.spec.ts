@@ -64,7 +64,7 @@ for (const kind of ['intake', 'lyrics']) {
           : draft(),
       });
     });
-    await section(page, '待确认草案');
+    await section(page, '待确认');
     await page.getByRole('button', { name: `查看草案 ${title}`, exact: true }).click();
     const detail = page.getByRole('article', { name: '草案详情' });
     await expect(detail).toContainText(kind === 'intake' ? 'Rock/CD01/01.flac' : '双语逐字动态');

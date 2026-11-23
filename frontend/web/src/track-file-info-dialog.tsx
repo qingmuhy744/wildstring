@@ -121,21 +121,24 @@ export function TrackFileInfoDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="track-file-info-dialog modal-dialog"
-      onClose={onClose}
+      className="track-file-info-dialog modal-dialog scroll-dialog"
       aria-labelledby="file-info-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
     >
-      <div className="file-info-content">
-        <header className="file-info-header">
-          <div className="file-info-title-group">
-            <h3 id="file-info-title">{t('trackFileInfoDialog.title')}</h3>
-            <p className="file-info-track-name ellipsis">
-              {track.title} · {artist(track)}
-            </p>
-          </div>
-          <DialogCloseButton aria-label={t('trackFileInfoDialog.close')} onClick={onClose} />
-        </header>
-
+      <header className="file-info-header scroll-dialog-header">
+        <div className="file-info-title-group">
+          <h3 id="file-info-title">{t('trackFileInfoDialog.title')}</h3>
+          <p className="file-info-track-name ellipsis">
+            {track.title} · {artist(track)}
+          </p>
+        </div>
+        <DialogCloseButton aria-label={t('trackFileInfoDialog.close')} onClick={onClose} />
+      </header>
+      <div className="file-info-content scroll-dialog-body">
         {loading ? (
           <div className="file-info-loading" role="status">
             {t('trackFileInfoDialog.loading')}

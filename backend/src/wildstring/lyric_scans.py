@@ -247,7 +247,9 @@ class LyricScans:
             rows = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT * FROM lyric_scan_items WHERE batch_id=? ORDER BY rowid LIMIT ? OFFSET ?",
+                    """SELECT i.*, l.locked AS lyric_locked, l.version AS lyric_lock_version
+                    FROM lyric_scan_items i LEFT JOIN lyric_locks l ON l.track_id=i.track_id
+                    WHERE i.batch_id=? ORDER BY i.rowid LIMIT ? OFFSET ?""",
                     (identity, limit, offset),
                 )
             ]
@@ -261,6 +263,10 @@ class LyricScans:
         for row in rows:
             row.pop("previous")
             row.pop("fingerprint")
+            row["lyric_lock"] = {
+                "locked": bool(row.pop("lyric_locked")),
+                "version": row.pop("lyric_lock_version") or 1,
+            }
             for field in ("baseline", "quality", "results"):
                 row[field] = json.loads(row[field]) if row[field] else None
         return batch | {

@@ -34,7 +34,7 @@ test('歌词编辑、播放打点、撤销、毫秒修正、导出与全屏生�
     await dialog.getByRole('button', { name: '歌词', exact: true }).click();
     await dialog.getByLabel('歌词内容', { exact: true }).fill('第一句测试\n第二句测试\n第三句测试');
     await dialog.getByRole('button', { name: '逐行打点', exact: true }).click();
-    await expect(dialog.getByRole('button', { name: '预览歌词', exact: true })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: '预览修改', exact: true })).toBeDisabled();
     await dialog.getByRole('button', { name: '播放打点歌曲', exact: true }).click();
     await expect.poll(async () => (await audio(page)).paused).toBe(false);
     const workspace = dialog.getByLabel('逐行打点工作区', { exact: true });
@@ -57,7 +57,7 @@ test('歌词编辑、播放打点、撤销、毫秒修正、导出与全屏生�
     ] as const)
       await dialog.getByLabel(`第 ${index} 句时间（秒）`, { exact: true }).fill(seconds);
     await page.screenshot({ path: `../../artifacts/lyrics-timing-${info.project.name}.png` });
-    await dialog.getByRole('button', { name: '预览歌词', exact: true }).click();
+    await dialog.getByRole('button', { name: '预览修改', exact: true }).click();
     await expect(dialog.getByLabel('歌词修改预览')).toContainText('第二句测试');
     const downloading = page.waitForEvent('download');
     await dialog.getByRole('button', { name: '导出 LRC', exact: true }).click();

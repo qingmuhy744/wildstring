@@ -47,7 +47,9 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 
 ## 巡检与计划
 
-`GET /tasks`；`POST /tasks {track_ids:[]?,max_tracks:500,max_calls:0,connection_id?:null,use_ai:false}`，默认规则巡检，不调用模型、不自动应用。`GET /tasks/{id}` 返回 `id,status,stage,checkpoint,counts,parameters,error_code,created_at,updated_at,trace_id,version,results:[]`。结果 `{track_id,title,issues:[missing_album|missing_cover|missing_lyrics|…],metadata_version}`，不泄漏路径。`POST /tasks/{id}/cancel {}` 协作取消；`POST /tasks/{id}/resume {}` 恢复暂停/中断/失败，保留 checkpoint。状态 `queued,running,retry_wait,paused_authorization,paused_budget,cancel_requested,cancelled,succeeded,partial,failed,interrupted`。
+`POST /tasks {scope:recent|library,track_ids:[]?,max_tracks:500,max_calls:0,connection_id?:null,use_ai:false}`。默认使用本地规则。未指定歌曲 ID 时，`recent` 按入库时间倒序检查至多 `max_tracks` 首，`library` 检查提交时当前曲库的全部可用歌曲。显式 `track_ids` 沿用首数、归属及去重校验。每批保存检查位置、累计进度和结果。
+
+`GET /tasks` 返回任务列表，`summary=true` 时返回状态、范围及计数摘要。`GET /tasks/{id}` 返回 `id,status,stage,checkpoint,counts,parameters,error_code,created_at,updated_at,trace_id,version,results:[]`。计数包括 `processed` 与 `total`。传 `result_offset` 时逐页返回至多 20 条结果及 `result_total`，省略内部歌曲 ID 与版本快照。结果 `{track_id,title,issues:[missing_album|missing_cover|missing_lyrics|…],metadata_version}`，不泄漏路径。`POST /tasks/{id}/cancel {}` 协作取消，`POST /tasks/{id}/resume {}` 从原快照及 checkpoint 恢复。状态 `queued,running,retry_wait,paused_authorization,paused_budget,cancel_requested,cancelled,succeeded,partial,failed,interrupted`。
 
 `GET /schedules`；`POST /schedules {name,enabled:false,interval_hours:24,timezone:Asia/Shanghai,parameters:{…任务参数}}`；`PATCH /schedules/{id}` 同字段加 version；`DELETE /schedules/{id}`。interval 1–720 小时，错过多周期只补一次，任务去重；timezone 校验 IANA，next_run_at 为 UTC。计划默认关闭，AI 后台需连接明确授权。
 

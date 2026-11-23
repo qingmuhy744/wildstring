@@ -174,10 +174,9 @@ export function GainControls({ trackId }: { trackId?: string }) {
             setOpen(false);
           }}
           aria-label={t('playbackGain.dialogAria')}
-          className="playlist-editor gain-dialog"
-          style={{ maxHeight: '90dvh', overflow: 'auto' }}
+          className="playlist-editor gain-dialog scroll-dialog"
         >
-          <div className="editor-heading">
+          <div className="editor-heading scroll-dialog-header">
             <div>
               <span className="eyebrow">{t('playbackGain.eyebrow')}</span>
               <h2>{t('playbackGain.dialogTitle')}</h2>
@@ -193,171 +192,173 @@ export function GainControls({ trackId }: { trackId?: string }) {
               ×
             </button>
           </div>
-          <p role="status">{message}</p>
-          {record && (
-            <fieldset disabled={busy}>
-              <label>
-                <HelpLabel hint="replayGain">{t('playbackGain.autoReplayGain')}</HelpLabel>
-                <select
-                  value={record.settings.mode}
-                  onChange={(e) =>
-                    setRecord({
-                      ...record,
-                      settings: { ...record.settings, mode: e.target.value },
-                    })
-                  }
-                >
-                  <option value="off">{t('playbackGain.off')}</option>
-                  <option value="track">{t('playbackGain.trackGain')}</option>
-                  <option value="album">{t('playbackGain.albumGain')}</option>
-                </select>
-              </label>
-              <label>
-                <HelpLabel hint="gainPreamp">{t('playbackGain.gainPreamp')}</HelpLabel>
-                <input
-                  type="number"
-                  min="-12"
-                  max="12"
-                  step="0.5"
-                  value={record.settings.preamp_db}
-                  onChange={(e) =>
-                    setRecord({
-                      ...record,
-                      settings: { ...record.settings, preamp_db: Number(e.target.value) },
-                    })
-                  }
-                />
-              </label>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={record.settings.prevent_clipping}
-                  onChange={(e) =>
-                    setRecord({
-                      ...record,
-                      settings: { ...record.settings, prevent_clipping: e.target.checked },
-                    })
-                  }
-                />
-                <HelpLabel hint="clipping">{t('playbackGain.preventClipping')}</HelpLabel>
-              </label>
-              <button
-                onClick={() =>
-                  void run(
-                    () =>
-                      api('/playback/gain-settings', {
-                        method: 'PUT',
-                        body: JSON.stringify(record.settings),
-                      }),
-                    t('playbackGain.eqSaved'),
-                  )
-                }
-              >
-                {t('playbackGain.saveEq')}
-              </button>
-              {(['album', 'track'] as const).map((scope) => (
-                <div key={scope}>
-                  <label>
-                    <HelpLabel hint={scope === 'album' ? 'albumGain' : 'trackGain'}>
-                      {scope === 'album'
-                        ? t('playbackGain.albumGainLabel')
-                        : t('playbackGain.trackGainLabel')}
-                    </HelpLabel>
-                    <input
-                      type="number"
-                      aria-label={
-                        scope === 'album'
-                          ? t('playbackGain.albumGainAria')
-                          : t('playbackGain.trackGainAria')
-                      }
-                      min="-12"
-                      max="12"
-                      step="0.5"
-                      disabled={scope === 'album' && !record.album_id}
-                      value={record[scope].gain_db}
-                      onChange={(e) =>
-                        setRecord({
-                          ...record,
-                          [scope]: { ...record[scope], gain_db: Number(e.target.value) },
-                        })
-                      }
-                    />
-                  </label>
-                  <button
-                    disabled={scope === 'album' && !record.album_id}
-                    onClick={() =>
-                      void run(
-                        () =>
-                          api(`/tracks/${trackId}/playback-gain`, {
-                            method: 'PUT',
-                            body: JSON.stringify({ scope, ...record[scope] }),
-                          }),
-                        t('playbackGain.manualGainSaved'),
-                      )
+          <div className="scroll-dialog-body">
+            <p role="status">{message}</p>
+            {record && (
+              <fieldset disabled={busy}>
+                <label>
+                  <HelpLabel hint="replayGain">{t('playbackGain.autoReplayGain')}</HelpLabel>
+                  <select
+                    value={record.settings.mode}
+                    onChange={(e) =>
+                      setRecord({
+                        ...record,
+                        settings: { ...record.settings, mode: e.target.value },
+                      })
                     }
                   >
-                    {scope === 'album'
-                      ? t('playbackGain.saveAlbumGain')
-                      : t('playbackGain.saveTrackGain')}
-                  </button>
-                  <button
-                    disabled={scope === 'album' && !record.album_id}
-                    onClick={() =>
-                      void run(
-                        () =>
-                          api(`/tracks/${trackId}/playback-gain`, {
-                            method: 'PUT',
-                            body: JSON.stringify({
-                              scope,
-                              version: record[scope].version,
-                              gain_db: 0,
-                            }),
-                          }),
-                        t('playbackGain.resetNotice'),
-                      )
+                    <option value="off">{t('playbackGain.off')}</option>
+                    <option value="track">{t('playbackGain.trackGain')}</option>
+                    <option value="album">{t('playbackGain.albumGain')}</option>
+                  </select>
+                </label>
+                <label>
+                  <HelpLabel hint="gainPreamp">{t('playbackGain.gainPreamp')}</HelpLabel>
+                  <input
+                    type="number"
+                    min="-12"
+                    max="12"
+                    step="0.5"
+                    value={record.settings.preamp_db}
+                    onChange={(e) =>
+                      setRecord({
+                        ...record,
+                        settings: { ...record.settings, preamp_db: Number(e.target.value) },
+                      })
                     }
-                  >
-                    {scope === 'album'
-                      ? t('playbackGain.resetAlbum')
-                      : t('playbackGain.resetTrack')}
-                  </button>
-                </div>
-              ))}
-              <p>
-                <HelpText hint="gainResult">
-                  {t('playbackGain.gainStats', {
-                    requested: record.requested_db.toFixed(1),
-                    applied: record.applied_db.toFixed(1),
-                    limited: record.limited ? t('playbackGain.peakLimited') : '',
-                    peak: record.peak_known
-                      ? t('playbackGain.peakKnown')
-                      : t('playbackGain.peakUnknown'),
-                  })}
-                </HelpText>
-              </p>
-              {record.can_analyze && (
+                  />
+                </label>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={record.settings.prevent_clipping}
+                    onChange={(e) =>
+                      setRecord({
+                        ...record,
+                        settings: { ...record.settings, prevent_clipping: e.target.checked },
+                      })
+                    }
+                  />
+                  <HelpLabel hint="clipping">{t('playbackGain.preventClipping')}</HelpLabel>
+                </label>
                 <button
-                  disabled={!!scanning}
                   onClick={() =>
                     void run(
-                      () => api(`/manage/tracks/${trackId}/analyze-loudness`, { method: 'POST' }),
-                      t('playbackGain.analysisEnqueued'),
+                      () =>
+                        api('/playback/gain-settings', {
+                          method: 'PUT',
+                          body: JSON.stringify(record.settings),
+                        }),
+                      t('playbackGain.eqSaved'),
                     )
                   }
                 >
-                  {scanning ? t('playbackGain.analyzing') : t('playbackGain.analyzeLoudness')}
+                  {t('playbackGain.saveEq')}
                 </button>
-              )}
-              {record.analysis.error && (
+                {(['album', 'track'] as const).map((scope) => (
+                  <div key={scope}>
+                    <label>
+                      <HelpLabel hint={scope === 'album' ? 'albumGain' : 'trackGain'}>
+                        {scope === 'album'
+                          ? t('playbackGain.albumGainLabel')
+                          : t('playbackGain.trackGainLabel')}
+                      </HelpLabel>
+                      <input
+                        type="number"
+                        aria-label={
+                          scope === 'album'
+                            ? t('playbackGain.albumGainAria')
+                            : t('playbackGain.trackGainAria')
+                        }
+                        min="-12"
+                        max="12"
+                        step="0.5"
+                        disabled={scope === 'album' && !record.album_id}
+                        value={record[scope].gain_db}
+                        onChange={(e) =>
+                          setRecord({
+                            ...record,
+                            [scope]: { ...record[scope], gain_db: Number(e.target.value) },
+                          })
+                        }
+                      />
+                    </label>
+                    <button
+                      disabled={scope === 'album' && !record.album_id}
+                      onClick={() =>
+                        void run(
+                          () =>
+                            api(`/tracks/${trackId}/playback-gain`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ scope, ...record[scope] }),
+                            }),
+                          t('playbackGain.manualGainSaved'),
+                        )
+                      }
+                    >
+                      {scope === 'album'
+                        ? t('playbackGain.saveAlbumGain')
+                        : t('playbackGain.saveTrackGain')}
+                    </button>
+                    <button
+                      disabled={scope === 'album' && !record.album_id}
+                      onClick={() =>
+                        void run(
+                          () =>
+                            api(`/tracks/${trackId}/playback-gain`, {
+                              method: 'PUT',
+                              body: JSON.stringify({
+                                scope,
+                                version: record[scope].version,
+                                gain_db: 0,
+                              }),
+                            }),
+                          t('playbackGain.resetNotice'),
+                        )
+                      }
+                    >
+                      {scope === 'album'
+                        ? t('playbackGain.resetAlbum')
+                        : t('playbackGain.resetTrack')}
+                    </button>
+                  </div>
+                ))}
                 <p>
-                  {t('playbackGain.analysisIncomplete', {
-                    error: record.analysis.error,
-                  })}
+                  <HelpText hint="gainResult">
+                    {t('playbackGain.gainStats', {
+                      requested: record.requested_db.toFixed(1),
+                      applied: record.applied_db.toFixed(1),
+                      limited: record.limited ? t('playbackGain.peakLimited') : '',
+                      peak: record.peak_known
+                        ? t('playbackGain.peakKnown')
+                        : t('playbackGain.peakUnknown'),
+                    })}
+                  </HelpText>
                 </p>
-              )}
-            </fieldset>
-          )}
-          <div className="editor-footer">
+                {record.can_analyze && (
+                  <button
+                    disabled={!!scanning}
+                    onClick={() =>
+                      void run(
+                        () => api(`/manage/tracks/${trackId}/analyze-loudness`, { method: 'POST' }),
+                        t('playbackGain.analysisEnqueued'),
+                      )
+                    }
+                  >
+                    {scanning ? t('playbackGain.analyzing') : t('playbackGain.analyzeLoudness')}
+                  </button>
+                )}
+                {record.analysis.error && (
+                  <p>
+                    {t('playbackGain.analysisIncomplete', {
+                      error: record.analysis.error,
+                    })}
+                  </p>
+                )}
+              </fieldset>
+            )}
+          </div>
+          <div className="editor-footer scroll-dialog-footer">
             <button type="button" onClick={() => setOpen(false)}>
               {t('playbackGain.closeSettings')}
             </button>
