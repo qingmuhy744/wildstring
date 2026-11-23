@@ -38,17 +38,23 @@ export interface AgentTask {
   trace_id?: string;
   version: number;
   result_total?: number;
-  results?: {
-    track_id?: string;
-    title?: string;
-    issues?: string[];
-    findings?: { code: string; summary: string; severity: string }[];
-    metadata_version?: number;
-    error_code?: string;
-    analysis?: string;
-    ai_skipped?: boolean;
-    draft_ids?: string[];
-  }[];
+  results?: InspectionResult[];
+  issue_groups?: { code: string; count: number }[];
+  analyses?: InspectionResult[];
+}
+export interface InspectionResult {
+  track_id?: string;
+  title?: string;
+  album_id?: string | null;
+  album?: string | null;
+  artists?: string[];
+  issues?: string[];
+  findings?: { code: string; summary: string; severity: string }[];
+  metadata_version?: number;
+  error_code?: string;
+  analysis?: string;
+  ai_skipped?: boolean;
+  draft_ids?: string[];
 }
 export interface AgentSchedule {
   id: string;

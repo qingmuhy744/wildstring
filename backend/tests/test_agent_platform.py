@@ -626,6 +626,15 @@ def test_inspection_scopes_use_ingest_order_and_resume_the_original_library(
     assert result["status"] == "succeeded"
     assert result["counts"]["processed"] == result["result_total"] == 502
     assert [item["title"] for item in result["results"]] == ["002.flac", "001.flac"]
+    grouped = client.get(endpoint, params={"group_by_issue": True}).json()
+    assert grouped["results"] == [] and grouped["analyses"] == []
+    assert {"code": "missing_lyrics", "count": 502} in grouped["issue_groups"]
+    group_page = client.get(
+        endpoint, params={"issue": "missing_lyrics", "result_offset": 500}
+    ).json()
+    assert group_page["result_total"] == 502
+    assert [item["title"] for item in group_page["results"]] == ["002.flac", "001.flac"]
+    assert not client.get(endpoint, params={"issue": "missing_title"}).json()["results"]
     summary = next(
         item
         for item in client.get(BASE + "/tasks?summary=true").json()["items"]

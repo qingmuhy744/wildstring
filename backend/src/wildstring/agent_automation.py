@@ -127,7 +127,7 @@ class Automation:
             actor, identity, result_offset=0 if parameters["scope"] == "library" else None
         )
 
-    def task(self, actor, identity, *, result_offset=None):
+    def task(self, actor, identity, *, result_offset=None, group_by_issue=False, issue=None):
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM agent_tasks WHERE id=? AND user_id=? AND library_visible(library_id)",
@@ -145,6 +145,30 @@ class Automation:
             result[key] = json.loads(result[key])
         result["parameters"].pop("_manual_ai_authorized", None)
         result["counts"].setdefault("total", len(result["parameters"]["track_ids"]))
+        if group_by_issue or issue is not None:
+            counts = Counter()
+            analyses = []
+            matching = []
+            for record in result["results"]:
+                if record.get("analysis") is not None:
+                    if group_by_issue:
+                        analyses.append(record)
+                    continue
+                codes = set(record.get("issues") or ())
+                if record.get("error_code"):
+                    codes.add("inspection_failed")
+                if group_by_issue:
+                    counts.update(codes)
+                if issue in codes:
+                    matching.append(record)
+            if group_by_issue:
+                result["issue_groups"] = [
+                    {"code": code, "count": count}
+                    for code, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+                ]
+                result["analyses"] = analyses
+            result["results"] = matching
+            result_offset = result_offset or 0
         if result_offset is not None:
             result["result_total"] = len(result["results"])
             result["results"] = result["results"][result_offset : result_offset + 20]

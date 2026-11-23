@@ -4920,22 +4920,6 @@ textarea {
   font-size: 11px;
   letter-spacing: 0.12em;
 }
-.sidebar-group {
-  margin: 2px 0;
-}
-.sidebar-group > summary {
-  cursor: pointer;
-  padding: 8px 10px;
-  color: var(--muted);
-  font-size: 13px;
-  border-radius: 8px;
-}
-.sidebar-group > summary:hover {
-  background: var(--workspace-selected);
-}
-.sidebar-group .nav-button {
-  padding-left: 18px;
-}
 .sidebar-navigation .nav-button {
   margin: 1px 0;
   padding-top: 7px;
