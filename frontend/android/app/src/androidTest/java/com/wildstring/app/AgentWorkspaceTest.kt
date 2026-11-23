@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
@@ -32,6 +33,9 @@ class AgentWorkspaceTest {
         @Volatile var connections = "[]"
         @Volatile var tasks = "[]"
         @Volatile var schedulesGate: CountDownLatch? = null
+        @Volatile var readAllGate: CountDownLatch? = null
+        @Volatile var inboxRefreshGate: CountDownLatch? = null
+        @Volatile var rejectReadAll = false
         @Volatile var draftActionResponseDelayMs = 0L
         @Volatile var history = "[]"
         @Volatile var rejectHistoryDelete = false
@@ -68,6 +72,12 @@ class AgentWorkspaceTest {
                     val memory = jsonBody("id" to "memory-one", "content" to memoryContent, "version" to memoryVersion)
                     return@synchronized if (request.method == "GET") json("""{"items":${if (memoryContent.isEmpty()) "[]" else "[$memory]"},"total":${if (memoryContent.isEmpty()) 0 else 1},"limit":100,"offset":0}""") else json(memory.toString())
                 }
+                if (path == "/api/v1/agent/notifications/read-all") {
+                    readAllGate?.let { check(it.await(20, TimeUnit.SECONDS)) { "Read-all gate was not released" } }
+                    if (rejectReadAll) return@synchronized json("{}").setResponseCode(500)
+                    read = true; return@synchronized json("{}")
+                }
+                if (path == "/api/v1/agent/notifications" && read) inboxRefreshGate?.let { check(it.await(20, TimeUnit.SECONDS)) { "Inbox refresh gate was not released" } }
                 if (path == "/api/v1/agent/notifications/read") { read = true; return@synchronized json("{}") }
                 if (path == "/api/v1/agent/notifications") return@synchronized json("""{"items":[{"id":"notice-one","event_id":"event-one","title":"新草案待确认","summary":"已生成 1 份草案，尚未应用。","severity":"info","draft_id":"draft-one","trace_id":"$trace","created_at":"2026-10-17T12:00:00Z","read_at":${if (read) "\"2026-10-17T12:01:00Z\"" else "null"},"version":${if (read) 2 else 1}}],"total":1,"limit":100,"offset":0,"unread_count":${if (read) 0 else 1},"high_watermark":${if (read) 2 else 1},"next_cursor":"c${if (read) 2 else 1}"}""")
                 if (path == "/api/v1/agent/connections") return@synchronized json("""{"items":$connections,"total":${JsonParser.parseString(connections).asJsonArray.size()},"limit":100,"offset":0}""").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -256,6 +266,45 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("新建计划", substring = false).assertDoesNotExist()
             assertFalse(fixture.requests.any { it.first.endsWith("/agent/tasks") || it.first.endsWith("/agent/schedules") })
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+    }
+    @Test fun markAllReadShowsOneProgressUntilRefreshAndKeepsRowsOnFailure() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            connect(vm, fixture)
+            openNotifications()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("新草案待确认").fetchSemanticsNodes().isNotEmpty() }
+            fixture.rejectReadAll = true
+            compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).performClick()
+            compose.waitUntil(15_000) { fixture.requests.count { it.first == "POST /api/v1/agent/notifications/read-all" } == 1 }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText(uiString(R.string.agent_plat_err_generic, 500), substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("新草案待确认").assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_unread_count, 1)).assertExists()
+
+            fixture.rejectReadAll = false
+            val readGate = CountDownLatch(1); val refreshGate = CountDownLatch(1)
+            fixture.readAllGate = readGate; fixture.inboxRefreshGate = refreshGate
+            compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).performClick()
+            compose.waitUntil(15_000) { fixture.requests.count { it.first == "POST /api/v1/agent/notifications/read-all" } == 2 }
+            val progress = SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo) and hasAnyAncestor(hasTestTag("agent-notifications"))
+            compose.onAllNodes(progress).assertCountEquals(1)
+            compose.onNodeWithText(uiString(R.string.agent_ws_marking_read)).assertExists()
+            compose.onNodeWithText("新草案待确认").assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).assertIsNotEnabled()
+            readGate.countDown()
+            compose.waitUntil(15_000) { vm.agent.inbox.value.loading }
+            compose.onAllNodes(progress).assertCountEquals(1)
+            compose.onNodeWithText(uiString(R.string.agent_ws_marking_read)).assertExists()
+            compose.onNodeWithText("新草案待确认").assertExists()
+            refreshGate.countDown()
+            compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
+            compose.onNodeWithText(uiString(R.string.agent_ws_empty_notifications_unread)).assertExists()
+            compose.onNodeWithTag("notice-filter-read").performClick()
+            compose.onNodeWithText("新草案待确认").assertExists()
+            assertEquals(2, fixture.requests.count { it.first == "POST /api/v1/agent/notifications/read-all" })
+        } finally {
+            fixture.readAllGate?.countDown(); fixture.inboxRefreshGate?.countDown()
+            compose.runOnIdle { vm.repository.session.invalidate() }
+        } }
     }
     @Test fun mobileAssistantNotificationAndConcreteApprovalRoundTrip() {
         val vm = vm()
