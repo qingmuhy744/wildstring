@@ -74,16 +74,18 @@ import kotlinx.coroutines.withContext
                     (offset.y + panChange.y).coerceIn(-maxPan, maxPan),
                 )
             }
-            Cover(vm, track.coverId, track.title,
-                Modifier.padding(20.dp).size(imageSize)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offset.x
-                        translationY = offset.y
-                    }
-                    .transformable(transformState)
-                    .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
+            // Keep gesture coordinates in screen space even when the cover is scaled.
+            Box(Modifier.fillMaxSize().transformable(transformState), contentAlignment = Alignment.Center) {
+                Cover(vm, track.coverId, track.title,
+                    Modifier.padding(20.dp).size(imageSize)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                        .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
+            }
             Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 if (track.mayHaveCover && !track.isPodcast) IconButton({ scope.launch {
                     busy = true; message = AppLanguage.string(R.string.art_prev_preparing)
