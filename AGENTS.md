@@ -54,5 +54,6 @@
 
 ## 6. 提交与交付
 
+- PR 使用 GitHub 的 Rebase and merge（`gh pr merge --rebase`）。分支落后时先 rebase 到目标分支，等所需检查通过后合入。
 - 保留用户已有修改。提交前检查 diff、敏感信息与大文件；推送后核验远程提交和 Actions 结果。
 - 提交说明的最后一段不要写 `Co-Authored-By:`。`make setup` 安装的 `commit-msg` 钩子会拒绝这一行。已有历史提交不改写。GitHub 合并或 Dependabot 在服务端补上的 `Co-authored-by` 不经过本机钩子。
