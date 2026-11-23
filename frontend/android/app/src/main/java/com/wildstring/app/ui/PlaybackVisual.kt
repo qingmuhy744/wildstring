@@ -52,7 +52,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.Track
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal val playbackStyles: List<Pair<String, String>>
@@ -100,9 +99,7 @@ internal val playbackStyles: List<Pair<String, String>>
             previous = now
         }
     }
-    var settled by remember(track.id) { mutableStateOf(false) }
-    LaunchedEffect(track.id) { delay(180); settled = true }
-    val arm by animateFloatAsState(if (playing && settled) 26f else 8f, tween(if (motionAllowed) 350 else 0), label = "tonearm")
+    val arm by animateFloatAsState(if (playing) 26f else 8f, tween(if (motionAllowed) 350 else 0), label = "tonearm")
     val stateDesc = if (moving) stringResource(R.string.pb_vis_state_spinning) else stringResource(R.string.pb_vis_state_still)
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = stateDesc
@@ -153,7 +150,7 @@ internal val playbackStyles: List<Pair<String, String>>
                         ), blendMode = BlendMode.DstIn)
                     }
                     Canvas(Modifier.offset(side * .84f, side * .06f).width(side * .022f).height(side * .48f)
-                        .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .04f) }) {
+                        .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .04f) }.testTag("vinyl-tonearm")) {
                         val pivot = Offset(size.width / 2, size.height * .04f)
                         drawCircle(Color(0xFF0C0A09).copy(alpha = 0.45f), radius = size.width * 2.6f, center = pivot + Offset(size.width * .35f, size.width * .5f))
                         drawCircle(Color(0xFF26221F), radius = size.width * 2.4f, center = pivot)
