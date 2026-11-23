@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Version [v0.8.26](docs/releases/v0.8.26.md)** · Android fixes the system Previous button and music preference input. Tap the current tab again to return to its home screen. Web podcast playback settings can be retried after a failed save. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
+- **Version [v0.8.27](docs/releases/v0.8.27.md)** · Web adds album-wide lyric lookup and library checks. Android fixes dragging zoomed artwork. iPhone and iPad gain more playback, library, and podcast controls. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
