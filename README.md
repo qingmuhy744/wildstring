@@ -54,7 +54,7 @@ make docker-import
 
 ## 版本动态
 
-- **版本 [v0.8.26](docs/releases/v0.8.26.md)** · Android 修复系统上一首和音乐偏好输入，重选底栏可回栏目首页。Web 播客支持重试保存续播设置。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
+- **版本 [v0.8.27](docs/releases/v0.8.27.md)** · Web 支持专辑批量查歌词和曲库检查。Android 修复封面预览拖动，iPhone 和 iPad 补齐播放、曲库与播客功能。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 
