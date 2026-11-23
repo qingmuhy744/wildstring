@@ -11,6 +11,8 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.compose.ui.test.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.core.view.WindowCompat
@@ -413,6 +415,77 @@ class NativePlaybackTest {
             stage("style complete $key")
         }
         assertEquals("Changing style must not reopen audio", styleStreams, session.streamRequests())
+    }
+
+    @Test fun artworkPreviewPanTracksScreenDistanceAfterZoom() = withPlayback("artwork-pan") { _ ->
+        fun openPreview() {
+            compose.onNodeWithTag("playback-visual-cover").performTouchInput { longClick() }
+            waitForArtworkWindow()
+        }
+        openPreview()
+        val preview = compose.onNodeWithTag("artwork-preview")
+        preview.performTouchInput { click(center) }
+        preview.assertIsDisplayed()
+        preview.performTouchInput { click(Offset(8f, 8f)) }
+        preview.assertDoesNotExist()
+        waitForActivityWindow()
+        openPreview()
+
+        // The fixture has a pale circle on blue. Its top and left edges remain
+        // visible at this zoom, so their pixel coordinates measure rendered motion.
+        fun circleTopLeft(): Offset {
+            val bitmap = preview.captureToImage().asAndroidBitmap()
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            var left = bitmap.width
+            var top = bitmap.height
+            for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+                val pixel = pixels[y * bitmap.width + x]
+                if (android.graphics.Color.red(pixel) in 235..255 &&
+                    android.graphics.Color.green(pixel) in 210..230 &&
+                    android.graphics.Color.blue(pixel) in 150..170) {
+                    left = minOf(left, x)
+                    top = minOf(top, y)
+                }
+            }
+            check(left < bitmap.width && top < bitmap.height) { "Fixture artwork did not load" }
+            return Offset(left.toFloat(), top.toFloat())
+        }
+        compose.waitUntil(10_000) { runCatching { circleTopLeft() }.isSuccess }
+        val initial = circleTopLeft()
+        preview.performTouchInput {
+            val radius = 110f
+            down(0, center - Offset(radius, 0f))
+            down(1, center + Offset(radius, 0f))
+            updatePointerTo(0, center - Offset(radius * 1.5f, 0f))
+            updatePointerTo(1, center + Offset(radius * 1.5f, 0f))
+            move()
+            up(1)
+            up(0)
+        }
+        val zoomed = circleTopLeft()
+        assertTrue("pinch must visibly enlarge the artwork", zoomed.x < initial.x - 20 && zoomed.y < initial.y - 20)
+        // The first movement clears touch slop; measure the next movement only.
+        fun assertPan(delta: Offset, outsideOriginal: Boolean = false) {
+            preview.performTouchInput {
+                val start = if (outsideOriginal) Offset(center.x, center.y - width / 2f - 25f) else center
+                down(start)
+                moveBy(delta * .4f, delayMillis = 100)
+            }
+            val before = circleTopLeft()
+            preview.performTouchInput { moveBy(delta, delayMillis = 100) }
+            val after = circleTopLeft()
+            preview.performTouchInput { up() }
+            assertEquals("horizontal screen displacement", delta.x, after.x - before.x, 4f)
+            assertEquals("vertical screen displacement", delta.y, after.y - before.y, 4f)
+        }
+        assertPan(Offset(120f, 0f))
+        // The second gesture starts outside the original bounds but on zoomed art.
+        assertPan(Offset(0f, 120f), outsideOriginal = true)
+        preview.performTouchInput { click(Offset(center.x, center.y + width / 2f + 25f)) }
+        preview.assertIsDisplayed()
+        compose.onNodeWithContentDescription(uiString(R.string.art_prev_close)).performClick()
+        waitForActivityWindow()
     }
 
     /** Plays fully buffered audio on repeat; returns once prebuffering is over. */
