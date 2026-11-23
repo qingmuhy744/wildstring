@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
@@ -122,6 +124,8 @@ internal fun SimpleNotificationsSheet(
 
 @Composable internal fun AgentNotifications(vm: MusicViewModel, open: (String, String) -> Unit, openAction: (String, JsonObject?) -> Unit) {
     val state by vm.agent.inbox.collectAsStateWithLifecycle()
+    val preferences by vm.settings.state.collectAsStateWithLifecycle()
+    val motionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val owner = vm.repository.session.cacheScope()
     val valid = state.owner == owner
@@ -150,8 +154,17 @@ internal fun SimpleNotificationsSheet(
                 IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading && !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_notifications)) }
             }
             if (!initialLoading && (action.busy || state.loading)) {
-                if (action.busy) Text(stringResource(R.string.agent_ws_marking_read), style = MaterialTheme.typography.bodySmall)
-                LinearProgressIndicator(Modifier.fillMaxWidth().testTag("notice-progress"))
+                Row(
+                    Modifier.testTag("notice-progress").semantics(mergeDescendants = true) {
+                        progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val phase = if (motionAllowed) rememberWildStringPhase() else null
+                    WildStrings(Modifier.size(24.dp)) { phase?.value ?: 0f }
+                    Text(stringResource(if (action.busy) R.string.agent_ws_marking_read else R.string.refreshing), style = MaterialTheme.typography.bodySmall)
+                }
             }
             AgentError(state.error)
             if (!action.busy && action.message != stringResource(R.string.completed)) ActionStatus(action)

@@ -1,7 +1,6 @@
 package com.wildstring.app.ui
 
 import com.wildstring.app.R
-import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -25,26 +24,35 @@ import kotlin.math.sin
     val resources = androidx.compose.ui.platform.LocalResources.current
     val pull = state.distanceFraction.coerceIn(0f, 1f)
     if (!refreshing && pull <= 0f) return
-    val transition = rememberInfiniteTransition(label = "wildstring-refresh")
-    val phase by transition.animateFloat(0f, (Math.PI * 2).toFloat(),
-        infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "string-phase")
-    val accent = MaterialTheme.colorScheme.primary
+    val phase = rememberWildStringPhase()
     Surface(modifier.padding(top = 12.dp).size(48.dp).graphicsLayer {
         alpha = if (refreshing) 1f else pull
         scaleX = .75f + .25f * pull; scaleY = scaleX
     }.testTag("wildstring-refresh").semantics { contentDescription = if (refreshing) resources.getString(R.string.refreshing) else resources.getString(R.string.release_to_refresh) },
         shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Canvas(Modifier.fillMaxSize().padding(10.dp)) {
-            for (row in 0..2) {
-                val path = Path()
-                for (step in 0..32) {
-                    val x = size.width * step / 32
-                    val y = size.height * (.28f + row * .22f) +
-                        sin(step / 32f * Math.PI * 2 + if (refreshing) phase else pull * 3).toFloat() * size.height * .08f
-                    if (step == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-                drawPath(path, accent, style = Stroke(width = 2.3.dp.toPx(), cap = StrokeCap.Round))
+        WildStrings(Modifier.fillMaxSize().padding(10.dp)) { if (refreshing) phase.value else pull * 3 }
+    }
+}
+
+@Composable internal fun rememberWildStringPhase(): State<Float> {
+    val transition = rememberInfiniteTransition(label = "wildstring-refresh")
+    return transition.animateFloat(0f, (Math.PI * 2).toFloat(),
+        infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "string-phase")
+}
+
+@Composable internal fun WildStrings(modifier: Modifier = Modifier, phase: () -> Float) {
+    val accent = MaterialTheme.colorScheme.primary
+    Canvas(modifier) {
+        val phaseValue = phase()
+        for (row in 0..2) {
+            val path = Path()
+            for (step in 0..32) {
+                val x = size.width * step / 32
+                val y = size.height * (.28f + row * .22f) +
+                    sin(step / 32f * Math.PI * 2 + phaseValue).toFloat() * size.height * .08f
+                if (step == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
+            drawPath(path, accent, style = Stroke(width = 2.3.dp.toPx(), cap = StrokeCap.Round))
         }
     }
 }

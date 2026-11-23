@@ -287,20 +287,35 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { fixture.requests.count { it.first == "POST /api/v1/agent/notifications/read-all" } == 2 }
             val progress = SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo) and hasAnyAncestor(hasTestTag("agent-notifications"))
             compose.onAllNodes(progress).assertCountEquals(1)
+            compose.onAllNodesWithTag("notice-progress").assertCountEquals(1)
             compose.onNodeWithText(uiString(R.string.agent_ws_marking_read)).assertExists()
             compose.onNodeWithText("新草案待确认").assertExists()
             compose.onNodeWithText(uiString(R.string.agent_ws_mark_all_read)).assertIsNotEnabled()
             readGate.countDown()
             compose.waitUntil(15_000) { vm.agent.inbox.value.loading }
             compose.onAllNodes(progress).assertCountEquals(1)
+            compose.onAllNodesWithTag("notice-progress").assertCountEquals(1)
             compose.onNodeWithText(uiString(R.string.agent_ws_marking_read)).assertExists()
             compose.onNodeWithText("新草案待确认").assertExists()
             refreshGate.countDown()
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("notice-progress").fetchSemanticsNodes().isEmpty() }
+            compose.onAllNodes(progress).assertCountEquals(0)
             compose.onNodeWithText(uiString(R.string.agent_ws_empty_notifications_unread)).assertExists()
             compose.onNodeWithTag("notice-filter-read").performClick()
             compose.onNodeWithText("新草案待确认").assertExists()
             assertEquals(2, fixture.requests.count { it.first == "POST /api/v1/agent/notifications/read-all" })
+
+            val manualRefreshGate = CountDownLatch(1)
+            fixture.inboxRefreshGate = manualRefreshGate
+            compose.onNodeWithContentDescription(uiString(R.string.agent_ws_refresh_notifications)).performClick()
+            compose.waitUntil(15_000) { vm.agent.inbox.value.loading }
+            compose.onAllNodes(progress).assertCountEquals(1)
+            compose.onAllNodesWithTag("notice-progress").assertCountEquals(1)
+            compose.onNodeWithText(uiString(R.string.refreshing)).assertExists()
+            compose.onNodeWithText("新草案待确认").assertExists()
+            manualRefreshGate.countDown()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("notice-progress").fetchSemanticsNodes().isEmpty() }
         } finally {
             fixture.readAllGate?.countDown(); fixture.inboxRefreshGate?.countDown()
             compose.runOnIdle { vm.repository.session.invalidate() }
