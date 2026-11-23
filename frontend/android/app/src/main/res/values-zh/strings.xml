@@ -800,6 +800,7 @@
     <string name="agent_ws_lyrics_song_source">歌曲：%1$s · %2$s</string>
     <string name="agent_ws_manual_ai_budget_notice">点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果按整理设置审核或应用。</string>
     <string name="agent_ws_mark_all_read">全部已读</string>
+    <string name="agent_ws_marking_read">正在标为已读</string>
     <string name="agent_ws_mark_read">标为已读</string>
     <string name="agent_ws_match_basis">匹配依据：%1$s</string>
     <string name="agent_ws_max_calls_label">最多模型调用次数</string>

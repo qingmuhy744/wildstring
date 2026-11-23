@@ -129,6 +129,8 @@ internal fun SimpleNotificationsSheet(
     val visible = if (!valid) emptyList() else state.items.filter { notice ->
         when (filter) { "unread" -> notice.text("read_at").isBlank(); "read" -> notice.text("read_at").isNotBlank(); else -> true }
     }
+    val initialLoading = state.loading && !action.busy &&
+        (!valid || (state.supported == null && state.items.isEmpty()))
     LaunchedEffect(owner) { vm.agent.refreshInbox() }
     Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize().testTag("agent-notifications"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -136,7 +138,7 @@ internal fun SimpleNotificationsSheet(
             if (valid && state.unread > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.agent_ws_unread_count, state.unread), Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                    TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_mark_all_read)) }
+                    TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy && !state.loading) { Text(stringResource(R.string.agent_ws_mark_all_read)) }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -145,11 +147,14 @@ internal fun SimpleNotificationsSheet(
                         FilterChip(filter == key, { filter = key }, { Text(label) }, modifier = Modifier.testTag("notice-filter-$key"))
                     }
                 }
-                IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_notifications)) }
+                IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading && !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.agent_ws_refresh_notifications)) }
             }
-            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (!initialLoading && (action.busy || state.loading)) {
+                if (action.busy) Text(stringResource(R.string.agent_ws_marking_read), style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(Modifier.fillMaxWidth().testTag("notice-progress"))
+            }
             AgentError(state.error)
-            if (action.message != stringResource(R.string.completed)) ActionStatus(action)
+            if (!action.busy && action.message != stringResource(R.string.completed)) ActionStatus(action)
         }
         items(visible, key = { it.text("id") }) { notice ->
             AgentCard {
@@ -169,7 +174,7 @@ internal fun SimpleNotificationsSheet(
                             Text(localizeNoticeActionLabel(actionItem.text("label")).ifBlank { stringResource(R.string.agent_ws_view_result) })
                         }
                     }
-                    if (notice.text("read_at").isBlank()) TextButton({ scope.launch { action.run { vm.agent.readNotification(notice.text("id")) } } }, enabled = !action.busy,
+                    if (notice.text("read_at").isBlank()) TextButton({ scope.launch { action.run { vm.agent.readNotification(notice.text("id")) } } }, enabled = !action.busy && !state.loading,
                         modifier = Modifier.testTag("notice-read-${notice.text("id")}")) { Text(stringResource(R.string.agent_ws_mark_read)) }
                 }
             }
@@ -177,7 +182,7 @@ internal fun SimpleNotificationsSheet(
         if (valid && visible.isEmpty() && !state.loading && state.error == null) item { AgentEmpty(when (filter) { "unread" -> stringResource(R.string.agent_ws_empty_notifications_unread); "read" -> stringResource(R.string.agent_ws_empty_notifications_read); else -> stringResource(R.string.agent_ws_empty_notifications_all) }) }
         item { Spacer(Modifier.height(16.dp)) }
     }
-    if (state.loading && visible.isEmpty()) AgentSkeleton()
+    if (initialLoading) AgentSkeleton()
     }
 }
 
