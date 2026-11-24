@@ -67,12 +67,14 @@
 
 在 [backend/src/wildstring/database.py](../../backend/src/wildstring/database.py) 将 `SCHEMA_VERSION` 从 `55` 升至 `56`，并同步在 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 补充旧库迁移测试构造：
 
-1. **现有音乐表增量扩展（向后兼容旧记录默认 `'copy'`）**：
+1. **现有音乐表增量扩展（向后兼容旧记录默认 `'copy'`，同批修改裸列插入）**：
    - `libraries`：新增 `storage_mode TEXT NOT NULL DEFAULT 'copy' CHECK(storage_mode IN ('copy', 'hardlink'))`
-   - `imported_files`：新增 `link_mode TEXT NOT NULL DEFAULT 'copy' CHECK(link_mode IN ('copy', 'hardlink', 'generated', 'managed_only'))`
+   - `imported_files`：新增 `link_mode TEXT NOT NULL DEFAULT 'copy' CHECK(link_mode IN ('copy', 'hardlink', 'generated', 'managed_only'))`。
+   - **同批强制修复**：当前 [importer.py](../../backend/src/wildstring/library/importer.py) 与 [upload.py](../../backend/src/wildstring/library/upload.py) 均使用省略列名的 7 列 `INSERT OR REPLACE INTO imported_files VALUES (?,?,?,?,?,?,?)`；必须在升至 `v56` 的**同一批改动**中改为显式 8 列列表 `(source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)`，并同步回归验证新库初始化、`v55` 原库升级（既有行默认 `'copy'`）及升级后的音乐导入与网页上传链路。
    - `library_migrations`：新增 `target_storage_mode TEXT CHECK(target_storage_mode IN ('copy', 'hardlink'))`、`relinked_files INTEGER NOT NULL DEFAULT 0`、`reclaimed_bytes INTEGER NOT NULL DEFAULT 0`、`kept_standalone_files INTEGER NOT NULL DEFAULT 0`、`sidecars_written INTEGER NOT NULL DEFAULT 0`；放宽允许同库在目标模式变化时的原地模式迁移（`target_root == source_root` 且 `target_storage_mode IS NOT NULL`）。
-2. **书库、托管路径与迁移**：
-   - `book_libraries`：`id`, `name`, `managed_root`, `storage_mode`（`'copy' | 'hardlink'`）, `source_roots_json`, `default_access`（`all` | `restricted`）, `auto_pair`（默认 1）, `version`, `created_at`, `updated_at`
+2. **书库、单一来源表、托管路径与迁移**：
+   - `book_libraries`：`id`, `name`, `managed_root`, `storage_mode`（`'copy' | 'hardlink'`）, `default_access`（`all` | `restricted`）, `auto_pair`（默认 1）, `version`, `created_at`, `updated_at`
+   - `book_library_sources`：`library_id`, `id`, `root`, `watch_enabled`（完全沿用 [catalog.py](../../backend/src/wildstring/library/catalog.py) 中 `library_sources` 的单一数据源表设计，不另存重复的 `source_roots_json`）
    - `book_library_access`：`(library_id, user_id, granted_by, created_at)` 联合主键
    - `book_library_migrations`：镜像 `library_migrations` 结构与迁移统计列（`source_root`, `target_root`, `target_storage_mode`, `copied_files`, `relinked_files`, `reclaimed_bytes`, `kept_standalone_files`, `sidecars_written`, `status`, `error` 等），与音乐库共用同一套存储安全校验与锁契约。
 3. **书籍主表与载体子表**：
@@ -97,8 +99,8 @@
 
 - **同文件系统与硬链接可用性预检**：
   - 在 [backend/src/wildstring/library/catalog.py](../../backend/src/wildstring/library/catalog.py)、[backend/src/wildstring/library/storage.py](../../backend/src/wildstring/library/storage.py) 与书籍库服务中新增共享校验器 `validate_hardlink_capability(source_roots, managed_root)`：
-    1. 校验每个 `source_root` 与 `managed_root`（不存在则向上追溯已存在父目录）位于相同内核设备 `st_dev`；若不同设备直接抛出 `HTTP 422 hardlink_cross_device`，返回提示包含 Docker/NAS 同父目录挂载说明（如源与托管目录均放在同一个 `/media` 挂载下），绝不回退复制；
-    2. 尝试对代表源目录或探测目标执行实际硬链接与只读检查，拦截只读挂载目标 `EROFS` 与 Linux `fs.protected_hardlinks=1` 下跨属主权限不足 `EPERM`，返回 `HTTP 422 hardlink_not_supported`。
+    1. `st_dev` 仅作为跨卷初筛：校验每个 `source_root` 与 `managed_root`（不存在则向上追溯已存在父目录）位于相同内核设备 `st_dev`；若不同设备直接抛出 `HTTP 422 hardlink_cross_device`，返回提示包含 Docker/NAS 同父目录挂载说明（如源与托管目录均放在同一个 `/media` 挂载下），绝不回退复制；
+    2. **基于真实源文件的只读硬链接权限探针**：遍历定位 `source_root` 下具有代表性的现存普通文件（全程以 `O_NOFOLLOW` 只读打开，绝不向 `source_root` 写入任何探测文件或修改源句柄），向 `managed_root` 内创建临时硬链接并在校验后立即 `unlink` 删除，精确拦截只读挂载目标 `EROFS` 与 Linux `fs.protected_hardlinks=1` 跨属主权限不足 `EPERM`（统一返回 `HTTP 422 hardlink_not_supported`）；若新库启用时 `source_root` 暂为空目录尚无现存文件，则在通过 `st_dev` 与 `managed_root` 可写检查后放行，并在首个真实文件导入/扫描时强制触发硬链接校验、同样绝不退回复制。
 - **扩展 [backend/src/wildstring/library/import_files.py](../../backend/src/wildstring/library/import_files.py)**：
   - 新增 `link_exclusive(source, root: Path, relative: Path, expected: str | None = None) -> str`：
     1. 在读取前记录源句柄 `fingerprint(os.fstat(source.fileno()))`，流式校验 `sha256`；
@@ -147,11 +149,13 @@
      - 预检同设备与硬链接可行性，并先行触发一次 `.wildstring/` 元数据导出保证历史编辑零丢失；
      - 建立当前库所有 `source_roots` 的 `(sha256, st_ino)` 索引（优先参考 `imported_files` / `book_*` 源映射记录验证，若原路径改名则用源根下同哈希匹配）；
      - 遍历托管文件：对源文件中存在 `sha256` 完全一致且 `st_ino` 尚未对齐源文件的副本，在同目录以 `os.link` 生成临时硬链接 `.wildstring-relink-<uuid>`，校验哈希一致后 **`os.replace` 原子替换**既有独立副本——正在播放中的文件描述符继续读取原 inode 不被中断、对外部读访问无任何空窗，替换完成瞬间系统自动释放重复占用的磁盘块，累计 `relinked_files` 与 `reclaimed_bytes`；
+     - **跳过 `os.utime`（严禁改写源 inode 时间戳）**：[storage.py](../../backend/src/wildstring/library/storage.py) 现有复制迁移在写入目标后调用 `os.utime` 同步修改时间；但在一切 `hardlink` 分支（含原地重链与跨目录直链）中**必须显式跳过 `os.utime`**，因为硬链接与做种源文件共用同一底层 inode，对目标调用 `os.utime` 会直接篡改只读源文件的元数据时间戳；
+     - **中断续跑与幂等校验**：由于 `os.replace` 仅保证单文件原子替换，若在原地切换中途发生进程重启或崩溃，重试/恢复流程（`retry` / 启动恢复）必须基于 `(target.st_ino == source.st_ino 且 sha256 一致)` 识别已成功硬链接的文件、按已重链处理而不报错或重复计费，并同步修正 `imported_files.link_mode`（或书库子表 `link_mode`）及 `relinked_files` / `reclaimed_bytes` / `kept_standalone_files` 统计，保证中断前后的磁盘物理状态与数据库最终完全一致；
      - 对找不到源文件的独立条目（例如网页端上传、CUE 切轨/WAV 转 FLAC 衍生文件、或外部做种源已被用户清理），**安全保留原托管副本**标记 `link_mode = 'managed_only' | 'generated'` 并计入 `kept_standalone_files`；
      - 事务内切换 `libraries.storage_mode = 'hardlink'`（或 `book_libraries.storage_mode = 'hardlink'`）并刷新 `imported_files.link_mode`。
   2. **场景 B：跨路径搬迁 + 转为 `hardlink` 一步完成**（解决默认 `/data/library` 需迁往与源盘同卷的 `/media/wildstring/library`）：
      - 要求目标 `managed_root` 与 `source_roots` 通过同设备及空目录预检；
-     - 先刷全库 `.wildstring/` 侧车；迁移期间命中源 `sha256` 的文件直接从源文件通过 `link_exclusive` 链接至新 `managed_root`（新位置瞬间建立且**几乎零额外磁盘增长**），同时将 `.wildstring/` 与独立文件（网页上传/转码衍生）同步至新位置并核验树完整；
+     - 先刷全库 `.wildstring/` 侧车；迁移期间命中源 `sha256` 的文件直接从源文件通过 `link_exclusive` 链接至新 `managed_root`（**同样跳过 `os.utime`**，新位置瞬间建立且**几乎零额外磁盘增长**），同时将 `.wildstring/` 与独立文件（网页上传/转码衍生）同步至新位置并核验树完整；
      - 原子切换数据库内 `root`、`storage_mode = 'hardlink'` 及 `imported_files` 映射，原有旧目录按既有存储迁移契约暂留以供管理员核对确认后回收。
   3. **场景 C：反向 `hardlink → copy` 解耦独立**：
      - 允许管理员后续从 `hardlink` 切回独立副本 `copy`：执行前用 `shutil.disk_usage` 核算目标卷剩余空间必须充足（否则报错 `422 insufficient_storage`），然后将 `st_nlink > 1` 文件逐个写出独立副本、`fsync` 并 `os.replace` 解耦硬链接关系，最后更新 `storage_mode = 'copy'`。
@@ -253,13 +257,13 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
 
 核对 [scripts/package_release.py](../../scripts/package_release.py) 对 prerelease tag `v0.9.0-alpha.1` 的统一版本解析约束（执行阶段最后提交完成）：
 
-| 目标文件 | 现行值（基线） | `v0.9.0-alpha.1` 目标值 | 说明 |
+| 目标文件 | 现行值（`v0.8.28` 基线） | `v0.9.0-alpha.1` 目标值 | 说明 |
 | --- | --- | --- | --- |
-| [backend/pyproject.toml](../../backend/pyproject.toml) | `0.8.27` | `0.9.0a1` | 同步执行 `uv lock` 更新 `backend/uv.lock` |
-| [frontend/web/package.json](../../frontend/web/package.json) | `0.8.27` | `0.9.0-alpha.1` | 同步更新 `frontend/web/package-lock.json` 根版本号 |
-| [frontend/android/app/build.gradle.kts](../../frontend/android/app/build.gradle.kts) | `versionCode = 63` / `0.8.27` | `versionCode = 64` / `0.9.0-alpha.1` | `versionCode` 必须严格大于前版 `63` |
-| [frontend/macos/project.yml](../../frontend/macos/project.yml) | `0.8.27` / `62` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "63"` | Apple `MARKETING_VERSION` 按 `package_release.py` 不带 prerelease 后缀，构建号严格递增 |
-| [frontend/ios/project.yml](../../frontend/ios/project.yml) | `0.8.27` / `62` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "63"` | 与 macOS 构建号保持同源规则并通过 XcodeGen 生成核验 |
+| [backend/pyproject.toml](../../backend/pyproject.toml) | `0.8.28` | `0.9.0a1` | 同步执行 `uv lock` 更新 `backend/uv.lock` |
+| [frontend/web/package.json](../../frontend/web/package.json) | `0.8.28` | `0.9.0-alpha.1` | 同步更新 `frontend/web/package-lock.json` 根版本号 |
+| [frontend/android/app/build.gradle.kts](../../frontend/android/app/build.gradle.kts) | `versionCode = 64` / `0.8.28` | `versionCode = 65` / `0.9.0-alpha.1` | `versionCode` 必须严格大于前版 `64` |
+| [frontend/macos/project.yml](../../frontend/macos/project.yml) | `0.8.28` / `63` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "64"` | Apple `MARKETING_VERSION` 按 `package_release.py` 不带 prerelease 后缀，构建号严格递增 |
+| [frontend/ios/project.yml](../../frontend/ios/project.yml) | `0.8.28` / `63` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "64"` | 与 macOS 构建号保持同源规则并通过 XcodeGen 生成核验 |
 
 - **既有热更新说明**：核实 [UpdatePolicy.kt](../../frontend/android/app/src/main/java/com/wildstring/app/update/UpdatePolicy.kt) 会在客户端侧跳过 `prerelease == true` 的 GitHub Release（`release_unstable`）；保留为正式渠道保护策略，在发布 `v0.9.0-alpha.1` 时标注 Alpha 包需手动安装验证。
 - **发版文档入口**：准备打 tag 前，按 [AGENTS.md](../../AGENTS.md) §1 同步更新中英文 README 最新版本、`docs/product/scope.md`、`CHANGELOG.md` 与 `docs/releases/v0.9.0-alpha.1.md`。
@@ -279,18 +283,20 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
 
 ### 2. 后端自动化测试验收矩阵
 
-- **迁移测试**：基于 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 构造 `v55` 库（含现有音乐曲库、覆写元数据、歌词、封面、播客进度与多库数据），升级至 `v56` 验证无损迁移及默认值对齐（旧库均为 `storage_mode = 'copy'`、`link_mode = 'copy'`）。
+- **迁移与既有音乐回归（阶段一合入即测）**：
+  - 基于 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 构造 `v55` 库（含现有音乐曲库、覆写元数据、歌词、封面、播客进度与多库数据），升级至 `v56` 验证无损迁移及默认值对齐（旧库均为 `storage_mode = 'copy'`、`link_mode = 'copy'`）。
+  - 紧随 `v56` 迁移测试立即验证**全新初始化数据库以及由 `v55` 升级而来的数据库**均可正常执行既有 `MusicImporter` 音乐导入与网页音乐上传（验证显式 8 列 `INSERT INTO imported_files` 无列数错误并完整保留既有音乐导入回归通过）。
 - **硬链接双模式与防跨卷测试（音乐 + 书架）**：
-  - 同挂载卷下创建 `hardlink` 模式音乐曲库与书库，导入直通音频（`.flac` / `.mp3` / `.m4a` / `.m4b`）与电子书（`.epub` / `.txt`）：断言源与托管文件 `st_ino` 完全一致、`st_nlink >= 2`、源目录完全只读；随后在 WildString 内修改元数据覆写、歌词、封面并重组织文件路径，断言源音频/电子书字节与修改时间 `0` 变化，且不允许任何内嵌标签写回改写源 inode。
+  - 同挂载卷下创建 `hardlink` 模式音乐曲库与书库，导入直通音频（`.flac` / `.mp3` / `.m4a` / `.m4b`）与电子书（`.epub` / `.txt`）：断言源与托管文件 `st_ino` 完全一致、`st_nlink >= 2`、源目录完全只读；随后在 WildString 内修改元数据覆写、歌词、封面并重组织文件路径，断言源音频/电子书字节与修改时间 `st_mtime_ns` `0` 变化，且不允许任何内嵌标签写回改写源 inode（包括硬链接迁移路径亦严格验证 `st_mtime_ns` 未被 `os.utime` 改写）。
   - 验证 `Intake` 下的 `WAV → FLAC` 与 `CUE` 分轨自然生成新副本（`link_mode = 'generated'`）并保留原始 WAV 源无损。
-  - 模拟不同挂载盘 / `EXDEV` 与只读 `EROFS` 场景新建/切换或迁移到 `hardlink`：断言服务端直接返回 `HTTP 422 hardlink_cross_device` 或 `hardlink_not_supported`，绝对不会静默回落成双份复制。
+  - 模拟不同挂载盘 / `EXDEV`、只读目标 `EROFS` 以及 `protected_hardlinks` 权限不足 `EPERM`（通过真实源只读文件探针捕捉）场景新建/切换或迁移到 `hardlink`：断言服务端直接返回 `HTTP 422 hardlink_cross_device` 或 `HTTP 422 hardlink_not_supported`，绝对不会静默回落成双份复制，且绝不向 `source_roots` 写入探测文件。
 - **`.wildstring/` 侧车双向零隐私与分享还原测试**：
   - **导出零隐私红线**：在音乐库与书架同时存在 2 个用户、各自的播放次数、红心、歌单、阅读/听书进度、个人书签、4 色批注后执行元数据编辑及全量导出 `.wildstring/`，逐字扫描所有导出的 `.json` / `.lrc` / 图片元数据，断言**绝不含**任何 `user_id`、`username`、进度、红心、歌单、批注、密码/令牌或宿主机/容器绝对路径。
   - **分享跨实例导入恢复**：将带 `.wildstring/` 的导出专辑/书籍目录复制到全新干净的 WildString 测试实例 `source_roots`（联网搜刮禁用），执行导入后断言所有精修元数据、锁定字段、`track_lyrics`（`.lrc`）、Pillow 封面与有声书章节表全部直接还原；另测对空数据库重扫已包含 `.wildstring/` 的托管目录亦可恢复。
   - **不可信输入安全防御 & 扫描回归**：构造含 symlink、路径穿越（`../`）、超限 `manifest.json`、错误 `sha256`、恶意附加私人字段与 `<script>` 的 `.wildstring/` 文件夹，验证被安全拒绝或忽略篡改项；验证现有 [scanner.py](../../backend/src/wildstring/library/scanner.py) 扫描含 `.wildstring/` 的托管目录时 `counts["skipped"]` 保持 `0`（不把侧车计为跳过文件破坏现有回归）。
 - **`copy → hardlink` 与 `hardlink → copy` 迁移测试（音乐 + 书架）**：
-  - **原地模式迁移**：针对已与 `source_roots` 同卷的 `copy` 库触发原地 `copy → hardlink` 迁移：断言执行前自动刷出 `.wildstring/`，迁移中保持一个打开的音频读文件描述符持续读取不中断、无 `ENOENT`，完成后对应源文件的文件 `st_ino` 对齐源、`reclaimed_bytes > 0`、`storage_mode == 'hardlink'`，而网页上传文件与 CUE 衍生文件作为 `kept_standalone_files` 完整保留不受损。
-  - **跨目录搬迁 + 转硬链**：将 `/data/libraries/lib1`（`copy`）迁移至源同卷 `/media/wildstring/lib1`（`target_storage_mode='hardlink'`）：断言新路径直接建立硬链接零双倍新写入、旧覆写/歌词/封面随 `.wildstring/` 迁移、`root` 原子切换，且支持 `retry` 与重启恢复。
+  - **原地模式迁移与中断恢复**：针对已与 `source_roots` 同卷的 `copy` 库触发原地 `copy → hardlink` 迁移：断言执行前自动刷出 `.wildstring/`，迁移中保持一个打开的音频读文件描述符持续读取不中断、无 `ENOENT`，完成后对应源文件的文件 `st_ino` 对齐源、`reclaimed_bytes > 0`、`storage_mode == 'hardlink'`，而网页上传文件与 CUE 衍生文件作为 `kept_standalone_files` 完整保留不受损；**另构造迁移中途完成一半（部分文件已 `os.replace` 为硬链接、其余仍为独立副本）后进程退出的状态，验证重跑/恢复时可幂等识别已完成项、补齐 `link_mode = 'hardlink'`，最终磁盘硬链关系、库记录与计数完全一致**。
+  - **跨目录搬迁 + 转硬链**：将 `/data/libraries/lib1`（`copy`）迁移至源同卷 `/media/wildstring/lib1`（`target_storage_mode='hardlink'`）：断言新路径直接建立硬链接零双倍新写入且源 `st_mtime_ns` 零变化、旧覆写/歌词/封面随 `.wildstring/` 迁移、`root` 原子切换，且支持 `retry` 与重启恢复。
   - **反向解耦**：执行 `hardlink → copy` 后，断言托管文件与源文件 `st_ino` 重新分离（`st_nlink == 1`），空间不足时提前拒绝。
 - **书架专属边界、上传红线、配对与 CAS 同步**：
   - `.epub`/`.txt`/封面上传正常入库为 `managed_only`；`.m4b`/`.mp3`/`.flac`/`.ogg`/`.m4a` 上传、音频伪装扩展名（魔数欺骗）与内嵌音频的 `.epub` 均返回 `HTTP 422 audio_upload_forbidden` 且无临时文件残留；EPUB Zip Bomb / `../` / `<script>` 被拒绝或剥离；多用户进度/书签/4 色批注隔离与 `HTTP 409` CAS 冲突正常；Mock `OpenLibrary` / `Google Books` / `Apple iTunes` 搜刮与 `locked_fields` 抗重扫生效且自动同步 `.wildstring/`。
@@ -323,5 +329,7 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
    - 缓解：严格限定解压与章节切片上限、异步惰性落盘 `book_cache`；以 `(spine_index, block_index, char_offset)` 作为跨端跨模式唯一规范锚点，切模式及调字号前先冻结锚点再局部复算。
 4. **误将有声书混入音乐库或 `podcast_queue` 引发统计污染**：
    - 缓解：`books_dir` / `book_libraries` 与 `libraries` / `podcasts_dir` 强制隔离交叉检查；书架有声书走独立会话通道，严禁写入 `podcast_queue` 与 `playback_states`。
-5. **回滚策略**：
-   - 本批新增书籍表与增量列均设安全默认值（既有音乐库保持 `storage_mode = 'copy'`）；若需应急退回 `copy` 模式，管理员可在界面执行 `hardlink → copy` 解耦回独立副本，或通过特性开关/提交回退恢复既有状态而不损毁源目录做种文件、既有曲库与播客个人数据。
+5. **回滚策略（区分存储模式回退与版本降级）**：
+   - 本批新增书籍表与增量列均设安全默认值（既有音乐库保持 `storage_mode = 'copy'`）：
+   - **(a) 保持 `0.9.0a1` 新版仅退回独立副本模式**：管理员可在界面或 API 发起 `hardlink → copy` 存储迁移，将托管媒体安全解耦为独立副本，不损毁源目录做种文件、既有曲库、书架与播客个人数据；
+   - **(b) 服务端程序降级回 `v0.8.28`**：[database.py](../../backend/src/wildstring/database.py) 强制拒绝打开高于自身 `SCHEMA_VERSION` 的数据库（`current > SCHEMA_VERSION`）；因此升级前须常规备份 `v55` `wildstring.db`，若需完整回退至 `v0.8.28` 程序镜像/二进制，须先将受保护的 `v55` 数据库备份恢复后再启动旧版服务。
