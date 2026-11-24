@@ -27,7 +27,7 @@ from wildstring.library.import_files import (
 )
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.scanner import SourceChangedError, fingerprint, open_source
-from wildstring.library.sidecar import refresh_music_tracks
+from wildstring.library.sidecar import read_music_sidecar_fields, refresh_music_tracks
 
 INPUT_SUFFIXES = SUPPORTED_SUFFIXES | {".wav"}
 logger = logging.getLogger(__name__)
@@ -573,8 +573,35 @@ class Intake:
         try:
             with open_source(self.settings.music_dir, relative) as source:
                 metadata = read_metadata(source, relative)
+                source_hash = digest(source)
+            sidecar_fields, sidecar_locked = read_music_sidecar_fields(
+                self.settings.music_dir, relative, source_hash
+            )
+            if sidecar_fields:
+                meta_updates = {}
+                for key in (
+                    "title",
+                    "artists",
+                    "album",
+                    "album_artists",
+                    "track_number",
+                    "disc_number",
+                ):
+                    if key in sidecar_fields and (
+                        key in sidecar_locked
+                        or not getattr(metadata, key)
+                        or (key == "title" and metadata.title_source == "filename")
+                    ):
+                        meta_updates[key] = sidecar_fields[key]
+                if "title" in meta_updates:
+                    meta_updates["title_source"] = "tag"
+                if meta_updates:
+                    metadata = replace(metadata, **meta_updates)
             sheet, tracks, cue_data = self.cue_for(relative)
             overrides = dict(item["overrides"])
+            for key, value in sidecar_fields.items():
+                if key in sidecar_locked and key in FIELDS:
+                    overrides.setdefault(key, value)
             if tracks and len(tracks) == 1:
                 track = tracks[0]
                 inferred = {

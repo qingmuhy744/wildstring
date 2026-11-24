@@ -19,14 +19,21 @@ object UpdatePolicy {
     const val MAX_APK = 200L * 1024 * 1024
     const val MAX_METADATA = 1024L * 1024
     private val versionPattern = Regex("^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$")
+    private val installedPattern = Regex("^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})(?:-(dev|alpha|beta|rc)\\.(0|[1-9][0-9]{0,8}))?$")
     fun version(value: String): List<Int> {
         if (!versionPattern.matches(value)) throw UpdateFailure("release_invalid")
         return value.split('.').map(String::toInt)
     }
+    private fun installedVersion(value: String): Pair<List<Int>, Boolean> {
+        val match = installedPattern.matchEntire(value) ?: throw UpdateFailure("release_invalid")
+        val numbers = listOf(match.groupValues[1].toInt(), match.groupValues[2].toInt(), match.groupValues[3].toInt())
+        return numbers to match.groupValues[4].isNotEmpty()
+    }
     fun isNewer(next: String, current: String): Boolean {
-        val a = version(next); val b = version(current)
+        val a = version(next)
+        val (b, currentIsPrerelease) = installedVersion(current)
         for (i in 0..2) if (a[i] != b[i]) return a[i] > b[i]
-        return false
+        return currentIsPrerelease
     }
     fun release(json: String): AppRelease {
         try {

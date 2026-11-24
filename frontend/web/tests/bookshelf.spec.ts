@@ -286,3 +286,114 @@ test('校对有声书章节标题后立即写入侧车', async ({ page }, info) 
     await rm(source, { recursive: true, force: true });
   }
 });
+
+test('批注高亮渲染与删除、切页续听有声书以及受限书库成员授权', async ({ page }, info) => {
+  await login(page);
+  const headers = { 'X-Wildstring-Client': 'web' };
+  const title = `批注与续听 ${info.project.name} ${Date.now()}`;
+  const source = await mkdtemp(join(tmpdir(), 'wildstring-book-full-'));
+  try {
+    await copyFile(
+      new URL('../../../tests/fixtures/audio/playback.mp3', import.meta.url),
+      join(source, 'chapter1.mp3'),
+    );
+    const library = await page.request.post('/api/v1/book-libraries', {
+      headers,
+      data: { name: title, source_roots: [source], default_access: 'restricted' },
+    });
+    expect(library.status()).toBe(201);
+    const lib = await library.json();
+    expect(
+      (await page.request.post(`/api/v1/book-libraries/${lib.id}/scan`, { headers })).status(),
+    ).toBe(200);
+    const uploaded = await page.request.post('/api/v1/books/upload', {
+      headers,
+      multipart: {
+        library_id: lib.id,
+        file: {
+          name: `${title}.txt`,
+          mimeType: 'text/plain',
+          buffer: Buffer.from('第一章\n这是一段用于高亮批注测试的文字内容。'),
+        },
+      },
+    });
+    expect(uploaded.status()).toBe(201);
+    const ebookId = (await uploaded.json()).id;
+    const ann = await page.request.post(`/api/v1/books/${ebookId}/annotations`, {
+      headers,
+      data: {
+        spine_index: 0,
+        start_block_index: 1,
+        start_char_offset: 0,
+        end_block_index: 1,
+        end_char_offset: 4,
+        selected_text: '这是一段',
+        color: 'terracotta',
+      },
+    });
+    expect(ann.status()).toBe(201);
+
+    await page.goto(`/books/${ebookId}/read`);
+    const reader = page.getByRole('dialog', { name: title });
+    const mark = reader.locator('mark[data-color="terracotta"]');
+    await expect(mark).toHaveText('这是一段');
+    await reader.getByText(/批注 \(1\)/).click();
+    await reader.getByRole('button', { name: '删除 这是一段' }).click();
+    await expect(mark).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // Start audiobook and switch away to Tracks -> persistent dock remains visible.
+    const audioBook = (
+      await (await page.request.get(`/api/v1/books?library_id=${lib.id}`)).json()
+    ).items.find((item: { id: string; has_audiobook: boolean }) => item.has_audiobook);
+    await page.getByLabel('书库', { exact: true }).selectOption(lib.id);
+    await page.getByRole('button', { name: audioBook.title, exact: false }).click();
+    await page.getByRole('button', { name: '收听', exact: true }).click();
+    await expect(page.locator('.book-audio')).toBeVisible();
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('tracks');
+    else await page.locator('.sidebar').getByRole('button', { name: '歌曲' }).first().click();
+    await expect(page.locator('.book-audio-dock')).toContainText(audioBook.title);
+    await page.locator('.book-audio-dock').getByRole('button', { name: '返回书架' }).click();
+    await expect(page.locator('.book-audio-dock')).toHaveCount(0);
+
+    // Owner grants member access in Management UI and member sees restricted book.
+    const visitorCreds = {
+      username: `member-${info.project.name}-${Date.now()}`,
+      password: 'disposable-member-password',
+    };
+    const userRes = await page.request.post('/api/v1/manage/users', {
+      headers,
+      data: { ...visitorCreds, library_ids: [] },
+    });
+    expect(userRes.status()).toBe(201);
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
+    else await page.getByRole('button', { name: /电台/ }).first().click();
+    await page.getByRole('button', { name: '书架', exact: true }).click();
+    await page.getByLabel('书库', { exact: true }).selectOption(lib.id);
+    await page.getByRole('button', { name: '管理书库' }).click();
+    await page.getByText('成员访问授权', { exact: true }).click();
+    const memberCheck = page.getByLabel(visitorCreds.username);
+    await memberCheck.scrollIntoViewIfNeeded();
+    await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes(`/book-libraries/${lib.id}/access/`) &&
+          res.request().method() === 'PUT' &&
+          res.status() === 200,
+      ),
+      memberCheck.check(),
+    ]);
+
+    await page.request.post('/api/v1/auth/logout', { headers });
+    expect(
+      (await page.request.post('/api/v1/auth/login', { headers, data: visitorCreds })).status(),
+    ).toBe(200);
+    await page.reload();
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
+    else await page.getByRole('button', { name: /电台/ }).first().click();
+    await page.getByRole('button', { name: '书架', exact: true }).click();
+    await expect(page.getByRole('button', { name: title, exact: false })).toBeVisible();
+  } finally {
+    await rm(source, { recursive: true, force: true });
+  }
+});

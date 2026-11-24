@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
@@ -36,6 +37,7 @@ from wildstring.library.sidecar import (
     export_music,
     refresh_music_track,
     refresh_music_tracks,
+    write_asset,
 )
 from wildstring.recommendations import DAY_ZONE, Recommendations
 from wildstring.server_settings import ServerSettings
@@ -584,19 +586,8 @@ class Management:
         for rel_dir in dirs:
             target_dir = (library_root / rel_dir).resolve()
             if target_dir.is_relative_to(library_root) and target_dir.is_dir():
-                temp_path: Path | None = None
-                try:
-                    with NamedTemporaryFile(
-                        dir=target_dir, prefix=".cover_", delete=False
-                    ) as stream:
-                        temp_path = Path(stream.name)
-                        stream.write(jpeg_bytes)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    temp_path.replace(target_dir / "cover.jpg")
-                except OSError:
-                    if temp_path is not None:
-                        temp_path.unlink(missing_ok=True)
+                with suppress(OSError):
+                    write_asset(library_root, rel_dir / "cover.jpg", jpeg_bytes)
 
     def source_roots(self):
         with self.database.connect() as db:
@@ -724,6 +715,8 @@ class Management:
             if trash_root.exists():
                 shutil.rmtree(trash_root, ignore_errors=True)
             raise
+        folders = {album_folder(Path(entry["path"])) for entry in entries}
+        export_music(self.database, root, library_id, folders)
         return {"id": identity, "album_id": album_id, "tracks": len(entries), "status": "trashed"}
 
     def restore_trash(self, identity):
@@ -767,6 +760,7 @@ class Management:
                         shutil.move(str(destination), str(source))
                 raise
         shutil.rmtree(trash_root, ignore_errors=True)
+        refresh_music_tracks(self.repository, [entry["track_id"] for entry in entries])
         return {"id": identity, "status": "restored", "tracks": len(entries)}
 
     def purge_trash(self, identity):
@@ -942,6 +936,11 @@ class Management:
                     # This process owns the worker lock: previous running jobs lost their owner.
                     self.storage.recover()
                     self.book_storage.recover()
+                    with self.database.connect(write=True) as db:
+                        db.execute(
+                            "UPDATE book_scan_jobs SET status='failed',error_message='scan_interrupted',finished_at=? WHERE status='running'",
+                            (now(),),
+                        )
                     with self.database.connect(write=True) as db:
                         for table, field in (
                             ("scan_runs", "scan_id"),
@@ -1530,15 +1529,7 @@ def management_router(service, auth):
     def reorganize_file(track_id: str):
         from wildstring.library.file_reorganizer import reorganize_track_file
 
-        original = service.repository.source(track_id)
-        result = reorganize_track_file(service.repository, track_id)
-        if original is not None and result["changed"]:
-            old = album_folder(Path(original["path"]))
-            new = album_folder(Path(result["new_path"]))
-            export_music(
-                service.database, Path(original["library_root"]), original["library_id"], {old, new}
-            )
-        return result
+        return reorganize_track_file(service.repository, track_id)
 
     @router.get("/albums/{album_id}/release-lock")
     def album_release_lock(album_id: str):

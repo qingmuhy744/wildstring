@@ -54,6 +54,7 @@ import { LyricScanDialog } from './lyric-scans';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
 import { Bookshelf, readingBookId } from './bookshelf';
+import { BookAudioHost, useBookAudioSession, type Book } from './book-reader';
 import { ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
 import type { TrackBlockMeasurements } from './track-window';
@@ -336,6 +337,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [radioTab, setRadioTab] = useState<'podcasts' | 'books'>(() =>
     readingBookId() ? 'books' : 'podcasts',
   );
+  const [focusedAudioBook, setFocusedAudioBook] = useState<Book | null>(null);
+  const [inlineBookAudioVisible, setInlineBookAudioVisible] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   const [metadataReviewBatch, setMetadataReviewBatch] = useState<string | null>(null);
@@ -412,6 +415,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const closePlayer = useCallback(() => setLyricsOpen(false), []);
   const player = usePlayer(currentUser.id),
     favorites = useFavorites(revision, setNotice);
+  const bookAudio = useBookAudioSession({
+    activeElsewhere: player.playing,
+    onPlay: () => player.audio.current?.pause(),
+    userId: currentUser.id,
+  });
   const favoritesPlaylist = catalog.find((item) => item.kind === 'favorites');
   const activePlaylist = view === 'favorites' ? favoritesPlaylist : playlist;
   const artistGrid = view === 'artists' && !selectedArtist;
@@ -1334,6 +1342,24 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </button>
             </div>
           </header>
+          <BookAudioHost
+            session={bookAudio}
+            showDock={Boolean(
+              bookAudio.book &&
+              !(
+                view === 'podcasts' &&
+                radioTab === 'books' &&
+                !focusPodcastId &&
+                inlineBookAudioVisible
+              ),
+            )}
+            onOpenBook={(book) => {
+              setFocusedAudioBook(book);
+              setRadioTab('books');
+              setFocusPodcastId(null);
+              switchView('podcasts');
+            }}
+          />
           {view === 'discover' && (
             <Discover
               playlists={operations.playlists}
@@ -1386,8 +1412,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 owner={currentUser.profile === 'owner'}
                 canEdit={currentUser.profile !== 'listener'}
                 canUpload={canImport}
-                musicPlaying={player.playing}
-                onPlayAudio={() => player.audio.current?.pause()}
+                audioSession={bookAudio}
+                focusedBook={focusedAudioBook}
+                onFocusBookHandled={() => setFocusedAudioBook(null)}
+                onInlineAudioChange={setInlineBookAudioVisible}
               />
             )}
             {view === 'podcasts' && (radioTab === 'podcasts' || !!focusPodcastId) && (

@@ -180,7 +180,7 @@ def scan_library(
                             raise SourceChangedError
                         repository.save(key, metadata, before.st_size, before.st_mtime_ns, run_id)
                         counts["updated" if existing else "added"] += 1
-                    if existing is None:
+                    if existing is None or full:
                         restore_music_track(
                             database,
                             settings.library_dir,

@@ -55,6 +55,19 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     private val gson = Gson()
     private val libraryPrefs = context.getSharedPreferences("music-libraries", Context.MODE_PRIVATE)
+    private val bookPrefs = context.getSharedPreferences("bookshelf-prefs", Context.MODE_PRIVATE)
+    val bookSyncConflict = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    fun bookDeviceId(): String = bookPrefs.getString("device_id", null)
+        ?: java.util.UUID.randomUUID().toString().also { bookPrefs.edit().putString("device_id", it).apply() }
+    suspend fun clearBookshelfStorage() {
+        withContext(Dispatchers.IO) {
+            database.books().clearEverything()
+            java.io.File(context.filesDir, "book_cache").deleteRecursively()
+        }
+        bookSyncConflict.value = null
+    }
+    fun bookCacheBytes(): Long = java.io.File(context.filesDir, "book_cache")
+        .takeIf { it.exists() }?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
     val selectedLibraryId: String get() = libraryPrefs.getString("selected:${session.storageScope()}", "all") ?: "all"
     fun selectLibrary(id: String) { session.storageScope()?.let { libraryPrefs.edit().putString("selected:$it", id).apply() } }
     private val accessChanges = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -446,7 +459,15 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         if (changed) {
             knownTracks.clear()
             val owner = session.cacheScope()
-            withContext(Dispatchers.IO) { if (owner == session.cacheScope()) { database.queue().clear(); cache.clear(owner) } }
+            withContext(Dispatchers.IO) {
+                if (owner == session.cacheScope()) {
+                    database.queue().clear()
+                    cache.clear(owner)
+                    database.books().clearEverything()
+                    java.io.File(context.filesDir, "book_cache").deleteRecursively()
+                    bookSyncConflict.value = null
+                }
+            }
         }
         return changed
     }
@@ -657,6 +678,9 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         cache.clear(); session.clearRouteSessions(); session.invalidate(); knownTracks.clear(); database.queue().clear()
         settings.bindAccount(session.activeServerId, session.account?.id)
         withContext(Dispatchers.IO) {
+            database.books().clearEverything()
+            java.io.File(context.filesDir, "book_cache").deleteRecursively()
+            bookSyncConflict.value = null
             val isolated = client.newBuilder().apply { interceptors().clear(); networkInterceptors().clear() }
                 .cookieJar(CookieJar.NO_COOKIES).retryOnConnectionFailure(false).build()
             for ((target, cookie) in routes) {

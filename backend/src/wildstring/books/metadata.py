@@ -3,7 +3,7 @@
 import json
 import time
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +31,7 @@ BookField = Literal[
     "description",
     "tags",
 ]
+BOOK_FIELD_NAMES = frozenset(get_args(BookField))
 
 
 class MetadataUpdate(BaseModel):
@@ -57,7 +58,7 @@ class ChapterTitleUpdate(BaseModel):
 
 
 def public_metadata(row):
-    values = {key: row[key] for key in BOOK_TEXT}
+    values = {key: row[key] for key in BOOK_TEXT if key != "sort_title"}
     values.update({key: json.loads(row[column]) for key, column in BOOK_ARRAY.items()})
     return values | {
         "series_index": row["series_index"],
@@ -66,12 +67,24 @@ def public_metadata(row):
     }
 
 
-def router(database, settings, auth):
+def router(
+    database,
+    settings,
+    auth,
+    *,
+    podcasts=None,
+    search_gate=None,
+    allow_fake_ip: bool = False,
+):
     router = APIRouter()
     read = Annotated[dict, Depends(dependency(auth, "books:read"))]
     edit = Annotated[dict, Depends(dependency(auth, "books:write"))]
     service = Books(database, settings)
-    providers = BookProviders()
+    providers = BookProviders(
+        network_policy=podcasts.get_network_policy if podcasts is not None else None,
+        itunes_gate=search_gate,
+        allow_fake_ip=allow_fake_ip,
+    )
     scrape = Annotated[dict, Depends(dependency(auth, "books:scrape_metadata"))]
 
     @router.get("/books/{book_id}/metadata")
@@ -88,7 +101,8 @@ def router(database, settings, auth):
     ):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
-        return {"items": providers.search(provider, q or book["title"], user["id"])}
+        term = (q or "").strip() or book["title"]
+        return {"items": providers.search(provider, term, user["id"])}
 
     @router.patch("/books/{book_id}/metadata", dependencies=[Depends(auth.require_client)])
     def update(book_id: str, user: edit, body: MetadataUpdate):
@@ -98,23 +112,32 @@ def router(database, settings, auth):
         locks = values.pop("locked_fields", None)
         if values.get("title") is None:
             values.pop("title", None)
-        with service.write(book["library_id"]), database.connect(write=True) as db:
-            db.execute("BEGIN IMMEDIATE")
-            book = book_record(db, book_id, user)
-            overrides = json.loads(book["overrides_json"]) | values
-            fields = dict(values)
-            for key, column in BOOK_ARRAY.items():
-                if key in fields:
-                    fields[column] = json.dumps(fields.pop(key) or [], ensure_ascii=False)
-            if "title" in fields:
-                fields["sort_title"] = normalize(fields["title"])
-            if locks is not None:
-                fields["locked_fields_json"] = json.dumps(sorted(set(locks)))
-            fields["overrides_json"] = json.dumps(overrides, ensure_ascii=False)
-            fields["updated_at"] = time.time()
-            assignments = ",".join(f"{key}=?" for key in fields)
-            db.execute(f"UPDATE books SET {assignments} WHERE id=?", (*fields.values(), book_id))  # nosec B608
-        export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
+        with service.write(book["library_id"]):
+            with database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                book = book_record(db, book_id, user)
+                overrides = json.loads(book["overrides_json"]) | values
+                fields = dict(values)
+                for key, column in BOOK_ARRAY.items():
+                    if key in fields:
+                        fields[column] = json.dumps(fields.pop(key) or [], ensure_ascii=False)
+                if "title" in fields:
+                    fields["sort_title"] = normalize(fields["title"])
+                if locks is not None:
+                    fields["locked_fields_json"] = json.dumps(sorted(set(locks)))
+                elif values:
+                    merged_locks = set(json.loads(book["locked_fields_json"])) | (
+                        set(values) & BOOK_FIELD_NAMES
+                    )
+                    fields["locked_fields_json"] = json.dumps(sorted(merged_locks))
+                fields["overrides_json"] = json.dumps(overrides, ensure_ascii=False)
+                fields["updated_at"] = time.time()
+                assignments = ",".join(f"{key}=?" for key in fields)
+                db.execute(
+                    f"UPDATE books SET {assignments} WHERE id=?",  # nosec B608
+                    (*fields.values(), book_id),
+                )
+            export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
         return get_metadata(book_id, user)
 
     @router.patch(
@@ -122,10 +145,13 @@ def router(database, settings, auth):
         dependencies=[Depends(auth.require_client)],
     )
     def update_chapter(book_id: str, chapter_index: int, body: ChapterTitleUpdate, user: edit):
+        if chapter_index < 0:
+            raise HTTPException(404, "book_chapter_not_found")
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         with service.write(book["library_id"]):
             with database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
                 book = book_record(db, book_id, user)
                 row = db.execute(
                     """UPDATE book_audiobook_chapters SET title=? WHERE book_id=? AND chapter_index=?

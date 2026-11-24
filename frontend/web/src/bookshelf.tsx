@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
-import { BookReader, BookAudio, type Book } from './book-reader';
+import { BookReader, BookAudio, type Book, type BookAudioSession } from './book-reader';
 import './bookshelf.css';
 
 interface Library {
   id: string;
   name: string;
+  default_access?: 'restricted' | 'all';
   storage_mode: 'copy' | 'hardlink';
   version: number;
+}
+interface MemberUser {
+  id: string;
+  username: string;
+  profile: string;
+  enabled: boolean;
 }
 interface Candidate {
   provider: string;
@@ -30,18 +37,52 @@ export function readingBookId() {
   return /^\/books\/([a-zA-Z0-9_-]+)\/read\/?$/.exec(window.location.pathname)?.[1];
 }
 
+function FilePicker({
+  name,
+  accept,
+  label,
+  required,
+}: {
+  name: string;
+  accept: string;
+  label: string;
+  required?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [fileName, setFileName] = useState('');
+  return (
+    <label className="bookshelf-file-picker">
+      <span className="bookshelf-file-label">{label}</span>
+      <span className="bookshelf-file-button">{t('bookshelf.chooseFile')}</span>
+      <input
+        className="sr-only"
+        type="file"
+        name={name}
+        accept={accept}
+        required={required}
+        onChange={(event) => setFileName(event.currentTarget.files?.[0]?.name || '')}
+      />
+      {fileName && <span className="bookshelf-file-name">{fileName}</span>}
+    </label>
+  );
+}
+
 export function Bookshelf({
   owner,
   canEdit,
   canUpload,
-  musicPlaying,
-  onPlayAudio,
+  audioSession,
+  focusedBook,
+  onFocusBookHandled,
+  onInlineAudioChange,
 }: {
   owner: boolean;
   canEdit: boolean;
   canUpload: boolean;
-  musicPlaying: boolean;
-  onPlayAudio: () => void;
+  audioSession: BookAudioSession;
+  focusedBook?: Book | null;
+  onFocusBookHandled?: () => void;
+  onInlineAudioChange?: (visible: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [libraryId, setLibraryId] = useState('');
@@ -60,15 +101,31 @@ export function Bookshelf({
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [members, setMembers] = useState<MemberUser[]>([]);
+  const [grantedIds, setGrantedIds] = useState<Set<string>>(new Set());
   const [revision, refresh] = useState(0);
   const [showManage, setManage] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [provider, setProvider] = useState('openlibrary');
   const readerDialog = useRef<HTMLDialogElement>(null);
+
   useEffect(() => {
     const dialog = readerDialog.current;
     if (reading && dialog && !dialog.open) dialog.showModal();
   }, [reading]);
+
+  useEffect(() => {
+    onInlineAudioChange?.(Boolean(selected && listening));
+    return () => onInlineAudioChange?.(false);
+  }, [selected, listening, onInlineAudioChange]);
+
+  useEffect(() => {
+    if (!focusedBook) return;
+    setSelected(focusedBook);
+    setListening(focusedBook.has_audiobook);
+    setReading(false);
+    onFocusBookHandled?.();
+  }, [focusedBook, onFocusBookHandled]);
 
   const selection = libraries.find((library) => library.id === libraryId);
 
@@ -99,6 +156,7 @@ export function Bookshelf({
   useEffect(() => {
     if (!owner || !showManage || !libraryId) {
       setJobs([]);
+      setGrantedIds(new Set());
       return;
     }
     const request = new AbortController();
@@ -112,6 +170,17 @@ export function Bookshelf({
         .catch((cause: Error) => {
           if (!request.signal.aborted) setError(cause.message);
         });
+    void Promise.all([
+      api<{ items: MemberUser[] }>('/manage/users', { signal: request.signal }),
+      api<{ user_ids: string[] }>(`/book-libraries/${libraryId}/access`, {
+        signal: request.signal,
+      }),
+    ])
+      .then(([userList, grants]) => {
+        setMembers(userList.items.filter((member) => member.profile !== 'owner'));
+        setGrantedIds(new Set(grants.user_ids));
+      })
+      .catch(() => {});
     load();
     const timer = window.setInterval(load, 2500);
     return () => {
@@ -247,7 +316,7 @@ export function Bookshelf({
     (book) =>
       (format === 'all' || (format === 'ebook' ? book.has_ebook : book.has_audiobook)) &&
       (status === 'all' || status === book.progress_status) &&
-      `${book.title} ${book.subtitle || ''}`
+      `${book.title} ${book.subtitle || ''} ${book.authors?.join(' ') || ''}`
         .toLocaleLowerCase()
         .includes(filter.toLocaleLowerCase()),
   );
@@ -272,19 +341,19 @@ export function Bookshelf({
           <button onClick={closeReader}>{t('bookshelf.back')}</button>
           <strong>{selected.title}</strong>
           {selected.has_audiobook && (
-            <button aria-pressed={listening} onClick={() => setListening(!listening)}>
+            <button
+              aria-pressed={listening}
+              onClick={() => {
+                if (!listening) audioSession.open(selected);
+                setListening(!listening);
+              }}
+            >
               {t('bookshelf.listen')}
             </button>
           )}
         </header>
         {listening && (
-          <BookAudio
-            key={selected.id}
-            book={selected}
-            activeElsewhere={musicPlaying}
-            canEdit={canEdit}
-            onPlay={onPlayAudio}
-          />
+          <BookAudio key={selected.id} book={selected} session={audioSession} canEdit={canEdit} />
         )}
         <BookReader key={selected.id} book={selected} />
       </dialog>
@@ -319,7 +388,13 @@ export function Bookshelf({
               </button>
             )}
             {selected.has_audiobook && (
-              <button aria-pressed={listening} onClick={() => setListening(!listening)}>
+              <button
+                aria-pressed={listening}
+                onClick={() => {
+                  if (!listening) audioSession.open(selected);
+                  setListening(!listening);
+                }}
+              >
                 {t('bookshelf.listen')}
               </button>
             )}
@@ -464,18 +539,16 @@ export function Bookshelf({
                     const body = new FormData(event.currentTarget);
                     void write(async () => {
                       await api(`/books/${selected.id}/cover`, { method: 'POST', body });
+                      setSelected(await api<Book>(`/books/${selected.id}`));
                     });
                   }}
                 >
-                  <label>
-                    {t('bookshelf.cover')}{' '}
-                    <input
-                      type="file"
-                      name="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      required
-                    />
-                  </label>
+                  <FilePicker
+                    name="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    label={t('bookshelf.cover')}
+                    required
+                  />
                   <button disabled={pending}>{t('bookshelf.save')}</button>
                 </form>
               </div>
@@ -483,31 +556,22 @@ export function Bookshelf({
           )}
           {canUpload && !selected.has_ebook && (
             <form className="bookshelf-controls" onSubmit={(event) => upload(event, selected)}>
-              <label>
-                {t('bookshelf.ebook')}{' '}
-                <input
-                  name="file"
-                  type="file"
-                  required
-                  accept=".epub,.txt,application/epub+zip,text/plain"
-                />
-              </label>
+              <FilePicker
+                name="file"
+                accept=".epub,.txt,application/epub+zip,text/plain"
+                label={t('bookshelf.ebook')}
+                required
+              />
               <button disabled={pending}>{t('bookshelf.upload')}</button>
             </form>
           )}
           {listening && (
-            <BookAudio
-              key={selected.id}
-              book={selected}
-              activeElsewhere={musicPlaying}
-              canEdit={canEdit}
-              onPlay={onPlayAudio}
-            />
+            <BookAudio key={selected.id} book={selected} session={audioSession} canEdit={canEdit} />
           )}
         </>
       ) : (
         <>
-          <div className="bookshelf-controls">
+          <div className="bookshelf-controls bookshelf-filter-bar">
             <select
               aria-label={t('bookshelf.library')}
               value={libraryId}
@@ -622,6 +686,65 @@ export function Bookshelf({
                     )}
                   </div>
                   <details>
+                    <summary>{t('bookshelf.memberAccess')}</summary>
+                    <p className="muted">
+                      {t(
+                        selection.default_access === 'all'
+                          ? 'bookshelf.memberAccessSharedHint'
+                          : 'bookshelf.memberAccessRestrictedHint',
+                      )}
+                    </p>
+                    {members.length ? (
+                      <ul className="bookshelf-access-list">
+                        {members.map((member) => {
+                          const checked = grantedIds.has(member.id);
+                          return (
+                            <li key={member.id}>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={pending}
+                                  onChange={(event) => {
+                                    const granted = event.currentTarget.checked;
+                                    setGrantedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (granted) next.add(member.id);
+                                      else next.delete(member.id);
+                                      return next;
+                                    });
+                                    void write(async () => {
+                                      try {
+                                        await api(
+                                          `/book-libraries/${selection.id}/access/${member.id}`,
+                                          {
+                                            method: 'PUT',
+                                            body: JSON.stringify({ granted }),
+                                          },
+                                        );
+                                      } catch (cause) {
+                                        setGrantedIds((prev) => {
+                                          const rollback = new Set(prev);
+                                          if (granted) rollback.delete(member.id);
+                                          else rollback.add(member.id);
+                                          return rollback;
+                                        });
+                                        throw cause;
+                                      }
+                                    });
+                                  }}
+                                />
+                                <span>{member.username}</span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="muted">{t('bookshelf.noMembers')}</p>
+                    )}
+                  </details>
+                  <details>
                     <summary>{t('bookshelf.migrate')}</summary>
                     <form className="bookshelf-form" onSubmit={startMigration}>
                       <label>
@@ -678,25 +801,26 @@ export function Bookshelf({
           {canUpload && selection && (
             <form className="bookshelf-controls" onSubmit={upload}>
               <input type="hidden" name="library_id" value={selection.id} />
-              <label>
-                {t('bookshelf.ebook')}{' '}
-                <input
-                  name="file"
-                  type="file"
-                  required
-                  accept=".epub,.txt,application/epub+zip,text/plain"
-                />
-              </label>
+              <FilePicker
+                name="file"
+                accept=".epub,.txt,application/epub+zip,text/plain"
+                label={t('bookshelf.ebook')}
+                required
+              />
               <button disabled={pending}>{t('bookshelf.upload')}</button>
             </form>
           )}
           {!loading && resume && (
-            <p>
+            <p className="bookshelf-resume">
               <button
+                className="primary"
                 onClick={() => {
                   changeBook(resume);
                   if (resume.resume_kind === 'reading') enterReading(resume);
-                  else setListening(true);
+                  else {
+                    audioSession.open(resume);
+                    setListening(true);
+                  }
                 }}
               >
                 {t(
@@ -709,22 +833,52 @@ export function Bookshelf({
             </p>
           )}
           {loading ? (
-            <p role="status">{t('bookshelf.loading')}</p>
+            <div className="bookshelf-loading">
+              <p role="status" className="muted">
+                {t('bookshelf.loading')}
+              </p>
+              <ul className="bookshelf-grid" aria-hidden="true">
+                {[0, 1, 2, 3, 4, 5].map((skeleton) => (
+                  <li key={skeleton} className="bookshelf-skeleton-card" />
+                ))}
+              </ul>
+            </div>
           ) : visible.length ? (
             <ul className="bookshelf-grid">
               {visible.map((book) => (
                 <li key={book.id}>
                   <button onClick={() => changeBook(book)}>
-                    <strong>{book.title}</strong>
-                    {book.subtitle && <span>{book.subtitle}</span>}
-                    <small>
-                      {[
-                        book.has_ebook && t('bookshelf.ebook'),
-                        book.has_audiobook && t('bookshelf.audiobook'),
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </small>
+                    {book.has_cover && (
+                      <img
+                        className="bookshelf-card-cover"
+                        src={`/api/v1/books/${book.id}/cover`}
+                        alt=""
+                        loading="lazy"
+                      />
+                    )}
+                    <div className="bookshelf-card-body">
+                      <strong>{book.title}</strong>
+                      {book.subtitle && <span>{book.subtitle}</span>}
+                      {!!book.authors?.length && (
+                        <span className="bookshelf-card-authors">{book.authors.join(' · ')}</span>
+                      )}
+                      <small>
+                        {[
+                          book.has_ebook && t('bookshelf.ebook'),
+                          book.has_audiobook && t('bookshelf.audiobook'),
+                          book.progress_status &&
+                            t(
+                              book.progress_status === 'finished'
+                                ? 'bookshelf.finished'
+                                : book.progress_status === 'in_progress'
+                                  ? 'bookshelf.inProgress'
+                                  : 'bookshelf.unread',
+                            ),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </small>
+                    </div>
                   </button>
                 </li>
               ))}

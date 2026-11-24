@@ -170,7 +170,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.podcasts = podcasts
     app.state.management = management
     app.include_router(catalog.router(auth))
-    app.include_router(books_router(catalog, auth, transcoding))
+    app.include_router(
+        books_router(
+            catalog,
+            auth,
+            transcoding,
+            podcasts=podcasts,
+            search_gate=podcast_search.gate,
+            allow_fake_ip=current.podcast_allow_fake_ip,
+        )
+    )
     app.state.providers = providers
     app.state.diagnostics = diagnostics
     app.state.agent_platform = platform

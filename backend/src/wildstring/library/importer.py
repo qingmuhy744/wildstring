@@ -158,7 +158,7 @@ class MusicImporter:
                         "SELECT target_path FROM imported_files WHERE target_root=? AND sha256=? LIMIT 1",
                         (str(self.root), sha256),
                     ).fetchone()
-                if duplicate is not None and allow_global_duplicate and mode != "hardlink":
+                if duplicate is not None and allow_global_duplicate:
                     target = Path(duplicate[0])
                     with open_source(self.root, target):
                         pass
@@ -174,15 +174,22 @@ class MusicImporter:
                             )
                         )
                         existing = target_digest(self.root, candidate)
-                        if existing == sha256 and (
-                            mode != "hardlink"
-                            or os.path.samestat((self.root / candidate).stat(), before)
-                        ):
+                        if existing == sha256:
                             self.counts["duplicates"] += 1
                             target = candidate
                             break
                         if existing is None:
-                            publish(source, self.root, candidate, sha256)
+                            if mode == "hardlink":
+                                publish(
+                                    source,
+                                    self.root,
+                                    candidate,
+                                    sha256,
+                                    source_root=self.settings.music_dir,
+                                    source_relative=relative,
+                                )
+                            else:
+                                publish(source, self.root, candidate, sha256)
                             self.counts["copied"] += 1
                             target = candidate
                             break
@@ -227,7 +234,14 @@ class MusicImporter:
                 existing = target_digest(self.root, destination)
                 if existing is None:
                     if hardlink:
-                        link_exclusive(source, self.root, destination, value)
+                        link_exclusive(
+                            source,
+                            self.root,
+                            destination,
+                            value,
+                            source_root=self.settings.music_dir,
+                            source_relative=sidecar,
+                        )
                         self.save(
                             sidecar, destination, os.fstat(source.fileno()), value, "hardlink"
                         )

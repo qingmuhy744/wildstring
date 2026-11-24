@@ -1,5 +1,6 @@
 """Book library registration and authenticated catalog reads."""
 
+import json
 import time
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -18,11 +19,16 @@ from wildstring.library.storage import LibraryStorage, MigrationInput, overlappi
 from wildstring.permissions import dependency
 
 LIBRARY_FIELDS = "l.id, l.name, l.storage_mode, l.auto_pair, l.version"
-BOOK_FIELDS = "b.id, b.library_id, b.title, b.subtitle, b.has_ebook, b.has_audiobook"
+BOOK_FIELDS = (
+    "b.id, b.library_id, b.title, b.subtitle, b.authors_json, "
+    "b.cover_path, b.has_ebook, b.has_audiobook"
+)
 
 
 def public_book(row):
     item = dict(row)
+    item["authors"] = json.loads(item.pop("authors_json", "[]"))
+    item["has_cover"] = bool(item.pop("cover_path", None))
     item["has_ebook"] = bool(item["has_ebook"])
     item["has_audiobook"] = bool(item["has_audiobook"])
     return item
@@ -45,7 +51,15 @@ class BookLibraryGrant(BaseModel):
     granted: bool = Field(strict=True)
 
 
-def router(catalog, auth, transcoding):
+def router(
+    catalog,
+    auth,
+    transcoding,
+    *,
+    podcasts=None,
+    search_gate=None,
+    allow_fake_ip: bool = False,
+):
     database = catalog.database
     storage = LibraryStorage(catalog, book=True)
     router = APIRouter(prefix="/api/v1", tags=["books"])
@@ -82,7 +96,7 @@ def router(catalog, auth, transcoding):
                 raise HTTPException(422, error.code) from error
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
-        reserved_roots = [catalog.settings.data_dir, *storage.reserved_roots()]
+        reserved_roots = [catalog.settings.data_dir.resolve(), *storage.reserved_roots()]
         stamp = time.time()
         with database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -121,6 +135,27 @@ def router(catalog, auth, transcoding):
             "auto_pair": body.auto_pair,
             "storage_mode": body.storage_mode,
             "version": 1,
+        }
+
+    @router.get(
+        "/book-libraries/{library_id}/access",
+        dependencies=[Depends(auth.require_owner)],
+    )
+    def list_grants(library_id: str):
+        with database.connect(scoped=False) as db:
+            row = db.execute(
+                "SELECT default_access FROM book_libraries WHERE id=?", (library_id,)
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "book_library_not_found")
+            users = db.execute(
+                "SELECT user_id FROM book_library_access WHERE library_id=? ORDER BY user_id",
+                (library_id,),
+            ).fetchall()
+        return {
+            "library_id": library_id,
+            "default_access": row["default_access"],
+            "user_ids": [item[0] for item in users],
         }
 
     @router.put(
@@ -235,7 +270,16 @@ def router(catalog, auth, transcoding):
         return public_book(row)
 
     router.include_router(content_router(database, catalog.settings, auth, transcoding))
-    router.include_router(progress_router(database, auth))
-    router.include_router(metadata_router(database, catalog.settings, auth))
+    router.include_router(progress_router(database, auth, catalog.settings))
+    router.include_router(
+        metadata_router(
+            database,
+            catalog.settings,
+            auth,
+            podcasts=podcasts,
+            search_gate=search_gate,
+            allow_fake_ip=allow_fake_ip,
+        )
+    )
     router.include_router(pairing_router(database, catalog.settings, auth))
     return router

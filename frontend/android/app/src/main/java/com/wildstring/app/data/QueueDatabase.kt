@@ -43,11 +43,11 @@ abstract class QueueDatabase : RoomDatabase() {
     companion object {
         val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                db.execSQL("CREATE TABLE bookshelf_books (owner TEXT NOT NULL, bookId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId))")
-                db.execSQL("CREATE TABLE bookshelf_ebook_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, spineIndex INTEGER NOT NULL, title TEXT NOT NULL, cacheKey TEXT NOT NULL, PRIMARY KEY(owner, bookId, spineIndex))")
-                db.execSQL("CREATE TABLE bookshelf_audio_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, chapterIndex INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, chapterIndex))")
-                db.execSQL("CREATE TABLE bookshelf_progress (owner TEXT NOT NULL, bookId TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, kind))")
-                db.execSQL("CREATE TABLE bookshelf_annotations (owner TEXT NOT NULL, bookId TEXT NOT NULL, annotationId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, annotationId))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS bookshelf_books (owner TEXT NOT NULL, bookId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS bookshelf_ebook_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, spineIndex INTEGER NOT NULL, title TEXT NOT NULL, cacheKey TEXT NOT NULL, PRIMARY KEY(owner, bookId, spineIndex))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS bookshelf_audio_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, chapterIndex INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, chapterIndex))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS bookshelf_progress (owner TEXT NOT NULL, bookId TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, kind))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS bookshelf_annotations (owner TEXT NOT NULL, bookId TEXT NOT NULL, annotationId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, annotationId))")
             }
         }
 

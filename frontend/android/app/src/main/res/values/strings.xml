@@ -1938,4 +1938,14 @@
     <string name="books_minutes">%1$d min</string>
     <string name="books_upload">Upload ebook</string>
     <string name="books_pick_library">Choose book library</string>
+    <string name="books_prev_chapter">Prev</string>
+    <string name="books_next_chapter">Next</string>
+    <string name="books_search">Search</string>
+    <string name="books_search_hint">Search book text</string>
+    <string name="books_annotations">Annotations</string>
+    <string name="books_no_annotations">No annotations</string>
+    <string name="books_delete">Delete</string>
+    <string name="books_upload_failed">Upload failed. Check the file format and size.</string>
+    <string name="books_sync_conflict">Reading position updated on another device. Reload before syncing.</string>
+    <string name="books_now_listening">Playing: %1$s</string>
 </resources>

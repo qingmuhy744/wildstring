@@ -9,7 +9,6 @@ from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from starlette.responses import Response
 
 from wildstring.books.ebooks import (
     IMAGE_SUFFIXES,
@@ -19,8 +18,9 @@ from wildstring.books.ebooks import (
     validate_upload,
 )
 from wildstring.books.service import EBOOK_SUFFIXES, Books
+from wildstring.http_cache import private_image_response
 from wildstring.library.scanner import open_source
-from wildstring.library.sidecar import export_books
+from wildstring.library.sidecar import export_books, write_asset
 from wildstring.library.streaming import AudioResponse
 from wildstring.library.upload import save_upload_to_temp
 from wildstring.permissions import dependency
@@ -65,6 +65,7 @@ def router(database, settings, auth, transcoding):
     service = Books(database, settings)
     read = Annotated[dict, Depends(dependency(auth, "books:read"))]
     upload = Annotated[dict, Depends(dependency(auth, "books:upload_ebook"))]
+    edit = Annotated[dict, Depends(dependency(auth, "books:write"))]
     manage = Annotated[dict, Depends(dependency(auth, "books:manage_libraries"))]
     client = [Depends(auth.require_client)]
     temporary = settings.data_dir / "book_upload"
@@ -87,10 +88,23 @@ def router(database, settings, auth, transcoding):
             raise HTTPException(422, "unsupported_ebook_format")
         file.file.seek(0)
         with service.write(library["id"]):
+            if book_id is not None:
+                with database.connect(scoped=False) as db:
+                    existing = db.execute(
+                        "SELECT has_ebook FROM books WHERE id=?", (book_id,)
+                    ).fetchone()
+                    if existing is None:
+                        raise HTTPException(404, "book_not_found")
+                    if existing["has_ebook"]:
+                        raise HTTPException(409, "book_ebook_already_attached")
             path, _, _ = save_upload_to_temp(file, temporary, MAX_EBOOK_BYTES)
             try:
                 with path.open("rb") as stream:
-                    return service.ebook(library, stream, filename, "managed_only", book_id=book_id)
+                    stored_id = service.ebook(
+                        library, stream, filename, "managed_only", book_id=book_id
+                    )
+                export_books(database, Path(library["managed_root"]), library["id"], stored_id)
+                return stored_id
             finally:
                 path.unlink(missing_ok=True)
 
@@ -188,7 +202,7 @@ def router(database, settings, auth, transcoding):
         return {"items": matches}
 
     @router.get("/books/{book_id}/ebook/assets/{asset_path}")
-    def asset(book_id: str, asset_path: str, user: read):
+    def asset(book_id: str, asset_path: str, user: read, request: Request):
         with database.connect(scoped=False) as db:
             book_record(db, book_id, user)
             ebook = ebook_record(db, book_id)
@@ -196,11 +210,7 @@ def router(database, settings, auth, transcoding):
             raise HTTPException(404, "book_asset_not_found")
         try:
             with open_source(service.cache_root, Path(ebook["cache_key"]) / asset_path) as stream:
-                return Response(
-                    stream.read(),
-                    media_type="image/jpeg",
-                    headers={"X-Content-Type-Options": "nosniff"},
-                )
+                return private_image_response(request, stream.read())
         except OSError as error:
             raise HTTPException(404, "book_asset_not_found") from error
 
@@ -272,10 +282,12 @@ def router(database, settings, auth, transcoding):
         )
 
     @router.post("/books/{book_id}/cover", dependencies=client)
-    def cover_upload(book_id: str, user: upload, file: Annotated[UploadFile, File()]):
+    def cover_upload(book_id: str, user: edit, file: Annotated[UploadFile, File()]):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         data = file.file.read(MAX_IMAGE_BYTES + 1)
+        if len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(413, "cover_too_large")
         suffix = validate_upload(file.filename or "", file.content_type or "", data)
         if suffix not in IMAGE_SUFFIXES:
             raise HTTPException(422, "book_image_invalid")
@@ -285,7 +297,7 @@ def router(database, settings, auth, transcoding):
             raise HTTPException(422, "book_image_invalid") from error
         relative = Path(book["managed_dir"]) / "cover.jpg"
         with service.write(book["library_id"]):
-            service.cache_file(Path(book["managed_root"]) / relative, jpeg)
+            write_asset(Path(book["managed_root"]), relative, jpeg)
             with database.connect(write=True) as db:
                 db.execute(
                     "UPDATE books SET cover_path=?,cover_hash=?,updated_at=? WHERE id=?",
@@ -295,17 +307,13 @@ def router(database, settings, auth, transcoding):
         return {"id": book_id}
 
     @router.get("/books/{book_id}/cover")
-    def cover(book_id: str, user: read):
+    def cover(book_id: str, user: read, request: Request):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         if book["cover_path"]:
             try:
                 with open_source(Path(book["managed_root"]), Path(book["cover_path"])) as stream:
-                    return Response(
-                        stream.read(),
-                        media_type="image/jpeg",
-                        headers={"X-Content-Type-Options": "nosniff"},
-                    )
+                    return private_image_response(request, stream.read())
             except OSError as error:
                 raise HTTPException(404, "book_cover_not_found") from error
         raise HTTPException(404, "book_cover_not_found")

@@ -4,14 +4,18 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import android.os.Process
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -19,13 +23,17 @@ import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
 import com.google.gson.JsonObject
 import com.wildstring.app.MainActivity
 import com.wildstring.app.data.BookSync
 import com.wildstring.app.data.Repository
 import dagger.hilt.android.AndroidEntryPoint
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -36,32 +44,48 @@ class BookPlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var session: MediaSession
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val executor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private val progressLock = Mutex()
     private var checkpointKey: Pair<String, String>? = null
     private var checkpoint: BookSync? = null
     private var started: Pair<String, String>? = null
     private var sleep: Job? = null
+    private var sleepEndElapsedMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
+        val extractors = DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(repository.client)))
-            .build().apply { setAudioAttributes(AudioAttributes.DEFAULT, true) }
+            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(repository.client), extractors))
+            .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .build().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(),
+                    true,
+                )
+            }
         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player)
             .setId("audiobooks")
             .setSessionActivity(activity)
+            .setBitmapLoader(AuthenticatedBitmapLoader(repository, executor))
             .setCallback(object : MediaSession.Callback {
                 override fun onConnectAsync(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): ListenableFuture<MediaSession.ConnectionResult> {
                     val result = when {
-                        controller.uid == Process.myUid() -> MediaSession.ConnectionResult.AcceptedResultBuilder()
+                        controller.uid == Process.myUid() -> MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
                             .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
                             .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
-                                .buildUpon().add(SessionCommand(SLEEP, Bundle.EMPTY)).build())
+                                .buildUpon()
+                                .add(SessionCommand(SLEEP, Bundle.EMPTY))
+                                .add(SessionCommand(SLEEP_STATUS, Bundle.EMPTY))
+                                .build())
                             .build()
                         controller.isTrusted -> MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
                             .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -102,6 +126,14 @@ class BookPlaybackService : MediaSessionService() {
                     customCommand: SessionCommand,
                     args: Bundle,
                 ): ListenableFuture<SessionResult> {
+                    if (customCommand.customAction == SLEEP_STATUS) {
+                        val remainingMin = if (sleepEndElapsedMs > 0L) {
+                            ((sleepEndElapsedMs - SystemClock.elapsedRealtime() + 59_999L) / 60_000L).toInt().coerceAtLeast(0)
+                        } else 0
+                        return Futures.immediateFuture(
+                            SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putInt("minutes", remainingMin) }),
+                        )
+                    }
                     if (customCommand.customAction != SLEEP) {
                         return super.onCustomCommand(session, controller, customCommand, args)
                     }
@@ -110,9 +142,16 @@ class BookPlaybackService : MediaSessionService() {
                         return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
                     }
                     sleep?.cancel()
-                    sleep = if (minutes == 0) null else work.launch {
-                        delay(minutes * 60_000L)
-                        player.pause()
+                    if (minutes == 0) {
+                        sleep = null
+                        sleepEndElapsedMs = 0L
+                    } else {
+                        sleepEndElapsedMs = SystemClock.elapsedRealtime() + minutes * 60_000L
+                        sleep = work.launch {
+                            delay(minutes * 60_000L)
+                            sleepEndElapsedMs = 0L
+                            player.pause()
+                        }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
@@ -148,15 +187,55 @@ class BookPlaybackService : MediaSessionService() {
             }
         }
         work.launch {
-            repository.session.profiles.collect {
-                if (identity(player.currentMediaItem)?.first?.let { it != repository.session.cacheScope() } == true) {
-                    started = null
-                    player.stop()
-                    player.clearMediaItems()
-                    sleep?.cancel()
+            repository.connectionRoutes.changes.collectLatest {
+                val owner = repository.session.cacheScope() ?: return@collectLatest
+                val endpoint = repository.session.endpoint ?: return@collectLatest
+                if (player.mediaItemCount == 0) return@collectLatest
+                val previous = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+                if (identity(previous.firstOrNull())?.first != owner) return@collectLatest
+                val rebuilt = previous.map { item ->
+                    val book = item.mediaMetadata.extras?.getString("bookId") ?: return@collectLatest
+                    val file = item.mediaMetadata.extras?.getInt("fileIndex") ?: return@collectLatest
+                    val url = endpoint.newBuilder().addPathSegments("api/v1/books").addPathSegment(book)
+                        .addPathSegments("audiobook/files/$file/stream").build()
+                    item.buildUpon().setUri(url.toString()).build()
+                }
+                val index = player.currentMediaItemIndex
+                val position = player.currentPosition
+                val autoplay = player.playWhenReady
+                player.setMediaItems(rebuilt, index.coerceIn(rebuilt.indices), position)
+                player.prepare()
+                player.playWhenReady = autoplay
+            }
+        }
+        work.launch {
+            repository.session.invalidations.collect { selection ->
+                yield()
+                if (selection != repository.session.requestState()?.selection.orEmpty()) return@collect
+                clearSessionPlayback()
+            }
+        }
+        work.launch {
+            repository.session.profiles.drop(1).collect { owner ->
+                yield()
+                if (owner != repository.session.cacheScope()) return@collect
+                val activeOwner = identity(player.currentMediaItem)?.first
+                if (activeOwner != null && activeOwner != owner) {
+                    clearSessionPlayback()
                 }
             }
         }
+    }
+
+    private fun clearSessionPlayback() {
+        started = null
+        checkpoint = null
+        checkpointKey = null
+        sleep?.cancel()
+        sleep = null
+        sleepEndElapsedMs = 0L
+        player.stop()
+        player.clearMediaItems()
     }
 
     private fun identity(item: MediaItem?): Pair<String, String>? {
@@ -176,12 +255,16 @@ class BookPlaybackService : MediaSessionService() {
             addProperty("playback_rate", player.playbackParameters.speed)
             addProperty("completed", completed)
         }
+        val initialVersion = extras.getInt("baseVersion", -1).takeIf { it >= 0 }
+        val initialIntent = extras.getString("intent") ?: "resume"
         work.launch {
             progressLock.withLock {
                 if (key.first != repository.session.cacheScope()) return@withLock
                 try {
                     if (checkpointKey != key) {
-                        checkpoint = BookSync(repository, key.second, "listening").also { it.load() }
+                        val sync = BookSync(repository, key.second, "listening", initialVersion, initialIntent)
+                        if (initialVersion == null) sync.load()
+                        checkpoint = sync
                         checkpointKey = key
                     }
                     checkpoint?.save(fields)
@@ -200,8 +283,12 @@ class BookPlaybackService : MediaSessionService() {
         work.cancel()
         session.release()
         player.release()
+        executor.shutdown()
         super.onDestroy()
     }
 
-    companion object { const val SLEEP = "wildstring.book.sleep" }
+    companion object {
+        const val SLEEP = "wildstring.book.sleep"
+        const val SLEEP_STATUS = "wildstring.book.sleep.status"
+    }
 }

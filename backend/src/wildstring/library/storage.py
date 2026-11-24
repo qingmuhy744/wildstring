@@ -61,7 +61,7 @@ class LibraryStorage:
     @staticmethod
     def managed_roots(db, *, ignore=None):
         return [
-            Path(row[0])
+            Path(row[0]).resolve()
             for row in db.execute(
                 """SELECT root FROM libraries
                 UNION SELECT managed_root FROM book_libraries
@@ -77,14 +77,15 @@ class LibraryStorage:
 
     @staticmethod
     def available(db, target, *, ignore=None, error="library_target_invalid"):
+        resolved = Path(target).resolve()
         roots = LibraryStorage.managed_roots(db, ignore=ignore)
         roots.extend(
-            Path(row[0])
+            Path(row[0]).resolve()
             for row in db.execute(
                 "SELECT root FROM library_sources UNION SELECT root FROM book_library_sources"
             )
         )
-        if any(overlapping(target, root) for root in roots):
+        if any(overlapping(resolved, root) for root in roots):
             raise HTTPException(422, error)
 
     def reserved_roots(self):
@@ -107,13 +108,13 @@ class LibraryStorage:
                 target.is_relative_to(runtime) and not target.is_relative_to(managed_parent)
             ):
                 raise ValueError
-            if collection == "books" and target == managed_parent:
+            if target == managed_parent:
                 raise ValueError
             if any(overlapping(target, root) for root in self.reserved_roots()):
                 raise ValueError
             with self.database.connect() as db:
                 self.available(db, target)
-            if any(overlapping(target, Path(root)) for root in sources):
+            if any(overlapping(target, Path(root).resolve()) for root in sources):
                 raise ValueError
             if target.exists() and (not target.is_dir() or any(target.iterdir())):
                 raise HTTPException(409, "library_target_not_empty")
@@ -200,6 +201,27 @@ class LibraryStorage:
                 raise HTTPException(422, error.code) from error
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
+        elif mode == "copy" and current_mode == "hardlink":
+            needed = 0
+            for directory, _, files in os.walk(source, followlinks=False):
+                for name in files:
+                    path = Path(directory) / name
+                    if path.is_symlink():
+                        continue
+                    try:
+                        info = path.stat()
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(info.st_mode) and (target != source or info.st_nlink > 1):
+                        needed += info.st_size
+            probe = target
+            while not probe.exists():
+                probe = probe.parent
+            try:
+                if shutil.disk_usage(probe).free < needed:
+                    raise HTTPException(422, "insufficient_storage")
+            except OSError:
+                pass
         identity, stamp = uuid4().hex, time.time()
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -304,7 +326,7 @@ class LibraryStorage:
         # Published copies and all other files are retained and verified below.
         for directory, _, files in os.walk(root, followlinks=False):
             for name in files:
-                if re.fullmatch(r"\.wildstring-(import|replace)-[0-9a-f]{32}", name):
+                if re.fullmatch(r"\.wildstring-(import|replace|asset)-[0-9a-f]{32}", name):
                     relative = (Path(directory) / name).relative_to(root)
                     with target_directory(root, relative) as descriptor:
                         os.unlink(
@@ -378,25 +400,92 @@ class LibraryStorage:
             )
         return dict(rows)
 
-    def originals(self, roots, hashes):
+    def originals(self, roots, hashes, sizes=None, hints=None):
         indexed = {}
+        if hints:
+            for root, relative in hints:
+                if len(indexed) >= len(hashes):
+                    break
+                try:
+                    if (root / relative).suffix.lower() not in self.media_suffixes:
+                        continue
+                    with open_source(root, relative) as stream:
+                        info = os.fstat(stream.fileno())
+                        if sizes is not None and info.st_size not in sizes:
+                            continue
+                        value = hashlib.file_digest(stream, "sha256").hexdigest()
+                        after = os.fstat(stream.fileno())
+                    if (info.st_size, info.st_mtime_ns) == (
+                        after.st_size,
+                        after.st_mtime_ns,
+                    ) and value in hashes:
+                        indexed.setdefault(value, (root, relative, info))
+                except (OSError, ValueError, SourceChangedError):
+                    continue
+        remaining = hashes - set(indexed)
+        if not remaining:
+            return indexed
         for root in roots:
+            if not remaining:
+                break
             for directory, folders, files in os.walk(root, followlinks=False):
                 folders[:] = sorted(name for name in folders if not name.startswith("."))
                 for name in sorted(files):
                     path = Path(directory) / name
                     if path.suffix.lower() not in self.media_suffixes or path.is_symlink():
                         continue
+                    try:
+                        stat_info = path.stat()
+                    except OSError:
+                        continue
+                    if not stat.S_ISREG(stat_info.st_mode) or (
+                        sizes is not None and stat_info.st_size not in sizes
+                    ):
+                        continue
                     relative = path.relative_to(root)
-                    with open_source(root, relative) as stream:
-                        info = os.fstat(stream.fileno())
-                        value = hashlib.file_digest(stream, "sha256").hexdigest()
-                        after = os.fstat(stream.fileno())
+                    try:
+                        with open_source(root, relative) as stream:
+                            info = os.fstat(stream.fileno())
+                            if sizes is not None and info.st_size not in sizes:
+                                continue
+                            value = hashlib.file_digest(stream, "sha256").hexdigest()
+                            after = os.fstat(stream.fileno())
+                    except (OSError, ValueError, SourceChangedError):
+                        continue
                     if (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                        raise SourceChangedError
-                    if value in hashes:
+                        continue
+                    if value in remaining:
                         indexed.setdefault(value, (root, relative, info))
+                        remaining.discard(value)
         return indexed
+
+    def _source_hints(self, db, library_id, roots):
+        hints = []
+        root_map = {str(root): root for root in roots}
+        if self.book:
+            rows = db.execute(
+                """SELECT e.source_path FROM book_ebooks e JOIN books b ON b.id=e.book_id
+                   WHERE b.library_id=? AND e.source_path IS NOT NULL
+                   UNION ALL
+                   SELECT f.source_path FROM book_audiobook_files f JOIN books b ON b.id=f.book_id
+                   WHERE b.library_id=? AND f.source_path IS NOT NULL""",
+                (library_id, library_id),
+            )
+            for row in rows:
+                source_file = Path(row[0])
+                for root in roots:
+                    if source_file.is_relative_to(root):
+                        hints.append((root, source_file.relative_to(root)))
+                        break
+        else:
+            for row in db.execute(
+                "SELECT source_root, source_path FROM imported_files WHERE target_root=(SELECT root FROM libraries WHERE id=?)",
+                (library_id,),
+            ):
+                root = root_map.get(row[0])
+                if root is not None:
+                    hints.append((root, Path(row[1])))
+        return hints
 
     def copy(self, job):
         self.authorize(job)
@@ -409,11 +498,12 @@ class LibraryStorage:
             mode = job["target_storage_mode"] or library["storage_mode"]
             roots = self.sources(db, job["library_id"])
             original_modes = self.provenance(db, job["library_id"], source)
+            hints = self._source_hints(db, job["library_id"], roots) if mode == "hardlink" else []
             if not in_place:
                 self.available(db, target, ignore=job["id"])
         if mode == "hardlink":
             validate_hardlink_capability(roots, target, self.media_suffixes)
-        if mode == "hardlink" and library["storage_mode"] == "copy" and not job["sidecars_written"]:
+        if mode == "hardlink" and not job["sidecars_written"]:
             # Once a job has published its sidecars, retry uses that snapshot.
             export = export_books if self.book else export_music
             written = export(self.database, source, job["library_id"])
@@ -435,9 +525,13 @@ class LibraryStorage:
             if shutil.disk_usage(target).free < needed:
                 raise ValueError("insufficient_storage")
         hashes = {item[0] for item in before.values()}
-        originals = self.originals(roots, hashes) if mode == "hardlink" else {}
+        sizes = {item[1] for item in before.values()}
+        originals = (
+            self.originals(roots, hashes, sizes=sizes, hints=hints) if mode == "hardlink" else {}
+        )
         copied = copied_bytes = relinked = reclaimed = standalone = 0
         modes = {}
+        linked_sources = {}
         for name, (value, size, modified) in before.items():
             self.authorize(job)
             relative = Path(name)
@@ -450,11 +544,14 @@ class LibraryStorage:
                 and ".wildstring" not in relative.parts
                 else None
             )
+            already_linked = False
             if existed:
                 with open_source(target, relative) as stream:
                     current = os.fstat(stream.fileno())
                     if not in_place and hashlib.file_digest(stream, "sha256").hexdigest() != value:
                         raise ValueError("library_target_conflict")
+                if original is not None and os.path.samestat(current, original[2]):
+                    already_linked = True
             if original is not None:
                 original_root, original_relative, expected_inode = original
                 if not existed or not os.path.samestat(current, expected_inode):
@@ -464,9 +561,11 @@ class LibraryStorage:
                         else:
                             link_exclusive(stream, target, relative, value)
                 modes[name] = "hardlink"
-                relinked += 1
-                if in_place:
-                    reclaimed += size
+                linked_sources[name] = (original_root, original_relative, expected_inode, value)
+                if library["storage_mode"] == "copy" or not already_linked:
+                    relinked += 1
+                    if in_place:
+                        reclaimed += size
             elif not in_place or (mode == "copy" and current.st_nlink > 1):
                 if not existed or current.st_nlink > 1:
                     with open_source(source, relative) as stream:
@@ -477,14 +576,27 @@ class LibraryStorage:
                 # Preserve timestamps only on independent files.
                 with open_source(target, relative) as stream:
                     os.utime(stream.fileno(), ns=(modified, modified))
-                modes[name] = prior if prior in {"generated", "managed_only"} else "copy"
+                modes[name] = (
+                    prior
+                    if (prior == "managed_only" or (not self.book and prior == "generated"))
+                    else "copy"
+                )
                 copied += 1
                 copied_bytes += size
             if mode == "hardlink" and original is None and ".wildstring" not in relative.parts:
-                standalone += 1
-                modes[name] = "generated" if prior == "generated" else "managed_only"
+                modes[name] = (
+                    "generated" if (not self.book and prior == "generated") else "managed_only"
+                )
+                if prior != "generated" and (
+                    not self.book or relative.suffix.lower() in self.media_suffixes
+                ):
+                    standalone += 1
             elif mode == "copy" and in_place and original is None:
-                modes[name] = prior if prior in {"generated", "managed_only"} else "copy"
+                modes[name] = (
+                    prior
+                    if (prior == "managed_only" or (not self.book and prior == "generated"))
+                    else "copy"
+                )
             with self.database.connect(write=True) as db:
                 db.execute(
                     f"""UPDATE {self.jobs} SET total_files=?,total_bytes=?,copied_files=?,copied_bytes=?,
@@ -522,11 +634,43 @@ class LibraryStorage:
                          AND book_id IN (SELECT id FROM books WHERE library_id=?)""",  # nosec B608
                         [(value, name, job["library_id"]) for name, value in modes.items()],
                     )
+                    for name, value in modes.items():
+                        if value == "hardlink" and name in linked_sources:
+                            original_root, original_relative, _, _ = linked_sources[name]
+                            db.execute(
+                                f"""UPDATE {table} SET source_path=COALESCE(source_path, ?)
+                                    WHERE managed_path=? AND book_id IN (SELECT id FROM books WHERE library_id=?)""",  # nosec B608
+                                (
+                                    str(original_root / original_relative),
+                                    name,
+                                    job["library_id"],
+                                ),
+                            )
             else:
-                db.executemany(
-                    "UPDATE imported_files SET link_mode=? WHERE target_root=? AND target_path=?",
-                    [(value, str(source), name) for name, value in modes.items()],
-                )
+                for name, value in modes.items():
+                    updated = db.execute(
+                        "UPDATE imported_files SET link_mode=? WHERE target_root=? AND target_path=?",
+                        (value, str(source), name),
+                    ).rowcount
+                    if not updated and value == "hardlink" and name in linked_sources:
+                        original_root, original_relative, expected_inode, file_hash = (
+                            linked_sources[name]
+                        )
+                        db.execute(
+                            """INSERT OR REPLACE INTO imported_files
+                               (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)
+                               VALUES (?,?,?,?,?,?,?,?)""",
+                            (
+                                str(original_root),
+                                original_relative.as_posix(),
+                                str(source),
+                                name,
+                                expected_inode.st_size,
+                                expected_inode.st_mtime_ns,
+                                file_hash,
+                                "hardlink",
+                            ),
+                        )
                 db.executemany(
                     "UPDATE tracks SET mtime_ns=? WHERE library_id=? AND path=? AND mtime_ns<>?",
                     [
@@ -534,10 +678,11 @@ class LibraryStorage:
                         for name, item in received.items()
                     ],
                 )
-                db.execute(
-                    "UPDATE imported_files SET target_root=? WHERE target_root=?",
-                    (str(target), str(source)),
-                )
+                if not in_place:
+                    db.execute(
+                        "UPDATE imported_files SET target_root=? WHERE target_root=?",
+                        (str(target), str(source)),
+                    )
             db.execute(
                 f"UPDATE {self.jobs} SET status='completed',error=NULL,updated_at=? WHERE id=?",  # nosec B608
                 (time.time(), job["id"]),

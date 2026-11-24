@@ -657,7 +657,7 @@ class PlaybackService : MediaSessionService() {
 }
 
 @OptIn(UnstableApi::class)
-private class AuthenticatedBitmapLoader(private val repository: Repository, private val executor: ListeningExecutorService) : BitmapLoader {
+internal class AuthenticatedBitmapLoader(private val repository: Repository, private val executor: ListeningExecutorService) : BitmapLoader {
     override fun supportsMimeType(mimeType: String): Boolean = mimeType.startsWith("image/")
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
         BitmapFactory.decodeByteArray(data, 0, data.size) ?: throw IOException("Invalid cover")

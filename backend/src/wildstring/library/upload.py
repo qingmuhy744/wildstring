@@ -152,6 +152,32 @@ def handle_upload(
                     replace_managed_file(copy_exclusive, stream, base_dir, relative_path, sha256)
                 target_str = relative_path.as_posix()
 
+            with database.connect(write=True) as db:
+                db.execute(
+                    """UPDATE imported_files
+                    SET link_mode='managed_only', sha256=?, source_size=?, source_mtime=?
+                    WHERE target_root=? AND target_path=?""",
+                    (
+                        sha256,
+                        size,
+                        int(temp_path.stat().st_mtime_ns),
+                        str(settings.library_dir),
+                        target_str,
+                    ),
+                )
+                row = db.execute(
+                    "SELECT id, library_id FROM tracks WHERE library_id=(SELECT id FROM libraries WHERE root=?) AND path=?",
+                    (
+                        str(settings.library_dir),
+                        matched_audio.as_posix() if matched_audio else target_str,
+                    ),
+                ).fetchone()
+            if row is not None:
+                from wildstring.library.repository import LibraryRepository
+                from wildstring.library.sidecar import refresh_music_track
+
+                refresh_music_track(LibraryRepository(database, settings.library_dir), row["id"])
+
             return {
                 "status": "imported",
                 "kind": "sidecar",

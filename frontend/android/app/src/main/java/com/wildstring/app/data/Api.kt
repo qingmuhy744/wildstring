@@ -69,12 +69,15 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
-    @GET("api/v1/books") suspend fun books(@Query("limit") limit: Int = 100): BookItems<BookSummary>
+    @GET("api/v1/books") suspend fun books(@Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): BookItems<BookSummary>
     @GET("api/v1/book-libraries") suspend fun bookLibraries(): BookItems<BookLibrary>
     @GET("api/v1/books/{id}/ebook/manifest") suspend fun bookManifest(@Path("id") id: String): BookManifest
     @GET("api/v1/books/{id}/ebook/chapters/{index}") suspend fun bookChapter(
         @Path("id") id: String, @Path("index") index: Int,
     ): BookChapterContent
+    @GET("api/v1/books/{id}/ebook/search") suspend fun searchBookEbook(
+        @Path("id") id: String, @Query("q") query: String,
+    ): BookItems<JsonObject>
     @GET("api/v1/books/{id}/audiobook") suspend fun bookAudio(@Path("id") id: String): BookAudioManifest
     @GET("api/v1/books/{id}/{kind}-progress") suspend fun bookProgress(
         @Path("id") id: String, @Path("kind") kind: String, @Tag owner: RequestOwner,
@@ -86,10 +89,16 @@ interface Api {
     @POST("api/v1/books/{id}/bookmarks") suspend fun addBookBookmark(
         @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
     ): JsonObject
+    @DELETE("api/v1/books/{id}/bookmarks/{markId}") suspend fun deleteBookBookmark(
+        @Path("id") id: String, @Path("markId") markId: String, @Tag owner: RequestOwner,
+    ): retrofit2.Response<Unit>
     @GET("api/v1/books/{id}/annotations") suspend fun bookAnnotations(@Path("id") id: String): BookItems<BookAnnotation>
     @POST("api/v1/books/{id}/annotations") suspend fun addBookAnnotation(
         @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
     ): JsonObject
+    @DELETE("api/v1/books/{id}/annotations/{annId}") suspend fun deleteBookAnnotation(
+        @Path("id") id: String, @Path("annId") annId: String, @Tag owner: RequestOwner,
+    ): retrofit2.Response<Unit>
     @Multipart
     @POST("api/v1/books/upload") suspend fun uploadEbook(
         @Part("library_id") library: okhttp3.RequestBody,

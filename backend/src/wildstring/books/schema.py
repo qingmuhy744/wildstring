@@ -223,4 +223,6 @@ TABLES = (
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL
     )""",
+    """CREATE INDEX IF NOT EXISTS book_bookmarks_by_user_book ON book_bookmarks(user_id,book_id)""",
+    """CREATE INDEX IF NOT EXISTS book_annotations_by_user_book ON book_annotations(user_id,book_id)""",
 )

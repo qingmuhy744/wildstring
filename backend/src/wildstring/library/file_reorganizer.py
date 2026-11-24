@@ -1,12 +1,17 @@
+"""Safe managed-file reorganization within the same mount without touching bytes."""
+
+import errno
 import json
-import shutil
+import os
+from contextlib import ExitStack, suppress
 from pathlib import Path
 
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
 
-from wildstring.library.import_files import organized_path
+from wildstring.library.import_files import organized_path, target_directory
 from wildstring.library.metadata import Metadata
+from wildstring.library.scanner import open_directory, open_source
 
 SIDECAR_SUFFIXES = {
     ".lrc",
@@ -89,7 +94,37 @@ def get_track_file_info(repository, track_id: str, *, include_host_paths: bool =
     }
 
 
+def _open_parent_nofollow(root: Path, relative: Path, stack: ExitStack):
+    directory = stack.enter_context(open_directory(root))
+    for part in relative.parts[:-1]:
+        directory = stack.enter_context(open_directory(part, dir_fd=directory))
+    return directory
+
+
+def _replace_entry(root: Path, old_rel: Path, new_rel: Path) -> int:
+    with ExitStack() as stack:
+        src_fd = _open_parent_nofollow(root, old_rel, stack)
+        with target_directory(root, new_rel) as dst_fd:
+            try:
+                old_stat = os.stat(old_rel.name, dir_fd=src_fd, follow_symlinks=False)
+            except FileNotFoundError as error:
+                raise HTTPException(404, "source_file_missing") from error
+            with suppress(FileNotFoundError):
+                dst_stat = os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False)
+                if not os.path.samestat(old_stat, dst_stat):
+                    raise HTTPException(409, "destination_file_exists")
+            try:
+                os.replace(old_rel.name, new_rel.name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+            except OSError as error:
+                if error.errno == errno.EXDEV:
+                    raise HTTPException(422, "hardlink_cross_device") from error
+                raise
+            return int(os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False).st_mtime_ns)
+
+
 def reorganize_track_file(repository, track_id: str):
+    from wildstring.library.sidecar import album_folder, export_music
+
     lock_path = repository.database.path.parent / "library-scan.lock"
     try:
         with FileLock(str(lock_path), timeout=2):
@@ -101,42 +136,34 @@ def reorganize_track_file(repository, track_id: str):
                 return {"status": "already_organized", "path": current_path, "changed": False}
 
             root = Path(repository.root)
-            old_abs = root / current_path
-            new_abs = root / suggested_path
+            old_rel = Path(current_path)
+            new_rel = Path(suggested_path)
 
-            if not old_abs.is_file():
-                raise HTTPException(404, "source_file_missing")
+            try:
+                with open_source(root, old_rel):
+                    pass
+            except OSError as error:
+                raise HTTPException(404, "source_file_missing") from error
 
-            if new_abs.exists() and new_abs.resolve() != old_abs.resolve():
-                raise HTTPException(409, "destination_file_exists")
-
-            new_abs.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old_abs), str(new_abs))
-            new_mtime_ns = int(new_abs.stat().st_mtime_ns)
+            new_mtime_ns = _replace_entry(root, old_rel, new_rel)
 
             moved_sidecars: list[tuple[str, str]] = []
-            old_parent = old_abs.parent
-            old_stem = old_abs.stem
-            new_stem = new_abs.stem
-            if old_parent.is_dir():
-                for item in old_parent.iterdir():
+            old_parent = root / old_rel.parent
+            old_stem = old_rel.stem
+            new_stem = new_rel.stem
+            if old_parent.is_dir() and not old_parent.is_symlink():
+                for item in sorted(old_parent.iterdir()):
                     if (
-                        item.is_file()
-                        and item != new_abs
+                        not item.is_symlink()
+                        and item.is_file()
                         and item.suffix.lower() in SIDECAR_SUFFIXES
                         and item.stem.lower() == old_stem.lower()
                     ):
-                        target_sidecar = new_abs.parent / f"{new_stem}{item.suffix}"
-                        if not target_sidecar.exists():
-                            shutil.move(str(item), str(target_sidecar))
-                            moved_sidecars.append(
-                                (
-                                    str(item.relative_to(root)),
-                                    str(target_sidecar.relative_to(root)),
-                                )
-                            )
-
-            cleanup_empty_parents(root, old_abs)
+                        sidecar_old = old_rel.parent / item.name
+                        sidecar_new = new_rel.parent / f"{new_stem}{item.suffix}"
+                        with suppress(HTTPException, OSError):
+                            _replace_entry(root, sidecar_old, sidecar_new)
+                            moved_sidecars.append((sidecar_old.as_posix(), sidecar_new.as_posix()))
 
             with repository.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -153,6 +180,15 @@ def reorganize_track_file(repository, track_id: str):
                         "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
                         (new_sc, str(root), old_sc),
                     )
+
+            with suppress(OSError, ValueError):
+                export_music(
+                    repository.database,
+                    root,
+                    repository.library_id(),
+                    {album_folder(old_rel), album_folder(new_rel)},
+                )
+            cleanup_empty_parents(root, root / old_rel)
     except Timeout:
         raise HTTPException(409, "scan_busy") from None
 
@@ -169,7 +205,7 @@ def cleanup_empty_parents(root: Path, path: Path):
     parent = path.parent
     while parent != root and parent.is_relative_to(root):
         try:
-            if not any(parent.iterdir()):
+            if not parent.is_symlink() and not any(parent.iterdir()):
                 parent.rmdir()
             else:
                 break

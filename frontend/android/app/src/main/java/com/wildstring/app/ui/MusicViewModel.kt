@@ -132,10 +132,11 @@ class MusicViewModel @Inject constructor(
             artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, addedTracks = ordered.flatMap { it.addedTracks.orEmpty() }, total = value.total, discs = ordered.firstOrNull()?.discs)).copy(window = value)
     }
     private fun cancelRanges() { rangeJobs.values.forEach { it.cancel() }; rangeJobs.clear() }
-    suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
+    suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art + repository.bookCacheBytes(), audioCache.bytes()) }
     fun clearCache() = viewModelScope.launch {
         val owner = repository.session.cacheScope()
         withContext(Dispatchers.IO) { repository.cache.clear(owner); audioCache.clear(owner) }
+        repository.clearBookshelfStorage()
         if (owner == repository.session.cacheScope()) { pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); podcastBrowser.reset(); imageLoader.memoryCache?.clear() }
     }
     private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.vm_server_or_account_changed)) }
@@ -322,6 +323,7 @@ class MusicViewModel @Inject constructor(
         selectionJob = viewModelScope.launch {
             stopForServerChange()
             repository.session.removeServer(id)
+            repository.clearBookshelfStorage()
             repository.downloads.switchScope()
             mutable.value = connectionState()
         }
@@ -1228,6 +1230,7 @@ class MusicViewModel @Inject constructor(
     }
     fun notify(message: String) { mutable.update { it.copy(mutationMessage = message) } }
     fun acknowledgeMessage(message: String) { mutable.update { if (it.mutationMessage == message) it.copy(mutationMessage = null) else it } }
+    fun pausePlayback() { controller?.pause() }
     fun toggle() { localPlaybackEpoch++; controller?.let { if (it.playWhenReady) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
     fun seek(ms: Long) {
         val target = ms.coerceAtLeast(0L)

@@ -23,8 +23,11 @@ class UpdatePolicyTest {
     }
     @Test fun semanticOrderingDoesNotCompareVersionStringsLexically() {
         assertTrue(UpdatePolicy.isNewer("0.3.10", "0.3.9")); assertTrue(UpdatePolicy.isNewer("1.0.0", "0.99.99"))
+        assertTrue(UpdatePolicy.isNewer("0.9.0", "0.9.0-alpha.1"))
+        assertFalse(UpdatePolicy.isNewer("0.8.29", "0.9.0-alpha.1"))
         assertFalse(UpdatePolicy.isNewer("0.3.1", "0.3.1")); assertFalse(UpdatePolicy.isNewer("0.2.9", "0.3.0"))
         assertThrows(UpdateFailure::class.java) { UpdatePolicy.version("0.03.2") }
+        assertThrows(UpdateFailure::class.java) { UpdatePolicy.version("0.9.0-alpha.1") }
     }
     @Test fun allDownloadsUseHttpsAndFixedRepositoryOrApprovedAssetRedirects() {
         val asset = UpdatePolicy.release(json()).apk
