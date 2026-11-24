@@ -15,6 +15,7 @@ export interface MusicLibrary {
   default_access?: boolean;
   sources?: { id: string; root: string; watch_enabled?: number }[];
   managed_root?: string;
+  storage_mode?: 'copy' | 'hardlink';
 }
 
 export function LibrarySwitcher({
@@ -107,6 +108,7 @@ export function MusicLibraryManager() {
   const [folders, setFolders] = useState('');
   const [paused, setPaused] = useState<string[]>([]);
   const [managedRoot, setManagedRoot] = useState('');
+  const [storageMode, setStorageMode] = useState<'copy' | 'hardlink'>('copy');
   const [defaultAccess, setDefaultAccess] = useState(false);
   const [picker, setPicker] = useState<'source' | 'managed' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -127,6 +129,7 @@ export function MusicLibraryManager() {
     setFolders(item?.sources?.map((s) => s.root).join('\n') || '');
     setPaused(item?.sources?.filter((s) => s.watch_enabled === 0).map((s) => s.root) || []);
     setManagedRoot('');
+    setStorageMode(item?.storage_mode || 'copy');
     setError('');
     setNotice('');
   }
@@ -151,7 +154,7 @@ export function MusicLibraryManager() {
               .includes(root),
           ),
           ...(!editing && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
-          ...(editing ? { version: editing.version, enabled } : {}),
+          ...(editing ? { version: editing.version, enabled } : { storage_mode: storageMode }),
         }),
       });
       edit(null);
@@ -277,6 +280,16 @@ export function MusicLibraryManager() {
         </fieldset>
         {!editing && (
           <>
+            <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
+            <select
+              id={`${id}-mode`}
+              value={storageMode}
+              disabled={busy}
+              onChange={(event) => setStorageMode(event.target.value as 'copy' | 'hardlink')}
+            >
+              <option value="copy">{t('bookshelf.copy')}</option>
+              <option value="hardlink">{t('bookshelf.hardlink')}</option>
+            </select>
             <label htmlFor={`${id}-managed`}>{t('musicLibraries.managedDirLabel')}</label>
             <input
               id={`${id}-managed`}

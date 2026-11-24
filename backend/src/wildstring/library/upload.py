@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -12,7 +11,12 @@ from mutagen import MutagenError
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.library.assets import IMAGE_SUFFIXES
-from wildstring.library.import_files import copy_exclusive, organized_path, target_digest
+from wildstring.library.import_files import (
+    copy_exclusive,
+    organized_path,
+    replace_managed_file,
+    target_digest,
+)
 from wildstring.library.intake import INPUT_SUFFIXES
 from wildstring.library.lyrics import MAX_TEXT_BYTES
 from wildstring.library.metadata import read_metadata
@@ -136,16 +140,16 @@ def handle_upload(
                 dest = (settings.library_dir / target_file).resolve()
                 if os.path.commonpath([str(base_dir), str(dest)]) != str(base_dir):
                     raise HTTPException(400, "invalid_path_traversal")
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(temp_path, dest)
+                with temp_path.open("rb") as stream:
+                    replace_managed_file(copy_exclusive, stream, base_dir, target_file, sha256)
                 target_str = target_file.as_posix()
             else:
                 # Place in relative path inside library_dir
                 dest = (settings.library_dir / relative_path).resolve()
                 if os.path.commonpath([str(base_dir), str(dest)]) != str(base_dir):
                     raise HTTPException(400, "invalid_path_traversal")
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(temp_path, dest)
+                with temp_path.open("rb") as stream:
+                    replace_managed_file(copy_exclusive, stream, base_dir, relative_path, sha256)
                 target_str = relative_path.as_posix()
 
             return {
@@ -224,7 +228,9 @@ def handle_upload(
             # Record in imported_files table
             with database.connect(write=True) as db:
                 db.execute(
-                    "INSERT OR REPLACE INTO imported_files VALUES (?,?,?,?,?,?,?)",
+                    """INSERT OR REPLACE INTO imported_files
+                    (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)
+                    VALUES (?,?,?,?,?,?,?,?)""",
                     (
                         "upload",
                         relative_path.as_posix(),
@@ -233,6 +239,7 @@ def handle_upload(
                         size,
                         int(temp_path.stat().st_mtime_ns),
                         sha256,
+                        "managed_only",
                     ),
                 )
 

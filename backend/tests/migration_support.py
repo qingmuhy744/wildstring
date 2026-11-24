@@ -182,3 +182,40 @@ def pre40(connection):
     for name in ("manual", "automatic"):
         if name in columns:
             connection.execute(f"ALTER TABLE podcast_resource_refs DROP COLUMN {name}")
+
+
+def pre57(connection):
+    for table in (
+        "book_annotations",
+        "book_bookmarks",
+        "book_listening_progress",
+        "book_reading_progress",
+        "book_scan_jobs",
+        "book_audiobook_chapters",
+        "book_audiobook_files",
+        "book_audiobooks",
+        "book_ebook_chapters",
+        "book_ebooks",
+        "books",
+        "book_library_migrations",
+        "book_library_access",
+        "book_library_sources",
+        "book_libraries",
+    ):
+        connection.execute(f"DROP TABLE {table}")
+    for table, columns in (
+        ("libraries", ("storage_mode",)),
+        ("imported_files", ("link_mode",)),
+        (
+            "library_migrations",
+            (
+                "target_storage_mode",
+                "relinked_files",
+                "reclaimed_bytes",
+                "kept_standalone_files",
+                "sidecars_written",
+            ),
+        ),
+    ):
+        for column in columns:
+            connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")

@@ -1,6 +1,7 @@
 """Isolated filesystem settings shared by backend tests."""
 
 import os
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from wildstring.config import Settings
+from wildstring.database import SCHEMA_VERSION, Database
+from wildstring.library.catalog import LibraryCatalog
 from wildstring.main import create_app
 
 
@@ -37,6 +40,47 @@ def settings(tmp_path: Path) -> Settings:
         library_dir=music,
         podcasts_dir=tmp_path / "podcasts",
     )
+
+
+@pytest.fixture(params=[None, 55, 56], ids=["fresh", "upgrade-v55", "upgrade-v56"])
+def storage_schema(settings, request):
+    from migration_support import pre57
+
+    version = request.param
+    if version is None:
+        return
+
+    database = Database(settings.data_dir)
+    database.initialize()
+    LibraryCatalog(database, settings).initialize()
+    with sqlite3.connect(database.path) as connection:
+        pre57(connection)
+        if version == 55:
+            for table in ("lyric_lookup_jobs", "provider_jobs", "provider_refresh_intents"):
+                connection.execute(f"ALTER TABLE {table} DROP COLUMN options")
+        connection.execute(
+            """INSERT INTO imported_files
+            (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256)
+            VALUES ('legacy-source','legacy.flac','legacy-target','legacy.flac',123,456,'legacy-hash')"""
+        )
+        connection.execute(f"PRAGMA user_version={version}")
+
+    database.initialize()
+    with database.connect() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert (
+            connection.execute("SELECT DISTINCT storage_mode FROM libraries").fetchone()[0]
+            == "copy"
+        )
+        legacy = connection.execute(
+            "SELECT source_size, source_mtime, sha256, link_mode FROM imported_files "
+            "WHERE source_root='legacy-source'"
+        ).fetchone()
+        assert tuple(legacy) == (123, 456, "legacy-hash", "copy")
+        for table in ("lyric_lookup_jobs", "provider_jobs", "provider_refresh_intents"):
+            assert "options" in {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
 
 
 @pytest.fixture

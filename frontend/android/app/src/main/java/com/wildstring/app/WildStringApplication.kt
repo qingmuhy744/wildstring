@@ -63,7 +63,7 @@ object ApplicationModule {
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).cache(null).build()
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =
-        Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").addMigrations(QueueDatabase.MIGRATION_1_2).build()
+        Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").addMigrations(QueueDatabase.MIGRATION_1_2, QueueDatabase.MIGRATION_2_3).build()
     @Provides @Singleton fun images(@ApplicationContext context: Context, client: OkHttpClient): ImageLoader =
         // A local server can be reachable without an Android INTERNET network; let HTTP and
         // our private cover cache decide instead of Coil forcing cache-only requests.

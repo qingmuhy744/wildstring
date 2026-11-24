@@ -775,7 +775,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     ) { padding ->
                         Box(Modifier.fillMaxSize().padding(padding)) {
                             if (state.tab == "podcast") {
-                                savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm, tabReselections) }
+                                savedPages.SaveableStateProvider("podcast") { RadioPage(vm, tabReselections) }
                             } else if (state.tab == "assistant") {
                                 savedPages.SaveableStateProvider("assistant") {
                                 MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true }) {

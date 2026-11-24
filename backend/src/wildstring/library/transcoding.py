@@ -247,6 +247,50 @@ class Transcoding:
         )
         return Plan(track_id, record, observed, target, offset, key, bitrate)
 
+    def book_plan(self, book_id, index, root, file, bitrate, start_ms):
+        if bitrate not in RATES:
+            raise HTTPException(422, "playback_bitrate_invalid")
+        if start_ms >= file["duration_ms"]:
+            raise HTTPException(416, "playback_position_out_of_range")
+        try:
+            with open_source(root, Path(file["managed_path"])) as source:
+                info = os.fstat(source.fileno())
+                if info.st_size != file["file_size"]:
+                    raise HTTPException(409, "file_changed_rescan_required")
+        except (OSError, ValueError) as error:
+            raise HTTPException(404, "audio_not_found") from error
+        channels = file["channels"] or 2
+        target = min(bitrate, 256 if channels == 1 else 320)
+        key = hashlib.sha256(
+            json.dumps(
+                [
+                    "book",
+                    book_id,
+                    index,
+                    file["sha256"],
+                    fingerprint(info),
+                    start_ms,
+                    target,
+                    self.settings()["generation"],
+                ]
+            ).encode()
+        ).hexdigest()
+        return Plan(
+            f"book:{book_id}:{index}",
+            {
+                "path": file["managed_path"],
+                "library_root": str(root),
+                "format": file["codec"],
+                "size_bytes": info.st_size,
+                "mtime_ns": info.st_mtime_ns,
+            },
+            {"duration_ms": file["duration_ms"], "channels": channels, "codec": file["codec"]},
+            target,
+            start_ms,
+            key,
+            bitrate,
+        )
+
     def cache_state(self, plan):
         if not plan.bitrate:
             return "none"

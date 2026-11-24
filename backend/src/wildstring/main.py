@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from tempfile import TemporaryFile
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Route
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -16,6 +16,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from wildstring import get_app_version
 from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
+from wildstring.books.router import router as books_router
 from wildstring.catalog_gaps import catalog_gaps_router
 from wildstring.config import Settings
 from wildstring.database import Database
@@ -169,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.podcasts = podcasts
     app.state.management = management
     app.include_router(catalog.router(auth))
+    app.include_router(books_router(catalog, auth, transcoding))
     app.state.providers = providers
     app.state.diagnostics = diagnostics
     app.state.agent_platform = platform
@@ -199,6 +201,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(diagnostics_router(diagnostics, auth, database))
 
     if current.web_dir is not None:
+        web_index = current.web_dir / "index.html"
+
+        @app.get("/books/{book_id}/read", include_in_schema=False)
+        def book_reader(book_id: str):
+            return FileResponse(web_index)
+
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
 
     app.add_middleware(LibraryAccess, auth=auth, catalog=catalog, router=app.router)

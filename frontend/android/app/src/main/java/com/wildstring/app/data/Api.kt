@@ -69,6 +69,33 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
+    @GET("api/v1/books") suspend fun books(@Query("limit") limit: Int = 100): BookItems<BookSummary>
+    @GET("api/v1/book-libraries") suspend fun bookLibraries(): BookItems<BookLibrary>
+    @GET("api/v1/books/{id}/ebook/manifest") suspend fun bookManifest(@Path("id") id: String): BookManifest
+    @GET("api/v1/books/{id}/ebook/chapters/{index}") suspend fun bookChapter(
+        @Path("id") id: String, @Path("index") index: Int,
+    ): BookChapterContent
+    @GET("api/v1/books/{id}/audiobook") suspend fun bookAudio(@Path("id") id: String): BookAudioManifest
+    @GET("api/v1/books/{id}/{kind}-progress") suspend fun bookProgress(
+        @Path("id") id: String, @Path("kind") kind: String, @Tag owner: RequestOwner,
+    ): BookCheckpoint
+    @PUT("api/v1/books/{id}/{kind}-progress") suspend fun saveBookProgress(
+        @Path("id") id: String, @Path("kind") kind: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): BookCheckpoint
+    @GET("api/v1/books/{id}/bookmarks") suspend fun bookBookmarks(@Path("id") id: String): BookItems<JsonObject>
+    @POST("api/v1/books/{id}/bookmarks") suspend fun addBookBookmark(
+        @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
+    @GET("api/v1/books/{id}/annotations") suspend fun bookAnnotations(@Path("id") id: String): BookItems<BookAnnotation>
+    @POST("api/v1/books/{id}/annotations") suspend fun addBookAnnotation(
+        @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
+    @Multipart
+    @POST("api/v1/books/upload") suspend fun uploadEbook(
+        @Part("library_id") library: okhttp3.RequestBody,
+        @Part file: okhttp3.MultipartBody.Part,
+        @Tag owner: RequestOwner,
+    ): JsonObject
     @GET("api/v1/podcasts") suspend fun podcasts(@Query("followed") followed: Boolean? = null): List<PodcastSummary>
     @GET("api/v1/podcasts/publishers") suspend fun podcastPublishers(@Tag owner: RequestOwner): List<PodcastPublisher>
     @GET("api/v1/podcasts/publishers/{id}") suspend fun podcastPublisher(@Path("id") id: String, @Tag owner: RequestOwner): PodcastPublisherDetail

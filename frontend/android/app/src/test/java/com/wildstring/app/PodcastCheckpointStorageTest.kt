@@ -26,7 +26,7 @@ class PodcastCheckpointStorageTest {
             old.execSQL("INSERT INTO playback_position VALUES (1,'https://server.example','entry',120000)")
             old.version = 1
         }
-        fun open() = Room.databaseBuilder(context, QueueDatabase::class.java, name).addMigrations(QueueDatabase.MIGRATION_1_2).build()
+        fun open() = Room.databaseBuilder(context, QueueDatabase::class.java, name).addMigrations(QueueDatabase.MIGRATION_1_2, QueueDatabase.MIGRATION_2_3).build()
         try {
             val first = open()
             try {

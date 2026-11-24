@@ -41,7 +41,11 @@
 
 ## 方案
 
-### 阶段一：契约设计、目录边界、权限与 SQLite Schema v56
+### 阶段一：契约设计、目录边界、权限与 SQLite Schema v57
+
+v57 表结构、既有音乐写入兼容、共享目录校验和书库的注册、授权、目录读取已落地。
+
+本次实现包含硬链接导入、模式迁移、侧车基础往返、书籍扫描、正文及音频读取、个人状态、Web 与 Android 入口和五端版本配置。独立播放、跨端锚点、增量侧车触发和设备验收的具体范围见[书架契约](../../contracts/bookshelf.md)及[发布草稿](../releases/v0.9.0-alpha.1.md)。
 
 #### 1.1 契约与权限扩展
 
@@ -63,31 +67,31 @@
 - 修改 [backend/src/wildstring/library/access.py](../../backend/src/wildstring/library/access.py)：
   - 将 `/api/v1/books` 与 `/api/v1/book-libraries` 纳入认证后由书籍模块自主按 `(user_id, book_library_id)` 执行授权隔离；对于无权访问或不存在的书籍/章节/缓存图片/音频流，统一返回 `HTTP 404`（遵循 [contracts/multiple-libraries.md](../../contracts/multiple-libraries.md) 不泄露未授权资源存在性）。
 
-#### 1.3 SQLite Schema v55 → v56
+#### 1.3 SQLite Schema v56 → v57
 
-在 [backend/src/wildstring/database.py](../../backend/src/wildstring/database.py) 将 `SCHEMA_VERSION` 从 `55` 升至 `56`，并同步在 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 补充旧库迁移测试构造：
+在 [backend/src/wildstring/database.py](../../backend/src/wildstring/database.py) 将 `SCHEMA_VERSION` 从 `56` 升至 `57`，并同步在 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 补充旧库迁移测试构造：
 
 1. **现有音乐表增量扩展（向后兼容旧记录默认 `'copy'`，同批修改裸列插入）**：
    - `libraries`：新增 `storage_mode TEXT NOT NULL DEFAULT 'copy' CHECK(storage_mode IN ('copy', 'hardlink'))`
    - `imported_files`：新增 `link_mode TEXT NOT NULL DEFAULT 'copy' CHECK(link_mode IN ('copy', 'hardlink', 'generated', 'managed_only'))`。
-   - **同批强制修复**：当前 [importer.py](../../backend/src/wildstring/library/importer.py) 与 [upload.py](../../backend/src/wildstring/library/upload.py) 均使用省略列名的 7 列 `INSERT OR REPLACE INTO imported_files VALUES (?,?,?,?,?,?,?)`；必须在升至 `v56` 的**同一批改动**中改为显式 8 列列表 `(source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)`，并同步回归验证新库初始化、`v55` 原库升级（既有行默认 `'copy'`）及升级后的音乐导入与网页上传链路。
+   - **同批强制修复**：当前 [importer.py](../../backend/src/wildstring/library/importer.py) 与 [upload.py](../../backend/src/wildstring/library/upload.py) 均使用省略列名的 7 列 `INSERT OR REPLACE INTO imported_files VALUES (?,?,?,?,?,?,?)`；必须在升至 `v57` 的**同一批改动**中改为显式 8 列列表 `(source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)`，并同步回归验证新库初始化、`v56` 原库升级（既有行默认 `'copy'`）及升级后的音乐导入与网页上传链路。
    - `library_migrations`：新增 `target_storage_mode TEXT CHECK(target_storage_mode IN ('copy', 'hardlink'))`、`relinked_files INTEGER NOT NULL DEFAULT 0`、`reclaimed_bytes INTEGER NOT NULL DEFAULT 0`、`kept_standalone_files INTEGER NOT NULL DEFAULT 0`、`sidecars_written INTEGER NOT NULL DEFAULT 0`；放宽允许同库在目标模式变化时的原地模式迁移（`target_root == source_root` 且 `target_storage_mode IS NOT NULL`）。
 2. **书库、单一来源表、托管路径与迁移**：
    - `book_libraries`：`id`, `name`, `managed_root`, `storage_mode`（`'copy' | 'hardlink'`）, `default_access`（`all` | `restricted`）, `auto_pair`（默认 1）, `version`, `created_at`, `updated_at`
    - `book_library_sources`：`library_id`, `id`, `root`, `watch_enabled`（完全沿用 [catalog.py](../../backend/src/wildstring/library/catalog.py) 中 `library_sources` 的单一数据源表设计，不另存重复的 `source_roots_json`）
-   - `book_library_access`：`(library_id, user_id, granted_by, created_at)` 联合主键
+   - `book_library_access`：`(library_id, user_id)` 联合主键，另存 `granted_by` 与 `created_at`
    - `book_library_migrations`：镜像 `library_migrations` 结构与迁移统计列（`source_root`, `target_root`, `target_storage_mode`, `copied_files`, `relinked_files`, `reclaimed_bytes`, `kept_standalone_files`, `sidecars_written`, `status`, `error` 等），与音乐库共用同一套存储安全校验与锁契约。
 3. **书籍主表与载体子表**：
    - `books`：`id`, `library_id`, `managed_dir`, `title`, `sort_title`, `subtitle`, `authors_json`, `narrators_json`, `series_name`, `series_index`, `publisher`, `published_year`, `language`, `isbn10`, `isbn13`, `description`, `tags_json`, `cover_path`, `cover_hash`, `has_ebook`, `has_audiobook`, `pair_key`, `overrides_json`, `locked_fields_json`, `created_at`, `updated_at`
    - `book_ebooks`：`id`, `book_id`（唯一外键）, `format`（`epub` | `txt`）, `managed_path`, `source_path`, `link_mode`（`copy` | `hardlink` | `managed_only`）, `file_size`, `sha256`, `encoding`, `spine_count`, `total_chars`, `cache_key`, `parsed_at`
    - `book_ebook_chapters`：`(book_id, spine_index)`、`href`, `title`, `level`, `block_count`, `char_count`, `start_global_char`
    - `book_audiobooks`：`id`, `book_id`（唯一外键）, `is_multi_file`, `total_duration_ms`, `chapter_count`, `total_bytes`, `codec_summary`, `created_at`
-   - `book_audiobook_files`：`(book_id, file_index)`、`managed_path`, `source_path`, `link_mode`（`copy` | `hardlink`）, `relative_name`, `duration_ms`, `codec`, `bitrate`, `sample_rate`, `channels`, `file_size`, `sha256`, `start_book_ms`
+   - `book_audiobook_files`：`(book_id, file_index)`、`managed_path`, `source_path`, `link_mode`（`copy` | `hardlink` | `managed_only`）, `relative_name`, `duration_ms`, `codec`, `bitrate`, `sample_rate`, `channels`, `file_size`, `sha256`, `start_book_ms`
    - `book_audiobook_chapters`：`(book_id, chapter_index)`、`file_index`, `title`, `start_file_ms`, `end_file_ms`, `start_book_ms`, `duration_ms`
 4. **扫描与个人状态表（全部按 `user_id` 隔离）**：
    - `book_scan_jobs`：`id`, `library_id`, `status`, `scanned_files`, `added_books`, `updated_books`, `paired_books`, `sidecars_applied`, `error_message`, `started_at`, `finished_at`
-   - `book_reading_progress`：`(user_id, book_id)`、`spine_index`, `block_index`, `char_offset`, `chapter_title`, `overall_ratio`, `reading_mode`（`scroll` | `paginated`）, `completed`, `version`, `session_id`, `device_id`, `updated_at`
-   - `book_listening_progress`：`(user_id, book_id)`、`chapter_index`, `chapter_position_ms`, `book_position_ms`, `playback_rate`, `completed`, `version`, `session_id`, `device_id`, `updated_at`
+   - `book_reading_progress`：`(user_id, book_id)`、`spine_index`, `block_index`, `char_offset`, `chapter_title`, `overall_ratio`, `reading_mode`（`scroll` | `paginated`）, `completed`, `version`, `session_id`, `device_id`, `sequence`, `updated_at`
+   - `book_listening_progress`：`(user_id, book_id)`、`chapter_index`, `chapter_position_ms`, `book_position_ms`, `playback_rate`, `completed`, `version`, `session_id`, `device_id`, `sequence`, `updated_at`
    - `book_bookmarks`：`id`, `user_id`, `book_id`, `kind`（`ebook` | `audio`）, `spine_index`, `block_index`, `char_offset`, `chapter_index`, `position_ms`, `excerpt`, `note`, `created_at`, `updated_at`
    - `book_annotations`：`id`, `user_id`, `book_id`, `spine_index`, `start_block_index`, `start_char_offset`, `end_block_index`, `end_char_offset`, `selected_text`, `note`, `color`（`amber` | `terracotta` | `sage` | `stone`）, `created_at`, `updated_at`
 
@@ -148,7 +152,7 @@
   1. **场景 A：同路径原地 `copy → hardlink` 释放双倍空间**（`managed_root` 不变或省略，且当前 `managed_root` 已与 `source_roots` 处于同一设备 `st_dev`）：
      - 预检同设备与硬链接可行性，并先行触发一次 `.wildstring/` 元数据导出保证历史编辑零丢失；
      - 建立当前库所有 `source_roots` 的 `(sha256, st_ino)` 索引（优先参考 `imported_files` / `book_*` 源映射记录验证，若原路径改名则用源根下同哈希匹配）；
-     - 遍历托管文件：对源文件中存在 `sha256` 完全一致且 `st_ino` 尚未对齐源文件的副本，在同目录以 `os.link` 生成临时硬链接 `.wildstring-relink-<uuid>`，校验哈希一致后 **`os.replace` 原子替换**既有独立副本——正在播放中的文件描述符继续读取原 inode 不被中断、对外部读访问无任何空窗，替换完成瞬间系统自动释放重复占用的磁盘块，累计 `relinked_files` 与 `reclaimed_bytes`；
+     - 遍历托管文件：对源文件中存在 `sha256` 完全一致且 `st_ino` 尚未对齐源文件的副本，在同目录以 `os.link` 生成临时硬链接 `.wildstring-relink-<uuid>`，校验哈希一致后 **`os.replace` 原子替换**既有独立副本——正在播放中的文件描述符继续读取原 inode 不被中断、对外部读访问无任何空窗，累计 `relinked_files` 与旧副本的逻辑字节数 `reclaimed_bytes`。该字段用于展示预计节省空间，实际释放可能延后至在播句柄关闭；
      - **跳过 `os.utime`（严禁改写源 inode 时间戳）**：[storage.py](../../backend/src/wildstring/library/storage.py) 现有复制迁移在写入目标后调用 `os.utime` 同步修改时间；但在一切 `hardlink` 分支（含原地重链与跨目录直链）中**必须显式跳过 `os.utime`**，因为硬链接与做种源文件共用同一底层 inode，对目标调用 `os.utime` 会直接篡改只读源文件的元数据时间戳；
      - **中断续跑与幂等校验**：由于 `os.replace` 仅保证单文件原子替换，若在原地切换中途发生进程重启或崩溃，重试/恢复流程（`retry` / 启动恢复）必须基于 `(target.st_ino == source.st_ino 且 sha256 一致)` 识别已成功硬链接的文件、按已重链处理而不报错或重复计费，并同步修正 `imported_files.link_mode`（或书库子表 `link_mode`）及 `relinked_files` / `reclaimed_bytes` / `kept_standalone_files` 统计，保证中断前后的磁盘物理状态与数据库最终完全一致；
      - 对找不到源文件的独立条目（例如网页端上传、CUE 切轨/WAV 转 FLAC 衍生文件、或外部做种源已被用户清理），**安全保留原托管副本**标记 `link_mode = 'managed_only' | 'generated'` 并计入 `kept_standalone_files`；
@@ -257,13 +261,13 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
 
 核对 [scripts/package_release.py](../../scripts/package_release.py) 对 prerelease tag `v0.9.0-alpha.1` 的统一版本解析约束（执行阶段最后提交完成）：
 
-| 目标文件 | 现行值（`v0.8.28` 基线） | `v0.9.0-alpha.1` 目标值 | 说明 |
+| 目标文件 | 现行值（`v0.8.29` 基线） | `v0.9.0-alpha.1` 目标值 | 说明 |
 | --- | --- | --- | --- |
-| [backend/pyproject.toml](../../backend/pyproject.toml) | `0.8.28` | `0.9.0a1` | 同步执行 `uv lock` 更新 `backend/uv.lock` |
-| [frontend/web/package.json](../../frontend/web/package.json) | `0.8.28` | `0.9.0-alpha.1` | 同步更新 `frontend/web/package-lock.json` 根版本号 |
-| [frontend/android/app/build.gradle.kts](../../frontend/android/app/build.gradle.kts) | `versionCode = 64` / `0.8.28` | `versionCode = 65` / `0.9.0-alpha.1` | `versionCode` 必须严格大于前版 `64` |
-| [frontend/macos/project.yml](../../frontend/macos/project.yml) | `0.8.28` / `63` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "64"` | Apple `MARKETING_VERSION` 按 `package_release.py` 不带 prerelease 后缀，构建号严格递增 |
-| [frontend/ios/project.yml](../../frontend/ios/project.yml) | `0.8.28` / `63` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "64"` | 与 macOS 构建号保持同源规则并通过 XcodeGen 生成核验 |
+| [backend/pyproject.toml](../../backend/pyproject.toml) | `0.8.29` | `0.9.0a1` | 同步执行 `uv lock` 更新 `backend/uv.lock` |
+| [frontend/web/package.json](../../frontend/web/package.json) | `0.8.29` | `0.9.0-alpha.1` | 同步更新 `frontend/web/package-lock.json` 根版本号 |
+| [frontend/android/app/build.gradle.kts](../../frontend/android/app/build.gradle.kts) | `versionCode = 65` / `0.8.29` | `versionCode = 66` / `0.9.0-alpha.1` | `versionCode` 必须严格大于前版 `65` |
+| [frontend/macos/project.yml](../../frontend/macos/project.yml) | `0.8.29` / `64` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "65"` | Apple `MARKETING_VERSION` 按 `package_release.py` 不带 prerelease 后缀，构建号严格递增 |
+| [frontend/ios/project.yml](../../frontend/ios/project.yml) | `0.8.29` / `64` | `MARKETING_VERSION: "0.9.0"` / `CURRENT_PROJECT_VERSION: "65"` | 与 macOS 构建号保持同源规则并通过 XcodeGen 生成核验 |
 
 - **既有热更新说明**：核实 [UpdatePolicy.kt](../../frontend/android/app/src/main/java/com/wildstring/app/update/UpdatePolicy.kt) 会在客户端侧跳过 `prerelease == true` 的 GitHub Release（`release_unstable`）；保留为正式渠道保护策略，在发布 `v0.9.0-alpha.1` 时标注 Alpha 包需手动安装验证。
 - **发版文档入口**：准备打 tag 前，按 [AGENTS.md](../../AGENTS.md) §1 同步更新中英文 README 最新版本、`docs/product/scope.md`、`CHANGELOG.md` 与 `docs/releases/v0.9.0-alpha.1.md`。
@@ -284,8 +288,8 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
 ### 2. 后端自动化测试验收矩阵
 
 - **迁移与既有音乐回归（阶段一合入即测）**：
-  - 基于 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 构造 `v55` 库（含现有音乐曲库、覆写元数据、歌词、封面、播客进度与多库数据），升级至 `v56` 验证无损迁移及默认值对齐（旧库均为 `storage_mode = 'copy'`、`link_mode = 'copy'`）。
-  - 紧随 `v56` 迁移测试立即验证**全新初始化数据库以及由 `v55` 升级而来的数据库**均可正常执行既有 `MusicImporter` 音乐导入与网页音乐上传（验证显式 8 列 `INSERT INTO imported_files` 无列数错误并完整保留既有音乐导入回归通过）。
+  - 基于 [backend/tests/migration_support.py](../../backend/tests/migration_support.py) 构造 `v56` 库（含现有音乐曲库、覆写元数据、歌词、封面、播客进度与多库数据），升级至 `v57` 验证无损迁移，并覆盖 `v55 → v57` 连续升级及默认值对齐（旧库均为 `storage_mode = 'copy'`、`link_mode = 'copy'`）。
+  - 紧随 `v57` 迁移测试立即验证**全新初始化数据库以及由 `v56` 升级而来的数据库**均可正常执行既有 `MusicImporter` 音乐导入与网页音乐上传（验证显式 8 列 `INSERT INTO imported_files` 无列数错误并完整保留既有音乐导入回归通过）。
 - **硬链接双模式与防跨卷测试（音乐 + 书架）**：
   - 同挂载卷下创建 `hardlink` 模式音乐曲库与书库，导入直通音频（`.flac` / `.mp3` / `.m4a` / `.m4b`）与电子书（`.epub` / `.txt`）：断言源与托管文件 `st_ino` 完全一致、`st_nlink >= 2`、源目录完全只读；随后在 WildString 内修改元数据覆写、歌词、封面并重组织文件路径，断言源音频/电子书字节与修改时间 `st_mtime_ns` `0` 变化，且不允许任何内嵌标签写回改写源 inode（包括硬链接迁移路径亦严格验证 `st_mtime_ns` 未被 `os.utime` 改写）。
   - 验证 `Intake` 下的 `WAV → FLAC` 与 `CUE` 分轨自然生成新副本（`link_mode = 'generated'`）并保留原始 WAV 源无损。
@@ -332,4 +336,4 @@ Android UI 需同时兼容手机（1080×1920）与平板（2560×1600）标准�
 5. **回滚策略（区分存储模式回退与版本降级）**：
    - 本批新增书籍表与增量列均设安全默认值（既有音乐库保持 `storage_mode = 'copy'`）：
    - **(a) 保持 `0.9.0a1` 新版仅退回独立副本模式**：管理员可在界面或 API 发起 `hardlink → copy` 存储迁移，将托管媒体安全解耦为独立副本，不损毁源目录做种文件、既有曲库、书架与播客个人数据；
-   - **(b) 服务端程序降级回 `v0.8.28`**：[database.py](../../backend/src/wildstring/database.py) 强制拒绝打开高于自身 `SCHEMA_VERSION` 的数据库（`current > SCHEMA_VERSION`）；因此升级前须常规备份 `v55` `wildstring.db`，若需完整回退至 `v0.8.28` 程序镜像/二进制，须先将受保护的 `v55` 数据库备份恢复后再启动旧版服务。
+   - **(b) 服务端程序降级回 `v0.8.29`**：[database.py](../../backend/src/wildstring/database.py) 强制拒绝打开高于自身 `SCHEMA_VERSION` 的数据库（`current > SCHEMA_VERSION`）；因此升级前须常规备份 `v56` `wildstring.db`，若需完整回退至 `v0.8.29` 程序镜像/二进制，须先将受保护的 `v56` 数据库备份恢复后再启动旧版服务。
