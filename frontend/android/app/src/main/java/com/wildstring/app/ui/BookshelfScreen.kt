@@ -76,6 +76,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -178,9 +179,8 @@ private fun BookshelfScreen(vm: MusicViewModel) {
     DisposableEffect(context, owner) {
         val token = SessionToken(context, ComponentName(context, BookPlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
-        var active = true
         val pollJob = scope.launch {
-            while (active) {
+            while (isActive) {
                 if (future.isDone && !future.isCancelled) {
                     val ctrl = runCatching { future.get() }.getOrNull()
                     val item = ctrl?.currentMediaItem
@@ -192,7 +192,6 @@ private fun BookshelfScreen(vm: MusicViewModel) {
             }
         }
         onDispose {
-            active = false
             pollJob.cancel()
             MediaController.releaseFuture(future)
         }
