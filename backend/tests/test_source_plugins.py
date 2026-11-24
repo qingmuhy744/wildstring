@@ -10,12 +10,13 @@ from zipfile import ZipFile
 import pytest
 from fastapi import HTTPException
 from test_personal_library import music
-from test_providers import HEADERS
 
 from wildstring.library.scanner import scan_library
 from wildstring.plugin_archives import inspect_package
 from wildstring.providers import Providers
 from wildstring.source_plugins import InstalledPlugin, Manifest
+
+HEADERS = {"X-Wildstring-Client": "web"}
 
 BASE = "/api/v1/manage/source-plugins"
 MANIFEST = {
