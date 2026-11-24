@@ -197,7 +197,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
         if (!state.loading && state.total == 0 && state.error == null) Text(
             if (state.query.isNotBlank()) stringResource(R.string.catalog_no_matches) else if (state.kind == "playlists") stringResource(R.string.catalog_no_playlists) else stringResource(R.string.catalog_empty),
             Modifier.align(Alignment.Center).padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (state.loading && !state.hasContent) CatalogSkeleton(state.kind)
+        if (state.loading && !state.hasContent) CatalogSkeleton(state.kind, tab = state.tab)
     }
 }
 

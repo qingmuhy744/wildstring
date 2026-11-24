@@ -1,10 +1,15 @@
 package com.wildstring.app
 
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.ParcelFileDescriptor
+import android.provider.Settings
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.DpRect
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
@@ -16,6 +21,9 @@ import com.wildstring.app.data.*
 import com.google.gson.Gson
 import java.io.File
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -80,7 +88,12 @@ class PadLayoutTest {
     private class Fixture : AutoCloseable {
         val server = MockWebServer()
         val requests = java.util.concurrent.ConcurrentLinkedQueue<String>()
-        val searchGate = java.util.concurrent.CountDownLatch(1)
+        val searchGate = CountDownLatch(1)
+        @Volatile var catalogGate = CountDownLatch(0)
+        private fun awaitCatalogGate() {
+            val latch = catalogGate
+            if (latch.count > 0) latch.await(8, TimeUnit.SECONDS)
+        }
         private val gson = Gson()
         private val tracks = (0..39).joinToString(",") { gson.toJson(Track(
             "track-$it", "合成歌曲 ${it.toString().padStart(2, '0')}",
@@ -123,15 +136,15 @@ class PadLayoutTest {
                         path.endsWith("/tracks") -> when (request.requestUrl!!.queryParameter("q")) {
                             "missing" -> page("", 0)
                             "denied" -> json("""{"detail":"forbidden"}""").setResponseCode(403)
-                            "loading" -> { searchGate.await(15, java.util.concurrent.TimeUnit.SECONDS); page(tracks, 40) }
-                            else -> page(tracks, 40)
+                            "loading" -> { searchGate.await(15, TimeUnit.SECONDS); page(tracks, 40) }
+                            else -> { awaitCatalogGate(); page(tracks, 40) }
                         }
                         path.endsWith("/artists") -> when (val name = request.requestUrl!!.queryParameter("q")) {
                             "艺人甲", "艺人乙", "艺人甲与一个很长的名字" -> page(gson.toJson(Artist("matched-artist", name, 40, null)), 1)
-                            else -> page(artists, 12)
+                            else -> { awaitCatalogGate(); page(artists, 12) }
                         }
-                        path.endsWith("/albums") -> page("", 0)
-                        path.endsWith("/playlists") -> page(playlists, 8)
+                        path.endsWith("/albums") -> { awaitCatalogGate(); page("", 0) }
+                        path.endsWith("/playlists") -> { awaitCatalogGate(); page(playlists, 8) }
                         path == "/api/v1/podcasts" -> json(shows.joinToString(prefix = "[", postfix = "]"))
                         path.startsWith("/api/v1/podcasts/show-") -> {
                             val id = path.substringAfterLast('-').toInt()
@@ -154,7 +167,7 @@ class PadLayoutTest {
             }
             server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
         }
-        override fun close() { searchGate.countDown(); server.close() }
+        override fun close() { catalogGate.countDown(); searchGate.countDown(); server.close() }
     }
     @Test fun tabletSongColumnsNavigateToArtistAndAlbum() {
         val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
@@ -387,8 +400,15 @@ class PadLayoutTest {
         } }
     }
 
-    /** Mini player in the Pad shell, then the full player with the queue docked (>=1100dp) or floating (840-1099dp). */
-    @Test fun padMiniPlayerAndQueueDockingFollowWindowWidth() {
+    private fun assertBoundsUnchanged(label: String, before: DpRect, after: DpRect) {
+        assertEquals("$label left shifted", before.left.value, after.left.value, 0.5f)
+        assertEquals("$label top shifted", before.top.value, after.top.value, 0.5f)
+        assertEquals("$label right shifted", before.right.value, after.right.value, 0.5f)
+        assertEquals("$label bottom shifted", before.bottom.value, after.bottom.value, 0.5f)
+    }
+
+    /** Mini player in the Pad shell, then the full player with the queue always floating over wide screens (>=840x600dp). */
+    @Test fun padMiniPlayerAndQueueFloatingOverlayKeepStageStill() {
         val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
         Fixture().use { fixture -> try {
             compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto") }
@@ -411,32 +431,31 @@ class PadLayoutTest {
                 capture("pad-$name-miniplayer-dark")
                 appearance(vm, "light")
             }
-            for ((width, height, docked) in listOf(Triple(1200, 800, true), Triple(900, 1200, false))) {
+            for ((width, height, label) in listOf(Triple(1200, 800, "landscape"), Triple(900, 1200, "portrait"))) {
                 window(width, height)
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
                 compose.waitForIdle()
-                val playerAlbumBounds = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
-                val playerQualityBounds = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
-                assertTrue("Album subtitle ($playerAlbumBounds) overflowed into quality badge ($playerQualityBounds) at ${width}x$height", playerAlbumBounds.right < playerQualityBounds.left)
+                val stageBefore = compose.onNodeWithTag("player-visual-stage-tablet").assertIsDisplayed().getBoundsInRoot()
+                val albumBefore = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
+                val qualityBefore = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
+                assertTrue("Album subtitle ($albumBefore) overflowed into quality badge ($qualityBefore) at ${width}x$height", albumBefore.right < qualityBefore.left)
                 compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
-                if (docked) {
-                    compose.onNodeWithTag("player-queue-docked").assertIsDisplayed()
-                    compose.onNodeWithTag("player-queue-popup").assertDoesNotExist()
-                    val dockedAlbumBounds = compose.onNodeWithTag("player-album").assertIsDisplayed().getBoundsInRoot()
-                    val dockedQualityBounds = compose.onNodeWithTag("playback-quality", useUnmergedTree = true).assertIsDisplayed().getBoundsInRoot()
-                    assertTrue("Docked album subtitle ($dockedAlbumBounds) overflowed into quality badge ($dockedQualityBounds)", dockedAlbumBounds.right < dockedQualityBounds.left)
-                } else {
-                    compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
-                    compose.onNodeWithTag("player-queue-docked").assertDoesNotExist()
-                }
-                capture("pad-player-queue-${if (docked) "docked" else "floating"}-light")
+                compose.waitForIdle()
+                compose.onNodeWithTag("player-queue-popup").assertIsDisplayed()
+                compose.onNodeWithTag("player-queue-docked").assertDoesNotExist()
+                assertBoundsUnchanged("stage at ${width}x$height", stageBefore, compose.onNodeWithTag("player-visual-stage-tablet").getBoundsInRoot())
+                assertBoundsUnchanged("album at ${width}x$height", albumBefore, compose.onNodeWithTag("player-album").getBoundsInRoot())
+                assertBoundsUnchanged("quality at ${width}x$height", qualityBefore, compose.onNodeWithTag("playback-quality", useUnmergedTree = true).getBoundsInRoot())
+                capture("pad-player-queue-floating-$label-light")
                 appearance(vm, "dark")
-                capture("pad-player-queue-${if (docked) "docked" else "floating"}-dark")
+                capture("pad-player-queue-floating-$label-dark")
                 appearance(vm, "light")
                 androidx.test.espresso.Espresso.pressBack()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isEmpty() }
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-queue-popup").fetchSemanticsNodes().isEmpty() }
+                assertBoundsUnchanged("stage after dismiss at ${width}x$height", stageBefore, compose.onNodeWithTag("player-visual-stage-tablet").getBoundsInRoot())
                 androidx.test.espresso.Espresso.pressBack()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isEmpty() }
             }
@@ -452,6 +471,199 @@ class PadLayoutTest {
             capture("pad-phone-player-dark")
             appearance(vm, "light")
         } finally {
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
+            window(390, 844)
+        } }
+    }
+
+    /** Frame-by-frame queue popup motion: the stage stays still while the floating queue enters, lands, exits smoothly, or snaps under reduced motion. */
+    @Test fun padFullscreenQueuePopupMotionIsContinuousAndStageStaysPut() {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val originalScale = runCatching {
+            Settings.Global.getString(resolver, Settings.Global.ANIMATOR_DURATION_SCALE)
+        }.getOrNull()?.takeIf { it.isNotBlank() && it != "null" } ?: "1.0"
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        fun popupImage(): Bitmap? = runCatching {
+            compose.onNodeWithTag("player-queue-popup")
+                .captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false)
+        }.getOrNull()
+        fun diffPixels(before: Bitmap?, after: Bitmap?): Int {
+            if (before == null || after == null || before.width != after.width || before.height != after.height) return -1
+            val a = IntArray(after.width * after.height).also { after.getPixels(it, 0, after.width, 0, 0, after.width, after.height) }
+            val b = IntArray(a.size).also { before.getPixels(it, 0, before.width, 0, 0, before.width, before.height) }
+            return a.indices.count { a[it] != b[it] }
+        }
+        Fixture().use { fixture -> try {
+            shell("settings put global animator_duration_scale 1.0")
+            compose.waitUntil(5_000) { ValueAnimator.areAnimatorsEnabled() }
+            compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto"); vm.settings.interfaceAnimations(true) }
+            window(390, 844)
+            val serverUrl = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(serverUrl, "pad", "synthetic-password", true) }
+            compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.loading }
+            compose.onNodeWithTag("nav-library").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-tracks").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("catalog-tracks").performClick()
+            compose.waitUntil(15_000) { vm.state.value.tracks.size == 40 }
+            compose.runOnIdle { vm.play(vm.state.value.tracks.take(3), 0) }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() }
+            window(1200, 800)
+            compose.onNodeWithTag("mini-player-open").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitForIdle()
+
+            // Animated open & close
+            data class Sample(
+                val tMs: Int, val stageLeft: Float, val stageRight: Float, val albumLeft: Float,
+                val popupTop: Float?, val popupBottom: Float?, val changedPx: Int,
+            )
+            fun stepFrames(count: Int): List<Sample> = buildList {
+                var prev: Bitmap? = null
+                repeat(count) { idx ->
+                    compose.mainClock.advanceTimeByFrame()
+                    val stage = compose.onAllNodesWithTag("player-visual-stage-tablet").fetchSemanticsNodes().first().boundsInRoot
+                    val album = compose.onAllNodesWithTag("player-album").fetchSemanticsNodes().first().boundsInRoot
+                    val popup = compose.onAllNodesWithTag("player-queue-popup").fetchSemanticsNodes().firstOrNull()?.boundsInRoot
+                    val img = if (popup != null) popupImage() else null
+                    add(Sample((idx + 1) * 16, stage.left, stage.right, album.left, popup?.top, popup?.bottom, if (popup != null) diffPixels(prev, img) else 0))
+                    prev?.recycle()
+                    prev = img
+                }
+                prev?.recycle()
+            }
+
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+            val openFrames = stepFrames(30)
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+
+            val openProblems = buildList {
+                addAll(MotionAssertions.staysPut("stage left on open", openFrames.map { it.stageLeft }))
+                addAll(MotionAssertions.staysPut("stage right on open", openFrames.map { it.stageRight }))
+                addAll(MotionAssertions.staysPut("album left on open", openFrames.map { it.albumLeft }))
+                val popupSamples = openFrames.filter { it.popupTop != null }
+                check(popupSamples.size >= 10) { "Popup did not stay mounted across animation frames: ${popupSamples.size}" }
+                val tops = popupSamples.map { it.popupTop!! }
+                assertTrue("Popup must animate vertically >= ${MotionAssertions.MIN_TRAVEL_PX}px, traveled ${abs(tops.last() - tops.first())}", abs(tops.last() - tops.first()) >= MotionAssertions.MIN_TRAVEL_PX)
+                addAll(MotionAssertions.continuousCurve("popup open top", tops))
+                addAll(MotionAssertions.landsAndStays("popup open", popupSamples.map { it.tMs }, tops, popupSamples.map { it.changedPx }, settleMs = 300))
+            }
+            assertTrue(openProblems.joinToString("\n"), openProblems.isEmpty())
+
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+            compose.mainClock.advanceTimeByFrame()
+            assertTrue("playback-queue semantics must vanish immediately on close", compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isEmpty())
+            val closeFrames = stepFrames(29)
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+
+            val closeProblems = buildList {
+                addAll(MotionAssertions.staysPut("stage left on close", closeFrames.map { it.stageLeft }))
+                addAll(MotionAssertions.staysPut("stage right on close", closeFrames.map { it.stageRight }))
+                addAll(MotionAssertions.staysPut("album left on close", closeFrames.map { it.albumLeft }))
+                val closingTops = closeFrames.filter { it.popupTop != null && it.tMs < 270 }.map { it.popupTop!! }
+                if (closingTops.size >= 4) {
+                    addAll(MotionAssertions.continuousCurve("popup close top", closingTops))
+                }
+                assertTrue("Popup must be gone after settle", closeFrames.filter { it.tMs >= 320 }.all { it.popupTop == null })
+            }
+            assertTrue(closeProblems.joinToString("\n"), closeProblems.isEmpty())
+
+            // Reduced motion (app preference off): lands in the first frame.
+            compose.runOnIdle { vm.settings.interfaceAnimations(false) }
+            compose.waitForIdle()
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
+            val reducedOpen = stepFrames(16)
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+            val firstTop = reducedOpen.first().popupTop!!
+            val lastTop = reducedOpen.last().popupTop!!
+            assertEquals("Reduced motion popup must land in frame 1", firstTop, lastTop, 0.5f)
+            assertTrue("Reduced motion must not drift", MotionAssertions.staysPut("reduced motion top", reducedOpen.mapNotNull { it.popupTop }).isEmpty())
+        } finally {
+            compose.mainClock.autoAdvance = true
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto"); vm.settings.interfaceAnimations(true) }
+            shell("settings put global animator_duration_scale $originalScale")
+            window(390, 844)
+        } }
+    }
+
+    /** Pad and Phone skeletons match their final layouts (compact 116dp album strip + multi-column tracks/card grids on Pad). */
+    @Test fun padAndPhoneLoadingSkeletonsMatchTargetLayouts() {
+        val vm = compose.runOnIdle { ViewModelProvider(activity())[MusicViewModel::class.java] }
+        Fixture().use { fixture -> try {
+            compose.runOnIdle { vm.settings.appearance("light"); vm.settings.orientation("auto") }
+            // Gate initial discovery load so discovery-skeleton stays visible cleanly for assertions & screenshots.
+            fixture.catalogGate = CountDownLatch(1)
+            window(1200, 800)
+            val serverUrl = fixture.server.url("/").toString()
+            val login = compose.runOnIdle { vm.connect(serverUrl, "pad", "synthetic-password", true) }
+            compose.waitUntil(15_000) { login.isCompleted && vm.state.value.connected }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("discovery-skeleton-album-4").fetchSemanticsNodes().isNotEmpty() }
+
+            val padAlbum0 = compose.onNodeWithTag("discovery-skeleton-album-0").getBoundsInRoot()
+            val padAlbum4 = compose.onNodeWithTag("discovery-skeleton-album-4").getBoundsInRoot()
+            val padShortcut0 = compose.onNodeWithTag("discovery-skeleton-shortcut-0").getBoundsInRoot()
+            val padTrack0 = compose.onNodeWithTag("discovery-skeleton-track-0").getBoundsInRoot()
+            assertEquals("Pad discovery skeleton album card width must stay compact (116dp)", 116f, (padAlbum0.right - padAlbum0.left).value, 2f)
+            assertEquals("Pad discovery skeleton albums must sit on one horizontal strip", padAlbum0.top.value, padAlbum4.top.value, 1f)
+            assertTrue("Pad discovery shortcuts must not stretch to 350dp phone-grid squares", (padShortcut0.right - padShortcut0.left).value < 260f)
+            assertTrue("Pad discovery track row must be single-line tabular", (padTrack0.bottom - padTrack0.top).value < 64f)
+
+            capture("skeleton-pad-discovery-light")
+            appearance(vm, "dark")
+            capture("skeleton-pad-discovery-dark")
+            appearance(vm, "light")
+
+            window(390, 844)
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("discovery-skeleton-album-0").fetchSemanticsNodes().isNotEmpty() }
+            capture("skeleton-phone-discovery-light")
+
+            // Unblock discovery, then inspect Pad tracks, artists, and playlists ("mine") skeletons individually.
+            fixture.catalogGate.countDown()
+            compose.waitUntil(15_000) { !vm.state.value.loading }
+
+            window(1200, 800)
+            compose.onNodeWithTag("nav-library").performClick()
+            compose.waitUntil(15_000) { !vm.state.value.loading && compose.onAllNodesWithTag("catalog-tracks").fetchSemanticsNodes().isNotEmpty() }
+
+            fixture.catalogGate = CountDownLatch(1)
+            compose.onNodeWithTag("catalog-tracks").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-skeleton-row-0").fetchSemanticsNodes().isNotEmpty() }
+            val trackRow0 = compose.onNodeWithTag("catalog-skeleton-row-0").getBoundsInRoot()
+            assertTrue("Pad track skeleton row must be wide multi-column", (trackRow0.right - trackRow0.left).value > 760f)
+            capture("skeleton-pad-tracks-light")
+            appearance(vm, "dark")
+            capture("skeleton-pad-tracks-dark")
+            appearance(vm, "light")
+            fixture.catalogGate.countDown()
+            compose.waitUntil(15_000) { !vm.state.value.loading }
+
+            fixture.catalogGate = CountDownLatch(1)
+            compose.onNodeWithTag("catalog-artists").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-skeleton-card-1").fetchSemanticsNodes().isNotEmpty() }
+            val artistCard0 = compose.onNodeWithTag("catalog-skeleton-card-0").getBoundsInRoot()
+            val artistCard1 = compose.onNodeWithTag("catalog-skeleton-card-1").getBoundsInRoot()
+            assertEquals("Pad artist skeleton cards must form a multi-column grid", artistCard0.top.value, artistCard1.top.value, 1f)
+            assertTrue("Pad artist skeleton cards must sit side by side", artistCard0.right.value <= artistCard1.left.value)
+            capture("skeleton-pad-artists-light")
+            fixture.catalogGate.countDown()
+            compose.waitUntil(15_000) { !vm.state.value.loading }
+
+            fixture.catalogGate = CountDownLatch(1)
+            compose.onNodeWithTag("nav-mine").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("catalog-skeleton-card-1").fetchSemanticsNodes().isNotEmpty() }
+            val mineCard0 = compose.onNodeWithTag("catalog-skeleton-card-0").getBoundsInRoot()
+            val mineCard1 = compose.onNodeWithTag("catalog-skeleton-card-1").getBoundsInRoot()
+            assertEquals("Pad playlists skeleton cards must form a multi-column grid", mineCard0.top.value, mineCard1.top.value, 1f)
+            capture("skeleton-pad-mine-light")
+            fixture.catalogGate.countDown()
+            compose.waitUntil(15_000) { !vm.state.value.loading }
+        } finally {
+            fixture.catalogGate.countDown()
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system"); vm.settings.orientation("auto") }
             window(390, 844)
         } }
