@@ -12,6 +12,6 @@ services:
     network_mode: none
     read_only: true
     tmpfs:
-      # The full suite retains isolated databases and audio until pytest exits.
-      - /tmp:size=1g,mode=1777
+      # Passed tmp_path dirs are pruned by pytest; headroom covers failed/concurrent fixtures.
+      - /tmp:size=2g,mode=1777
       - /podcasts:size=512m,mode=1777

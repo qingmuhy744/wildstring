@@ -56,6 +56,8 @@ known-first-party = ["wildstring"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-config --strict-markers"
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 
 [tool.bandit]
 exclude_dirs = ["backend/tests", ".cache", ".venv"]
