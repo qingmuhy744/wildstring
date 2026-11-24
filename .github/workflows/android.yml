@@ -259,7 +259,8 @@ jobs:
           # system_server.
           script: |
             timeout 120 adb wait-for-device
-            timeout 120 adb shell 'until [ "$(getprop sys.boot_completed)" = "1" ] && am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true; settings put secure anr_show_background 0 >/dev/null 2>&1 || true; [ "$(getprop sys.boot_completed)" = "1" ] && am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && pm path android >/dev/null 2>&1; do sleep 2; done'
+            adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
             python3 scripts/run_android_instrumented.py --app-apk artifacts/test-apks/app-debug.apk --test-apk artifacts/test-apks/app-debug-androidTest.apk --arg realBackend=http://10.0.2.2:19882/ --classes="$ANDROID_TEST_CLASSES" --repeat="$ANDROID_TEST_REPEAT" --retries="$ANDROID_TEST_RETRIES" --shard-index="$ANDROID_TEST_SHARD_INDEX" --shard-count="$ANDROID_TEST_SHARD_COUNT" --output "artifacts/android-instrumented/shard-$ANDROID_TEST_SHARD_INDEX"
       - name: Stop synthetic API
         if: always()

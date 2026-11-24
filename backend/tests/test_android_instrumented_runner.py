@@ -178,3 +178,84 @@ def test_execute_stops_when_recovery_exhausted_or_disabled(monkeypatch, tmp_path
     assert runs[1].seconds == 0.0
     summary = (tmp_path / "summary.md").read_text()
     assert "1 class runs were not started" in summary
+
+
+def test_dismiss_system_error_dialogs_noop_without_error_window(monkeypatch) -> None:
+    commands: list[tuple[str, ...]] = []
+
+    def fake_adb(*args: str, **kwargs) -> str:
+        commands.append(args)
+        return "Window{abc u0 com.wildstring.app.dev/com.wildstring.app.MainActivity}\n"
+
+    monkeypatch.setattr(run_android_instrumented, "adb", fake_adb)
+
+    assert run_android_instrumented.dismiss_system_error_dialogs({"com.wildstring.app.dev"}) == []
+    assert commands == [("shell", "dumpsys", "window", "windows")]
+
+
+def test_dismiss_system_error_dialogs_stops_launcher_and_keeps_protected(monkeypatch) -> None:
+    commands: list[tuple[str, ...]] = []
+    dumpsys_calls = 0
+
+    def fake_adb(*args: str, **kwargs) -> str:
+        nonlocal dumpsys_calls
+        commands.append(args)
+        if args == ("shell", "dumpsys", "window", "windows"):
+            dumpsys_calls += 1
+            if dumpsys_calls == 1:
+                return (
+                    "Window{4d9ffc9 u0 Application Not Responding: com.android.launcher3}\n"
+                    "Window{111 u0 Application Not Responding: com.wildstring.app.dev}\n"
+                    "Window{222 u0 Application Not Responding: com.wildstring.app.dev.test}\n"
+                    "Window{333 u0 Application Error: android}\n"
+                    "Window{444 u0 Application Not Responding: com.android.systemui}\n"
+                )
+            return "Window{abc u0 com.wildstring.app.dev/com.wildstring.app.MainActivity}\n"
+        return ""
+
+    monkeypatch.setattr(run_android_instrumented, "adb", fake_adb)
+
+    cleared = run_android_instrumented.dismiss_system_error_dialogs(
+        {"com.wildstring.app.dev", "com.wildstring.app.dev.test"}
+    )
+
+    assert cleared == ["com.android.launcher3"]
+    assert (
+        "shell",
+        "am",
+        "broadcast",
+        "-a",
+        "android.intent.action.CLOSE_SYSTEM_DIALOGS",
+    ) in commands
+    assert ("shell", "am", "force-stop", "com.android.launcher3") in commands
+    assert all(
+        args[:3] != ("shell", "am", "force-stop") or args[3] == "com.android.launcher3"
+        for args in commands
+    )
+    assert all("uiautomator" not in args for args in commands)
+
+
+def test_dismiss_system_error_dialogs_falls_back_to_tapping_wait(monkeypatch) -> None:
+    commands: list[tuple[str, ...]] = []
+
+    def fake_adb(*args: str, **kwargs) -> str:
+        commands.append(args)
+        if args == ("shell", "dumpsys", "window", "windows"):
+            return "Window{4d9ffc9 u0 Application Not Responding: com.android.launcher3}\n"
+        if args == ("shell", "cat", "/sdcard/wildstring-anr.xml"):
+            return (
+                "<hierarchy>"
+                '<node text="Wait" resource-id="android:id/aerr_wait" bounds="[100,200][300,280]" />'
+                '<node text="Close app" resource-id="android:id/aerr_close" bounds="[100,100][300,180]" />'
+                "</hierarchy>"
+            )
+        return ""
+
+    monkeypatch.setattr(run_android_instrumented, "adb", fake_adb)
+
+    cleared = run_android_instrumented.dismiss_system_error_dialogs({"com.wildstring.app.dev"})
+
+    assert cleared == ["com.android.launcher3"]
+    assert ("shell", "uiautomator", "dump", "/sdcard/wildstring-anr.xml") in commands
+    assert ("shell", "cat", "/sdcard/wildstring-anr.xml") in commands
+    assert ("shell", "input", "tap", "200", "240") in commands

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess  # nosec B404 - runs adb and an operator-provided CI hook
 import sys
@@ -48,6 +49,12 @@ DEVICE_GONE_MARKERS = (
 )
 # AndroidJUnitRunner status codes.
 START, OK, ERROR, FAILURE, IGNORED, ASSUMPTION = 1, 0, -1, -2, -3, -4
+ERROR_WINDOW_PATTERN = re.compile(
+    r"Window\{[^\n}]*\bApplication (?:Not Responding|Error): ([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\}"
+)
+NODE_PATTERN = re.compile(r"<node\b[^>]*>")
+BOUNDS_PATTERN = re.compile(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
+PROTECTED_SYSTEM_PACKAGES = frozenset({"android", "com.android.systemui"})
 
 
 @dataclass
@@ -163,6 +170,7 @@ def suppress_system_dialogs() -> None:
     """Suppress blocking OS-level crash, ANR, immersive mode, and setup dialogs."""
     settings = (
         ("global", "hide_error_dialogs", "1"),
+        ("secure", "anr_show_background", "0"),
         ("secure", "immersive_mode_confirmations", "confirmed"),
         ("global", "device_provisioned", "1"),
         ("secure", "user_setup_complete", "1"),
@@ -175,6 +183,61 @@ def suppress_system_dialogs() -> None:
             adb("shell", "settings", "put", namespace, key, value, timeout=10, check=False)
         except Exception:  # nosec B110
             pass
+    try:
+        adb("shell", "wm", "dismiss-keyguard", timeout=10, check=False)
+    except Exception:  # nosec B110
+        pass
+
+
+def _tap_error_dialog_button(hierarchy: str) -> bool:
+    for target_id in ('resource-id="android:id/aerr_wait"', 'resource-id="android:id/aerr_close"'):
+        for node_match in NODE_PATTERN.finditer(hierarchy):
+            attrs = node_match.group(0)
+            if target_id not in attrs:
+                continue
+            bounds_match = BOUNDS_PATTERN.search(attrs)
+            if bounds_match:
+                left, top, right, bottom = (int(value) for value in bounds_match.groups())
+                cx = (left + right) // 2
+                cy = (top + bottom) // 2
+                adb("shell", "input", "tap", str(cx), str(cy), timeout=10, check=False)
+                return True
+    return False
+
+
+def dismiss_system_error_dialogs(protected_packages: set[str] | None = None) -> list[str]:
+    """Clear already-open boot ANR/crash dialogs so they cannot steal window focus."""
+    windows = adb("shell", "dumpsys", "window", "windows", timeout=15, check=False)
+    packages = list(dict.fromkeys(ERROR_WINDOW_PATTERN.findall(windows)))
+    if not packages:
+        return []
+    protected = (protected_packages or set()) | PROTECTED_SYSTEM_PACKAGES
+    offenders = [pkg for pkg in packages if pkg not in protected]
+    if not offenders:
+        return []
+    print(f"Dismissing system error dialog(s) for {', '.join(offenders)}", flush=True)
+    adb(
+        "shell",
+        "am",
+        "broadcast",
+        "-a",
+        "android.intent.action.CLOSE_SYSTEM_DIALOGS",
+        timeout=10,
+        check=False,
+    )
+    for pkg in offenders:
+        adb("shell", "am", "force-stop", pkg, timeout=10, check=False)
+    remaining_windows = adb("shell", "dumpsys", "window", "windows", timeout=15, check=False)
+    remaining = [
+        pkg
+        for pkg in dict.fromkeys(ERROR_WINDOW_PATTERN.findall(remaining_windows))
+        if pkg not in protected
+    ]
+    if remaining:
+        adb("shell", "uiautomator", "dump", "/sdcard/wildstring-anr.xml", timeout=15, check=False)
+        hierarchy = adb("shell", "cat", "/sdcard/wildstring-anr.xml", timeout=15, check=False)
+        _tap_error_dialog_button(hierarchy)
+    return offenders
 
 
 def device_ready(timeout: float = 60) -> bool:
@@ -291,6 +354,7 @@ def run_class(
     directory = options.output / f"iteration-{iteration}" / f"attempt-{attempt}"
     device_output = f"/sdcard/Android/media/{options.app_package}/additional_test_output/{short}"
     DEVICE_TROUBLE.clear()
+    dismiss_system_error_dialogs({options.app_package, options.test_package})
     adb("logcat", "-c", timeout=30, check=False)
     adb("shell", "rm", "-rf", device_output, timeout=30, check=False)
     if DEVICE_TROUBLE:
@@ -585,6 +649,7 @@ def prepare_device(options: argparse.Namespace) -> None:
         timeout=30,
         check=False,
     )
+    dismiss_system_error_dialogs({options.app_package, options.test_package})
 
 
 def recover_device(options: argparse.Namespace, label: str, restarts: int) -> bool:
