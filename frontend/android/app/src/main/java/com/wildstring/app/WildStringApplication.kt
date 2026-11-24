@@ -24,14 +24,17 @@ import okhttp3.OkHttpClient
 class WildStringApplication : Application() {
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate() {
-        // Compose Foundation 1.12's optimized BasicTextField min-size node reads a
-        // CompositionLocal in update() even while its layout node is detached. When a page's
-        // search field moves through movableContentOf (page <-> player backdrop) in the same frame
-        // as a text style change, attach throws, leaves half-attached modifier nodes, and the next
-        // Activity destroy crashes with "Must run runDetachLifecycle() once after
-        // runAttachLifecycle()". The legacy min-size path has no such read. Set before any Compose
-        // code loads, as the flag documentation asks; MovableTextFieldTest guards the regression.
+        // Compose Foundation 1.12/1.13's BasicTextField size, height-in-lines, and min-size
+        // modifier nodes read CompositionLocal / LayoutDirection in update() even while the layout
+        // node is detached. When a page moves through movableContentOf (settings <-> catalog) or
+        // SubcomposeLayout (Scaffold / BoxWithConstraints) in the same frame as a text style
+        // change, attach throws, leaves half-attached modifier nodes, and the next Activity destroy
+        // crashes with "Must run runDetachLifecycle() once after runAttachLifecycle()". Keep all
+        // three paths on the legacy modifiers until upstream stops reading from detached nodes;
+        // MovableTextFieldTest guards the regression.
         ComposeFoundationFlags.isBasicTextFieldMinSizeOptimizationEnabled = false
+        ComposeFoundationFlags.isBasicTextFieldHeightInLinesOptimizationEnabled = false
+        ComposeFoundationFlags.isBasicTextFieldSizeOptimizationEnabled = false
         super.onCreate()
         AppLanguage.install(this)
         CrashHandler.install(this)

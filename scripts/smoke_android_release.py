@@ -12,8 +12,8 @@ CONNECTION_COPY = (
 )
 
 
-def adb(*arguments: str) -> bytes:
-    return subprocess.run(["adb", *arguments], check=True, capture_output=True, timeout=120).stdout
+def adb(*arguments: str, check: bool = True) -> bytes:
+    return subprocess.run(["adb", *arguments], check=check, capture_output=True, timeout=120).stdout
 
 
 def main() -> None:
@@ -23,6 +23,18 @@ def main() -> None:
     output = ROOT / "artifacts/android-release-smoke"
     output.mkdir(parents=True, exist_ok=True)
     adb("install", "-r", str(packages[0]))
+    adb("shell", "settings", "put", "global", "hide_error_dialogs", "1", check=False)
+    adb("shell", "settings", "put", "secure", "anr_show_background", "0", check=False)
+    adb("shell", "wm", "dismiss-keyguard", check=False)
+    adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS", check=False)
+    windows = adb("shell", "dumpsys", "window", "windows", check=False).decode(
+        "utf-8", errors="replace"
+    )
+    if (
+        "Application Not Responding: com.android.launcher3" in windows
+        or "Application Error: com.android.launcher3" in windows
+    ):
+        adb("shell", "am", "force-stop", "com.android.launcher3", check=False)
     response = adb("shell", "am", "start", "-W", "-n", "com.wildstring.app/.MainActivity")
     if b"Error" in response:
         raise RuntimeError(response.decode())
