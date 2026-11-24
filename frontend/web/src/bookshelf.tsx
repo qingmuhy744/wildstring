@@ -54,6 +54,8 @@ export function Bookshelf({
   const [format, setFormat] = useState('all');
   const [status, setStatus] = useState('all');
   const [notice, setNotice] = useState('');
+  const [migrationError, setMigrationError] = useState('');
+  const [exported, setExported] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
@@ -162,7 +164,7 @@ export function Bookshelf({
     }
   }
 
-  async function write(operation: () => Promise<void>) {
+  async function write(operation: () => Promise<void>, reportError = setError) {
     setError('');
     setNotice('');
     setPending(true);
@@ -170,7 +172,7 @@ export function Bookshelf({
       await operation();
       refresh((value) => value + 1);
     } catch (cause) {
-      setError((cause as Error).message);
+      reportError((cause as Error).message);
     } finally {
       setPending(false);
     }
@@ -228,6 +230,7 @@ export function Bookshelf({
     if (!selection) return;
     const values = new FormData(event.currentTarget);
     const path = String(values.get('managed_root') || '').trim();
+    setMigrationError('');
     void write(async () => {
       await api(`/book-libraries/${selection.id}/migrations`, {
         method: 'POST',
@@ -237,7 +240,7 @@ export function Bookshelf({
           ...(path ? { managed_root: path } : {}),
         }),
       });
-    });
+    }, setMigrationError);
   }
 
   const visible = (books || []).filter(
@@ -279,6 +282,7 @@ export function Bookshelf({
             key={selected.id}
             book={selected}
             activeElsewhere={musicPlaying}
+            canEdit={canEdit}
             onPlay={onPlayAudio}
           />
         )}
@@ -496,6 +500,7 @@ export function Bookshelf({
               key={selected.id}
               book={selected}
               activeElsewhere={musicPlaying}
+              canEdit={canEdit}
               onPlay={onPlayAudio}
             />
           )}
@@ -506,7 +511,11 @@ export function Bookshelf({
             <select
               aria-label={t('bookshelf.library')}
               value={libraryId}
-              onChange={(event) => setLibraryId(event.target.value)}
+              onChange={(event) => {
+                setLibraryId(event.target.value);
+                setMigrationError('');
+                setExported(null);
+              }}
             >
               <option value="">{t('bookshelf.allLibraries')}</option>
               {libraries.map((library) => (
@@ -602,12 +611,15 @@ export function Bookshelf({
                             `/book-libraries/${selection.id}/export-sidecars`,
                             { method: 'POST', timeoutMs: 0 },
                           );
-                          setNotice(t('bookshelf.exported', { count: result.sidecars_written }));
+                          setExported(result.sidecars_written);
                         })
                       }
                     >
                       {t('bookshelf.export')}
                     </button>
+                    {exported !== null && (
+                      <span role="status">{t('bookshelf.exported', { count: exported })}</span>
+                    )}
                   </div>
                   <details>
                     <summary>{t('bookshelf.migrate')}</summary>
@@ -626,6 +638,7 @@ export function Bookshelf({
                       <label>
                         {t('bookshelf.managedRoot')} <input name="managed_root" />
                       </label>
+                      {migrationError && <p role="alert">{migrationError}</p>}
                       <button disabled={pending}>{t('bookshelf.migrate')}</button>
                     </form>
                     {jobs.map((job) => (
@@ -636,7 +649,10 @@ export function Bookshelf({
                           {t('bookshelf.estimate', { bytes: job.reclaimed_bytes.toLocaleString() })}
                         </span>
                         <span>{t('bookshelf.retained', { count: job.kept_standalone_files })}</span>
-                        {job.error && <span>{job.error}</span>}
+                        <span>{t('bookshelf.exported', { count: job.sidecars_written })}</span>
+                        {job.error && (
+                          <span>{t(`errors.${job.error}`, { defaultValue: job.error })}</span>
+                        )}
                         {job.status === 'failed' && (
                           <button
                             disabled={pending}

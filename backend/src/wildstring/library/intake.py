@@ -27,6 +27,7 @@ from wildstring.library.import_files import (
 )
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.scanner import SourceChangedError, fingerprint, open_source
+from wildstring.library.sidecar import refresh_music_tracks
 
 INPUT_SUFFIXES = SUPPORTED_SUFFIXES | {".wav"}
 logger = logging.getLogger(__name__)
@@ -821,6 +822,7 @@ class Intake:
             importer.error(relative, code)
 
     def apply_overrides(self):
+        updated = []
         with self.database.connect(write=True) as connection:
             for item in connection.execute(
                 "SELECT id,outputs FROM intake_items WHERE library_id=? AND state='imported'",
@@ -841,6 +843,7 @@ class Intake:
                             (json.dumps(output["overrides"], ensure_ascii=False), row["id"]),
                         )
                         apply_effective(connection, row["id"])
+                        updated.append(row["id"])
                     if row:
                         output["applied"] = True
                         changed = True
@@ -849,3 +852,4 @@ class Intake:
                         "UPDATE intake_items SET outputs=? WHERE id=?",
                         (json.dumps(outputs, ensure_ascii=False), item["id"]),
                     )
+        refresh_music_tracks(self.repository, updated)

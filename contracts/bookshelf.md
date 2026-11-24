@@ -22,7 +22,7 @@
 
 同一本书可含电子书、有声书或两者。扫描同库识别配对，候选歧义时保持独立；有管理权限的账号可显式配对或拆分。章节和媒体请求按书籍真实所属库授权，未授权时返回 404。有声书独立播放和记录进度，音乐和播客继续使用各自的队列、接续和统计。
 
-上传入口只收 EPUB、TXT 和书籍封面。音频扩展名、音视频 MIME、音频特征字节或 EPUB 内音频均返回 422 `audio_upload_forbidden`，不支持的电子书格式返回 422 `unsupported_ebook_format`。有声书通过只读扫描来源进入书库。
+上传入口只收 EPUB、TXT 和书籍封面。音频扩展名、音视频 MIME、音频特征字节或 EPUB 内音频均返回 422 `audio_upload_forbidden`，不支持的电子书格式返回 422 `unsupported_ebook_format`。有声书通过只读扫描来源进入书库。 具备 `books:write` 和该书库访问权限的成员可以用 `PATCH /api/v1/books/{book_id}/audiobook/chapters/{chapter_index}` 提交 `{title}` 校对标题。校对保留音频和时间范围，保存后刷新托管目录的便携章节信息。
 
 阅读内容以章节 manifest 和服务端净化后的语义块返回。块包含 `block_index`、`tag`、`runs`、`text`、`char_len` 和可选 `image_key`。原 EPUB 的脚本、外部样式和远程资源不交给阅读器执行或加载。正文与图片放入 `book_cache`，缓存图像与音频流使用同一书库授权。滚动与分页使用同一个 `(spine_index, block_index, char_offset)` 阅读锚点。
 

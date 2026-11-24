@@ -643,6 +643,10 @@ class Core:
                 )
         except sqlite3.IntegrityError:
             raise HTTPException(409, "agent_idempotency_conflict") from None
+        if record["kind"] not in {"playlist", "intake"}:
+            from wildstring.library.sidecar import refresh_music_tracks
+
+            refresh_music_tracks(self.repository_for(actor), object_ids)
         return self.draft(actor, identity)
 
     def apply_playlist(self, connection, actor, payload):

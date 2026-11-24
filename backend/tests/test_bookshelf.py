@@ -1,5 +1,6 @@
 """Book libraries share the server's storage boundary and use separate grants."""
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -329,6 +330,18 @@ def test_epub_safety_pair_split_and_portable_share(settings, authenticated_clien
         )
         paired = owner.post(prefix + "/pair", headers=HEADERS, json={"other_book_id": audio["id"]})
         assert paired.status_code == 200, paired.text
+        source_audio = source / "script.mp3"
+        before = source_audio.stat()
+        corrected = owner.patch(
+            prefix + "/audiobook/chapters/0", headers=HEADERS, json={"title": "Corrected opening"}
+        )
+        assert corrected.json() == {"chapter_index": 0, "title": "Corrected opening"}
+        sidecar = Path(library["managed_root"]) / identity / ".wildstring" / "manifest.json"
+        assert (
+            json.loads(sidecar.read_text())["audiobook"]["chapters"][0]["title"]
+            == "Corrected opening"
+        )
+        assert source_audio.stat().st_mtime_ns == before.st_mtime_ns
         assert (
             owner.get(
                 prefix + "/audiobook/files/0/stream", headers={"Range": "bytes=0-9"}

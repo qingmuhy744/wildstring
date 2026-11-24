@@ -17,14 +17,18 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextMeasurer
@@ -62,6 +66,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -177,7 +183,7 @@ private fun BookshelfScreen(vm: MusicViewModel) {
             }
             Text(book.title, style = MaterialTheme.typography.headlineSmall)
             if (listening) BookListening(vm, book)
-            if (reading) BookReading(repository, book)
+            if (reading) BookReading(vm, book)
         } else {
             OutlinedTextField(filter, { filter = it }, singleLine = true,
                 label = { Text(stringResource(R.string.books_find)) }, modifier = Modifier.fillMaxWidth())
@@ -245,7 +251,10 @@ private fun BookshelfScreen(vm: MusicViewModel) {
 }
 
 @Composable
-private fun BookReading(repository: Repository, book: BookSummary) {
+private fun BookReading(vm: MusicViewModel, book: BookSummary) {
+    val repository = vm.repository
+    val preferences by vm.settings.state.collectAsStateWithLifecycle()
+    val animateReaderUi = preferences.interfaceAnimations && playbackMotionAllowed()
     val context = LocalContext.current
     val focus = LocalFocusManager.current
     val owner = repository.session.storageScope()
@@ -268,8 +277,9 @@ private fun BookReading(repository: Repository, book: BookSummary) {
     var anchor by rememberSaveable(book.id) { mutableIntStateOf(0) }
     var charOffset by rememberSaveable(book.id) { mutableIntStateOf(0) }
     var error by remember(book.id) { mutableStateOf(false) }
-    var showContents by remember(book.id) { mutableStateOf(false) }
-    var showMarks by remember(book.id) { mutableStateOf(false) }
+    var showTools by remember(book.id) { mutableStateOf(false) }
+    var showPanel by remember(book.id) { mutableStateOf(false) }
+    var contentsPanel by remember(book.id) { mutableStateOf(true) }
     var marks by remember(book.id) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var annotations by remember(book.id, owner) { mutableStateOf<List<BookAnnotation>>(emptyList()) }
     var selection by remember(book.id, spine) { mutableStateOf<BookSelection?>(null) }
@@ -354,126 +364,171 @@ private fun BookReading(repository: Repository, book: BookSummary) {
         }
     }
 
-    Column(Modifier.fillMaxWidth().background(palette).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(paged, {
-                focus.clearFocus()
-                selection = null
-                paged = !paged
-            }, { Text(stringResource(if (paged) R.string.books_pages else R.string.books_scroll)) })
-            FilterChip(dark, { dark = !dark }, { Text(stringResource(R.string.books_dark)) })
-            TextButton(onClick = { showContents = true }) { Text(stringResource(R.string.books_contents)) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = { size = (size - 1).coerceAtLeast(14f) }) { Text("A−") }
-            TextButton(onClick = { size = (size + 1).coerceAtMost(24f) }) { Text("A+") }
-            TextButton(onClick = {
-                scope.launch {
-                    try {
-                        marks = repository.api().bookBookmarks(book.id).items
-                        showMarks = true
-                    } catch (cause: CancellationException) { throw cause }
-                    catch (cause: Exception) { error = true }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
+        Column(Modifier.fillMaxSize().background(palette).padding(12.dp).testTag("book-reader-stage"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(paged, {
+                    focus.clearFocus()
+                    selection = null
+                    paged = !paged
+                    if (blocks != null) savePosition(anchor, charOffset)
+                }, { Text(stringResource(if (paged) R.string.books_pages else R.string.books_scroll)) })
+                FilterChip(dark, { dark = !dark }, { Text(stringResource(R.string.books_dark)) })
+                TextButton(onClick = {
+                    showTools = false
+                    contentsPanel = true
+                    showPanel = true
+                }) { Text(stringResource(R.string.books_contents)) }
+                IconToggleButton(showTools, { showTools = it }, enabled = !blocks.isNullOrEmpty()) {
+                    Icon(Icons.Default.MoreHoriz, stringResource(R.string.books_tools))
                 }
-            }) { Text(stringResource(R.string.books_marks)) }
-            TextButton(onClick = {
-                scope.launch {
-                    try {
-                        repository.api().addBookBookmark(book.id, JsonObject().apply {
-                            addProperty("kind", "ebook"); addProperty("spine_index", spine)
-                            addProperty("block_index", anchor); addProperty("char_offset", charOffset)
-                            addProperty("excerpt", blocks?.getOrNull(anchor)?.text?.take(100))
-                        }, RequestOwner(repository.session.cacheScope()))
-                    } catch (cause: CancellationException) { throw cause }
-                    catch (cause: Exception) { error = true }
-                }
-            }) { Text(stringResource(R.string.books_add_mark)) }
-        }
-        if (selection != null) {
-            TextButton(onClick = {
-                annotation = selection
-                selection = null
-                focus.clearFocus()
-            }) { Text(stringResource(R.string.books_annotate)) }
-        }
-        if (error) Text(stringResource(R.string.books_error), color = ink)
-        val chapter = blocks
-        if (chapter == null && !error) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (!chapter.isNullOrEmpty()) {
-            val highlights = annotations.filter { it.spine == spine }
-            val imageBase = repository.url("api", "v1", "books", book.id, "ebook", "assets")
-            val imageScope = "$owner:${book.id}:${manifest?.sha256}"
-            if (paged) {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            }
+            if (selection != null) {
+                TextButton(onClick = {
+                    annotation = selection
+                    selection = null
+                    focus.clearFocus()
+                }) { Text(stringResource(R.string.books_annotate)) }
+            }
+            if (error) Text(stringResource(R.string.books_error), color = ink)
+            val chapter = blocks
+            if (chapter == null && !error) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (!chapter.isNullOrEmpty()) {
+                val highlights = annotations.filter { it.spine == spine }
+                val imageBase = repository.url("api", "v1", "books", book.id, "ebook", "assets")
+                val imageScope = "$owner:${book.id}:${manifest?.sha256}"
+                BoxWithConstraints(
+                    Modifier.weight(1f).widthIn(max = 760.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
+                ) {
                     val density = LocalDensity.current
                     val measurer = rememberTextMeasurer()
                     val width = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
                     val height = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
-                    val gap = with(density) { 8.dp.roundToPx() }
-                    val pages = remember(chapter, size, width, height, gap, measurer) {
-                        measurePages(chapter, measurer, size, width, height, gap)
-                    }
-                    val startPage = pages.indexOfLast { page ->
-                        page.isNotEmpty() && (page.first().block.index < anchor ||
-                            (page.first().block.index == anchor && page.first().offset <= charOffset))
-                    }.coerceAtLeast(0)
-                    val pager = rememberPagerState(initialPage = startPage) { pages.size }
-                    LaunchedEffect(pages, jump) { pager.scrollToPage(startPage.coerceIn(pages.indices)) }
-                    LaunchedEffect(pager, pages) {
-                        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
-                            pages.getOrNull(page)?.firstOrNull()?.let { piece ->
-                                savePosition(piece.block.index, piece.offset)
+                    if (paged) {
+                        val gap = with(density) { 8.dp.roundToPx() }
+                        val pages = remember(chapter, size, width, height, gap, measurer) {
+                            measurePages(chapter, measurer, size, width, height, gap)
+                        }
+                        val startPage = pages.indexOfLast { page ->
+                            page.isNotEmpty() && (page.first().block.index < anchor ||
+                                (page.first().block.index == anchor && page.first().offset <= charOffset))
+                        }.coerceAtLeast(0)
+                        val pager = rememberPagerState(initialPage = startPage) { pages.size }
+                        LaunchedEffect(pager, pages, jump) {
+                            pager.scrollToPage(startPage.coerceIn(pages.indices))
+                            snapshotFlow { pager.settledPage }.drop(1).collect { page ->
+                                pages[page].firstOrNull()?.let { savePosition(it.block.index, it.offset) }
+                            }
+                        }
+                        HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                pages[page].forEach { piece ->
+                                    val image = piece.block.imageKey
+                                    if (image != null) BookImage(images, "$imageBase/$image", "$imageScope:$image", Modifier.fillMaxSize())
+                                    else BookParagraph(piece, size, ink, highlights) { selection = it }
+                                }
+                            }
+                        }
+                    } else {
+                        val list = rememberLazyListState(initialFirstVisibleItemIndex = anchor.coerceIn(chapter.indices))
+                        fun textLayout(block: BookBlock) = measurer.measure(block.text, bookStyle(block, size),
+                            constraints = Constraints(maxWidth = width))
+                        LaunchedEffect(list, chapter, size, width, height, jump) {
+                            val index = anchor.coerceIn(chapter.indices)
+                            val block = chapter[index]
+                            val top = if (charOffset > 0 && block.text.isNotEmpty()) {
+                                val position = block.text.offsetByCodePoints(0,
+                                    charOffset.coerceAtMost(block.text.codePointCount(0, block.text.length)))
+                                val layout = textLayout(block)
+                                layout.getLineTop(layout.getLineForOffset(position)).toInt()
+                            } else 0
+                            list.scrollToItem(index, top)
+                            snapshotFlow {
+                                if (list.isScrollInProgress) null
+                                else list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
+                            }.drop(1).filterNotNull().distinctUntilChanged().collect { (item, offset) ->
+                                val first = chapter[item]
+                                val chars = if (offset > 0 && first.text.isNotEmpty()) {
+                                    val layout = textLayout(first)
+                                    first.text.codePointCount(0, layout.getLineStart(layout.getLineForVerticalPosition(offset.toFloat())))
+                                } else 0
+                                savePosition(first.index, chars)
+                            }
+                        }
+                        LazyColumn(Modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(chapter, key = { it.index }) { block ->
+                                val image = block.imageKey
+                                if (image != null) BookImage(images, "$imageBase/$image", "$imageScope:$image", Modifier.fillMaxWidth())
+                                else BookParagraph(PagePiece(block, 0), size, ink, highlights) { selection = it }
                             }
                         }
                     }
-                    HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
-                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pages[page].forEach { piece ->
-                                val image = piece.block.imageKey
-                                if (image != null) BookImage(images, "$imageBase/$image", "$imageScope:$image", Modifier.fillMaxSize())
-                                else BookParagraph(piece, size, ink, highlights) { selection = it }
-                            }
+                    BookReaderToolbar(showTools, animateReaderUi) {
+                        FlowRow(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { size = (size - 1).coerceAtLeast(14f) }) { Text("A−") }
+                            TextButton(onClick = { size = (size + 1).coerceAtMost(24f) }) { Text("A+") }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        marks = repository.api().bookBookmarks(book.id).items.filter { it.get("kind").asString == "ebook" }
+                                        showTools = false
+                                    contentsPanel = false
+                                        showPanel = true
+                                    } catch (cause: CancellationException) { throw cause }
+                                    catch (cause: Exception) { error = true }
+                                }
+                            }) { Text(stringResource(R.string.books_marks)) }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        repository.api().addBookBookmark(book.id, JsonObject().apply {
+                                            addProperty("kind", "ebook"); addProperty("spine_index", spine)
+                                            addProperty("block_index", anchor); addProperty("char_offset", charOffset)
+                                            addProperty("excerpt", blocks?.getOrNull(anchor)?.text?.take(100))
+                                        }, RequestOwner(repository.session.cacheScope()))
+                                    } catch (cause: CancellationException) { throw cause }
+                                    catch (cause: Exception) { error = true }
+                                }
+                            }) { Text(stringResource(R.string.books_add_mark)) }
                         }
-                    }
-                }
-            } else {
-                val list = rememberLazyListState(initialFirstVisibleItemIndex = anchor.coerceIn(chapter.indices))
-                LaunchedEffect(list, jump) {
-                    list.scrollToItem(anchor.coerceIn(chapter.indices))
-                    snapshotFlow { list.firstVisibleItemIndex }.distinctUntilChanged().collect {
-                        savePosition(it, if (it == anchor) charOffset else 0)
-                    }
-                }
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(chapter, key = { it.index }) { block ->
-                        val image = block.imageKey
-                        if (image != null) BookImage(images, "$imageBase/$image", "$imageScope:$image", Modifier.fillMaxWidth())
-                        else BookParagraph(PagePiece(block, 0), size, ink, highlights) { selection = it }
                     }
                 }
             }
         }
-        if (showContents) AlertDialog(
-            onDismissRequest = { showContents = false },
-            title = { Text(stringResource(R.string.books_contents)) },
-            text = { LazyColumn { items(manifest?.chapters.orEmpty()) { item ->
-                TextButton(onClick = { spine = item.index; anchor = 0; charOffset = 0; jump++; showContents = false }) { Text(item.title) }
-            } } },
-            confirmButton = { TextButton(onClick = { showContents = false }) { Text(stringResource(R.string.books_close)) } },
-        )
-        if (showMarks) AlertDialog(
-            onDismissRequest = { showMarks = false },
-            title = { Text(stringResource(R.string.books_marks)) },
-            text = { LazyColumn { items(marks) { item ->
-                TextButton(onClick = {
-                    val next = item.get("spine_index")?.takeUnless { it.isJsonNull }?.asInt
-                    if (next != null) { spine = next; anchor = item.get("block_index").asInt; charOffset = item.get("char_offset")?.asInt ?: 0; jump++ }
-                    showMarks = false
-                }) { Text(item.get("excerpt")?.takeUnless { it.isJsonNull }?.asString.orEmpty()) }
-            } } },
-            confirmButton = { TextButton(onClick = { showMarks = false }) { Text(stringResource(R.string.books_close)) } },
-        )
+        BackHandler(showTools) { showTools = false }
+        BookReaderPanel(showPanel, wide, animateReaderUi,
+            stringResource(if (contentsPanel) R.string.books_contents else R.string.books_marks),
+            close = { showPanel = false },
+        ) {
+            if (contentsPanel) {
+                LazyColumn {
+                    items(manifest?.chapters.orEmpty()) { item ->
+                        TextButton(onClick = {
+                            spine = item.index
+                            savePosition(0)
+                            jump++
+                            showPanel = false
+                        }) { Text(item.title) }
+                    }
+                }
+            } else {
+                LazyColumn {
+                    if (marks.isEmpty()) item { Text(stringResource(R.string.books_no_marks)) }
+                    items(marks) { item ->
+                        TextButton(onClick = {
+                            val next = item.get("spine_index")?.takeUnless { it.isJsonNull }?.asInt
+                            if (next != null) {
+                                spine = next
+                                savePosition(item.get("block_index").asInt, item.get("char_offset")?.asInt ?: 0)
+                                jump++
+                            }
+                            showPanel = false
+                        }) { Text(item.get("excerpt")?.takeUnless { it.isJsonNull }?.asString.orEmpty()) }
+                    }
+                }
+            }
+        }
         annotation?.let { range ->
             AlertDialog(
                 onDismissRequest = { annotation = null },

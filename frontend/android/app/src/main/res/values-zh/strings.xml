@@ -1930,7 +1930,9 @@
     <string name="books_pages">分页</string>
     <string name="books_scroll">滚动</string>
     <string name="books_dark">深色纸张</string>
+    <string name="books_tools">阅读工具</string>
     <string name="books_contents">目录</string>
+    <string name="books_no_marks">暂无书签</string>
     <string name="books_marks">书签</string>
     <string name="books_add_mark">添加书签</string>
     <string name="books_close">关闭</string>

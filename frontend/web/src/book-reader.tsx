@@ -45,6 +45,7 @@ interface Chapter {
 }
 interface Bookmark extends Anchor {
   id: string;
+  kind: 'ebook' | 'audio';
   excerpt?: string;
 }
 interface Annotation {
@@ -148,20 +149,31 @@ export function BookReader({ book }: { book: Book }) {
   const scroll = useRef<HTMLDivElement>(null);
   const pending = useRef<Anchor | null>(null);
   const visible = useRef<Anchor>({ spine_index: 0, block_index: 0, char_offset: 0 });
+  const restoredViewport = useRef<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const saveTimer = useRef<number>(0);
   const saveAnchor = useRef<() => void>(() => {});
 
-  function jump({ spine_index, block_index, char_offset }: Anchor) {
+  function jump({ spine_index, block_index, char_offset }: Anchor, persist = true) {
     const anchor = { spine_index, block_index, char_offset };
     pending.current = anchor;
     if (anchor.spine_index === loadedSpine) restore(anchor);
     else setSpine(anchor.spine_index);
+    if (persist) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = 0;
+      checkpoint.save({ ...anchor, reading_mode: mode });
+    }
   }
 
   const checkpoint = useCheckpoint<Reading>(prefix + '/reading-progress', (value) => {
     if (value.version) {
       setMode(value.reading_mode);
-      jump(value);
+      jump(value, false);
     }
   });
 
@@ -175,7 +187,7 @@ export function BookReader({ book }: { book: Book }) {
     ])
       .then(([bookData, savedMarks, savedAnnotations]) => {
         setChapters(bookData.chapters);
-        setMarks(savedMarks.items);
+        setMarks(savedMarks.items.filter((mark) => mark.kind === 'ebook'));
         setAnnotations(savedAnnotations.items);
       })
       .catch((cause: Error) => {
@@ -205,9 +217,11 @@ export function BookReader({ book }: { book: Book }) {
     const text = block.firstChild;
     const range = document.createRange();
     if (text?.nodeType === Node.TEXT_NODE) {
-      const offset = [...(text.textContent || '')].slice(0, anchor.char_offset).join('').length;
+      const characters = [...(text.textContent || '')];
+      const position = Math.min(anchor.char_offset, Math.max(characters.length - 1, 0));
+      const offset = characters.slice(0, position).join('').length;
       range.setStart(text, offset);
-      range.setEnd(text, Math.min((text.textContent || '').length, offset + 1));
+      range.setEnd(text, offset + (characters[position]?.length || 0));
     } else range.selectNode(block);
     const rect = range.getBoundingClientRect();
     if (mode === 'paginated') {
@@ -218,6 +232,12 @@ export function BookReader({ book }: { book: Book }) {
     } else {
       viewport.scrollTop += rect.top - box.top;
     }
+    restoredViewport.current = {
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+      width: viewport.clientWidth,
+      height: viewport.clientHeight,
+    };
     visible.current = anchor;
     pending.current = null;
   }
@@ -236,25 +256,43 @@ export function BookReader({ book }: { book: Book }) {
   useEffect(() => {
     const viewport = scroll.current;
     if (!viewport) return;
-    let width = viewport.clientWidth;
     const observer = new ResizeObserver(() => {
-      if (viewport.clientWidth !== width) {
-        width = viewport.clientWidth;
-        restore(visible.current);
+      const layout = restoredViewport.current;
+      if (
+        loadedSpine === spine &&
+        (viewport.clientWidth !== layout?.width || viewport.clientHeight !== layout?.height)
+      ) {
+        restore(pending.current || visible.current);
       }
     });
     observer.observe(viewport);
     return () => observer.disconnect();
     // The active reading mode determines the scroll axis on resize.
-  }, [mode, loadedSpine]);
+  }, [mode, spine, loadedSpine]);
 
   function syncAnchor() {
     const viewport = scroll.current;
     if (!viewport || loadedSpine !== spine) return;
+    const restored = restoredViewport.current;
+    if (
+      restored &&
+      (viewport.clientWidth !== restored.width ||
+        viewport.clientHeight !== restored.height ||
+        (viewport.scrollLeft === restored.left && viewport.scrollTop === restored.top))
+    )
+      return;
+    if (restored) {
+      restored.left = Number.NaN;
+      restored.top = Number.NaN;
+    }
     const box = viewport.getBoundingClientRect();
+    const range = document.createRange();
     for (const block of viewport.querySelectorAll<HTMLElement>('[data-block]')) {
-      const fragments = [...block.getClientRects()];
-      const fragment = fragments.find(
+      const text = block.firstChild;
+      range.selectNodeContents(block);
+      const boxes =
+        text?.nodeType === Node.TEXT_NODE ? range.getClientRects() : block.getClientRects();
+      const fragment = [...boxes].find(
         (rect) =>
           rect.bottom > box.top &&
           rect.top < box.bottom &&
@@ -262,15 +300,16 @@ export function BookReader({ book }: { book: Book }) {
           rect.left < box.right,
       );
       if (!fragment) continue;
-      const text = block.firstChild;
       let charOffset = 0;
       if (text?.nodeType === Node.TEXT_NODE) {
-        const range = document.caretRangeFromPoint(
+        const top = Math.max(fragment.top, box.top);
+        const bottom = Math.min(fragment.bottom, box.bottom);
+        const caret = document.caretRangeFromPoint(
           Math.max(fragment.left, box.left) + 1,
-          Math.max(fragment.top, box.top) + 2,
+          (top + bottom) / 2,
         );
-        if (range?.startContainer === text)
-          charOffset = charIndex(text.textContent || '', range.startOffset);
+        if (caret?.startContainer === text)
+          charOffset = charIndex(text.textContent || '', caret.startOffset);
       }
       visible.current = {
         spine_index: spine,
@@ -539,6 +578,9 @@ export function BookReader({ book }: { book: Book }) {
                   key={block.block_index}
                   data-block={block.block_index}
                   alt=""
+                  onLoad={() => {
+                    if (loadedSpine === spine) restore(visible.current);
+                  }}
                   src={`/api/v1${prefix}/ebook/assets/${block.image_key}`}
                 />
               ) : /^h[1-6]$/.test(block.tag) ? (
@@ -574,10 +616,12 @@ interface AudioChapter {
 export function BookAudio({
   book,
   activeElsewhere,
+  canEdit,
   onPlay,
 }: {
   book: Book;
   activeElsewhere: boolean;
+  canEdit: boolean;
   onPlay: () => void;
 }) {
   const { t } = useTranslation();
@@ -712,6 +756,45 @@ export function BookAudio({
           </button>
         ))}
       </div>
+      {canEdit && (
+        <details>
+          <summary>{t('bookshelf.editChapter')}</summary>
+          <form
+            key={index}
+            className="bookshelf-controls"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const title = String(new FormData(event.currentTarget).get('title') || '').trim();
+              if (!title) return;
+              void api<Pick<AudioChapter, 'chapter_index' | 'title'>>(
+                prefix + `/audiobook/chapters/${index}`,
+                { method: 'PATCH', body: JSON.stringify({ title }) },
+              )
+                .then((edited) => {
+                  setChapters(
+                    (items) =>
+                      items?.map((item) =>
+                        item.chapter_index === edited.chapter_index
+                          ? { ...item, title: edited.title }
+                          : item,
+                      ) ?? null,
+                  );
+                  setError('');
+                })
+                .catch((cause: Error) => setError(cause.message));
+            }}
+          >
+            <input
+              name="title"
+              aria-label={t('bookshelf.chapterTitle')}
+              required
+              maxLength={4096}
+              defaultValue={current.title}
+            />
+            <button>{t('bookshelf.save')}</button>
+          </form>
+        </details>
+      )}
       <audio
         ref={audio}
         controls

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wildstring.library.lyric_edits import LyricsEditor
 from wildstring.library.online_lyrics import normalize_bundle
+from wildstring.library.sidecar import refresh_music_track
 from wildstring.lyric_quality import improves, matched, quality, rank, reaches
 from wildstring.source_models import LyricChoice
 from wildstring.source_plugins import PluginError
@@ -891,6 +892,7 @@ class LyricScans:
                 "UPDATE lyric_scan_items SET status='restored',updated_at=? WHERE id=?",
                 (time.time(), item_id),
             )
+        refresh_music_track(self.sources.providers.repository, item["track_id"])
         return {"ok": True}
 
     def router(self, auth):
