@@ -5,12 +5,14 @@ import json
 import logging
 import stat
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from mutagen.flac import FLAC
 from mutagen.id3 import TCOM, TEXT, TIPL, TPE1, TRCK, TXXX
 from mutagen.mp3 import MP3
+from PIL import Image
 from test_assets import image, put_picture
 from test_personal_library import music
 
@@ -439,6 +441,10 @@ def test_caa_cover_requires_fresh_confirmation_and_survives_rescan(settings, aut
             client.get(f"/api/v1/tracks/{track['id']}/cover").headers["x-wildstring-cover-source"]
             == "chosen"
         )
+        record = providers.repository.source(track["id"])
+        manifest = Path(record["library_root"]) / Path(record["path"]).parent / ".wildstring"
+        with Image.open(manifest / "cover.jpg") as portable_cover:
+            assert portable_cover.format == "JPEG"
         scan_library(settings, full=True)
         assert client.get(f"/api/v1/tracks/{track['id']}").json()["has_cover"]
         assert client.get(f"/api/v1/tracks/{track['id']}/cover").status_code == 200

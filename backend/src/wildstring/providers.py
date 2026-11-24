@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from wildstring.diagnostics import record_event, trace_context
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+from wildstring.library.sidecar import refresh_music_tracks
 from wildstring.metadata_matching import lookup_fingerprint, lookup_snapshot
 from wildstring.outbound import OutboundError, network_error, request_bytes, validate_proxy
 from wildstring.provider_network import (
@@ -1774,6 +1775,7 @@ class Providers:
                 connection.execute(
                     "UPDATE metadata_suggestions SET status='applied' WHERE id=?", (identity,)
                 )
+            refresh_music_tracks(self.repository, (row["track_id"],))
             return saved
 
         @router.get("/manage/providers/suggestions/{identity}/cover-preview")
@@ -1807,7 +1809,10 @@ class Providers:
             )
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                selections.save_in_transaction(connection, CoverSelection.model_validate(payload))
+                result = selections.save_in_transaction(
+                    connection, CoverSelection.model_validate(payload)
+                )
+            refresh_music_tracks(self.repository, result["track_ids"])
             return {"applied": True}
 
         @router.get("/lastfm")

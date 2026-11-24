@@ -345,7 +345,8 @@ def restore_book(database, library_root, book_id, source_root, folder):
                 fields[column] = json.dumps(value, ensure_ascii=False)
         for key in ("series_index", "published_year"):
             value = manifest.get(key)
-            if key not in locked and type(value) is int and 0 <= value <= 9999:
+            numeric_types = (int, float) if key == "series_index" else (int,)
+            if key not in locked and type(value) in numeric_types and 0 <= value <= 9999:
                 fields[key] = value
         incoming_locks = manifest.get("locked_fields")
         if isinstance(incoming_locks, list):

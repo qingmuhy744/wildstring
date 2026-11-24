@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.content import book_record
@@ -49,6 +49,11 @@ class MetadataUpdate(BaseModel):
     description: Text | None = None
     tags: list[Text] | None = Field(default=None, max_length=64)
     locked_fields: list[BookField] | None = Field(default=None, max_length=32)
+
+
+class ChapterTitleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=4096)
 
 
 def public_metadata(row):
@@ -111,5 +116,25 @@ def router(database, settings, auth):
             db.execute(f"UPDATE books SET {assignments} WHERE id=?", (*fields.values(), book_id))  # nosec B608
         export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
         return get_metadata(book_id, user)
+
+    @router.patch(
+        "/books/{book_id}/audiobook/chapters/{chapter_index}",
+        dependencies=[Depends(auth.require_client)],
+    )
+    def update_chapter(book_id: str, chapter_index: int, body: ChapterTitleUpdate, user: edit):
+        with database.connect(scoped=False) as db:
+            book = book_record(db, book_id, user)
+        with service.write(book["library_id"]):
+            with database.connect(write=True) as db:
+                book = book_record(db, book_id, user)
+                row = db.execute(
+                    """UPDATE book_audiobook_chapters SET title=? WHERE book_id=? AND chapter_index=?
+                       RETURNING chapter_index,title""",
+                    (body.title, book_id, chapter_index),
+                ).fetchone()
+                if row is None:
+                    raise HTTPException(404, "book_chapter_not_found")
+            export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
+        return dict(row)
 
     return router

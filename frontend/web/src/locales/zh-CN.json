@@ -898,6 +898,7 @@
     }
   },
   "errors": {
+    "book_chapter_not_found": "找不到该有声书章节。",
     "hardlink_cross_device": "请把来源和托管目录放在同一挂载卷后重试。",
     "hardlink_not_supported": "服务器无法创建硬链接，请检查挂载与文件权限。",
     "audio_upload_forbidden": "请通过书库来源目录导入有声书。",
@@ -2383,6 +2384,8 @@
     "uploadingProgress": "正在上传 ({{completed}}/{{total}})"
   },
   "bookshelf": {
+    "editChapter": "校对章节标题",
+    "chapterTitle": "章节标题",
     "status": "阅读状态",
     "allStatuses": "全部状态",
     "unread": "未开始",

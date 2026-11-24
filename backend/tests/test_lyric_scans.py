@@ -18,6 +18,7 @@ from test_source_plugins import MANIFEST
 from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
+from wildstring.library.sidecar import album_folder
 from wildstring.lyric_quality import improves, quality, reaches
 from wildstring.plugin_rate import permit
 from wildstring.providers import Providers
@@ -174,6 +175,11 @@ def test_scan_coverage_force_scope_and_confirmation_restore(
         assert applied["items"][0]["status"] == "applied", applied
         playing = client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()
         assert playing["lines"][0]["translation"] == "合成译文"
+        source = scans.sources.providers.repository.source(track["id"])
+        portable = Path(source["library_root"]) / album_folder(Path(source["path"])) / ".wildstring"
+        manifest = portable / "manifest.json"
+        applied_entry = json.loads(manifest.read_text())["tracks"][0]
+        assert (portable / applied_entry["lyric_file"]).read_text() == "[00:01.000]Synthetic"
         duplicate = client.post(
             BASE + f"/{first['id']}/apply", headers=HEADERS, json={"item_ids": [item["id"]]}
         ).json()
@@ -183,6 +189,7 @@ def test_scan_coverage_force_scope_and_confirmation_restore(
         )
         assert restored.status_code == 200, restored.text
         assert client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()["kind"] == "none"
+        assert "lyric_file" not in json.loads(manifest.read_text())["tracks"][0]
 
 
 def test_pause_cancel_locked_and_changed_lyrics_are_protected(

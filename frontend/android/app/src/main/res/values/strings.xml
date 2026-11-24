@@ -1922,7 +1922,9 @@
     <string name="books_pages">Pages</string>
     <string name="books_scroll">Scroll</string>
     <string name="books_dark">Dark paper</string>
+    <string name="books_tools">Reading tools</string>
     <string name="books_contents">Contents</string>
+    <string name="books_no_marks">No bookmarks</string>
     <string name="books_marks">Bookmarks</string>
     <string name="books_add_mark">Add bookmark</string>
     <string name="books_close">Close</string>

@@ -898,6 +898,7 @@
     }
   },
   "errors": {
+    "book_chapter_not_found": "That audiobook chapter does not exist.",
     "hardlink_cross_device": "Place the source and managed folders on the same mount and try again.",
     "hardlink_not_supported": "The server could not create a hard link. Check the mount and file permissions.",
     "audio_upload_forbidden": "Add audiobooks through a library source folder.",
@@ -2383,6 +2384,8 @@
     "uploadingProgress": "Uploading ({{completed}}/{{total}})"
   },
   "bookshelf": {
+    "editChapter": "Edit chapter title",
+    "chapterTitle": "Chapter title",
     "status": "Reading status",
     "allStatuses": "All statuses",
     "unread": "Unstarted",
