@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.content import book_record
-from wildstring.library.scanner import open_source
+from wildstring.library.fs import open_source
 from wildstring.permissions import dependency
 
 Index = Annotated[int, Field(strict=True, ge=0)]
@@ -155,7 +155,7 @@ def router(database, auth, settings=None):
                     (book_id,),
                 ).fetchone()
                 exact = exact_chapter_chars(
-                    info["cache_key"], body.spine_index, body.block_index, body.char_offset
+                    info["cache_key"], chapter["spine_index"], body.block_index, body.char_offset
                 )
                 if exact is not None:
                     in_chapter = min(chapter["char_count"], exact)

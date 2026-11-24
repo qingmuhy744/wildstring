@@ -16,12 +16,12 @@ from pydantic import ValidationError
 from wildstring.books.ebooks import normalized_image
 from wildstring.library.assets import MAX_COVER_BYTES, TrackAssets
 from wildstring.library.edits import Overrides, apply_effective
+from wildstring.library.fs import open_source
 from wildstring.library.import_files import digest, target_directory
 from wildstring.library.lyric_edits import LyricsText
 from wildstring.library.lyrics import MAX_TEXT_BYTES
 from wildstring.library.metadata import normalize
 from wildstring.library.repository import LibraryRepository
-from wildstring.library.scanner import open_source
 from wildstring.library.tag_fields import DETAIL_DEFAULTS
 
 DIRECTORY = ".wildstring"
@@ -119,13 +119,10 @@ def write_asset(root, relative, payload):
 
 
 def _unlink_asset(root: Path, relative: Path) -> None:
-    try:
-        with target_directory(root, relative) as descriptor:
-            target = relative.name if descriptor is not None else root / relative
-            with suppress(FileNotFoundError):
-                os.unlink(target, dir_fd=descriptor)
-    except OSError:
-        pass
+    with suppress(OSError), target_directory(root, relative) as descriptor:
+        target = relative.name if descriptor is not None else root / relative
+        with suppress(FileNotFoundError):
+            os.unlink(target, dir_fd=descriptor)
 
 
 def remove_sidecar_dir(root: Path, folder: Path) -> None:
@@ -592,10 +589,7 @@ def refresh_music_tracks(repository, track_ids):
     if not folders:
         return
     lock = FileLock(repository.database.path.parent / "library-scan.lock", timeout=2)
-    try:
-        with lock:
-            for (root, library_id), albums in folders.items():
-                with suppress(OSError, ValueError):
-                    export_music(repository.database, root, library_id, albums)
-    except Timeout:
-        pass
+    with suppress(Timeout), lock:
+        for (root, library_id), albums in folders.items():
+            with suppress(OSError, ValueError):
+                export_music(repository.database, root, library_id, albums)

@@ -6,6 +6,7 @@ import re
 import shutil
 import stat
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -217,11 +218,9 @@ class LibraryStorage:
             probe = target
             while not probe.exists():
                 probe = probe.parent
-            try:
+            with suppress(OSError):
                 if shutil.disk_usage(probe).free < needed:
                     raise HTTPException(422, "insufficient_storage")
-            except OSError:
-                pass
         identity, stamp = uuid4().hex, time.time()
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")

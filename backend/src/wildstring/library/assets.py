@@ -15,6 +15,7 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from wildstring.library.fs import fingerprint, open_source
 from wildstring.library.lyrics import (
     MAX_TEXT_BYTES,
     decode_text,
@@ -23,7 +24,6 @@ from wildstring.library.lyrics import (
     synced_lines,
 )
 from wildstring.library.repository import LibraryRepository
-from wildstring.library.scanner import fingerprint, open_source
 
 MAX_COVER_BYTES = 8 * 1024 * 1024
 MAX_PIXELS = 20_000_000
