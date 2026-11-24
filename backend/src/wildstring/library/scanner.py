@@ -119,6 +119,8 @@ def scan_library(
                 path = "."
             record_error(path, "directory_unreadable")
 
+        from wildstring.library.sidecar import album_folder, restore_music_track
+
         def candidates():
             if paths is not None:
                 for key in sorted(paths):
@@ -127,6 +129,7 @@ def scan_library(
             for directory, folders, files in os.walk(
                 settings.library_dir, followlinks=False, onerror=directory_error
             ):
+                folders[:] = [name for name in folders if name != ".wildstring"]
                 normal_folders = [
                     name for name in folders if not (Path(directory) / name).is_symlink()
                 ]
@@ -177,6 +180,15 @@ def scan_library(
                             raise SourceChangedError
                         repository.save(key, metadata, before.st_size, before.st_mtime_ns, run_id)
                         counts["updated" if existing else "added"] += 1
+                    if existing is None:
+                        restore_music_track(
+                            database,
+                            settings.library_dir,
+                            repository.library_id(),
+                            relative,
+                            settings.library_dir,
+                            album_folder(relative),
+                        )
                 except SourceChangedError:
                     record_error(key, "file_changed")
                 except OSError:

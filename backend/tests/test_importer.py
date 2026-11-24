@@ -39,7 +39,7 @@ def store(settings):
 
 
 def test_copy_normalizes_names_copies_sidecars_and_preserves_sources(
-    settings, authenticated_client
+    settings, authenticated_client, storage_schema
 ):
     path = source(settings)
     original = path.read_bytes()
@@ -48,6 +48,12 @@ def test_copy_normalizes_names_copies_sidecars_and_preserves_sources(
     assert report["status"] == "completed"
     assert report["counts"]["copied"] == 1
     assert report["counts"]["assets_copied"] == 1
+    with Database(settings.data_dir).connect() as connection:
+        modes = connection.execute(
+            "SELECT DISTINCT link_mode FROM imported_files WHERE source_root=?",
+            (str(settings.music_dir),),
+        )
+        assert [row[0] for row in modes] == ["copy"]
     track = store(settings).tracks()["items"][0]
     assert track["path"] == "测试艺人/测试专辑/CD02/03 - 测试歌曲.flac"
     target = settings.library_dir / track["path"]
@@ -222,3 +228,129 @@ def test_fallback_directory_creation_does_not_follow_symlink(settings, tmp_path,
         with target_directory(settings.library_dir, Path("linked/new/file.flac")):
             pass
     assert not (outside / "new").exists()
+
+
+def test_hardlink_mode_and_in_place_round_trip(settings, authenticated_client, tmp_path):
+    import time
+
+    sources = tmp_path / "hardlink-source"
+    sources.mkdir()
+    source_file = source(settings)
+    source_file = source_file.rename(sources / source_file.name)
+    original = source_file.stat()
+    with authenticated_client(settings) as client:
+        headers = {"X-Wildstring-Client": "web"}
+        created = client.post(
+            "/api/v1/libraries",
+            headers=headers,
+            json={
+                "name": "Hardlink",
+                "source_roots": [str(sources)],
+                "managed_root": str(tmp_path / "hardlink-managed"),
+                "storage_mode": "copy",
+            },
+        )
+        assert created.status_code == 201, created.text
+        library = created.json()
+        from wildstring.library.scope import library_context
+
+        with library_context("admin", library["id"]):
+            report = import_music(settings)
+        assert report["status"] == "completed", report
+        root = Path(library["managed_root"])
+        audio = next(root.rglob("*.flac"))
+        old = audio.stat()
+        assert old.st_ino != original.st_ino
+        route = f"/api/v1/libraries/{library['id']}/migrations"
+        for mode in ("hardlink", "copy"):
+            libraries = client.get("/api/v1/libraries").json()
+            version = next(row["version"] for row in libraries if row["id"] == library["id"])
+            with audio.open("rb") as playback:
+                submitted = client.post(
+                    route, headers=headers, json={"version": version, "target_storage_mode": mode}
+                )
+                assert submitted.status_code == 202, submitted.text
+                identity = submitted.json()["id"]
+                for _ in range(100):
+                    job = next(
+                        row for row in client.get(route).json()["items"] if row["id"] == identity
+                    )
+                    if job["status"] in {"completed", "failed"}:
+                        break
+                    time.sleep(0.05)
+                assert job["status"] == "completed", job
+                assert playback.read() == source_file.read_bytes()
+            assert (audio.stat().st_ino == original.st_ino) == (mode == "hardlink")
+            assert source_file.stat().st_mtime_ns == original.st_mtime_ns
+            if mode == "hardlink":
+                assert job["relinked_files"] == 1 and job["reclaimed_bytes"] == old.st_size
+                assert job["sidecars_written"] == 1
+
+
+def test_relink_retry_finishes_partial_job_without_counting_files_twice(
+    settings, authenticated_client, tmp_path, monkeypatch
+):
+    import time
+
+    from wildstring.library import storage
+    from wildstring.library.scope import library_context
+
+    first = source(settings, "first.flac", "First")
+    second = source(settings, "second.flac", "Second")
+    originals = tmp_path / "relink-source"
+    originals.mkdir()
+    first = first.rename(originals / first.name)
+    second = second.rename(originals / second.name)
+    target = tmp_path / "relink-target"
+    original_publish = storage.replace_managed_file
+    calls = 0
+
+    def fail_second(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("test migration interruption")
+        return original_publish(*args)
+
+    def wait_job(client, path, identity):
+        for _ in range(120):
+            job = next(row for row in client.get(path).json()["items"] if row["id"] == identity)
+            if job["status"] in {"failed", "completed"}:
+                return job
+            time.sleep(0.05)
+        pytest.fail("Migration did not finish")
+
+    headers = {"X-Wildstring-Client": "web"}
+    with authenticated_client(settings) as client:
+        result = client.post(
+            "/api/v1/libraries",
+            headers=headers,
+            json={"name": "Retry", "source_roots": [str(originals)], "managed_root": str(target)},
+        )
+        assert result.status_code == 201, result.text
+        library = result.json()
+        with library_context("admin", library["id"]):
+            assert import_music(settings)["status"] == "completed"
+        copies = list(target.rglob("*.flac"))
+        assert len(copies) == 2
+        paths = f"/api/v1/libraries/{library['id']}/migrations"
+        monkeypatch.setattr(storage, "replace_managed_file", fail_second)
+        response = client.post(
+            paths,
+            headers=headers,
+            json={"version": library["version"], "target_storage_mode": "hardlink"},
+        )
+        assert response.status_code == 202, response.text
+        identity = response.json()["id"]
+        stopped = wait_job(client, paths, identity)
+        assert stopped["status"] == "failed" and stopped["relinked_files"] == 1
+        source_inodes = {first.stat().st_ino, second.stat().st_ino}
+        assert len(source_inodes & {path.stat().st_ino for path in copies}) == 1
+
+        monkeypatch.setattr(storage, "replace_managed_file", original_publish)
+        assert client.post(f"{paths}/{identity}/retry", headers=headers).status_code == 202
+        completed = wait_job(client, paths, identity)
+        assert completed["status"] == "completed", completed["error"]
+        assert completed["relinked_files"] == 2
+        assert completed["reclaimed_bytes"] == first.stat().st_size + second.stat().st_size
+        assert {path.stat().st_ino for path in copies} == source_inodes

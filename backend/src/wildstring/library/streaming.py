@@ -12,7 +12,16 @@ from starlette.responses import Response, StreamingResponse
 
 from wildstring.library.scanner import open_source
 
-MEDIA_TYPES = {"mp3": "audio/mpeg", "flac": "audio/flac", "m4a": "audio/mp4"}
+MEDIA_TYPES = {
+    "mp3": "audio/mpeg",
+    "flac": "audio/flac",
+    "m4a": "audio/mp4",
+    "m4b": "audio/mp4",
+    "ogg": "audio/ogg",
+    "opus": "audio/ogg",
+    "epub": "application/epub+zip",
+    "txt": "text/plain",
+}
 
 
 def byte_range(value: str | None, size: int) -> tuple[int, int] | None:
@@ -50,9 +59,9 @@ class AudioResponse(Response):
         try:
             with open_source(self.root, Path(self.record["path"])) as source:
                 info = os.fstat(source.fileno())
-                if (info.st_size, info.st_mtime_ns) != (
-                    self.record["size_bytes"],
-                    self.record["mtime_ns"],
+                expected_mtime = self.record.get("mtime_ns")
+                if info.st_size != self.record["size_bytes"] or (
+                    expected_mtime is not None and info.st_mtime_ns != expected_mtime
                 ):
                     raise HTTPException(409, "file_changed_rescan_required")
                 await self.send_audio(source, info, scope, receive, send)

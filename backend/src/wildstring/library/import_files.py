@@ -1,8 +1,10 @@
 """Safe managed-file naming, hashing and exclusive publication for import and intake."""
 
+import errno
 import hashlib
 import os
 import re
+import stat
 import unicodedata
 from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
@@ -113,3 +115,81 @@ def copy_exclusive(source, root: Path, relative: Path, expected: str | None = No
             return value
         finally:
             os.unlink(temp_name, dir_fd=directory)
+
+
+class HardlinkError(OSError):
+    def __init__(self, error):
+        self.code = "hardlink_cross_device" if error == errno.EXDEV else "hardlink_not_supported"
+        super().__init__(error, self.code)
+
+
+def _link_descriptor(source, directory, name):
+    """Publish the opened inode directly on the Linux server."""
+    if directory is None or not Path("/proc/self/fd").is_dir():
+        raise HardlinkError(errno.ENOTSUP)
+    try:
+        os.link(f"/proc/self/fd/{source.fileno()}", name, dst_dir_fd=directory)
+    except FileExistsError:
+        raise
+    except OSError as error:
+        raise HardlinkError(error.errno) from error
+
+
+def link_exclusive(source, root: Path, relative: Path, expected: str | None = None) -> str:
+    """Publish a verified regular source inode without overwriting a target."""
+    before = fingerprint(os.fstat(source.fileno()))
+    value = digest(source)
+    if fingerprint(os.fstat(source.fileno())) != before or (
+        expected is not None and expected != value
+    ):
+        raise SourceChangedError
+    with target_directory(root, relative) as directory:
+        _link_descriptor(source, directory, relative.name)
+        if fingerprint(os.fstat(source.fileno())) != before:
+            os.unlink(relative.name, dir_fd=directory)
+            raise SourceChangedError
+    return value
+
+
+def validate_hardlink_capability(source_roots, managed_root: Path, suffixes):
+    parent = managed_root
+    while not parent.exists():
+        parent = parent.parent
+    for root in source_roots:
+        if root.stat().st_dev != parent.stat().st_dev:
+            raise HardlinkError(errno.EXDEV)
+        for directory, folders, files in os.walk(root, followlinks=False):
+            folders[:] = sorted(name for name in folders if not name.startswith("."))
+            sample = next(
+                (
+                    path
+                    for name in sorted(files)
+                    if not name.startswith(".")
+                    and (path := Path(directory) / name).suffix.lower() in suffixes
+                    and stat.S_ISREG(path.lstat().st_mode)
+                ),
+                None,
+            )
+            if sample is not None:
+                name = f".wildstring-probe-{uuid4().hex}"
+                with (
+                    open_source(root, sample.relative_to(root)) as source,
+                    target_directory(parent, Path(name)) as descriptor,
+                ):
+                    _link_descriptor(source, descriptor, name)
+                    os.unlink(name, dir_fd=descriptor)
+                break
+
+
+def replace_managed_file(publish, source, root: Path, relative: Path, expected: str) -> None:
+    """Replace one directory entry without writing to its old inode."""
+    temporary = relative.with_name(f".wildstring-replace-{uuid4().hex}")
+    publish(source, root, temporary, expected)
+    with target_directory(root, relative) as directory:
+        old = temporary.name if directory is not None else root / temporary
+        new = relative.name if directory is not None else root / relative
+        try:
+            os.replace(old, new, src_dir_fd=directory, dst_dir_fd=directory)
+        finally:
+            with suppress(FileNotFoundError):
+                os.unlink(old, dir_fd=directory)

@@ -17,7 +17,14 @@ from wildstring.library.conversion import convert
 from wildstring.library.cue import parse_cue
 from wildstring.library.download_policy import DownloadPolicy, album_directory, partial, pending
 from wildstring.library.edits import FIELDS, Overrides, apply_effective
-from wildstring.library.import_files import copy_exclusive, digest, organized_path, target_digest
+from wildstring.library.import_files import (
+    HardlinkError,
+    copy_exclusive,
+    digest,
+    link_exclusive,
+    organized_path,
+    target_digest,
+)
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.scanner import SourceChangedError, fingerprint, open_source
 
@@ -489,9 +496,14 @@ class Intake:
             return staged
         staged = Path(item["id"]) / str(item["version"]) / f"source{relative.suffix.lower()}"
         if not (self.root / staged).exists():
-            self.check_space((self.settings.music_dir / relative).stat().st_size * 2)
+            self.root.mkdir(parents=True, exist_ok=True)
             with open_source(self.settings.music_dir, relative) as source:
-                sha = copy_exclusive(source, self.root, staged)
+                info = os.fstat(source.fileno())
+                if importer.mode == "hardlink" and info.st_dev == self.root.stat().st_dev:
+                    sha = link_exclusive(source, self.root, staged)
+                else:
+                    self.check_space(info.st_size * 2)
+                    sha = copy_exclusive(source, self.root, staged)
         else:
             sha = target_digest(self.root, staged)
             if item["staged_sha256"] and sha != item["staged_sha256"]:
@@ -714,7 +726,9 @@ class Intake:
                         else {k: v for k, v in overrides.items() if k != "title"}
                     )
                     for output in outputs:
-                        target = prepared.import_track(output.relative_to(temporary))
+                        target = prepared.import_track(
+                            output.relative_to(temporary), generated=True
+                        )
                         importer.targets.update(prepared.targets)
                         if target is not None:
                             published.append(
@@ -728,6 +742,12 @@ class Intake:
                     # Transient generated paths must never remain as duplicate hash references.
                     with self.database.connect(write=True) as connection:
                         connection.execute(
+                            """UPDATE OR IGNORE imported_files
+                            SET source_root='generated', source_path=target_path
+                            WHERE source_root=? AND target_root=?""",
+                            (temporary, str(self.settings.library_dir)),
+                        )
+                        connection.execute(
                             "DELETE FROM imported_files WHERE source_root=? AND target_root=?",
                             (temporary, str(self.settings.library_dir)),
                         )
@@ -735,24 +755,35 @@ class Intake:
                     importer.counts["converted"] += len(published)
             elif item["state"] == "approved":
                 staged = self.stage(importer, item, relative)
-                prepared = importer.__class__(
-                    self.settings.model_copy(update={"music_dir": self.root}), self.database
+                prepared = (
+                    importer
+                    if importer.mode == "hardlink"
+                    else importer.__class__(
+                        self.settings.model_copy(update={"music_dir": self.root}), self.database
+                    )
                 )
                 target = prepared.import_track(
-                    staged,
+                    relative if prepared is importer else staged,
                     metadata=replace(
                         metadata,
                         **{key: value for key, value in overrides.items() if key in FIELDS},
                     ),
                 )
-                importer.targets.update(prepared.targets)
-                for key in importer.counts:
-                    importer.counts[key] += prepared.counts[key]
+                if prepared is not importer:
+                    importer.targets.update(prepared.targets)
+                    if target is not None:
+                        importer.portable_sources[target] = (
+                            self.settings.music_dir,
+                            relative.parent,
+                        )
+                    for key in importer.counts:
+                        importer.counts[key] += prepared.counts[key]
                 if target is None:
                     raise ValueError("intake_publish_failed")
-                with open_source(self.settings.music_dir, relative) as source:
-                    info, sha = os.fstat(source.fileno()), digest(source)
-                importer.save(relative, target, info, sha)
+                if prepared is not importer:
+                    with open_source(self.settings.music_dir, relative) as source:
+                        info, sha = os.fstat(source.fileno()), digest(source)
+                    importer.save(relative, target, info, sha)
                 self.update(
                     item["id"],
                     state="imported",
@@ -760,7 +791,8 @@ class Intake:
                     outputs=[{"path": target.as_posix(), "overrides": overrides}],
                 )
             else:
-                self.check_space((self.settings.music_dir / relative).stat().st_size)
+                if importer.mode == "copy":
+                    self.check_space((self.settings.music_dir / relative).stat().st_size)
                 target = importer.import_track(
                     relative,
                     metadata=replace(
@@ -779,7 +811,9 @@ class Intake:
             raise
         except (ValueError, OSError, MutagenError, TypeError, IndexError, OverflowError) as error:
             code = (
-                str(error)
+                error.code
+                if isinstance(error, HardlinkError)
+                else str(error)
                 if isinstance(error, ValueError) and str(error).replace("_", "").isalnum()
                 else "intake_file_unavailable"
             )

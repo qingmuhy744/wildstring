@@ -48,7 +48,9 @@ def test_plain_sync_clear_restore_rescan_and_music_unchanged(settings, authentic
         assert restored.status_code == 200
         assert client.get(public + "/lyrics").json()["source"] == "embedded"
         assert hashlib.sha256(path.read_bytes()).hexdigest() == before
-        assert sorted(p.name for p in settings.library_dir.iterdir()) == [path.name]
+        assert sorted(p.name for p in settings.library_dir.iterdir()) == [".wildstring", path.name]
+        manifest = (settings.library_dir / ".wildstring" / "manifest.json").read_text()
+        assert "lyric_file" not in manifest
 
 
 def test_concurrent_editor_and_sidecar_changes_preserve_draft(settings, authenticated_client):

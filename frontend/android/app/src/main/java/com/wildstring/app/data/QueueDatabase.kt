@@ -29,11 +29,28 @@ interface PodcastCheckpointDao {
     suspend fun all(owner: String): List<PodcastCheckpointRow>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(row: PodcastCheckpointRow)
 }
-@Database(entities = [QueueEntry::class, SavedPosition::class, PodcastCheckpointRow::class], version = 2, exportSchema = true)
+@Database(
+    entities = [QueueEntry::class, SavedPosition::class, PodcastCheckpointRow::class,
+        BookEntity::class, BookEbookChapterMetaEntity::class, BookAudiobookChapterEntity::class,
+        BookProgressSyncEntity::class, BookAnnotationSyncEntity::class],
+    version = 3,
+    exportSchema = true,
+)
 abstract class QueueDatabase : RoomDatabase() {
     abstract fun queue(): QueueDao
     abstract fun podcasts(): PodcastCheckpointDao
+    abstract fun books(): BookshelfDao
     companion object {
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE bookshelf_books (owner TEXT NOT NULL, bookId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId))")
+                db.execSQL("CREATE TABLE bookshelf_ebook_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, spineIndex INTEGER NOT NULL, title TEXT NOT NULL, cacheKey TEXT NOT NULL, PRIMARY KEY(owner, bookId, spineIndex))")
+                db.execSQL("CREATE TABLE bookshelf_audio_chapters (owner TEXT NOT NULL, bookId TEXT NOT NULL, chapterIndex INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, chapterIndex))")
+                db.execSQL("CREATE TABLE bookshelf_progress (owner TEXT NOT NULL, bookId TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, kind))")
+                db.execSQL("CREATE TABLE bookshelf_annotations (owner TEXT NOT NULL, bookId TEXT NOT NULL, annotationId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, bookId, annotationId))")
+            }
+        }
+
         val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS podcast_checkpoints (owner TEXT NOT NULL, episodeId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, episodeId))")

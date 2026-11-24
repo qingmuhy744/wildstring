@@ -18,7 +18,10 @@ class FolderCreate(BaseModel):
 
 def source_roots(settings, db):
     return [settings.music_dir.resolve()] + [
-        Path(row[0]).resolve() for row in db.execute("SELECT root FROM library_sources")
+        Path(row[0]).resolve()
+        for row in db.execute(
+            "SELECT root FROM library_sources UNION SELECT root FROM book_library_sources"
+        )
     ]
 
 

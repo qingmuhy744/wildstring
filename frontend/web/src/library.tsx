@@ -53,6 +53,7 @@ import { MetadataReviewDialog } from './metadata-review';
 import { LyricScanDialog } from './lyric-scans';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
+import { Bookshelf, readingBookId } from './bookshelf';
 import { ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
 import type { TrackBlockMeasurements } from './track-window';
@@ -263,6 +264,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     window.scrollTo(0, 0);
   }
   const [view, setView] = useState<View>(() => {
+    if (readingBookId()) return 'podcasts';
     try {
       const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
@@ -331,6 +333,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [manageOpen, setManageOpen] = useState(false);
   const [managementTab, setManagementTab] = useState<ManagementTab>('home');
   const [focusPodcastId, setFocusPodcastId] = useState<string | null>(null);
+  const [radioTab, setRadioTab] = useState<'podcasts' | 'books'>(() =>
+    readingBookId() ? 'books' : 'podcasts',
+  );
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   const [metadataReviewBatch, setMetadataReviewBatch] = useState<string | null>(null);
@@ -1357,6 +1362,35 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             }
           >
             {view === 'podcasts' && (
+              <nav className="workspace-tabs radio-tabs" aria-label={t('bookshelf.radio')}>
+                <button
+                  aria-pressed={radioTab === 'podcasts' || !!focusPodcastId}
+                  onClick={() => setRadioTab('podcasts')}
+                >
+                  {t('bookshelf.podcasts')}
+                </button>
+                <button
+                  aria-pressed={radioTab === 'books' && !focusPodcastId}
+                  onClick={() => {
+                    setRadioTab('books');
+                    setFocusPodcastId(null);
+                  }}
+                >
+                  {t('bookshelf.title')}
+                </button>
+              </nav>
+            )}
+            {view === 'podcasts' && radioTab === 'books' && !focusPodcastId && (
+              <Bookshelf
+                key={currentUser.id}
+                owner={currentUser.profile === 'owner'}
+                canEdit={currentUser.profile !== 'listener'}
+                canUpload={canImport}
+                musicPlaying={player.playing}
+                onPlayAudio={() => player.audio.current?.pause()}
+              />
+            )}
+            {view === 'podcasts' && (radioTab === 'podcasts' || !!focusPodcastId) && (
               <PodcastsPage
                 userId={currentUser.id}
                 canEditPublishers={canManage}
@@ -1368,7 +1402,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 isPlayingPodcast={Boolean(player.current?.podcast_id && player.playing)}
                 queuedEpisodeIds={player.podcastQueueItems.map((item) => item.episode_id)}
                 focusPodcastId={focusPodcastId}
-                onFocusHandled={() => setFocusPodcastId(null)}
+                onFocusHandled={() => {
+                  setRadioTab('podcasts');
+                  setFocusPodcastId(null);
+                }}
                 onQueueTrack={(track, next) => {
                   if (next) return player.playNext(track);
                   return player.enqueue(track);

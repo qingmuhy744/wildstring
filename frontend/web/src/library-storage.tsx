@@ -20,6 +20,10 @@ type Migration = {
   copied_bytes: number;
   total_bytes: number;
   error: string | null;
+  relinked_files?: number;
+  reclaimed_bytes?: number;
+  kept_standalone_files?: number;
+  sidecars_written?: number;
 };
 const statusKeys: Record<string, string> = {
   queued: 'libraryStorage.statusQueued',
@@ -40,6 +44,7 @@ export function LibraryStorage({
   const [policy, setPolicy] = useState<IntakePolicy | null>(null);
   const [job, setJob] = useState<Migration | null>(null);
   const [target, setTarget] = useState('');
+  const [mode, setMode] = useState<'copy' | 'hardlink'>(library.storage_mode || 'copy');
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -50,6 +55,7 @@ export function LibraryStorage({
     setPolicy(null);
     setJob(null);
     setTarget('');
+    setMode(library.storage_mode || 'copy');
     setMessage('');
     void Promise.all([api<IntakePolicy>(intake), api<{ items: Migration[] }>(endpoint)])
       .then(([value, jobs]) => {
@@ -64,7 +70,7 @@ export function LibraryStorage({
     return () => {
       active = false;
     };
-  }, [intake, endpoint]);
+  }, [intake, endpoint, library.storage_mode]);
   const moving = job?.status === 'queued' || job?.status === 'running';
   useEffect(() => {
     if (!moving) return;
@@ -111,6 +117,21 @@ export function LibraryStorage({
       setBusy(false);
     }
   }
+  async function exportSidecars() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api<{ sidecars_written: number }>(
+        `/manage/export-sidecars?library_id=${encodeURIComponent(library.id)}`,
+        { method: 'POST', timeoutMs: 0 },
+      );
+      setMessage(t('bookshelf.exported', { count: result.sidecars_written }));
+    } catch (cause) {
+      setMessage((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function migrate(retry = false) {
     setBusy(true);
     setMessage('');
@@ -120,7 +141,13 @@ export function LibraryStorage({
           method: 'POST',
           ...(retry
             ? {}
-            : { body: JSON.stringify({ version: library.version, managed_root: target.trim() }) }),
+            : {
+                body: JSON.stringify({
+                  version: library.version,
+                  ...(target.trim() ? { managed_root: target.trim() } : {}),
+                  target_storage_mode: mode,
+                }),
+              }),
         }),
       );
       if (!retry) setTarget('');
@@ -211,6 +238,14 @@ export function LibraryStorage({
       )}
       <h3>{t('libraryStorage.managedDirTitle')}</h3>
       <p className="storage-path">{library.managed_root}</p>
+      <div className="bookshelf-controls">
+        <span>
+          {t(library.storage_mode === 'hardlink' ? 'bookshelf.hardlink' : 'bookshelf.copy')}
+        </span>
+        <button type="button" disabled={busy || moving} onClick={() => void exportSidecars()}>
+          {t('bookshelf.export')}
+        </button>
+      </div>
       <p className="muted">{t('libraryStorage.managedDirHint')}</p>
       <form
         onSubmit={(event) => {
@@ -218,19 +253,32 @@ export function LibraryStorage({
           void migrate();
         }}
       >
+        <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
+        <select
+          id={`${id}-mode`}
+          value={mode}
+          disabled={busy || moving}
+          onChange={(event) => setMode(event.target.value as 'copy' | 'hardlink')}
+        >
+          <option value="copy">{t('bookshelf.copy')}</option>
+          <option value="hardlink">{t('bookshelf.hardlink')}</option>
+        </select>
         <label htmlFor={`${id}-target`}>{t('libraryStorage.newManagedDirLabel')}</label>
         <input
           id={`${id}-target`}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
-          required
+          required={mode === (library.storage_mode || 'copy')}
           disabled={busy || moving}
           placeholder={t('libraryStorage.newManagedDirPlaceholder')}
         />
         <button type="button" disabled={busy || moving} onClick={() => setPicking(true)}>
           {t('libraryStorage.browseMigrationTarget')}
         </button>
-        <button type="submit" disabled={busy || moving || !target.trim()}>
+        <button
+          type="submit"
+          disabled={busy || moving || (!target.trim() && mode === (library.storage_mode || 'copy'))}
+        >
           {t('libraryStorage.migrateBtn')}
         </button>
       </form>
@@ -258,6 +306,18 @@ export function LibraryStorage({
                 })}
               </p>
             </>
+          )}
+          {!!job.relinked_files && (
+            <p>
+              {t('bookshelf.relinked', { count: job.relinked_files })} ·{' '}
+              {t('bookshelf.estimate', { bytes: (job.reclaimed_bytes || 0).toLocaleString() })}
+            </p>
+          )}
+          {!!job.kept_standalone_files && (
+            <p>{t('bookshelf.retained', { count: job.kept_standalone_files })}</p>
+          )}
+          {!!job.sidecars_written && (
+            <p>{t('bookshelf.exported', { count: job.sidecars_written })}</p>
           )}
           {job.status === 'failed' && (
             <>

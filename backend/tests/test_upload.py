@@ -5,6 +5,8 @@ from pathlib import Path
 
 from mutagen.flac import FLAC
 
+from wildstring.database import Database
+
 FIXTURE = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/silence.flac"
 HEADERS = {"X-Wildstring-Client": "web"}
 
@@ -35,7 +37,9 @@ def create_flac_bytes(
     return temp_file.read_bytes()
 
 
-def test_upload_standard_audio_and_sidecar_lrc(settings, authenticated_client, tmp_path):
+def test_upload_standard_audio_and_sidecar_lrc(
+    settings, authenticated_client, tmp_path, storage_schema
+):
     audio_bytes = create_flac_bytes(
         tmp_path,
         title="爱在西元前",
@@ -60,6 +64,12 @@ def test_upload_standard_audio_and_sidecar_lrc(settings, authenticated_client, t
         assert data["track_number"] == 1
         assert "CD01/01 - 爱在西元前.flac" in data["target_path"]
         assert (settings.library_dir / data["target_path"]).exists()
+        with Database(settings.data_dir).connect() as connection:
+            row = connection.execute(
+                "SELECT link_mode FROM imported_files WHERE source_root='upload' AND target_path=?",
+                (data["target_path"],),
+            ).fetchone()
+            assert row[0] == "managed_only"
 
         # 2. Upload companion lyric (.lrc)
         lrc_content = "[00:01.00]古巴比伦王颁布了汉谟拉比法典\n".encode()

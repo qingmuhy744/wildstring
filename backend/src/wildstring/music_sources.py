@@ -773,6 +773,9 @@ class MusicSources:
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             result = self.apply_in_transaction(db, identity, body, scan_item)
+        from wildstring.library.sidecar import refresh_music_track
+
+        refresh_music_track(self.providers.repository, result["track_id"])
         return editor.read(result["track_id"])
 
     def apply_in_transaction(self, db, identity, body, scan_item=None):

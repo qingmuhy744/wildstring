@@ -46,6 +46,12 @@ BROWSING_PREFIXES = (
 )
 
 
+def _outside_music_scope(path: str) -> bool:
+    if any(path.startswith("/api/v1/" + prefix) for prefix in EXEMPT_PREFIXES):
+        return True
+    return path.removeprefix("/api/v1/").partition("/")[0] in {"books", "book-libraries"}
+
+
 class LibraryAccess:
     def __init__(self, app, *, auth, catalog, router):
         self.app, self.auth, self.catalog, self.router = app, auth, catalog, router
@@ -67,7 +73,7 @@ class LibraryAccess:
         path = scope["path"]
         query = parse_qs(scope.get("query_string", b"").decode())
         context = LibraryContext(user["id"])
-        exempt = any(path.startswith("/api/v1/" + p) for p in EXEMPT_PREFIXES)
+        exempt = _outside_music_scope(path)
         visible: set[str] = set()
         try:
             visible = allowed_ids(db, user["id"])
@@ -216,7 +222,7 @@ class LibraryAccess:
         if not token_value or len(token_value) > 128:
             return await self.app(scope, receive, send)
         path = scope["path"]
-        exempt = any(path.startswith("/api/v1/" + p) for p in EXEMPT_PREFIXES)
+        exempt = _outside_music_scope(path)
         replay = None
         needs_body_buffer = (
             not exempt

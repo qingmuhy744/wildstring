@@ -1,15 +1,30 @@
 """Library administration, read-only import roots and account access grants."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.folders import FolderCreate, browse_folders, create_folder
+from wildstring.library.import_files import HardlinkError, validate_hardlink_capability
+from wildstring.library.metadata import SUPPORTED_SUFFIXES
 from wildstring.library.scope import allowed_ids, library_for_root
-from wildstring.library.storage import LibraryStorage, MigrationInput, busy
+from wildstring.library.storage import LibraryStorage, MigrationInput, busy, overlapping
+
+
+def normalize_source_roots(values):
+    try:
+        roots = [Path(value).resolve(strict=True) for value in values]
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(422, "library_source_invalid") from None
+    for index, (value, root) in enumerate(zip(values, roots, strict=True)):
+        if not Path(value).is_absolute() or not root.is_dir():
+            raise HTTPException(422, "library_source_invalid")
+        if any(overlapping(root, other) for other in roots[:index]):
+            raise HTTPException(422, "library_sources_overlap")
+    return roots
 
 
 class LibraryInput(BaseModel):
@@ -20,6 +35,7 @@ class LibraryInput(BaseModel):
     )
     paused_source_roots: list[str] | None = Field(default=None, max_length=32)
     managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
+    storage_mode: Literal["copy", "hardlink"] | None = None
     default_access: bool | None = Field(default=None, strict=True)
 
 
@@ -113,44 +129,25 @@ class LibraryCatalog:
             result["default_access"] = bool(record["default_access"])
             result["sources"] = record["sources"]
             result["managed_root"] = record["root"]
+            result["storage_mode"] = record["storage_mode"]
         return result
 
     def roots(self, values, managed_root):
-        try:
-            roots = [Path(value).expanduser().resolve() for value in values]
-        except (OSError, RuntimeError, ValueError):
-            raise HTTPException(422, "library_source_invalid") from None
-        if any(
-            not Path(value).is_absolute() or not root.is_dir()
-            for value, root in zip(values, roots, strict=True)
-        ):
-            raise HTTPException(422, "library_source_invalid")
+        roots = normalize_source_roots(values)
         with self.database.connect() as db:
-            managed = [Path(r[0]) for r in db.execute("SELECT root FROM libraries")]
-            managed += [
-                Path(r[0])
-                for r in db.execute(
-                    "SELECT target_root FROM library_migrations WHERE status IN ('queued','running')"
-                )
-            ]
-            managed += [
-                Path(r[0])
-                for r in db.execute(
-                    "SELECT source_root FROM library_migrations WHERE status='completed'"
-                )
-            ]
-        for index, root in enumerate(roots):
+            reserved = LibraryStorage.managed_roots(db)
+            reserved.extend(
+                Path(row[0]) for row in db.execute("SELECT root FROM book_library_sources")
+            )
+        storage = LibraryStorage(self)
+        for root in roots:
             if any(
-                root.is_relative_to(other) or other.is_relative_to(root) for other in roots[:index]
-            ):
-                raise HTTPException(422, "library_sources_overlap")
-            if any(
-                root.is_relative_to(other) or other.is_relative_to(root)
+                overlapping(root, other)
                 for other in [
-                    *managed,
+                    *reserved,
                     managed_root,
                     self.settings.data_dir,
-                    self.settings.podcasts_dir,
+                    *storage.reserved_roots(),
                 ]
             ):
                 raise HTTPException(422, "library_sources_overlap")
@@ -166,6 +163,17 @@ class LibraryCatalog:
         if not old and body.managed_root:
             root = LibraryStorage(self).destination(body.managed_root, body.source_roots)
         roots = self.roots(body.source_roots, root)
+        mode = old["storage_mode"] if old else (body.storage_mode or "copy")
+        if old and body.storage_mode and body.storage_mode != mode:
+            raise HTTPException(409, "library_migration_required")
+        if mode == "hardlink":
+            try:
+                validate_hardlink_capability(roots, root, SUPPORTED_SUFFIXES)
+            except HardlinkError as error:
+                raise HTTPException(422, error.code) from error
+            except OSError as error:
+                raise HTTPException(422, "hardlink_not_supported") from error
+
         paused = {str(Path(p).resolve()) for p in body.paused_source_roots or []}
         if not paused <= {str(p) for p in roots}:
             raise HTTPException(422, "library_source_invalid")
@@ -184,8 +192,8 @@ class LibraryCatalog:
             if creating:
                 LibraryStorage(self).available(db, root)
                 db.execute(
-                    "INSERT INTO libraries(id,root,name,default_access) VALUES (?,?,?,?)",
-                    (identity, str(root), body.name, bool(body.default_access)),
+                    "INSERT INTO libraries(id,root,name,default_access,storage_mode) VALUES (?,?,?,?,?)",
+                    (identity, str(root), body.name, bool(body.default_access), mode),
                 )
             elif not db.execute(
                 "UPDATE libraries SET name=?,enabled=?,default_access=COALESCE(?,default_access),"

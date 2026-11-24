@@ -14,6 +14,11 @@ PROFILE_SCOPES = {
     "owner": frozenset(
         set(SCOPES)
         | {
+            "books:read",
+            "books:write",
+            "books:upload_ebook",
+            "books:manage_libraries",
+            "books:scrape_metadata",
             "library:read",
             "library:inspect",
             "library:import",
@@ -37,6 +42,11 @@ PROFILE_SCOPES = {
     ),
     "librarian": frozenset(
         {
+            "books:read",
+            "books:write",
+            "books:upload_ebook",
+            "books:manage_libraries",
+            "books:scrape_metadata",
             "library:read",
             "library:inspect",
             "library:import",
@@ -61,6 +71,9 @@ PROFILE_SCOPES = {
     ),
     "editor": frozenset(
         {
+            "books:read",
+            "books:write",
+            "books:scrape_metadata",
             "library:read",
             "library:inspect",
             "metadata:write",
@@ -80,6 +93,7 @@ PROFILE_SCOPES = {
     ),
     "listener": frozenset(
         {
+            "books:read",
             "library:read",
             "personal:read",
             "personal:write",

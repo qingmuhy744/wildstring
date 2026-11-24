@@ -31,6 +31,12 @@ from wildstring.library.intake import INPUT_SUFFIXES, Intake, IntakeApproval, In
 from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
+from wildstring.library.sidecar import (
+    album_folder,
+    export_music,
+    refresh_music_track,
+    refresh_music_tracks,
+)
 from wildstring.recommendations import DAY_ZONE, Recommendations
 from wildstring.server_settings import ServerSettings
 from wildstring.task_notifications import management_result
@@ -115,6 +121,7 @@ class Management:
         from wildstring.library.storage import LibraryStorage
 
         self.storage = LibraryStorage(LibraryCatalog(self.database, settings))
+        self.book_storage = LibraryStorage(self.storage.catalog, book=True)
         self.next_discovery = 0
         self.next_recommendation = 0
         self.discovery_due = {}
@@ -352,6 +359,7 @@ class Management:
                     user_id=user_id,
                     source="folder-batch",
                 )
+        refresh_music_tracks(self.repository, requested)
         return {
             "folder": body.folder,
             "updated": len(requested),
@@ -508,6 +516,7 @@ class Management:
 
         if save_sidecar:
             self._save_album_sidecar_cover(tracks, file_bytes)
+        refresh_music_tracks(self.repository, (track["id"] for track in tracks))
 
         return {"album_id": album_id, "image_sha256": key, "tracks_updated": len(tracks)}
 
@@ -546,6 +555,7 @@ class Management:
                 connection.execute(
                     "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (tid,)
                 )
+        refresh_music_tracks(self.repository, (track["id"] for track in tracks))
         return {"album_id": album_id, "cleared": True}
 
     def _save_album_sidecar_cover(self, tracks, file_bytes: bytes):
@@ -809,6 +819,7 @@ class Management:
                 "SELECT album_id FROM tracks WHERE id=?", (first_track_id,)
             ).fetchone()
             new_album_id = new_album_row["album_id"] if new_album_row else body.album_id
+        refresh_music_tracks(self.repository, requested)
         return {"album_id": new_album_id, "updated": len(requested)}
 
     def link(self, job_id, *, import_id=None, scan_id=None):
@@ -930,6 +941,7 @@ class Management:
                 try:
                     # This process owns the worker lock: previous running jobs lost their owner.
                     self.storage.recover()
+                    self.book_storage.recover()
                     with self.database.connect(write=True) as db:
                         for table, field in (
                             ("scan_runs", "scan_id"),
@@ -963,7 +975,7 @@ class Management:
                         )
                     while not self.stopping.is_set():
                         self.check_storage()
-                        if self.storage.step():
+                        if self.storage.step() or self.book_storage.step():
                             self.stopping.wait(0.5)
                             continue
                         job = self.claim()
@@ -1491,7 +1503,9 @@ def management_router(service, auth):
         body: MetadataUpdate,
         user: Annotated[dict, Depends(auth.require_permission("metadata:write"))],
     ):
-        return editor.save(track_id, body, user_id=user["id"])
+        result = editor.save(track_id, body, user_id=user["id"])
+        refresh_music_track(service.repository, track_id)
+        return result
 
     @router.get("/tracks/{track_id}/file-info")
     def track_file_info(
@@ -1516,7 +1530,15 @@ def management_router(service, auth):
     def reorganize_file(track_id: str):
         from wildstring.library.file_reorganizer import reorganize_track_file
 
-        return reorganize_track_file(service.repository, track_id)
+        original = service.repository.source(track_id)
+        result = reorganize_track_file(service.repository, track_id)
+        if original is not None and result["changed"]:
+            old = album_folder(Path(original["path"]))
+            new = album_folder(Path(result["new_path"]))
+            export_music(
+                service.database, Path(original["library_root"]), original["library_id"], {old, new}
+            )
+        return result
 
     @router.get("/albums/{album_id}/release-lock")
     def album_release_lock(album_id: str):
@@ -1555,6 +1577,27 @@ def management_router(service, auth):
 
             return clear(connection, service.repository.library_id(), album_id, version)
 
+    @router.post(
+        "/export-sidecars",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
+    def export_sidecars():
+        identity = service.repository.library_id()
+        if identity is None:
+            raise HTTPException(404, "library_not_found")
+        try:
+            with FileLock(service.settings.data_dir / "library-scan.lock", timeout=0):
+                return {
+                    "sidecars_written": export_music(
+                        service.database, service.repository.root, identity
+                    )
+                }
+        except Timeout as error:
+            raise HTTPException(409, "scan_busy") from error
+
     @router.get("/tracks/{track_id}/lyrics")
     def read_lyrics(track_id: str):
         return lyrics.read(track_id)
@@ -1577,6 +1620,8 @@ def management_router(service, auth):
         ],
     )
     def update_lyrics(track_id: str, body: LyricsUpdate):
-        return lyrics.save(track_id, body)
+        result = lyrics.save(track_id, body)
+        refresh_music_track(service.repository, track_id)
+        return result
 
     return router

@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from functools import cached_property
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,7 +14,14 @@ from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.library.albums import album_key
 from wildstring.library.assets import IMAGE_SUFFIXES, MAX_COVER_BYTES, TrackAssets
-from wildstring.library.import_files import copy_exclusive, digest, organized_path, target_digest
+from wildstring.library.import_files import (
+    HardlinkError,
+    copy_exclusive,
+    digest,
+    link_exclusive,
+    organized_path,
+    target_digest,
+)
 from wildstring.library.intake import INPUT_SUFFIXES, Intake
 from wildstring.library.lyrics import MAX_TEXT_BYTES
 from wildstring.library.metadata import read_metadata
@@ -49,7 +57,16 @@ class MusicImporter:
         self.errors: list[dict] = []
         self.run_id = uuid4().hex
         self.targets: set[str] = set()
+        self.portable_sources: dict[Path, tuple[Path, Path]] = {}
         self.last_progress = time.monotonic()
+
+    @cached_property
+    def mode(self):
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT storage_mode FROM libraries WHERE root=?", (str(self.root),)
+            ).fetchone()
+            return row[0] if row else "copy"
 
     def progress(self, status="running"):
         if status == "running" and time.monotonic() - self.last_progress < 0.5:
@@ -80,10 +97,12 @@ class MusicImporter:
             ).fetchone()
             return dict(row) if row else None
 
-    def save(self, source: Path, target: Path, info, sha256: str):
+    def save(self, source: Path, target: Path, info, sha256: str, link_mode=None):
         with self.database.connect(write=True) as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO imported_files VALUES (?,?,?,?,?,?,?)",
+                """INSERT OR REPLACE INTO imported_files
+                (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)
+                VALUES (?,?,?,?,?,?,?,?)""",
                 (
                     str(self.settings.music_dir),
                     source.as_posix(),
@@ -92,13 +111,16 @@ class MusicImporter:
                     info.st_size,
                     info.st_mtime_ns,
                     sha256,
+                    link_mode or self.mode,
                 ),
             )
 
-    def import_track(self, relative: Path, *, metadata=None):
+    def import_track(self, relative: Path, *, metadata=None, generated=False):
         from wildstring.library.scope import require_current_library
 
         require_current_library(self.database, "library:import")
+        mode = "generated" if generated else self.mode
+        publish = link_exclusive if mode == "hardlink" else copy_exclusive
         with open_source(self.settings.music_dir, relative) as source:
             before = os.fstat(source.fileno())
             previous = self.manifest(relative)
@@ -117,7 +139,7 @@ class MusicImporter:
                     self.error(relative, "source_changed_managed_copy_preserved", conflict=True)
                     return None
                 else:
-                    self.save(relative, target, before, previous["sha256"])
+                    self.save(relative, target, before, previous["sha256"], previous["link_mode"])
                     self.counts["unchanged"] += 1
             else:
                 observed = read_metadata(source, relative)
@@ -136,7 +158,7 @@ class MusicImporter:
                         "SELECT target_path FROM imported_files WHERE target_root=? AND sha256=? LIMIT 1",
                         (str(self.root), sha256),
                     ).fetchone()
-                if duplicate is not None and allow_global_duplicate:
+                if duplicate is not None and allow_global_duplicate and mode != "hardlink":
                     target = Path(duplicate[0])
                     with open_source(self.root, target):
                         pass
@@ -152,24 +174,29 @@ class MusicImporter:
                             )
                         )
                         existing = target_digest(self.root, candidate)
-                        if existing == sha256:
+                        if existing == sha256 and (
+                            mode != "hardlink"
+                            or os.path.samestat((self.root / candidate).stat(), before)
+                        ):
                             self.counts["duplicates"] += 1
                             target = candidate
                             break
                         if existing is None:
-                            copy_exclusive(source, self.root, candidate, sha256)
+                            publish(source, self.root, candidate, sha256)
                             self.counts["copied"] += 1
                             target = candidate
                             break
                     else:
                         self.error(relative, "target_collision", conflict=True)
                         return None
-                self.save(relative, target, before, sha256)
+                self.save(relative, target, before, sha256, mode)
         self.targets.add(target.as_posix())
-        self.import_sidecars(relative, target)
+        if not generated:
+            self.portable_sources[target] = (self.settings.music_dir, relative.parent)
+        self.import_sidecars(relative, target, hardlink=mode == "hardlink")
         return target
 
-    def import_sidecars(self, relative: Path, target: Path):
+    def import_sidecars(self, relative: Path, target: Path, *, hardlink=False):
         # Reuse the same exact-name rules as playback. No fuzzy lyric matching.
         source_assets = TrackAssets(
             LibraryRepository(self.database, self.settings.music_dir, fixed=True)
@@ -199,7 +226,13 @@ class MusicImporter:
                 value = digest(source)
                 existing = target_digest(self.root, destination)
                 if existing is None:
-                    copy_exclusive(source, self.root, destination, value)
+                    if hardlink:
+                        link_exclusive(source, self.root, destination, value)
+                        self.save(
+                            sidecar, destination, os.fstat(source.fileno()), value, "hardlink"
+                        )
+                    else:
+                        copy_exclusive(source, self.root, destination, value)
                     self.counts["assets_copied"] += 1
                 elif existing != value:
                     self.error(sidecar, "managed_sidecar_preserved", conflict=True)
@@ -323,6 +356,8 @@ class MusicImporter:
                     relative = path.relative_to(self.settings.music_dir)
                     try:
                         intake.process(self, relative, automatic)
+                    except HardlinkError as error:
+                        self.error(relative, error.code)
                     except SourceChangedError:
                         self.error(relative, "source_changed_during_import")
                     except (
@@ -343,6 +378,20 @@ class MusicImporter:
                 _lock_owned=True,
                 on_start=on_scan,
             )
+            from wildstring.library.sidecar import restore_music_track
+
+            for target, (root, folder) in self.portable_sources.items():
+                library_id = repository.library_id()
+                try:
+                    restored = restore_music_track(
+                        self.database, self.root, library_id, target, root, folder
+                    )
+                    if not restored and folder != folder.parent:
+                        restore_music_track(
+                            self.database, self.root, library_id, target, root, folder.parent
+                        )
+                except OSError:
+                    self.error(target, "sidecar_unavailable")
             intake.apply_overrides()
             status = (
                 "completed_with_errors"
