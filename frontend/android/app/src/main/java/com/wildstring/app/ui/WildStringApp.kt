@@ -651,8 +651,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val rail = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
         val compact = safeHeight < 600.dp
         val floatingQueue = expanded && state.current != null && wide && !compact
-        // From 1100dp the queue docks beside the player (a right sidebar, as in Spotify); 840-1099dp keep the overlay.
-        val dockedQueue = floatingQueue && safeWidth >= 1100.dp
         var wasWide by rememberSaveable { mutableStateOf(wide) }
         var wasLandscapeWindow by rememberSaveable { mutableStateOf(landscapeWindow) }
         var previousStyle by rememberSaveable { mutableStateOf(preferences.playbackStyle) }
@@ -920,8 +918,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 exit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
                 label = "player-overlay",
             ) {
-                Row(Modifier.fillMaxSize()) {
-                  Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(Modifier.fillMaxSize()) {
                     // The offset outlives the dismiss so the exit slide continues from the finger.
                     DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
                     PlayerScreen(vm, state, wide, landscape, landscapeWindow, rail, lyrics, queue, rotation,
@@ -934,31 +931,50 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         onArtist = ::openTrackArtist,
                         onAdd = { actions = state.current }, onSleep = { sleepDialog = true },
                         onOpenShow = ::openPlayingShowFromPlayer)
-                  }
-                  if (dockedQueue && queue) Surface(
-                      Modifier.safeDrawingPadding().padding(top = 12.dp, end = 16.dp, bottom = 16.dp).width(360.dp).fillMaxHeight()
-                          .testTag("player-queue-docked"),
-                      shape = RoundedCornerShape(16.dp),
-                      color = MaterialTheme.colorScheme.surfaceContainerLow,
-                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                  ) { QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false }) }
                 }
             }
         }
-        if (floatingQueue && queue && !dockedQueue) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .2f))
-                .pointerInput(Unit) { detectTapGestures { queue = false } }
-                .safeDrawingPadding()) {
+        val queueMotionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
+        val animatedQueuePopupProgress by animateFloatAsState(
+            targetValue = if (floatingQueue && queue) 1f else 0f,
+            animationSpec = if (queueMotionAllowed) tween(240, easing = FastOutSlowInEasing) else snap(),
+            label = "queue-popup-progress",
+        )
+        val queuePopupProgress = if (queueMotionAllowed) animatedQueuePopupProgress else if (floatingQueue && queue) 1f else 0f
+        if (floatingQueue && (queue || queuePopupProgress > 0.001f)) {
+            val popupSlidePx = with(LocalDensity.current) { 20.dp.toPx() }
+            Box(
+                Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.2f * queuePopupProgress))
+                    .then(
+                        if (queue) Modifier.pointerInput(Unit) { detectTapGestures { queue = false } }
+                        else Modifier
+                    )
+                    .safeDrawingPadding(),
+            ) {
                 Surface(
                     Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp)
                         .width(360.dp).heightIn(max = 520.dp)
+                        .graphicsLayer {
+                            alpha = queuePopupProgress
+                            translationY = (1f - queuePopupProgress) * popupSlidePx
+                            val scale = 0.96f + 0.04f * queuePopupProgress
+                            scaleX = scale
+                            scaleY = scale
+                            transformOrigin = TransformOrigin(1f, 1f)
+                        }
                         .testTag("player-queue-popup")
-                        .pointerInput(Unit) { detectTapGestures {} },
+                        .then(
+                            if (queue) Modifier.pointerInput(Unit) { detectTapGestures {} }
+                            else Modifier
+                        ),
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false })
+                    Box(if (!queue) Modifier.clearAndSetSemantics {} else Modifier) {
+                        QueuePanel(vm, state, Modifier.fillMaxWidth(), onClose = { queue = false })
+                    }
                 }
             }
         }
@@ -1592,7 +1608,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 }
             }
             Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
-                    PlaybackControls(vm, state, onQueue, onAlbum, onArtist, compact = true)
+                    PlaybackControls(vm, state, onQueue, onAlbum, onArtist, compact = true, queueOpen = queue)
             }
         } else if (wide && preferences.playbackStyle != "cassette") Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Row(
@@ -1624,6 +1640,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                     Spacer(Modifier.height(28.dp))
                     PlaybackControls(
                         vm, state, onQueue, onAlbum, onArtist,
+                        queueOpen = queue,
                         modifier = Modifier.widthIn(max = 480.dp).dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp),
                     )
                 }
@@ -1660,7 +1677,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
-            PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
+            PlaybackControls(vm, state, onQueue, onAlbum, onArtist, queueOpen = queue,
                 modifier = Modifier.align(Alignment.CenterHorizontally).widthIn(max = 480.dp).dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
@@ -1689,13 +1706,13 @@ private fun PlaybackModeButton(vm: MusicViewModel, state: MusicState) {
 
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
-    onArtist: (String) -> Unit = {}, compact: Boolean = false, modifier: Modifier = Modifier) {
+    onArtist: (String) -> Unit = {}, compact: Boolean = false, queueOpen: Boolean = false, modifier: Modifier = Modifier) {
     if (state.current == null) return
     Column(modifier.fillMaxWidth()) {
         PlaybackHeader(vm, state, onAlbum, onArtist, compact)
         Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
         PlaybackSeekSection(vm, state.duration)
-        PlaybackTransport(vm, state, onQueue, compact)
+        PlaybackTransport(vm, state, onQueue, compact, queueOpen)
     }
 }
 
@@ -1824,7 +1841,7 @@ private fun PlaybackHeader(vm: MusicViewModel, state: MusicState, onAlbum: () ->
 
 /** Mode, previous, play/pause, next and queue; also shows the playback error. */
 @Composable
-private fun PlaybackTransport(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, compact: Boolean) {
+private fun PlaybackTransport(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, compact: Boolean, queueOpen: Boolean = false) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             PlaybackModeButton(vm, state)
@@ -1845,7 +1862,13 @@ private fun PlaybackTransport(vm: MusicViewModel, state: MusicState, onQueue: ()
                 }
             }
             IconButton(tactile(vm::next)) { Icon(Icons.Default.SkipNext, stringResource(R.string.next_track), Modifier.size(30.dp)) }
-            IconButton(tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.play_queue)) }
+            IconButton(tactile(onQueue), Modifier.semantics { selected = queueOpen }) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    stringResource(R.string.play_queue),
+                    tint = if (queueOpen) Accent else LocalContentColor.current,
+                )
+            }
         }
         state.playbackError?.let { ErrorMessage(it) { vm.toggle() } }
     }
