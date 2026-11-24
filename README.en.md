@@ -54,7 +54,7 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Version [v0.8.27](docs/releases/v0.8.27.md)** · Web adds album-wide lyric lookup and library checks. Android fixes dragging zoomed artwork. iPhone and iPad gain more playback, library, and podcast controls. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
+- **Version [v0.8.28](docs/releases/v0.8.28.md)** · Faster single-track lyric and metadata lookup with per-search source selection, plus Android Pad layout-matched skeletons and floating fullscreen player queue. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
