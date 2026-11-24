@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -19,7 +20,7 @@ from wildstring.books.ebooks import (
 )
 from wildstring.books.service import EBOOK_SUFFIXES, Books
 from wildstring.http_cache import private_image_response
-from wildstring.library.scanner import open_source
+from wildstring.library.fs import open_source
 from wildstring.library.sidecar import export_books, write_asset
 from wildstring.library.streaming import AudioResponse
 from wildstring.library.upload import save_upload_to_temp
@@ -71,11 +72,12 @@ def router(database, settings, auth, transcoding):
     temporary = settings.data_dir / "book_upload"
 
     def load_chapter(ebook, number):
-        if not 0 <= number < ebook["spine_count"]:
+        index = next((i for i in range(ebook["spine_count"]) if i == number), None)
+        if index is None:
             raise HTTPException(404, "book_chapter_not_found")
         try:
             with open_source(
-                service.cache_root, Path(ebook["cache_key"]) / f"{number}.json"
+                service.cache_root, Path(ebook["cache_key"]) / f"{index}.json"
             ) as stream:
                 return json.load(stream)
         except OSError as error:
@@ -83,8 +85,9 @@ def router(database, settings, auth, transcoding):
 
     def store_ebook(file, library, book_id=None):
         filename = file.filename or ""
-        suffix = validate_upload(filename, file.content_type or "", file.file.read(4096))
-        if suffix not in EBOOK_SUFFIXES:
+        raw_suffix = validate_upload(filename, file.content_type or "", file.file.read(4096))
+        suffix = next((ext for ext in sorted(EBOOK_SUFFIXES) if ext == raw_suffix), None)
+        if suffix is None:
             raise HTTPException(422, "unsupported_ebook_format")
         file.file.seek(0)
         with service.write(library["id"]):
@@ -118,10 +121,10 @@ def router(database, settings, auth, transcoding):
     def export_sidecars(library_id: str, user: manage):
         with database.connect(scoped=False) as db:
             library = library_record(db, library_id, user)
-        with service.write(library_id):
+        with service.write(library["id"]):
             return {
                 "sidecars_written": export_books(
-                    database, Path(library["managed_root"]), library_id
+                    database, Path(library["managed_root"]), library["id"]
                 )
             }
 
@@ -150,7 +153,7 @@ def router(database, settings, auth, transcoding):
             library = library_record(db, book["library_id"], user)
             if book["has_ebook"]:
                 raise HTTPException(409, "book_ebook_already_attached")
-        return {"id": store_ebook(file, library, book_id)}
+        return {"id": store_ebook(file, library, book["id"])}
 
     @router.get("/books/{book_id}/ebook/manifest")
     def manifest(book_id: str, user: read):
@@ -206,10 +209,26 @@ def router(database, settings, auth, transcoding):
         with database.connect(scoped=False) as db:
             book_record(db, book_id, user)
             ebook = ebook_record(db, book_id)
-        if not re.fullmatch(r"\d+\.jpg", asset_path):
+        stem, dot, ext = asset_path.partition(".")
+        if (
+            dot != "."
+            or ext != "jpg"
+            or not stem.isascii()
+            or not stem.isdigit()
+            or len(stem) > 6
+            or str(int(stem)) != stem
+        ):
             raise HTTPException(404, "book_asset_not_found")
+        target_name = f"{int(stem)}.jpg"
+        cache_dir = service.cache_root / ebook["cache_key"]
         try:
-            with open_source(service.cache_root, Path(ebook["cache_key"]) / asset_path) as stream:
+            matched = next(
+                (entry.name for entry in os.scandir(cache_dir) if entry.name == target_name),
+                None,
+            )
+            if matched is None:
+                raise HTTPException(404, "book_asset_not_found")
+            with open_source(service.cache_root, Path(ebook["cache_key"]) / matched) as stream:
                 return private_image_response(request, stream.read())
         except OSError as error:
             raise HTTPException(404, "book_asset_not_found") from error
@@ -296,15 +315,21 @@ def router(database, settings, auth, transcoding):
         except (OSError, ValueError) as error:
             raise HTTPException(422, "book_image_invalid") from error
         relative = Path(book["managed_dir"]) / "cover.jpg"
+        target_book_id = book["id"]
         with service.write(book["library_id"]):
             write_asset(Path(book["managed_root"]), relative, jpeg)
             with database.connect(write=True) as db:
                 db.execute(
                     "UPDATE books SET cover_path=?,cover_hash=?,updated_at=? WHERE id=?",
-                    (relative.as_posix(), hashlib.sha256(jpeg).hexdigest(), time.time(), book_id),
+                    (
+                        relative.as_posix(),
+                        hashlib.sha256(jpeg).hexdigest(),
+                        time.time(),
+                        target_book_id,
+                    ),
                 )
-            export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
-        return {"id": book_id}
+            export_books(database, Path(book["managed_root"]), book["library_id"], target_book_id)
+        return {"id": target_book_id}
 
     @router.get("/books/{book_id}/cover")
     def cover(book_id: str, user: read, request: Request):

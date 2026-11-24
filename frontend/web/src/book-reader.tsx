@@ -79,8 +79,12 @@ interface Match extends Anchor {
   excerpt: string;
 }
 
-const key = () =>
-  globalThis.crypto?.randomUUID?.() || `ws-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function key(): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint32Array(4);
+  globalThis.crypto.getRandomValues(bytes);
+  return `ws-${Array.from(bytes, (part) => part.toString(16).padStart(8, '0')).join('')}`;
+}
 
 function deviceId() {
   const saved = localStorage.getItem('wildstring:book-device');

@@ -318,7 +318,8 @@ def test_relink_retry_finishes_partial_job_without_counting_files_twice(
             if job["status"] in {"failed", "completed"}:
                 return job
             time.sleep(0.05)
-        pytest.fail("Migration did not finish")
+        pytest_wait_timeout = "Migration did not finish"
+        raise AssertionError(pytest_wait_timeout)
 
     headers = {"X-Wildstring-Client": "web"}
     with authenticated_client(settings) as client:
@@ -436,8 +437,8 @@ def test_hardlink_to_copy_insufficient_storage_rejected(
 
     sources = tmp_path / "space-source"
     sources.mkdir()
-    src = source(settings, "big.flac", "Big")
-    src = src.rename(sources / src.name)
+    initial = source(settings, "big.flac", "Big")
+    initial.rename(sources / initial.name)
     target = tmp_path / "space-managed"
     headers = {"X-Wildstring-Client": "web"}
     with authenticated_client(settings) as client:

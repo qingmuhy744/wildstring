@@ -3,15 +3,15 @@
 import errno
 import json
 import os
-from contextlib import ExitStack, suppress
+from contextlib import suppress
 from pathlib import Path
 
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
 
+from wildstring.library.fs import open_parent_directory, open_source
 from wildstring.library.import_files import organized_path, target_directory
 from wildstring.library.metadata import Metadata
-from wildstring.library.scanner import open_directory, open_source
 
 SIDECAR_SUFFIXES = {
     ".lrc",
@@ -94,32 +94,23 @@ def get_track_file_info(repository, track_id: str, *, include_host_paths: bool =
     }
 
 
-def _open_parent_nofollow(root: Path, relative: Path, stack: ExitStack):
-    directory = stack.enter_context(open_directory(root))
-    for part in relative.parts[:-1]:
-        directory = stack.enter_context(open_directory(part, dir_fd=directory))
-    return directory
-
-
 def _replace_entry(root: Path, old_rel: Path, new_rel: Path) -> int:
-    with ExitStack() as stack:
-        src_fd = _open_parent_nofollow(root, old_rel, stack)
-        with target_directory(root, new_rel) as dst_fd:
-            try:
-                old_stat = os.stat(old_rel.name, dir_fd=src_fd, follow_symlinks=False)
-            except FileNotFoundError as error:
-                raise HTTPException(404, "source_file_missing") from error
-            with suppress(FileNotFoundError):
-                dst_stat = os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False)
-                if not os.path.samestat(old_stat, dst_stat):
-                    raise HTTPException(409, "destination_file_exists")
-            try:
-                os.replace(old_rel.name, new_rel.name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
-            except OSError as error:
-                if error.errno == errno.EXDEV:
-                    raise HTTPException(422, "hardlink_cross_device") from error
-                raise
-            return int(os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False).st_mtime_ns)
+    with open_parent_directory(root, old_rel) as src_fd, target_directory(root, new_rel) as dst_fd:
+        try:
+            old_stat = os.stat(old_rel.name, dir_fd=src_fd, follow_symlinks=False)
+        except FileNotFoundError as error:
+            raise HTTPException(404, "source_file_missing") from error
+        with suppress(FileNotFoundError):
+            dst_stat = os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False)
+            if not os.path.samestat(old_stat, dst_stat):
+                raise HTTPException(409, "destination_file_exists")
+        try:
+            os.replace(old_rel.name, new_rel.name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+        except OSError as error:
+            if error.errno == errno.EXDEV:
+                raise HTTPException(422, "hardlink_cross_device") from error
+            raise
+        return int(os.stat(new_rel.name, dir_fd=dst_fd, follow_symlinks=False).st_mtime_ns)
 
 
 def reorganize_track_file(repository, track_id: str):

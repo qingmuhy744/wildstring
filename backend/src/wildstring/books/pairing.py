@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.content import book_record
 from wildstring.books.service import Books
+from wildstring.library.fs import open_source
 from wildstring.library.import_files import copy_exclusive, link_exclusive
-from wildstring.library.scanner import open_source
 from wildstring.library.sidecar import BOOK_ARRAY, BOOK_TEXT, export_books, read_asset, write_asset
 from wildstring.permissions import dependency
 
@@ -122,6 +122,7 @@ def router(database, settings, auth):
     def pair(book_id: str, body: PairInput, user: manage):
         with database.connect(scoped=False) as db:
             first = book_record(db, book_id, user)
+        target_id = first["id"]
         root = Path(first["managed_root"])
         published, retired = [], []
         other_managed_dir = None
@@ -130,28 +131,29 @@ def router(database, settings, auth):
                 with database.connect(write=True) as db:
                     db.execute("BEGIN IMMEDIATE")
                     db.execute("PRAGMA defer_foreign_keys=ON")
-                    first = book_record(db, book_id, user)
+                    first = book_record(db, target_id, user)
                     other = book_record(db, body.other_book_id, user)
+                    other_id = other["id"]
                     other_managed_dir = other["managed_dir"]
                     carriers = (first["has_ebook"], first["has_audiobook"])
                     counterpart = (other["has_ebook"], other["has_audiobook"])
                     if (
-                        first["id"] == other["id"]
+                        target_id == other_id
                         or first["library_id"] != other["library_id"]
                         or carriers not in {(1, 0), (0, 1)}
                         or counterpart != carriers[::-1]
                     ):
                         raise HTTPException(409, "book_pair_invalid")
                     carrier = "ebook" if other["has_ebook"] else "audiobook"
-                    move_carrier(db, root, other["id"], book_id, carrier, published, retired)
+                    move_carrier(db, root, other_id, target_id, carrier, published, retired)
                     # Migrate any remaining bookmarks/annotations on `other` too.
                     db.execute(
                         "UPDATE book_bookmarks SET book_id=? WHERE book_id=?",
-                        (book_id, other["id"]),
+                        (target_id, other_id),
                     )
                     db.execute(
                         "UPDATE book_annotations SET book_id=? WHERE book_id=?",
-                        (book_id, other["id"]),
+                        (target_id, other_id),
                     )
                     updates: dict[str, object] = {
                         "has_ebook": 1,
@@ -186,9 +188,9 @@ def router(database, settings, auth):
                     assignments = ",".join(f"{key}=?" for key in updates)
                     db.execute(
                         f"UPDATE books SET {assignments} WHERE id=?",  # nosec B608
-                        (*updates.values(), book_id),
+                        (*updates.values(), target_id),
                     )
-                    db.execute("DELETE FROM books WHERE id=?", (other["id"],))
+                    db.execute("DELETE FROM books WHERE id=?", (other_id,))
             except FileExistsError as error:
                 for path in published:
                     path.unlink(missing_ok=True)
@@ -202,13 +204,14 @@ def router(database, settings, auth):
                     path.unlink()
             if other_managed_dir:
                 _cleanup_empty_book_dir(root, other_managed_dir)
-            export_books(database, root, first["library_id"], book_id)
-        return {"id": book_id}
+            export_books(database, root, first["library_id"], target_id)
+        return {"id": target_id}
 
     @router.post("/books/{book_id}/split", dependencies=client, status_code=201)
     def split(book_id: str, body: SplitInput, user: manage):
         with database.connect(scoped=False) as db:
             first = book_record(db, book_id, user)
+        source_id = first["id"]
         root = Path(first["managed_root"])
         published, retired = [], []
         new_id = uuid4().hex
@@ -217,7 +220,7 @@ def router(database, settings, auth):
                 with database.connect(write=True) as db:
                     db.execute("BEGIN IMMEDIATE")
                     db.execute("PRAGMA defer_foreign_keys=ON")
-                    first = book_record(db, book_id, user)
+                    first = book_record(db, source_id, user)
                     if not (first["has_ebook"] and first["has_audiobook"]):
                         raise HTTPException(409, "book_split_invalid")
                     new_ebook = body.carrier == "ebook"
@@ -230,9 +233,9 @@ def router(database, settings, auth):
                            SELECT ?,library_id,?,title,sort_title,subtitle,authors_json,narrators_json,
                             series_name,series_index,publisher,published_year,language,isbn10,isbn13,description,
                             tags_json,?,?,NULL,overrides_json,locked_fields_json,?,? FROM books WHERE id=?""",
-                        (new_id, new_id, new_ebook, not new_ebook, stamp, stamp, book_id),
+                        (new_id, new_id, new_ebook, not new_ebook, stamp, stamp, source_id),
                     )
-                    move_carrier(db, root, book_id, new_id, body.carrier, published, retired)
+                    move_carrier(db, root, source_id, new_id, body.carrier, published, retired)
                     if first["cover_path"] and (
                         cover := read_asset(root, Path(first["cover_path"]), 8 * 1024 * 1024)
                     ):
@@ -245,7 +248,7 @@ def router(database, settings, auth):
                         )
                     db.execute(
                         "UPDATE books SET has_ebook=?,has_audiobook=?,pair_key=NULL,updated_at=? WHERE id=?",
-                        (not new_ebook, new_ebook, stamp, book_id),
+                        (not new_ebook, new_ebook, stamp, source_id),
                     )
             except Exception:
                 for path in published:
@@ -254,8 +257,8 @@ def router(database, settings, auth):
             for path in retired:
                 with suppress(OSError):
                     path.unlink()
-            export_books(database, root, first["library_id"], book_id)
+            export_books(database, root, first["library_id"], source_id)
             export_books(database, root, first["library_id"], new_id)
-        return {"id": new_id, "original_id": book_id}
+        return {"id": new_id, "original_id": source_id}
 
     return router

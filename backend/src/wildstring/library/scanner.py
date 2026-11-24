@@ -3,7 +3,6 @@
 import os
 import stat
 import time
-from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -11,61 +10,22 @@ from mutagen import MutagenError
 
 from wildstring.config import Settings
 from wildstring.database import Database
+from wildstring.library.fs import SourceChangedError, fingerprint, open_directory, open_source
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.repository import COUNTERS, LibraryRepository
+
+__all__ = [
+    "ScanBusyError",
+    "SourceChangedError",
+    "fingerprint",
+    "open_directory",
+    "open_source",
+    "scan_library",
+]
 
 
 class ScanBusyError(Exception):
     """Another scanner owns this data directory."""
-
-
-class SourceChangedError(Exception):
-    """The source changed while metadata was being read."""
-
-
-@contextmanager
-def open_directory(path, *, dir_fd=None):
-    """Own each directory descriptor explicitly, including failed nested opens."""
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
-    try:
-        yield descriptor
-    finally:
-        os.close(descriptor)
-
-
-@contextmanager
-def open_source(root: Path, relative: Path):
-    """Open only regular files, without following symlinks on POSIX hosts."""
-    if (
-        relative.is_absolute()
-        or not relative.parts
-        or any(part in {".", ".."} for part in relative.parts)
-    ):
-        raise OSError("Invalid library path")
-    if os.open in os.supports_dir_fd:
-        with ExitStack() as stack:
-            directory = stack.enter_context(open_directory(root))
-            for part in relative.parts[:-1]:
-                directory = stack.enter_context(open_directory(part, dir_fd=directory))
-            descriptor = os.open(
-                relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
-            )
-            with os.fdopen(descriptor, "rb") as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise OSError("Source is not a regular file")
-                yield source
-    else:
-        path = root / relative
-        if path.is_symlink() or not path.resolve().is_relative_to(root):
-            raise OSError("Source is outside the library")
-        with path.open("rb") as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                raise OSError("Source is not a regular file")
-            yield source
-
-
-def fingerprint(value: os.stat_result) -> tuple[int, int, int, int]:
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
 
 
 def scan_library(

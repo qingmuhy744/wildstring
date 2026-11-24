@@ -6,12 +6,17 @@ import os
 import re
 import stat
 import unicodedata
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from uuid import uuid4
 
+from wildstring.library.fs import (
+    SourceChangedError,
+    fingerprint,
+    open_parent_directory,
+    open_source,
+)
 from wildstring.library.metadata import Metadata
-from wildstring.library.scanner import SourceChangedError, fingerprint, open_directory, open_source
 
 RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.IGNORECASE)
 
@@ -41,26 +46,8 @@ def organized_path(metadata: Metadata) -> Path:
 @contextmanager
 def target_directory(root: Path, relative: Path):
     """Create/open parents without following directory symlinks on POSIX."""
-    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
-        raise OSError("Invalid managed path")
-    root.mkdir(parents=True, exist_ok=True)
-    if os.open in os.supports_dir_fd:
-        with ExitStack() as stack:
-            directory = stack.enter_context(open_directory(root))
-            for part in relative.parts[:-1]:
-                # Existing parents are validated by the no-follow open below.
-                with suppress(FileExistsError):
-                    os.mkdir(part, mode=0o700, dir_fd=directory)
-                directory = stack.enter_context(open_directory(part, dir_fd=directory))
-            yield directory
-    else:
-        parent = root
-        for part in relative.parts[:-1]:
-            parent = parent / part
-            if parent.is_symlink() or not parent.resolve().is_relative_to(root):
-                raise OSError("Managed directory is not safe")
-            parent.mkdir(exist_ok=True)
-        yield None
+    with open_parent_directory(root, relative, create=True) as directory:
+        yield directory
 
 
 def digest(source) -> str:
@@ -155,10 +142,7 @@ def _source_parent(root: Path | None, relative: Path | None):
     if root is None or relative is None or Path("/proc/self/fd").is_dir():
         yield None, None
         return
-    with ExitStack() as stack:
-        directory = stack.enter_context(open_directory(root))
-        for part in relative.parts[:-1]:
-            directory = stack.enter_context(open_directory(part, dir_fd=directory))
+    with open_parent_directory(root, relative) as directory:
         yield directory, relative.name
 
 
