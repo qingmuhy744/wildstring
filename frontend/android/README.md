@@ -34,7 +34,7 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 `src/test` 中的 `PodcastProgressNetworkTest` 使用 Robolectric、MockWebServer 与内存 Room 数据库，在 JVM 验证完成状态、续听模式、读写次数、冲突接管及离线补传，随 `make android-test` / `make android-ci` 执行，无需启动模拟器。Robolectric 与 Android 37 sandbox SDK 均由 Gradle 锁定并校验 SHA-256；SDK 复用 Gradle 缓存，测试期间禁用 Robolectric 自行下载。`PodcastResumeServiceTest`、`PodcastResumeUiTest` 保留设备上的真实 MediaSession／服务生命周期与交互、截图验证，JVM 通过不能替代这些验收。
 
-准备 JDK 21、Android SDK `platforms;android-37.0` 与 `build-tools;36.1.0`。在仓库根目录执行：
+准备 JDK 21、Android SDK `platforms;android-37.2` 与 `build-tools;36.1.0`。在仓库根目录执行：
 
 ```sh
 make android-ci                 # Android Lint、单元测试、debug APK 与校验和
