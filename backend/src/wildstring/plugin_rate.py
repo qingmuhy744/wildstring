@@ -27,12 +27,16 @@ def permit(policy, clock=None):
         next_at, cooldown, reason, last_at = row if row else (0, 0, None, 0)
         if cooldown > now:
             raise PluginError(reason or "source_plugin_rate_limited", cooldown_until=cooldown)
-        interval = max(1, min(120, float(policy.get("interval_seconds", 5))))
-        next_at = max(next_at, last_at + interval) if row else 0
-        if next_at > now:
-            return min(0.25, next_at - now)
+        if policy.get("interactive") and not policy.get("batch_id"):
+            interval = max(0.8, min(120.0, float(policy.get("interval_seconds", 0.8))))
+            due = (last_at + interval) if row else 0
+        else:
+            interval = max(1.0, min(120.0, float(policy.get("interval_seconds", 5))))
+            due = max(next_at, last_at + interval) if row else 0
+        if due > now:
+            return min(0.25, due - now)
         db.execute(
-            "INSERT INTO plugin_request_gates(plugin_id,next_at,last_at) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET next_at=excluded.next_at,last_at=excluded.last_at",
+            "INSERT INTO plugin_request_gates(plugin_id,next_at,last_at) VALUES (?,?,?) ON CONFLICT(plugin_id) DO UPDATE SET next_at=max(plugin_request_gates.next_at,excluded.next_at),last_at=excluded.last_at",
             (policy["plugin_id"], now + interval, now),
         )
     return 0

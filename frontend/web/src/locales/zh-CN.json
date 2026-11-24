@@ -1753,6 +1753,7 @@
     "selectTrackAria": "选择 {{title}}",
     "skipTrackInBatch": "批量更新时跳过此曲",
     "sourceIssuePrefix": "来源问题：",
+    "sourcesLabel": "查询来源",
     "startAlbumScan": "开始查找歌词",
     "startScan": "开始后台扫描",
     "statusApplied": "已启用",
@@ -2104,6 +2105,7 @@
     "retryProgress": "重试查询进度",
     "reviewBatch": "查看本批结果",
     "reuseRecentLabel": "可复用近期结果",
+    "sourcesLabel": "查询来源",
     "startButton": "开始更新",
     "statusReadError": "本批状态暂时无法读取，任务不会重新提交。可以重试查询，或到管理的任务记录查看。",
     "submitFailed": "更新未提交，请检查联网设置后重试。",
@@ -2555,6 +2557,7 @@
     "waitingForNetwork": "等待允许的下载网络。"
   },
   "onlineMetadataMatcher": {
+    "allSources": "全部",
     "applied": "✓ 已填入下方",
     "collapseMatcher": "收起在线匹配",
     "emptyPrompt": "暂无现成候选。您可以点击上方的「重新联网检索」，系统将自动通过已启用的音源与 MusicBrainz 在线查找最佳匹配。",
@@ -2570,6 +2573,7 @@
     "searchButton": "重新联网检索",
     "searchTitlePlaceholder": "检索歌名",
     "searching": "正在联网检索…",
+    "sourceSelectorAria": "选择查询来源",
     "trackNo": "第 {{number}} 首",
     "unknownAlbum": "未知专辑",
     "unknownArtist": "未知艺人",
@@ -3903,6 +3907,7 @@
   },
   "sourcePlugins": {
     "actionFailed": "操作未完成。",
+    "allSources": "全部",
     "auditionPaused": "试听已暂停",
     "auditionPlaying": "正在播放试听",
     "badgeBilingual": "译文覆盖 {{pct}}%",
@@ -3967,6 +3972,7 @@
     "secretPlaceholder": "已保存，留空保留",
     "seekLineTitle": "点击跳播试听此句",
     "sourcePriority": "来源优先级（0–100，越小越优先）",
+    "sourceSelectorAria": "选择歌词来源",
     "sourcesCount": "{{count}} 个来源",
     "startAudition": "试听这首歌",
     "statusDisabled": "已停用",

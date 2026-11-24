@@ -670,3 +670,71 @@ def test_cooldown_releases_source_slot_for_other_tracks(
             assert row["status"] == "queued"
             assert row["attempts"] == row["busy_deferrals"] == 0
             assert "fixture-source" not in json.loads(row["results"])
+
+
+def test_lyric_scans_source_filtering_and_sources_endpoint(
+    settings, authenticated_client, monkeypatch
+):
+    prepare(settings, monkeypatch)
+    second_manifest = MANIFEST | {"id": "second-source", "name": "第二来源"}
+    with authenticated_client(settings) as client:
+        track, scans = setup(settings, client)
+        adapter = f"""
+class Plugin:
+    def search(self, context, query):
+        return [{{"id":"song", "title":{track["title"]!r}, "artists":{track["artists"]!r}, "duration_ms":{track["duration_ms"]}, "source_url":"https://example.com/song2"}}]
+    def metadata(self, context, request):
+        return [{{"id":"song", "title":{track["title"]!r}, "artists":{track["artists"]!r}, "duration_ms":{track["duration_ms"]}, "fields":{{"title":{track["title"]!r},"artists":{track["artists"]!r}}}, "source_url":"https://example.com/song2"}}]
+    def lyrics(self, context, candidate):
+        return {{"original":"synthetic", "normalized":{{"kind":"synced", "format":"krc", "lines":[{{"time_ms":1000,"text":"Synthetic","words":[{{"start_ms":1000,"end_ms":2000,"text":"Synthetic"}}]}}],"layers":{{"translation":[{{"time_ms":1000,"text":"合成译文"}}]}}}}}}
+"""
+        second_zip = io.BytesIO()
+        with ZipFile(second_zip, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(second_manifest))
+            archive.writestr("adapter.py", adapter)
+        assert (
+            client.post(
+                "/api/v1/manage/source-plugins/import",
+                headers=HEADERS,
+                content=second_zip.getvalue(),
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                "/api/v1/manage/source-plugins/second-source",
+                headers=HEADERS,
+                json={"version": 1, "enabled": True, "priority": 60},
+            ).status_code
+            == 200
+        )
+        sources = client.get("/api/v1/manage/lyric-scans/sources").json()["items"]
+        assert [s["id"] for s in sources] == ["fixture-source", "second-source"]
+
+        # GET settings schema remains untouched (round-trip strict PUT still succeeds)
+        current_settings = client.get("/api/v1/manage/lyric-scan-settings").json()
+        assert (
+            client.put(
+                "/api/v1/manage/lyric-scan-settings", headers=HEADERS, json=current_settings
+            ).status_code
+            == 200
+        )
+
+        invalid = client.post(
+            BASE + "/preview", headers=HEADERS, json={"plugin_ids": ["missing-source"]}
+        )
+        assert invalid.status_code == 422
+        assert (
+            client.post(
+                BASE + "/preview", headers=HEADERS, json={"plugin_ids": ["second-source"]}
+            ).json()["total"]
+            == 1
+        )
+        created = client.post(
+            BASE, headers=HEADERS, json={"plugin_ids": ["second-source"], "goal": 1}
+        )
+        assert created.status_code == 200
+        batch = finish(client, scans, created.json()["id"])
+        assert batch["items"][0]["results"] and list(batch["items"][0]["results"].keys()) == [
+            "second-source"
+        ]

@@ -86,6 +86,8 @@ export function LyricScans({
     [interval, setIntervalValue] = useState(5);
   const [rateProfile, setRateProfile] = useState('low');
   const [defaults, setDefaults] = useState<RateSettings | null>(null);
+  const [availableSources, setAvailableSources] = useState<{ id: string; name: string }[]>([]),
+    [checkedPluginIds, setCheckedPluginIds] = useState<string[]>([]);
   const [force, setForce] = useState(false),
     [preview, setPreview] = useState<number | null>(null);
   const [scans, setScans] = useState<Scan[] | null>(null),
@@ -100,6 +102,15 @@ export function LyricScans({
     batch?.items
       .filter((item) => item.status === 'ready' && !item.lyric_lock.locked)
       .map((item) => item.id) ?? [];
+  const selectedPluginIds = availableSources
+    .filter((source) => checkedPluginIds.includes(source.id))
+    .map((source) => source.id);
+  const narrowedPluginIds =
+    availableSources.length >= 2 &&
+    selectedPluginIds.length > 0 &&
+    selectedPluginIds.length < availableSources.length
+      ? selectedPluginIds
+      : undefined;
   const endpoint = '/manage/lyric-scans';
   const options = {
     scope: albumId ? 'album' : 'library',
@@ -110,6 +121,7 @@ export function LyricScans({
     rate_profile: rateProfile,
     interval_seconds: interval,
     force,
+    ...(narrowedPluginIds ? { plugin_ids: narrowedPluginIds } : {}),
   };
   const optionsKey = JSON.stringify(options);
   useEffect(() => setPreview(null), [optionsKey]);
@@ -129,6 +141,13 @@ export function LyricScans({
         setRateProfile(value.default_profile);
       })
       .catch((error) => setMessage(String(error)));
+    void api<{ items: { id: string; name: string }[] }>('/manage/lyric-scans/sources')
+      .then((value) => {
+        const items = value.items || [];
+        setAvailableSources(items);
+        setCheckedPluginIds(items.map((item) => item.id));
+      })
+      .catch(() => {});
   }, [albumId, initialBatchId]);
   useEffect(() => {
     if (!batch || !['queued', 'running'].includes(batch.status)) return;
@@ -191,6 +210,7 @@ export function LyricScans({
   const optionsDisabled =
     busy ||
     !defaults ||
+    (availableSources.length >= 2 && selectedPluginIds.length === 0) ||
     (rateProfile === 'custom' && (interval < 1 || interval > 120 || !Number.isInteger(interval)));
   const scanOptions = (
     <>
@@ -252,6 +272,33 @@ export function LyricScans({
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
           <HelpLabel hint="scanForce">{t('lyricScans.forceRescan')}</HelpLabel>
         </label>
+        {availableSources.length >= 2 && (
+          <div
+            className="source-checkbox-group lyric-scan-sources"
+            role="group"
+            aria-label={t('lyricScans.sourcesLabel')}
+          >
+            <span className="source-checkbox-title">{t('lyricScans.sourcesLabel')}</span>
+            <div className="source-checkbox-list">
+              {availableSources.map((source) => (
+                <label className="check-label" key={source.id}>
+                  <input
+                    type="checkbox"
+                    checked={checkedPluginIds.includes(source.id)}
+                    onChange={(e) =>
+                      setCheckedPluginIds((prev) =>
+                        e.target.checked
+                          ? [...prev, source.id]
+                          : prev.filter((item) => item !== source.id),
+                      )
+                    }
+                  />
+                  {source.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </fieldset>
       <p className="muted">{t('lyricScans.rateExplanation')}</p>
     </>

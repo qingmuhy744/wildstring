@@ -714,14 +714,38 @@ export function OnlineLyrics({
   const [result, setResult] = useState<{
     items: LyricCandidate[];
     jobs: { status: string; warnings: string[] }[];
+    sources?: { id: string; name: string }[];
   } | null>(null);
   const previewId = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null),
     [offset, setOffset] = useState(0);
+  const [selectedSources, setSelectedSources] = useState<string[] | null>(null);
   const [filterMode, setFilterMode] = useState<'all' | 'word' | 'bilingual'>('all');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [candidateMessageId, setCandidateMessageId] = useState<string | null>(null);
+  const availableSources = result?.sources ?? [];
+  const filteredSelection = selectedSources
+    ? selectedSources.filter((id) => availableSources.some((source) => source.id === id))
+    : null;
+  const activeSelection =
+    filteredSelection &&
+    filteredSelection.length > 0 &&
+    filteredSelection.length < availableSources.length
+      ? filteredSelection
+      : null;
+
+  function toggleSource(id: string) {
+    if (!activeSelection) {
+      setSelectedSources([id]);
+      return;
+    }
+    const next = activeSelection.includes(id)
+      ? activeSelection.filter((item) => item !== id)
+      : [...activeSelection, id];
+    setSelectedSources(next.length === 0 || next.length >= availableSources.length ? null : next);
+  }
+
   const candidates = (result?.items ?? []).map((candidate) => ({
     candidate,
     quality: inferCandidateQuality(candidate),
@@ -747,10 +771,26 @@ export function OnlineLyrics({
   const running = result?.jobs.some((job) => ['queued', 'running'].includes(job.status));
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(() => {
-      void load().catch(() => {});
-    }, 2000);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const delays = [250, 500, 1000, 2000];
+    let attempt = 0;
+    const schedule = () => {
+      const delay = delays[Math.min(attempt, delays.length - 1)];
+      attempt += 1;
+      timer = setTimeout(() => {
+        void load()
+          .catch(() => {})
+          .finally(() => {
+            if (!cancelled) schedule();
+          });
+      }, delay);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [running, trackId]);
   async function run(work: () => Promise<unknown>, candidateId: string | null = null) {
     setCandidateMessageId(candidateId);
@@ -768,11 +808,45 @@ export function OnlineLyrics({
   return (
     <section className="online-lyrics">
       {showHeading && <h3>{t('sourcePlugins.onlineLyricsTitle')}</h3>}
+      {availableSources.length >= 2 && (
+        <div
+          className="button-row lyric-source-selector"
+          role="group"
+          aria-label={t('sourcePlugins.sourceSelectorAria')}
+        >
+          <button
+            type="button"
+            disabled={busy || running}
+            aria-pressed={activeSelection === null}
+            onClick={() => setSelectedSources(null)}
+          >
+            {t('sourcePlugins.allSources')}
+          </button>
+          {availableSources.map((source) => (
+            <button
+              key={source.id}
+              type="button"
+              disabled={busy || running}
+              aria-pressed={activeSelection !== null && activeSelection.includes(source.id)}
+              onClick={() => toggleSource(source.id)}
+            >
+              {source.name}
+            </button>
+          ))}
+        </div>
+      )}
       <button
         type="button"
         disabled={busy || running}
         onClick={() =>
-          void run(() => api(`/manage/tracks/${trackId}/online-lyrics`, { method: 'POST' }))
+          void run(() =>
+            api(
+              `/manage/tracks/${trackId}/online-lyrics`,
+              activeSelection
+                ? { method: 'POST', body: JSON.stringify({ plugin_ids: activeSelection }) }
+                : { method: 'POST' },
+            ),
+          )
         }
       >
         {t('sourcePlugins.searchOnlineLyrics')}

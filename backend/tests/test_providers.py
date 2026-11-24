@@ -524,3 +524,159 @@ def test_invalid_json_shape_and_nested_relations_are_failures_not_worker_crashes
         suggestions, warnings = providers.suggestions(track)
         assert suggestions == [] and warnings == ["musicbrainz_invalid_response"]
         assert enable(client, public_url="http://[").status_code == 422
+
+
+def test_suggestions_parallel_sources_filtering_and_custom_query_preserve_other_providers(
+    settings, authenticated_client, monkeypatch
+):
+    from test_source_plugins import package
+
+    from wildstring.music_sources import MusicSources
+
+    music(settings, "并行.flac", ["原始艺人"], ["原始专辑"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        providers.stop()
+        assert (
+            enable(
+                client,
+                musicbrainz=True,
+                lastfm=True,
+                api_key="a" * 32,
+                api_secret="b" * 32,
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/v1/manage/source-plugins/import", headers=HEADERS, content=package()
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                "/api/v1/manage/source-plugins/fixture-source",
+                headers=HEADERS,
+                json={"version": 1, "enabled": True, "priority": 10},
+            ).status_code
+            == 200
+        )
+        track = client.get("/api/v1/tracks").json()["items"][0]
+
+        sources_res = client.get("/api/v1/manage/providers/sources").json()["items"]
+        assert [s["id"] for s in sources_res] == ["fixture-source", "musicbrainz", "lastfm"]
+        bundle = client.get(f"/api/v1/manage/providers/tracks/{track['id']}").json()
+        assert [s["id"] for s in bundle["available_sources"]] == [
+            "fixture-source",
+            "musicbrainz",
+            "lastfm",
+        ]
+
+        recorded_queries = []
+        real_plugin = providers.sources.plugins["fixture-source"]
+
+        def slow_cached(provider, _key, url, parameters=None, *, force=False):
+            time.sleep(0.25)
+            if provider == "musicbrainz" and url.endswith("recording"):
+                return {"recordings": [{"id": RECORDING}]}
+            if provider == "musicbrainz":
+                return {"id": RECORDING, "title": "MB标题", "artist-credit": [], "relations": []}
+            if provider == "lastfm":
+                return {"track": {"toptags": {"tag": [{"name": "pop"}]}}}
+            return {}
+
+        class SlowPlugin:
+            def __getattr__(self, name):
+                return getattr(real_plugin, name)
+
+            def search(self, _ctx, query):
+                time.sleep(0.25)
+                recorded_queries.append(query)
+                return [
+                    {
+                        "id": "plugin-item",
+                        "title": "自定义歌名",
+                        "artists": ["自定义艺人"],
+                        "duration_ms": track["duration_ms"],
+                        "source_url": "https://example.com/plugin",
+                    }
+                ]
+
+            def metadata(self, _ctx, req):
+                return [
+                    c | {"fields": {"title": c["title"], "artists": c["artists"], "album": "新专"}}
+                    for c in req["candidates"]
+                ]
+
+        monkeypatch.setattr(providers, "cached", slow_cached)
+        slow_plugin = SlowPlugin()
+        monkeypatch.setattr(
+            MusicSources, "plugins", property(lambda _self: {"fixture-source": slow_plugin})
+        )
+
+        started = time.monotonic()
+        suggestions, warnings = providers.suggestions(track, force=True)
+        elapsed = time.monotonic() - started
+        assert warnings == []
+        assert {item[0] for item in suggestions} == {"fixture-source", "musicbrainz", "lastfm"}
+        assert elapsed < 0.70
+
+        # Filtering sources skips MusicBrainz and Last.fm cleanly
+        recorded_queries.clear()
+        only_plugin, warnings = providers.suggestions(track, force=True, sources=["fixture-source"])
+        assert warnings == []
+        assert {item[0] for item in only_plugin} == {"fixture-source"}
+
+        # Validation rejects unknown sources or multi-track custom queries
+        assert (
+            client.post(
+                "/api/v1/manage/providers/query",
+                headers=HEADERS,
+                json={"track_ids": [track["id"]], "sources": ["nonexistent"]},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/v1/manage/providers/query",
+                headers=HEADERS,
+                json={"track_ids": [track["id"], "other"], "query_title": "X"},
+            ).status_code
+            == 422
+        )
+
+        # First enqueue all sources so MusicBrainz & Last.fm pending suggestions exist
+        assert (
+            client.post(
+                "/api/v1/manage/providers/query",
+                headers=HEADERS,
+                json={"track_ids": [track["id"]], "interactive": True, "force": True},
+            ).status_code
+            == 200
+        )
+        providers.step()
+
+        # Now query ONLY fixture-source with custom title/artist; other providers stay!
+        recorded_queries.clear()
+        assert (
+            client.post(
+                "/api/v1/manage/providers/query",
+                headers=HEADERS,
+                json={
+                    "track_ids": [track["id"]],
+                    "sources": ["fixture-source"],
+                    "interactive": True,
+                    "force": True,
+                    "query_title": "自定义歌名",
+                    "query_artist": "自定义艺人",
+                },
+            ).status_code
+            == 200
+        )
+        providers.step()
+        assert recorded_queries == ["自定义歌名 自定义艺人"]
+        after = client.get(f"/api/v1/manage/providers/tracks/{track['id']}").json()
+        assert {"fixture-source", "musicbrainz", "lastfm"}.issubset(
+            {item["provider"] for item in after["suggestions"]}
+        )

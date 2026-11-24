@@ -346,11 +346,29 @@
   height: 4px;
   margin-block: 8px;
 }
-.lyric-candidate-filters {
-  margin-top: 12px;
+.lyric-source-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
 }
+.lyric-source-selector button,
 .lyric-candidate-filters button {
   white-space: nowrap;
+}
+.lyric-source-selector button {
+  padding: 6px 12px;
+  font-size: 12px;
+  min-height: 32px;
+}
+.lyric-source-selector button[aria-pressed='true'],
+.lyric-candidate-filters button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: rgb(var(--accent-rgb) / 12%);
+}
+.lyric-candidate-filters {
+  margin-top: 12px;
 }
 .lyric-candidate {
   display: grid;

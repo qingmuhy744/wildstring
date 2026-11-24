@@ -1,15 +1,17 @@
 """Source-plugin orchestration keeps permissions and matching in WildString."""
 
 import json
+import re
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from difflib import SequenceMatcher
+from typing import Annotated
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi import Request as APIRequest
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -32,6 +34,74 @@ class PluginSettings(BaseModel):
     priority: int = Field(default=50, ge=0, le=100)
     config: dict[str, str] = Field(default_factory=dict, max_length=20)
     clear_secrets: list[str] = Field(default_factory=list, max_length=10)
+
+
+class LyricQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plugin_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
+
+
+_NOISE_TAG = re.compile(
+    r"\[\s*([^\[\]]+?)\s*\]|【\s*([^【】]+?)\s*】|\(\s*([^()]+?)\s*\)|（\s*([^（）]+?)\s*）"
+)
+_NOISE_TERM = (
+    r"(?:flac|wav|ape|alac|dsd|dff|dsf|aac|mp3|m4a|ogg|opus|wma|"
+    r"lossless|无损|母带|hi-?res|hires|sq|hq|mq|cd|"
+    r"explicit|clean|"
+    r"official\s+(?:music\s+|lyric\s+)?(?:audio|video)|official\s+visualizer|"
+    r"lyric\s+video|music\s+video|visualizer|mv|pv|audio|hd|uhd|4k|1080p|"
+    r"\d+\s*kbps|\d+\s*bit(?:\s*/\s*\d+(?:\.\d+)?\s*k(?:hz)?)?|\d+(?:\.\d+)?\s*khz)"
+)
+_NOISE_CONTENT = re.compile(rf"(?i)^{_NOISE_TERM}(?:[\s/,|·+-]+{_NOISE_TERM})*$")
+
+
+def clean_search_text(value: str) -> str:
+    """Strip bracketed technical/packaging noise while keeping musical version markers."""
+    original = (value or "").strip()
+    if not original:
+        return ""
+    stripped = _NOISE_TAG.sub(
+        lambda m: (
+            ""
+            if _NOISE_CONTENT.fullmatch(next(g for g in m.groups() if g is not None).strip())
+            else m.group(0)
+        ),
+        original,
+    )
+    cleaned = re.sub(r"\s{2,}", " ", stripped).strip()
+    return cleaned or original
+
+
+def search_query(
+    track: dict,
+    *,
+    query_title: str | None = None,
+    query_artist: str | None = None,
+) -> dict:
+    """Build normalized search title, artists, and combined query keyword."""
+    title = (
+        query_title.strip()
+        if query_title and query_title.strip()
+        else clean_search_text(str(track.get("title") or ""))
+    )
+    if query_artist and query_artist.strip():
+        artists = [
+            part.strip() for part in re.split(r"[,;/、]+", query_artist.strip()) if part.strip()
+        ]
+    else:
+        artists = [
+            cleaned
+            for item in track.get("artists", [])
+            if (cleaned := clean_search_text(str(item)))
+        ]
+    keyword = (title + (" " + " ".join(artists) if artists else "")).strip()[:200]
+    return {
+        "title": title,
+        "artists": artists,
+        "album": track.get("album"),
+        "duration_ms": track.get("duration_ms"),
+        "keyword": keyword,
+    }
 
 
 def matching(track, candidate):
@@ -300,10 +370,14 @@ class MusicSources:
         *,
         force=False,
         batch_id=None,
-        interval_seconds=5,
+        interval_seconds=None,
         include_release=True,
         interactive=False,
+        query_title=None,
+        query_artist=None,
     ):
+        if interval_seconds is None:
+            interval_seconds = 0.8 if (interactive and not batch_id) else 5
         configuration = self.settings(identity)
         context = PluginContext(self, identity, configuration)
         context.force, context.batch_id, context.interval_seconds = (
@@ -315,7 +389,17 @@ class MusicSources:
         if batch_id:
             context.deadline = time.monotonic() + max(180, interval_seconds * 12 + 120)
         plugin = self.plugins[identity]
-        query = (track["title"] + " " + " ".join(track.get("artists", [])))[:200]
+        parsed_query = search_query(track, query_title=query_title, query_artist=query_artist)
+        effective_track = (
+            track
+            if not (query_title and query_title.strip())
+            and not (query_artist and query_artist.strip())
+            else track | {"title": parsed_query["title"], "artists": parsed_query["artists"]}
+        )
+        query = (
+            parsed_query["keyword"]
+            or (track["title"] + " " + " ".join(track.get("artists", [])))[:200]
+        )
         candidates = plugin.search(context, query)
         if not isinstance(candidates, list):
             raise PluginError("source_plugin_invalid_response")
@@ -323,7 +407,7 @@ class MusicSources:
         summaries = []
         for row in candidates[:3]:
             try:
-                summary = self.candidate(track, row)
+                summary = self.candidate(effective_track, row)
             except (PluginError, ValidationError):
                 continue
             valid_candidates.append(row)
@@ -357,7 +441,7 @@ class MusicSources:
         result = {}
         for row in details:
             try:
-                detail = self.candidate(track, row, full=True)
+                detail = self.candidate(effective_track, row, full=True)
             except (PluginError, ValidationError):
                 continue
             if detail["id"] in valid_ids:
@@ -414,16 +498,45 @@ class MusicSources:
         }
         return detail | {"match": matching(track, detail)}
 
-    def suggestions(self, track, *, interactive=False):
+    def available_lyric_sources(self):
+        return [
+            {"id": value["id"], "name": value["name"]}
+            for value in self.catalog()
+            if value["available"] and value["enabled"] and value["lyrics_enabled"]
+        ]
+
+    def suggestions(
+        self,
+        track,
+        *,
+        force=False,
+        interactive=False,
+        plugin_ids=None,
+        query_title=None,
+        query_artist=None,
+    ):
         output, warnings = [], []
+        selected = set(plugin_ids) if plugin_ids is not None else None
         configs = [
             config
             for config in self.catalog()
-            if config["available"] and config["enabled"] and config["metadata_enabled"]
+            if config["available"]
+            and config["enabled"]
+            and config["metadata_enabled"]
+            and (selected is None or config["id"] in selected)
         ]
+        if not configs:
+            return output, warnings
 
         def fetch(config):
-            candidates, context = self.candidates(track, config["id"], interactive=interactive)
+            candidates, context = self.candidates(
+                track,
+                config["id"],
+                force=force,
+                interactive=interactive,
+                query_title=query_title,
+                query_artist=query_artist,
+            )
             self.current(config["id"], context.configuration["version"])
             return [
                 (config["id"], row["source_url"], row["fields"], row.get("cover_url"), row["match"])
@@ -449,25 +562,35 @@ class MusicSources:
                     )
         return output, warnings
 
-    def enqueue_lyrics(self, track_id):
+    def enqueue_lyrics(self, track_id, *, plugin_ids=None):
         LyricsEditor(self.providers.repository).read(track_id)
-        if not any(
-            value["available"] and value["enabled"] and value["lyrics_enabled"]
-            for value in self.catalog()
-        ):
+        sources = self.available_lyric_sources()
+        if not sources:
             raise HTTPException(409, "source_plugins_disabled")
+        options_json = None
+        if plugin_ids is not None:
+            normalized_ids = list(dict.fromkeys(plugin_ids))
+            available_ids = {item["id"] for item in sources}
+            if not normalized_ids or any(item not in available_ids for item in normalized_ids):
+                raise HTTPException(422, "source_plugin_invalid_selection")
+            options_json = json.dumps({"plugin_ids": normalized_ids})
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT id FROM lyric_lookup_jobs j WHERE track_id=? AND status IN ('queued','running') AND NOT EXISTS (SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id)",
+                "SELECT id,status FROM lyric_lookup_jobs j WHERE track_id=? AND status IN ('queued','running') AND NOT EXISTS (SELECT 1 FROM lyric_scan_items i WHERE i.job_id=j.id)",
                 (track_id,),
             ).fetchone()
             if row:
+                if row["status"] == "queued":
+                    db.execute(
+                        "UPDATE lyric_lookup_jobs SET options=?,updated_at=? WHERE id=?",
+                        (options_json, time.time(), row["id"]),
+                    )
                 return {"id": row[0], "status": "queued"}
             identity = uuid4().hex
             db.execute(
-                "INSERT INTO lyric_lookup_jobs VALUES (?,?,'queued',NULL,'[]',?,?)",
-                (identity, track_id, time.time(), time.time()),
+                "INSERT INTO lyric_lookup_jobs(id,track_id,status,error,warnings,created_at,updated_at,options) VALUES (?,?,'queued',NULL,'[]',?,?,?)",
+                (identity, track_id, time.time(), time.time(), options_json),
             )
         return {"id": identity, "status": "queued"}
 
@@ -486,11 +609,17 @@ class MusicSources:
         warnings = []
         try:
             from wildstring.library.scope import library_job_scope
+            from wildstring.lyric_quality import matched, quality
+
+            options = json.loads(job["options"]) if job["options"] else {}
+            selected_ids = (
+                set(options["plugin_ids"]) if options.get("plugin_ids") is not None else None
+            )
 
             with library_job_scope(self.database, "lyric_lookup_jobs", job["id"], job["track_id"]):
                 with self.database.connect(write=True) as db:
                     db.execute(
-                        "DELETE FROM lyric_candidates WHERE track_id=? AND job_id IN (SELECT id FROM lyric_lookup_jobs WHERE status NOT IN ('queued','running','paused')) AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
+                        "DELETE FROM lyric_candidates WHERE track_id=? AND job_id IN (SELECT id FROM lyric_lookup_jobs WHERE status NOT IN ('queued','running','paused')) AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT c2.id FROM lyric_candidates c2 WHERE c2.track_id=lyric_candidates.track_id AND c2.plugin_id=lyric_candidates.plugin_id ORDER BY c2.created_at DESC, c2.id DESC LIMIT 4) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
                         (job["track_id"], job["track_id"]),
                     )
                     db.execute(
@@ -502,7 +631,10 @@ class MusicSources:
                 configs = [
                     config
                     for config in self.catalog()
-                    if config["available"] and config["enabled"] and config["lyrics_enabled"]
+                    if config["available"]
+                    and config["enabled"]
+                    and config["lyrics_enabled"]
+                    and (selected_ids is None or config["id"] in selected_ids)
                 ]
 
                 def fetch(config):
@@ -552,25 +684,28 @@ class MusicSources:
                                     time.time(),
                                 ),
                             )
+                        if matched(candidate) and quality(normalized)["level"] >= 5:
+                            break
 
-                with ThreadPoolExecutor(max_workers=max(1, len(configs))) as pool:
-                    futures = [
-                        (config, pool.submit(copy_context().run, fetch, config))
-                        for config in configs
-                    ]
-                    for config, future in futures:
-                        try:
-                            future.result()
-                        except Exception as error:
-                            warnings.append(
-                                config["id"]
-                                + ":"
-                                + (
-                                    error.code
-                                    if isinstance(error, PluginError)
-                                    else "source_plugin_invalid_response"
+                if configs:
+                    with ThreadPoolExecutor(max_workers=max(1, len(configs))) as pool:
+                        futures = [
+                            (config, pool.submit(copy_context().run, fetch, config))
+                            for config in configs
+                        ]
+                        for config, future in futures:
+                            try:
+                                future.result()
+                            except Exception as error:
+                                warnings.append(
+                                    config["id"]
+                                    + ":"
+                                    + (
+                                        error.code
+                                        if isinstance(error, PluginError)
+                                        else "source_plugin_invalid_response"
+                                    )
                                 )
-                            )
                 with self.database.connect(write=True) as db:
                     count = db.execute(
                         "SELECT count(*) FROM lyric_candidates WHERE job_id=?", (job["id"],)
@@ -605,7 +740,7 @@ class MusicSources:
             rows = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT * FROM lyric_candidates WHERE track_id=? ORDER BY created_at DESC LIMIT 30",
+                    "SELECT * FROM lyric_candidates WHERE track_id=? ORDER BY created_at DESC LIMIT 50",
                     (track_id,),
                 )
             ]
@@ -631,7 +766,7 @@ class MusicSources:
                 -value["created_at"],
             )
         )
-        return {"items": rows, "jobs": jobs}
+        return {"items": rows, "jobs": jobs, "sources": self.available_lyric_sources()}
 
     def apply(self, identity, body, scan_item=None):
         editor = LyricsEditor(self.providers.repository)
@@ -820,8 +955,8 @@ class MusicSources:
             return self.results(track_id)
 
         @router.post("/manage/tracks/{track_id}/online-lyrics", dependencies=mutation)
-        def query(track_id: str, user=admin):
-            return self.enqueue_lyrics(track_id)
+        def query(track_id: str, user=admin, body: Annotated[LyricQuery | None, Body()] = None):
+            return self.enqueue_lyrics(track_id, plugin_ids=body.plugin_ids if body else None)
 
         @router.post("/manage/lyric-candidates/{identity}/apply", dependencies=mutation)
         def apply(identity: str, body: LyricChoice, user=admin):
