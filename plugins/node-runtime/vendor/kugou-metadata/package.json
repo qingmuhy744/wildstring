@@ -6,7 +6,7 @@
   "description": "Reviewed upstream metadata subset; see UPSTREAM.json",
   "dependencies": {
     "@wildstring/native-rsa": "1.0.0",
-    "axios": "^1.21.1",
+    "axios": "^1.21.0",
     "big-integer": "^1.6.52",
     "crypto-js": "^4.2.0",
     "pako": "^3.0.3"
