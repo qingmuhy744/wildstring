@@ -128,8 +128,11 @@ class BookPlaybackService : MediaSessionService() {
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == SLEEP_STATUS) {
                         val remainingMin = if (sleepEndElapsedMs > 0L) {
-                            ((sleepEndElapsedMs - SystemClock.elapsedRealtime() + 59_999L) / 60_000L).toInt().coerceAtLeast(0)
-                        } else 0
+                            val remainingMs = (sleepEndElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                            ((remainingMs + 59_999L) / 60_000L).toInt()
+                        } else {
+                            0
+                        }
                         return Futures.immediateFuture(
                             SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putInt("minutes", remainingMin) }),
                         )
