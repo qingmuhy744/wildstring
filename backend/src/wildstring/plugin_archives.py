@@ -333,6 +333,7 @@ def execute_serial(plugin, context, method, value, cache_key):
             "plugin_id": plugin.manifest.id,
             "interval_seconds": context.interval_seconds,
             "batch_id": context.batch_id,
+            "interactive": bool(context.interactive),
         },
     }
     if not plugin.manifest.request_pacing:

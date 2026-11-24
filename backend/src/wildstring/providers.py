@@ -12,7 +12,9 @@ import shutil
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from contextvars import copy_context
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated, Literal
@@ -463,6 +465,56 @@ class Providers:
             )
         return result
 
+    @staticmethod
+    def _merge_job_options(existing_json, incoming_json, *, interactive):
+        if incoming_json == existing_json:
+            return existing_json
+        existing = json.loads(existing_json) if existing_json else {}
+        incoming = json.loads(incoming_json) if incoming_json else {}
+        if incoming.get("query_title") or incoming.get("query_artist"):
+            return incoming_json
+        if (existing.get("query_title") or existing.get("query_artist")) and not incoming:
+            return incoming_json
+        if "sources" not in incoming:
+            return None
+        if "sources" not in existing:
+            merged_sources = incoming["sources"] if interactive else None
+        else:
+            merged_sources = list(dict.fromkeys([*existing["sources"], *incoming["sources"]]))
+        merged = {"sources": merged_sources} if merged_sources is not None else {}
+        return json.dumps(merged, ensure_ascii=False) if merged else None
+
+    def available_metadata_sources(self, config=None):
+        config = config or self.settings()
+        by_id = {}
+        if config["musicbrainz"]:
+            by_id["musicbrainz"] = {"id": "musicbrainz", "name": "MusicBrainz", "kind": "builtin"}
+        if config["lastfm"] and config["lastfm_configured"]:
+            by_id["lastfm"] = {"id": "lastfm", "name": "Last.fm", "kind": "builtin"}
+        for item in self.sources.catalog():
+            if item["available"] and item["enabled"] and item["metadata_enabled"]:
+                by_id[item["id"]] = {"id": item["id"], "name": item["name"], "kind": "plugin"}
+        ordered = []
+        for identity in self.source_priority(config):
+            if identity in by_id:
+                ordered.append(by_id.pop(identity))
+        ordered.extend(by_id.values())
+        return ordered
+
+    def _build_job_options(self, sources=None, query_title=None, query_artist=None, *, config=None):
+        options = {}
+        if sources is not None:
+            normalized = list(dict.fromkeys(sources))
+            available = {item["id"] for item in self.available_metadata_sources(config)}
+            if not normalized or any(item not in available for item in normalized):
+                raise HTTPException(422, "invalid_provider_sources")
+            options["sources"] = normalized
+        if query_title is not None and query_title.strip():
+            options["query_title"] = query_title.strip()
+        if query_artist is not None and query_artist.strip():
+            options["query_artist"] = query_artist.strip()
+        return json.dumps(options, ensure_ascii=False) if options else None
+
     def enqueue(
         self,
         track_ids=None,
@@ -472,13 +524,18 @@ class Providers:
         mode="all",
         force=False,
         track_batch=False,
+        sources=None,
+        query_title=None,
+        query_artist=None,
+        interactive=None,
     ):
         from wildstring.provider_batches import record_batch
 
         config = self.settings()
         if not config["enabled"]:
             raise HTTPException(409, "providers_disabled")
-        interactive = scope == "track"
+        interactive = (scope == "track") if interactive is None else bool(interactive)
+        options_json = self._build_job_options(sources, query_title, query_artist, config=config)
         ids = list(dict.fromkeys(track_ids or []))
         library_id = self.repository.library_id(create=track_batch)
         batch_id = None
@@ -507,15 +564,33 @@ class Providers:
                 raise HTTPException(404, "track_not_found")
             clock = time.time()
             existing_active = connection.execute(
-                "SELECT id,track_id,metadata_version,status,refresh_mode,force,interactive FROM provider_jobs "
+                "SELECT id,track_id,metadata_version,status,refresh_mode,force,interactive,options FROM provider_jobs "
                 "WHERE status IN ('queued','running') AND track_id IN "
                 "(SELECT value FROM json_each(?))",
                 (json.dumps([row["id"] for row in rows]),),
             ).fetchall()
+            existing_intents = {
+                row["track_id"]: row["options"]
+                for row in connection.execute(
+                    "SELECT track_id,options FROM provider_refresh_intents "
+                    "WHERE track_id IN (SELECT value FROM json_each(?))",
+                    (json.dumps([row["id"] for row in rows]),),
+                ).fetchall()
+            }
             inserted = connection.executemany(
-                "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive) VALUES (?,?,?,'queued',?,?,?,?,?)",
+                "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive,options) VALUES (?,?,?,'queued',?,?,?,?,?,?)",
                 [
-                    (uuid4().hex, row["id"], row["version"], clock, clock, mode, force, interactive)
+                    (
+                        uuid4().hex,
+                        row["id"],
+                        row["version"],
+                        clock,
+                        clock,
+                        mode,
+                        force,
+                        interactive,
+                        options_json,
+                    )
                     for row in rows
                 ],
             )
@@ -531,41 +606,55 @@ class Providers:
                 current = current_by_id[job["track_id"]]
                 merged_mode = "all" if mode == "all" or job["refresh_mode"] == "all" else "missing"
                 if job["status"] == "queued":
+                    merged_options = self._merge_job_options(
+                        job["options"], options_json, interactive=interactive
+                    )
                     changed = (
                         job["metadata_version"] != current["version"]
                         or merged_mode != job["refresh_mode"]
                         or (interactive and not job["interactive"])
                         or bool(force)
                         and not job["force"]
+                        or merged_options != job["options"]
                     )
                     if changed:
                         connection.execute(
-                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,interactive=MAX(interactive,?),next_attempt=CASE WHEN ? THEN 0 ELSE next_attempt END,updated_at=? WHERE id=?",
+                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,interactive=MAX(interactive,?),next_attempt=CASE WHEN ? THEN 0 ELSE next_attempt END,options=?,updated_at=? WHERE id=?",
                             (
                                 current["version"],
                                 merged_mode,
                                 int(bool(force or job["force"])),
                                 interactive,
                                 interactive,
+                                merged_options,
                                 clock,
                                 job["id"],
                             ),
                         )
                         upgraded += 1
-                elif job["metadata_version"] != current["version"]:
+                elif job["metadata_version"] != current["version"] or (
+                    interactive and options_json is not None and options_json != job["options"]
+                ):
+                    intent_options = self._merge_job_options(
+                        existing_intents.get(job["track_id"], job["options"]),
+                        options_json,
+                        interactive=interactive,
+                    )
                     connection.execute(
-                        """INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,interactive,created_at,updated_at)
-                        VALUES (?,?,?,?,?,?,?)
+                        """INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,interactive,options,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?,?)
                         ON CONFLICT(track_id) DO UPDATE SET metadata_version=excluded.metadata_version,
                         refresh_mode=CASE WHEN provider_refresh_intents.refresh_mode='all' OR excluded.refresh_mode='all' THEN 'all' ELSE 'missing' END,
                         force=MAX(provider_refresh_intents.force,excluded.force),
-                        interactive=MAX(provider_refresh_intents.interactive,excluded.interactive),updated_at=excluded.updated_at""",
+                        interactive=MAX(provider_refresh_intents.interactive,excluded.interactive),
+                        options=excluded.options,updated_at=excluded.updated_at""",
                         (
                             job["track_id"],
                             current["version"],
                             merged_mode,
                             int(bool(force or job["force"])),
                             interactive,
+                            intent_options,
                             clock,
                             clock,
                         ),
@@ -657,18 +746,49 @@ class Providers:
                 continue
         return sorted(matches.values(), key=lambda item: item["match"]["score"], reverse=True)[:3]
 
-    def suggestions(self, track, *, force=False, interactive=False):
+    def suggestions(
+        self,
+        track,
+        *,
+        force=False,
+        interactive=False,
+        sources=None,
+        query_title=None,
+        query_artist=None,
+    ):
         output, warnings = [], []
         config = self.settings()
-        local_cover = bool(track.get("has_cover"))
-        if config["caa"] and not local_cover:
-            from wildstring.library.assets import TrackAssets
+        allowed = set(sources) if sources is not None else None
+        has_query_override = bool(
+            (query_title and query_title.strip()) or (query_artist and query_artist.strip())
+        )
+        if has_query_override:
+            effective_title = (
+                query_title.strip() if query_title and query_title.strip() else track["title"]
+            )
+            effective_artists = (
+                [
+                    part.strip()
+                    for part in re.split(r"[,;/、]+", query_artist.strip())
+                    if part.strip()
+                ]
+                if query_artist and query_artist.strip()
+                else track.get("artists", [])
+            )
+            effective_track = track | {"title": effective_title, "artists": effective_artists}
+        else:
+            effective_track = track
 
-            with suppress(HTTPException):
-                local_cover = TrackAssets(self.repository).cover(track["id"], 96) is not None
-        if config["musicbrainz"]:
+        def fetch_musicbrainz():
+            mb_output, mb_warnings = [], []
+            local_cover = bool(track.get("has_cover"))
+            if config["caa"] and not local_cover:
+                from wildstring.library.assets import TrackAssets
+
+                with suppress(HTTPException):
+                    local_cover = TrackAssets(self.repository).cover(track["id"], 96) is not None
             recordings = []
-            if config["acoustid"]:
+            if config["acoustid"] and not has_query_override:
                 try:
                     recordings = self.identify(track, force=force)
                 except (
@@ -679,13 +799,15 @@ class Providers:
                     ValueError,
                     AttributeError,
                 ) as error:
-                    warnings.append(
+                    mb_warnings.append(
                         error.code
                         if isinstance(error, ProviderError | FingerprintError)
                         else "acoustid_invalid_response"
                     )
             try:
-                identity = track.get("external_ids", {}).get("recording")
+                identity = (
+                    None if has_query_override else track.get("external_ids", {}).get("recording")
+                )
                 if not recordings and identity:
                     recordings = [{"id": str(UUID(identity))}]
                 elif not recordings:
@@ -693,9 +815,9 @@ class Providers:
                     def escape(text):
                         return re.sub(r'([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)', r"\\\1", text)
 
-                    query = f'recording:"{escape(track["title"])}"'
-                    if track["artists"]:
-                        query += f' AND artist:"{escape(track["artists"][0])}"'
+                    query = f'recording:"{escape(effective_track["title"])}"'
+                    if effective_track["artists"]:
+                        query += f' AND artist:"{escape(effective_track["artists"][0])}"'
                     recordings = self.cached(
                         "musicbrainz",
                         query,
@@ -771,7 +893,7 @@ class Providers:
                                         ),
                                         None,
                                     )
-                        output.append(
+                        mb_output.append(
                             (
                                 "musicbrainz",
                                 f"https://musicbrainz.org/recording/{recording['id']}",
@@ -781,17 +903,20 @@ class Providers:
                             )
                         )
             except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
-                warnings.append(
+                mb_warnings.append(
                     error.code
                     if isinstance(error, ProviderError)
                     else "musicbrainz_invalid_response"
                 )
-        if config["lastfm"] and config["lastfm_configured"] and track["artists"]:
+            return mb_output, mb_warnings
+
+        def fetch_lastfm():
+            lf_output, lf_warnings = [], []
             try:
                 params = {
                     "method": "track.getInfo",
-                    "artist": track["artists"][0],
-                    "track": track["title"],
+                    "artist": effective_track["artists"][0],
+                    "track": effective_track["title"],
                     "autocorrect": 0,
                 }
                 result = self.cached(
@@ -802,13 +927,13 @@ class Providers:
                 }
                 if result.get("wiki", {}).get("summary"):
                     fields["description"] = re.sub("<[^>]+>", "", result["wiki"]["summary"])[:4096]
-                output.append(
+                lf_output.append(
                     (
                         "lastfm",
                         "https://www.last.fm/music/"
-                        + quote(track["artists"][0], safe="")
+                        + quote(effective_track["artists"][0], safe="")
                         + "/_/"
-                        + quote(track["title"], safe=""),
+                        + quote(effective_track["title"], safe=""),
                         fields,
                         None,
                         {},
@@ -816,22 +941,66 @@ class Providers:
                 )
             except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
                 if not isinstance(error, ProviderError) or error.code != "lastfm_track_not_found":
-                    warnings.append(
+                    lf_warnings.append(
                         error.code
                         if isinstance(error, ProviderError)
                         else "lastfm_invalid_response"
                     )
-        plugin_output, plugin_warnings = self.sources.suggestions(track, interactive=interactive)
-        output.extend(plugin_output)
-        warnings.extend(plugin_warnings)
-        priority = self.source_priority()
+            return lf_output, lf_warnings
+
+        plugin_ids = (
+            [item for item in sources if item not in {"musicbrainz", "lastfm"}]
+            if sources is not None
+            else None
+        )
+
+        def fetch_plugins():
+            kwargs = {"interactive": interactive}
+            if force:
+                kwargs["force"] = force
+            if plugin_ids is not None:
+                kwargs["plugin_ids"] = plugin_ids
+            if query_title is not None and query_title.strip():
+                kwargs["query_title"] = query_title.strip()
+            if query_artist is not None and query_artist.strip():
+                kwargs["query_artist"] = query_artist.strip()
+            return self.sources.suggestions(track, **kwargs)
+
+        branches = []
+        if config["musicbrainz"] and (allowed is None or "musicbrainz" in allowed):
+            branches.append(fetch_musicbrainz)
+        if (
+            config["lastfm"]
+            and config["lastfm_configured"]
+            and effective_track["artists"]
+            and (allowed is None or "lastfm" in allowed)
+        ):
+            branches.append(fetch_lastfm)
+        if self.sources is not None and (plugin_ids is None or len(plugin_ids) > 0):
+            branches.append(fetch_plugins)
+
+        if len(branches) == 1:
+            branch_output, branch_warnings = branches[0]()
+            output.extend(branch_output)
+            warnings.extend(branch_warnings)
+        elif len(branches) > 1:
+            with ThreadPoolExecutor(max_workers=len(branches)) as pool:
+                futures = [pool.submit(copy_context().run, branch) for branch in branches]
+                for future in futures:
+                    branch_output, branch_warnings = future.result()
+                    output.extend(branch_output)
+                    warnings.extend(branch_warnings)
+
+        priority = self.source_priority(config)
         output.sort(
             key=lambda item: priority.index(item[0]) if item[0] in priority else len(priority)
         )
         return output, warnings
 
-    def source_priority(self):
-        return [value["id"] for value in self.sources.catalog()] + self.settings()["priority"]
+    def source_priority(self, config=None):
+        return [value["id"] for value in self.sources.catalog()] + (config or self.settings())[
+            "priority"
+        ]
 
     def process_job(self, job):
         from wildstring.library.scope import library_job_scope
@@ -857,7 +1026,7 @@ class Providers:
         if latest is not None:
             successor = uuid4().hex
             connection.execute(
-                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive) VALUES (?,?,?,'queued',?,?,?,?,?)",
+                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force,interactive,options) VALUES (?,?,?,'queued',?,?,?,?,?,?)",
                 (
                     successor,
                     job["track_id"],
@@ -867,6 +1036,7 @@ class Providers:
                     intent["refresh_mode"],
                     intent["force"],
                     intent["interactive"],
+                    dict(intent).get("options"),
                 ),
             )
             connection.execute(
@@ -881,8 +1051,20 @@ class Providers:
         track = self.repository.track(job["track_id"])
         if track is None:
             raise ProviderError("track_not_found", False)
+        raw_options = dict(job).get("options")
+        options = json.loads(raw_options) if raw_options else {}
+        extra_kwargs = {}
+        if options.get("sources") is not None:
+            extra_kwargs["sources"] = options["sources"]
+        if options.get("query_title") is not None:
+            extra_kwargs["query_title"] = options["query_title"]
+        if options.get("query_artist") is not None:
+            extra_kwargs["query_artist"] = options["query_artist"]
         suggestions, warnings = self.suggestions(
-            track, force=bool(job["force"]), interactive=bool(job["interactive"])
+            track,
+            force=bool(job["force"]),
+            interactive=bool(job["interactive"]),
+            **extra_kwargs,
         )
         from wildstring.library.scope import require_current_library
 
@@ -1416,9 +1598,22 @@ class Providers:
                         self.secrets(credentials)
             return self.settings()
 
+        @router.get("/manage/providers/sources")
+        def list_sources(user: admin):
+            return {"items": self.available_metadata_sources()}
+
         @router.post("/manage/providers/query", dependencies=mutation)
         def query(body: BatchQuery, user: admin):
-            return self.enqueue(body.track_ids)
+            if (body.query_title or body.query_artist) and len(body.track_ids) != 1:
+                raise HTTPException(422, "invalid_query_override")
+            return self.enqueue(
+                body.track_ids,
+                force=body.force,
+                interactive=body.interactive,
+                sources=body.sources,
+                query_title=body.query_title,
+                query_artist=body.query_artist,
+            )
 
         @router.post("/manage/providers/refresh", dependencies=mutation)
         def refresh(body: RefreshQuery, user: admin):
@@ -1430,6 +1625,7 @@ class Providers:
                 mode=body.mode,
                 force=body.force,
                 track_batch=True,
+                sources=body.sources,
             )
 
         @router.get("/manage/providers/refresh/{batch_id}")
@@ -1538,6 +1734,7 @@ class Providers:
                 "jobs": jobs,
                 "provider_names": {value["id"]: value["name"] for value in self.sources.catalog()}
                 | {"musicbrainz": "MusicBrainz", "lastfm": "Last.fm"},
+                "available_sources": self.available_metadata_sources(),
             }
 
         @router.post("/manage/providers/suggestions/{identity}/apply", dependencies=mutation)
@@ -1790,7 +1987,13 @@ class ProviderSettings(BaseModel):
 
 
 class BatchQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     track_ids: list[str] = Field(min_length=1, max_length=100)
+    sources: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    force: bool = False
+    interactive: bool = False
+    query_title: str | None = Field(default=None, max_length=300)
+    query_artist: str | None = Field(default=None, max_length=300)
 
 
 class RefreshQuery(BaseModel):
@@ -1799,6 +2002,7 @@ class RefreshQuery(BaseModel):
     id: str | None = Field(default=None, min_length=1, max_length=128)
     mode: Literal["missing", "all"] = "missing"
     force: bool = False
+    sources: list[str] | None = Field(default=None, min_length=1, max_length=20)
 
 
 class ApplySuggestion(BaseModel):

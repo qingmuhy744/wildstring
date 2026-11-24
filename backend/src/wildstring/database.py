@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 55
+SCHEMA_VERSION = 56
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -733,6 +733,22 @@ class Database:
                         "lyric_scan_items(track_id) WHERE status='running'"
                     )
                     connection.execute("PRAGMA user_version = 55")
+            if current < 56:
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    for table in (
+                        "lyric_lookup_jobs",
+                        "provider_jobs",
+                        "provider_refresh_intents",
+                    ):
+                        if not any(
+                            row[1] == "options"
+                            for row in connection.execute(f"PRAGMA table_info({table})")
+                        ):
+                            connection.execute(  # nosec B608 -- fixed table names above
+                                f"ALTER TABLE {table} ADD COLUMN options TEXT"
+                            )
+                    connection.execute("PRAGMA user_version = 56")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
             )

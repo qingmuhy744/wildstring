@@ -428,7 +428,7 @@ def test_upgrade_retires_v1_plugin_and_preserves_library_evidence(
                 ("old-batch", library_id, options),
             )
             connection.execute(
-                "INSERT INTO lyric_lookup_jobs VALUES (?,?,'queued',NULL,'[]',1,1)",
+                "INSERT INTO lyric_lookup_jobs(id,track_id,status,error,warnings,created_at,updated_at) VALUES (?,?,'queued',NULL,'[]',1,1)",
                 ("old-batch-job", track["id"]),
             )
             connection.execute(
@@ -548,7 +548,7 @@ def test_manual_lyric_job_survives_pending_batch_and_newer_batch_history(
                     (batch_id, library_id, '{"providers": []}', index + 10, index + 10),
                 )
                 connection.execute(
-                    "INSERT INTO lyric_lookup_jobs VALUES (?,?,?,NULL,'[]',?,?)",
+                    "INSERT INTO lyric_lookup_jobs(id,track_id,status,error,warnings,created_at,updated_at) VALUES (?,?,?,NULL,'[]',?,?)",
                     (job_id, track["id"], status, index + 10, index + 10),
                 )
                 connection.execute(
@@ -614,3 +614,311 @@ def test_lyric_candidates_skip_invalid_rows_and_prefer_accepted_versions(
     assert detail_requests == (
         [{"candidates": [summary, live], "include_release": False}] if needs_details else []
     )
+
+
+def test_interactive_gate_uses_0_8s_and_preserves_scheduled_batch_next_at(
+    settings, authenticated_client
+):
+    import time
+
+    from wildstring.plugin_rate import permit, wait
+
+    with authenticated_client(settings) as client:
+        db = client.app.state.providers.database
+        now = time.time()
+        batch_next_at = now + 30.0
+        with db.connect(write=True) as conn:
+            conn.execute(
+                "INSERT INTO plugin_request_gates VALUES (?,?,?,?,?)",
+                ("fixture-source", batch_next_at, 0.0, now - 2.0, None),
+            )
+        policy = {
+            "database": str(db.path),
+            "plugin_id": "fixture-source",
+            "interval_seconds": 0.8,
+            "interactive": True,
+            "batch_id": None,
+        }
+        # Interactive single-track query must NOT wait for batch_next_at (+30s).
+        assert permit(policy, clock=now) == 0
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT next_at,last_at FROM plugin_request_gates WHERE plugin_id='fixture-source'"
+            ).fetchone()
+        assert row["next_at"] >= batch_next_at
+        assert row["last_at"] >= now
+
+        # Follow-up interactive request within 0.8s waits >= 0.75s via wait() without lowering next_at.
+        started = time.monotonic()
+        wait(policy)
+        elapsed = time.monotonic() - started
+        assert elapsed >= 0.7
+        with db.connect() as conn:
+            row2 = conn.execute(
+                "SELECT next_at FROM plugin_request_gates WHERE plugin_id='fixture-source'"
+            ).fetchone()
+        assert row2["next_at"] >= batch_next_at
+
+
+def test_manual_lyric_short_circuits_after_matched_level5_candidate(
+    settings, authenticated_client, monkeypatch
+):
+    from wildstring.music_sources import MusicSources
+
+    monkeypatch.setattr(Providers, "start", lambda self: None)
+    music(settings, "短剧.flac", ["合成歌手"], ["合成专辑"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        assert client.post(BASE + "/import", headers=HEADERS, content=package()).status_code == 200
+        assert (
+            client.put(
+                BASE + "/fixture-source",
+                headers=HEADERS,
+                json={"version": 1, "enabled": True},
+            ).status_code
+            == 200
+        )
+        real_plugin = providers.sources.plugins["fixture-source"]
+        lyric_calls = []
+
+        class StubPlugin:
+            def __getattr__(self, name):
+                return getattr(real_plugin, name)
+
+            def search(self, _ctx, _query):
+                return [
+                    {
+                        "id": "first",
+                        "title": track["title"],
+                        "artists": track["artists"],
+                        "duration_ms": track["duration_ms"],
+                        "source_url": "https://example.com/1",
+                    },
+                    {
+                        "id": "second",
+                        "title": track["title"],
+                        "artists": track["artists"],
+                        "duration_ms": track["duration_ms"],
+                        "source_url": "https://example.com/2",
+                    },
+                ]
+
+            def metadata(self, _ctx, req):
+                return [
+                    c | {"fields": {"title": c["title"], "artists": c["artists"]}}
+                    for c in req["candidates"]
+                ]
+
+            def lyrics(self, _ctx, candidate):
+                lyric_calls.append(candidate["id"])
+                return {
+                    "format": "lrc",
+                    "original": "[00:01.00]行",
+                    "normalized": {
+                        "format": "lrc",
+                        "kind": "synced",
+                        "layers": {"translation": [{"time_ms": 1000, "text": "line"}]},
+                        "lines": [
+                            {
+                                "time_ms": 1000,
+                                "end_ms": 2000,
+                                "text": "行",
+                                "words": [{"start_ms": 1000, "end_ms": 2000, "text": "行"}],
+                            }
+                        ],
+                    },
+                }
+
+        stub_plugin = StubPlugin()
+        monkeypatch.setattr(
+            MusicSources, "plugins", property(lambda _self: {"fixture-source": stub_plugin})
+        )
+        endpoint = f"/api/v1/manage/tracks/{track['id']}/online-lyrics"
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        assert providers.sources.step()
+        assert lyric_calls == ["first"]
+
+        # Level 3 (bilingual line-timed, not word-timed) does NOT short-circuit.
+        lyric_calls.clear()
+
+        class LinePlugin(StubPlugin):
+            def lyrics(self, _ctx, candidate):
+                lyric_calls.append(candidate["id"])
+                return {
+                    "format": "lrc",
+                    "original": "[00:01.00]行",
+                    "normalized": {
+                        "format": "lrc",
+                        "kind": "synced",
+                        "layers": {"translation": [{"time_ms": 1000, "text": "line"}]},
+                        "lines": [{"time_ms": 1000, "end_ms": 2000, "text": "行"}],
+                    },
+                }
+
+        line_plugin = LinePlugin()
+        monkeypatch.setattr(
+            MusicSources, "plugins", property(lambda _self: {"fixture-source": line_plugin})
+        )
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        assert providers.sources.step()
+        assert lyric_calls == ["first", "second"]
+
+
+def test_search_query_strips_technical_noise_and_keeps_version_markers():
+    from wildstring.music_sources import clean_search_text, search_query
+
+    assert clean_search_text("晴天 [FLAC 24bit/96kHz]") == "晴天"
+    assert clean_search_text("Song (Explicit) [Official Audio]") == "Song"
+    assert clean_search_text("稻香 (Official Music Video) 【无损】") == "稻香"
+    assert clean_search_text("晴天 (Live) [FLAC]") == "晴天 (Live)"
+    assert clean_search_text("晴天 (现场版) [24bit]") == "晴天 (现场版)"
+    assert clean_search_text("稻香 (Demo) [Hi-Res]") == "稻香 (Demo)"
+    assert clean_search_text("Track (Remastered 2020) (Clean)") == "Track (Remastered 2020)"
+    assert clean_search_text("Song (Acoustic) [Lossless]") == "Song (Acoustic)"
+    assert clean_search_text("Song (Instrumental) [320kbps]") == "Song (Instrumental)"
+    assert clean_search_text("  [FLAC]  ") == "[FLAC]"
+
+    parsed = search_query(
+        {"title": "晴天 [FLAC]", "artists": ["周杰伦 [SQ]"], "duration_ms": 269000},
+        query_title="七里香",
+        query_artist="Jay Chou",
+    )
+    assert parsed["title"] == "七里香"
+    assert parsed["artists"] == ["Jay Chou"]
+    assert parsed["keyword"] == "七里香 Jay Chou"
+
+
+def test_single_track_lyric_plugin_selection_and_candidate_retention(
+    settings, authenticated_client, monkeypatch
+):
+    from wildstring.music_sources import MusicSources
+
+    monkeypatch.setattr(Providers, "start", lambda self: None)
+    music(settings, "双源.flac", ["合成艺人"], ["合成专辑"])
+    scan_library(settings)
+    second_manifest = MANIFEST | {"id": "second-source", "name": "第二来源"}
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        assert client.post(BASE + "/import", headers=HEADERS, content=package()).status_code == 200
+        assert (
+            client.post(
+                BASE + "/import", headers=HEADERS, content=package(manifest=second_manifest)
+            ).status_code
+            == 200
+        )
+        for identity, priority in (("fixture-source", 10), ("second-source", 20)):
+            assert (
+                client.put(
+                    f"{BASE}/{identity}",
+                    headers=HEADERS,
+                    json={"version": 1, "enabled": True, "priority": priority},
+                ).status_code
+                == 200
+            )
+        real_plugins = providers.sources.plugins
+        calls = []
+
+        def fake_plugin(identity, lyric_text_value):
+            real = real_plugins[identity]
+
+            class Fake:
+                def __getattr__(self, name):
+                    return getattr(real, name)
+
+                def search(self, _ctx, _query):
+                    calls.append(identity)
+                    return [
+                        {
+                            "id": f"{identity}-song",
+                            "title": track["title"],
+                            "artists": track["artists"],
+                            "duration_ms": track["duration_ms"],
+                            "source_url": f"https://example.com/{identity}",
+                        }
+                    ]
+
+                def metadata(self, _ctx, req):
+                    return req["candidates"]
+
+                def lyrics(self, _ctx, _cand):
+                    return {
+                        "format": "lrc",
+                        "original": lyric_text_value,
+                        "normalized": {
+                            "format": "lrc",
+                            "kind": "synced",
+                            "layers": {},
+                            "lines": [{"time_ms": 1000, "text": lyric_text_value}],
+                        },
+                    }
+
+            return Fake()
+
+        patched_plugins = {
+            "fixture-source": fake_plugin("fixture-source", "[00:01]一"),
+            "second-source": fake_plugin("second-source", "[00:01]二"),
+        }
+        monkeypatch.setattr(MusicSources, "plugins", property(lambda _self: patched_plugins))
+        endpoint = f"/api/v1/manage/tracks/{track['id']}/online-lyrics"
+        initial = client.get(endpoint).json()
+        assert [s["id"] for s in initial["sources"]] == ["fixture-source", "second-source"]
+
+        invalid = client.post(endpoint, headers=HEADERS, json={"plugin_ids": ["unknown-source"]})
+        assert invalid.status_code == 422
+
+        assert client.post(endpoint, headers=HEADERS).status_code == 200
+        assert providers.sources.step()
+        assert set(calls) == {"fixture-source", "second-source"}
+
+        calls.clear()
+        for _ in range(6):
+            res = client.post(endpoint, headers=HEADERS, json={"plugin_ids": ["second-source"]})
+            assert res.status_code == 200
+            assert providers.sources.step()
+        assert calls == ["second-source"] * 6
+        final = client.get(endpoint).json()
+        plugins_present = {item["plugin_id"] for item in final["items"]}
+        assert plugins_present == {"fixture-source", "second-source"}
+
+
+def test_schema_55_to_56_migration_adds_options_and_keeps_jobs(settings):
+    from wildstring.database import SCHEMA_VERSION, Database
+
+    music(settings, "迁移.flac", ["合成歌手"], ["合成专辑"])
+    scan_library(settings)
+    db = Database(settings.data_dir)
+    db.initialize()
+    with db.connect(write=True) as conn:
+        track_id = conn.execute("SELECT id FROM tracks LIMIT 1").fetchone()[0]
+        conn.execute("PRAGMA user_version = 55")
+        for tbl in ("lyric_lookup_jobs", "provider_jobs", "provider_refresh_intents"):
+            if any(r[1] == "options" for r in conn.execute(f"PRAGMA table_info({tbl})")):
+                conn.execute(f"ALTER TABLE {tbl} DROP COLUMN options")
+        conn.execute(
+            "INSERT INTO lyric_lookup_jobs(id,track_id,status,error,warnings,created_at,updated_at) "
+            "VALUES ('job-55',?,'queued',NULL,'[]',1,1)",
+            (track_id,),
+        )
+        conn.execute(
+            "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at) "
+            "VALUES ('pjob-55',?,1,'queued',1,1)",
+            (track_id,),
+        )
+    migrated = Database(settings.data_dir)
+    migrated.initialize()
+    with migrated.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        for tbl in ("lyric_lookup_jobs", "provider_jobs", "provider_refresh_intents"):
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
+            assert "options" in cols
+        assert (
+            conn.execute("SELECT id FROM lyric_lookup_jobs WHERE id='job-55'").fetchone()[0]
+            == "job-55"
+        )
+        assert (
+            conn.execute("SELECT id FROM provider_jobs WHERE id='pjob-55'").fetchone()[0]
+            == "pjob-55"
+        )

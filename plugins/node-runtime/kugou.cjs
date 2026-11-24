@@ -18,8 +18,6 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', async () => {
   try {
     const data = JSON.parse(input);
-    const method = methods[data.path];
-    if (!method) throw Error('method');
     const cookie = Object.fromEntries(
       (data.cookie || '')
         .split(';')
@@ -29,9 +27,30 @@ process.stdin.on('end', async () => {
           return [v.slice(0, i).trim(), v.slice(i + 1).trim()];
         }),
     );
-    const result = await method({ ...data.parameters, cookie }, paced(data, (options) =>
-      request({ ...options, timeout: 12000 }),
-    ));
+    const run = paced(data, (options) => request({ ...options, timeout: 12000 }));
+    if (data.path === '/lyric/combined') {
+      const found = await methods['/search/lyric']({ ...data.parameters, cookie }, run);
+      const candidates = found.body?.candidates || found.body?.data?.candidates || [];
+      if (!candidates.length) {
+        process.stdout.write(JSON.stringify({ code: 200, error_code: 0, no_lyrics: true }));
+        process.exit(0);
+      }
+      const lyric = candidates[0];
+      const decoded = await methods['/lyric'](
+        { id: lyric.id, accesskey: lyric.accesskey, fmt: 'krc', decode: 'true', cookie },
+        run,
+      );
+      process.stdout.write(
+        JSON.stringify({
+          ...(decoded.body || {}),
+          lyric_id: String(lyric.id),
+        }),
+      );
+      process.exit(0);
+    }
+    const method = methods[data.path];
+    if (!method) throw Error('method');
+    const result = await method({ ...data.parameters, cookie }, run);
     process.stdout.write(JSON.stringify(result.body));
     process.exit(0);
   } catch (error) {

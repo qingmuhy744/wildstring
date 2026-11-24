@@ -1753,6 +1753,7 @@
     "selectTrackAria": "Select {{title}}",
     "skipTrackInBatch": "Skip this track in batch updates",
     "sourceIssuePrefix": "Source issue: ",
+    "sourcesLabel": "Search sources",
     "startAlbumScan": "Find lyrics",
     "startScan": "Start background scan",
     "statusApplied": "Applied",
@@ -2104,6 +2105,7 @@
     "retryProgress": "Retry query progress",
     "reviewBatch": "Review this batch",
     "reuseRecentLabel": "Reuse recent results",
+    "sourcesLabel": "Search sources",
     "startButton": "Start update",
     "statusReadError": "Unable to read batch status at this time. Tasks will not be resubmitted. You can retry the query or check task records in management.",
     "submitFailed": "Update not submitted. Please check network settings and try again.",
@@ -2555,6 +2557,7 @@
     "waitingForNetwork": "Waiting for an allowed download network."
   },
   "onlineMetadataMatcher": {
+    "allSources": "All",
     "applied": "✓ Filled below",
     "collapseMatcher": "Collapse online matching",
     "emptyPrompt": "No existing candidates. You can click \"Re-search online\" above, and the system will automatically look up the best match via enabled providers and MusicBrainz.",
@@ -2570,6 +2573,7 @@
     "searchButton": "Re-search online",
     "searchTitlePlaceholder": "Search title",
     "searching": "Searching online…",
+    "sourceSelectorAria": "Select search sources",
     "trackNo": "Track {{number}}",
     "unknownAlbum": "Unknown album",
     "unknownArtist": "Unknown artist",
@@ -3903,6 +3907,7 @@
   },
   "sourcePlugins": {
     "actionFailed": "Action incomplete.",
+    "allSources": "All",
     "auditionPaused": "Audition paused",
     "auditionPlaying": "Audition playing",
     "badgeBilingual": "Translation coverage {{pct}}%",
@@ -3967,6 +3972,7 @@
     "secretPlaceholder": "Configured, leave blank to keep",
     "seekLineTitle": "Click to jump and audition this line",
     "sourcePriority": "Source priority (0–100, lower is higher priority)",
+    "sourceSelectorAria": "Select lyric sources",
     "sourcesCount": "{{count}} source(s)",
     "startAudition": "Play to preview",
     "statusDisabled": "Disabled",

@@ -35,6 +35,10 @@ def clean(value):
 def bridge(context, path, parameters):
     if context.data["config"].get("base_url"):
         return context.bridge(path, parameters)
+    first_permitted = False
+    if context.data.get("rate") and callable(getattr(context, "throttle", None)):
+        context.throttle()
+        first_permitted = True
     environment = dict(os.environ)
     environment["TMPDIR"] = str(context.directory)
     mode = context.data["proxy_mode"]
@@ -60,6 +64,7 @@ def bridge(context, path, parameters):
                 "parameters": parameters,
                 "cookie": context.data["secrets"].get("cookie") or "",
                 "rate": context.data.get("rate"),
+                "first_permitted": first_permitted,
                 "rate_command": [sys.executable, "-I", "-m", "wildstring.plugin_rate"],
             }
         ).encode(),
@@ -170,7 +175,7 @@ class QQPlugin:
         "QQ 音乐 / QQMusicApi",
         "https://github.com/L-1124/QQMusicApi",
         "GPL-3.0-only",
-        version="2.0.0",
+        version="2.0.1",
         request_pacing=True,
         requires_modules=("qqmusic_api",),
         cover_hosts=("gtimg.cn",),
@@ -300,7 +305,7 @@ class NeteasePlugin:
         "网易云音乐 / API Enhanced",
         "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced",
         "GPL-3.0-only",
-        version="2.0.0",
+        version="2.0.1",
         request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("music.126.net",),
@@ -404,7 +409,7 @@ class KuGouPlugin:
         "酷狗音乐 / KuGouMusicApi",
         "https://github.com/MakcRe/KuGouMusicApi",
         "GPL-3.0-only",
-        version="2.0.0",
+        version="2.0.1",
         request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("kugou.com",),
@@ -508,16 +513,22 @@ class KuGouPlugin:
         return output
 
     def lyrics(self, context, candidate):
-        found = bridge(
-            context,
-            "/search/lyric",
-            {
-                "keywords": candidate["title"] + " " + " ".join(candidate["artists"]),
-                "hash": (candidate.get("token") or {}).get("hash") or "",
-                "duration": candidate["duration_ms"],
-                "man": "yes",
-            },
-        )
+        params = {
+            "keywords": candidate["title"] + " " + " ".join(candidate["artists"]),
+            "hash": (candidate.get("token") or {}).get("hash") or "",
+            "duration": candidate["duration_ms"],
+            "man": "yes",
+        }
+        if context is not None and not (context.data.get("config") or {}).get("base_url"):
+            data = bridge(context, "/lyric/combined", params)
+            if data.get("no_lyrics"):
+                raise PluginError("source_plugin_no_lyrics")
+            return {
+                "format": "krc",
+                "original": data.get("decodeContent", ""),
+                "lyric_id": str(data.get("lyric_id", "")),
+            }
+        found = bridge(context, "/search/lyric", params)
         choices = found.get("candidates") or found.get("data", {}).get("candidates") or []
         if not choices:
             raise PluginError("source_plugin_no_lyrics")

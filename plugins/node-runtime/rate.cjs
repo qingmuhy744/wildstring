@@ -61,9 +61,14 @@ function gate(data) {
 exports.paced = (data, request) => {
   let chain = Promise.resolve();
   let lastStart = -Infinity;
+  let firstPermitted = Boolean(data.first_permitted);
   return (...args) => {
     const task = chain.then(async () => {
-      await gate(data);
+      if (firstPermitted) {
+        firstPermitted = false;
+      } else {
+        await gate(data);
+      }
       // The gate subprocess may take different amounts of time to exit. Enforce the
       // interval at the actual HTTP start too, using a monotonic clock in this queue.
       const interval = Math.max(0, Number(data.rate?.interval_seconds) || 0) * 1000;

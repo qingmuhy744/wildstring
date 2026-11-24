@@ -29,6 +29,7 @@ class ScanOptions(BaseModel):
     rate_profile: Literal["low", "medium", "high", "custom"] | None = None
     interval_seconds: int = Field(default=10, ge=1, le=120)
     force: bool = False
+    plugin_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
 
 
 class ScanControl(BaseModel):
@@ -171,6 +172,30 @@ class LyricScans:
                 )
             ]
 
+    def available_sources(self):
+        return [
+            {"id": c["id"], "name": c["name"]}
+            for c in self.sources.catalog()
+            if c["enabled"] and c["lyrics_enabled"] and c["available"]
+        ]
+
+    def _select_configs(self, plugin_ids):
+        configs = [
+            c
+            for c in self.sources.catalog()
+            if c["enabled"] and c["lyrics_enabled"] and c["available"]
+        ]
+        if plugin_ids is None:
+            if not configs:
+                raise HTTPException(409, "source_plugins_disabled")
+            return configs
+        normalized = list(dict.fromkeys(plugin_ids))
+        available_ids = {c["id"] for c in configs}
+        if not normalized or any(pid not in available_ids for pid in normalized):
+            raise HTTPException(422, "lyric_scan_invalid_providers")
+        selected = set(normalized)
+        return [c for c in configs if c["id"] in selected]
+
     def create(self, body):
         defaults = self.settings()
         profile = body.rate_profile or defaults["default_profile"]
@@ -183,13 +208,7 @@ class LyricScans:
             }
         )
         tracks = self.tracks(body)
-        configs = [
-            c
-            for c in self.sources.catalog()
-            if c["enabled"] and c["lyrics_enabled"] and c["available"]
-        ]
-        if not configs:
-            raise HTTPException(409, "source_plugins_disabled")
+        configs = self._select_configs(body.plugin_ids)
         plugins = self.sources.plugins
         options = body.model_dump() | {
             "providers": [
@@ -656,7 +675,7 @@ class LyricScans:
             if not item["job_id"]:
                 item["job_id"] = uuid4().hex
                 db.execute(
-                    "INSERT INTO lyric_lookup_jobs VALUES (?,?,'running',NULL,'[]',?,?)",
+                    "INSERT INTO lyric_lookup_jobs(id,track_id,status,error,warnings,created_at,updated_at) VALUES (?,?,'running',NULL,'[]',?,?)",
                     (item["job_id"], item["track_id"], time.time(), time.time()),
                 )
                 db.execute(
@@ -901,8 +920,14 @@ class LyricScans:
                 ]
             return {"items": [self.read(i, limit=0) for i in ids]}
 
+        @router.get("/lyric-scans/sources")
+        def list_sources(user=admin):
+            return {"items": self.available_sources()}
+
         @router.post("/lyric-scans/preview", dependencies=mutation)
         def preview(body: ScanOptions, user=admin):
+            if body.plugin_ids is not None:
+                self._select_configs(body.plugin_ids)
             return {"total": len(self.tracks(body)), "options": body.model_dump()}
 
         @router.post("/lyric-scans", dependencies=mutation)

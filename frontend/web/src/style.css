@@ -5043,6 +5043,31 @@ textarea {
   min-height: 38px;
   box-sizing: border-box;
 }
+.source-checkbox-group {
+  display: grid;
+  gap: 8px;
+}
+.lyric-scan-sources {
+  grid-column: 1 / -1;
+}
+.source-checkbox-title {
+  font-size: 13px;
+  color: var(--muted);
+}
+.source-checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+.source-checkbox-list label.check-label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-block: 0;
+  min-height: 32px;
+}
 .lyric-scan-options input[type='number'] {
   width: 100%;
 }
@@ -5902,15 +5927,16 @@ dialog.scroll-dialog[open] {
 .matcher-search-bar {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: 10px 12px;
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
 .matcher-input-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  flex: 1;
-  min-width: 260px;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 .matcher-input-group label {
   display: flex;
@@ -5918,7 +5944,8 @@ dialog.scroll-dialog[open] {
   gap: 4px;
   font-size: 11px;
   color: var(--muted);
-  flex: 1;
+  flex: 1 1 130px;
+  min-width: 0;
 }
 .matcher-input-group input {
   height: 34px;
@@ -5926,17 +5953,39 @@ dialog.scroll-dialog[open] {
   padding: 6px 10px;
   font-size: 12px;
 }
+.matcher-search-bar:has(.matcher-source-chips) .matcher-input-group {
+  flex: 1 0 100%;
+}
 .matcher-search-bar .primary-button {
   height: 34px;
   min-height: 34px;
   padding: 0 14px;
   font-size: 12px;
   background: var(--accent);
-  color: #1a1815;
+  color: var(--on-accent);
   font-weight: 500;
   border: 0;
   border-radius: 6px;
   white-space: nowrap;
+  margin-inline-start: auto;
+}
+.matcher-source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 220px;
+}
+.matcher-source-chips button {
+  padding: 5px 10px;
+  min-height: 30px;
+  font-size: 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.matcher-source-chips button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: rgb(var(--accent-rgb) / 12%);
 }
 .matcher-results-caption {
   font-size: 12px;
@@ -5953,16 +6002,17 @@ dialog.scroll-dialog[open] {
 }
 .matcher-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   transition: border-color 0.15s;
 }
 .matcher-card:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--accent);
 }
 .matcher-card-art {
   width: 44px;
@@ -5970,7 +6020,7 @@ dialog.scroll-dialog[open] {
   min-width: 44px;
   border-radius: 4px;
   overflow: hidden;
-  background: #1c1a17;
+  background: var(--surface-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5988,7 +6038,7 @@ dialog.scroll-dialog[open] {
   height: 22px;
 }
 .matcher-card-info {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
 }
 .matcher-card-main {
@@ -6001,11 +6051,17 @@ dialog.scroll-dialog[open] {
   text-overflow: ellipsis;
 }
 .matcher-card-main strong {
-  color: var(--fg, #eee);
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .matcher-artist {
   color: var(--muted);
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .matcher-meta-dot {
   opacity: 0.5;
@@ -6014,48 +6070,51 @@ dialog.scroll-dialog[open] {
   font-size: 11px;
   color: var(--muted);
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 3px;
 }
 .matcher-card-badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 5px;
+  font-variant-numeric: tabular-nums;
 }
 .source-badge {
-  font-size: 10px;
+  font-size: 11px;
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--tag-bg);
   border-radius: 3px;
-  color: #ccc;
+  color: var(--text);
 }
 .score-badge {
-  font-size: 10px;
+  font-size: 11px;
   padding: 2px 6px;
-  background: rgba(144, 238, 144, 0.15);
-  color: #98fb98;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
   border-radius: 3px;
 }
 .matcher-card-action .fill-button {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--surface-subtle);
+  color: var(--text);
+  border: 1px solid var(--border);
   padding: 6px 12px;
   font-size: 12px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 .matcher-card-action .fill-button:hover {
   background: var(--accent);
-  color: #000;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 .matcher-card-action .applied-button {
-  background: rgba(144, 238, 144, 0.2);
-  color: #98fb98;
-  border: 1px solid #98fb98;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+  border: 1px solid var(--success);
   padding: 6px 12px;
   font-size: 12px;
   border-radius: 6px;
@@ -6067,7 +6126,7 @@ dialog.scroll-dialog[open] {
   color: var(--muted);
   padding: 12px;
   text-align: center;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface);
   border-radius: 6px;
 }
 

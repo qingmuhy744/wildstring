@@ -226,3 +226,47 @@ def test_bridge_preserves_structured_rate_error(monkeypatch, tmp_path):
         adapters.bridge(context, "/song/detail", {})
     assert error.value.upstream_429 is True
     assert error.value.retry_after == 12
+
+
+def test_kugou_combined_lyrics_uses_single_bridge_call_and_respects_base_url(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def fake_bridge(_context, path, params):
+        calls.append((path, params))
+        if path == "/lyric/combined":
+            return {"decodeContent": "[00:01]combined", "lyric_id": "88"}
+        if path == "/search/lyric":
+            return {"candidates": [{"id": 77, "accesskey": "k"}]}
+        return {"decodeContent": "[00:01]fallback"}
+
+    monkeypatch.setattr(adapters, "bridge", fake_bridge)
+    plugin = adapters.KuGouPlugin()
+    candidate = {
+        "id": "1",
+        "title": "Song",
+        "artists": ["Artist"],
+        "duration_ms": 180000,
+        "token": {"hash": "abc"},
+    }
+
+    # With context and empty base_url: uses single /lyric/combined call.
+    calls.clear()
+    ctx_builtin = SimpleNamespace(data={"config": {}})
+    result = plugin.lyrics(ctx_builtin, candidate)
+    assert calls == [
+        (
+            "/lyric/combined",
+            {"keywords": "Song Artist", "hash": "abc", "duration": 180000, "man": "yes"},
+        )
+    ]
+    assert result["lyric_id"] == "88"
+    assert result["original"] == "[00:01]combined"
+
+    # With custom base_url configured: keeps two-step /search/lyric + /lyric fallback.
+    calls.clear()
+    ctx_custom = SimpleNamespace(data={"config": {"base_url": "https://api.example.com"}})
+    fallback = plugin.lyrics(ctx_custom, candidate)
+    assert [path for path, _ in calls] == ["/search/lyric", "/lyric"]
+    assert fallback["original"] == "[00:01]fallback"

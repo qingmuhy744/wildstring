@@ -76,3 +76,32 @@ test('successful follow-up request clears an earlier authentication response', a
     server.close();
   }
 });
+
+test('first_permitted skips gate spawn on first call and enforces gate on follow-up call', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wildstring-rate-'));
+  const countFile = path.join(dir, 'count');
+  const script = [
+    process.execPath,
+    '-e',
+    `const fs=require('fs');fs.appendFileSync(${JSON.stringify(countFile)},'1');console.log(JSON.stringify({ok:true}));`,
+  ];
+  try {
+    const run = paced(
+      {
+        first_permitted: true,
+        rate: { plugin_id: 'fixture', interval_seconds: 0.05 },
+        rate_command: script,
+      },
+      async () => ({ status: 200, body: { ok: true } }),
+    );
+    await run();
+    assert.equal(fs.existsSync(countFile), false);
+    await run();
+    assert.equal(fs.readFileSync(countFile, 'utf8'), '1');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -34,6 +34,8 @@ export function MetadataRefreshDialog({
   const progress = useRef<HTMLParagraphElement>(null);
   const [mode, setMode] = useState('missing'),
     [force, setForce] = useState(false);
+  const [availableSources, setAvailableSources] = useState<{ id: string; name: string }[]>([]),
+    [checkedSources, setCheckedSources] = useState<string[]>([]);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [done, setDone] = useState(false);
@@ -41,6 +43,20 @@ export function MetadataRefreshDialog({
     [batch, setBatch] = useState<RefreshBatch | null>(null);
   const [statusError, setStatusError] = useState(''),
     [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ items: { id: string; name: string }[] }>('/manage/providers/sources', {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        const items = response.items || [];
+        setAvailableSources(items);
+        setCheckedSources(items.map((item) => item.id));
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     if (done) {
       progress.current?.focus({ preventScroll: true });
@@ -60,6 +76,8 @@ export function MetadataRefreshDialog({
     if (!batchId) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const delays = [300, 600, 1200, 2000];
+    let attempt = 0;
     setStatusError('');
     async function load() {
       try {
@@ -70,7 +88,11 @@ export function MetadataRefreshDialog({
         if (controller.signal.aborted) return;
         setBatch(response);
         setStatusError('');
-        if (response.queued + response.running > 0) timer = setTimeout(() => void load(), 2000);
+        if (response.queued + response.running > 0) {
+          const delay = delays[Math.min(attempt, delays.length - 1)];
+          attempt += 1;
+          timer = setTimeout(() => void load(), delay);
+        }
       } catch {
         if (!controller.signal.aborted) setStatusError(t('metadataRefresh.statusReadError'));
       }
@@ -81,11 +103,19 @@ export function MetadataRefreshDialog({
       clearTimeout(timer);
     };
   }, [batchId, retry]);
+  const selectedInOrder = availableSources
+    .filter((source) => checkedSources.includes(source.id))
+    .map((source) => source.id);
+  const sourcesMissingSelection = availableSources.length >= 2 && selectedInOrder.length === 0;
   async function submit() {
-    if (pending.current || done) return;
+    if (pending.current || done || sourcesMissingSelection) return;
     pending.current = true;
     setBusy(true);
     setMessage(t('metadataRefresh.submitting'));
+    const narrowedSources =
+      availableSources.length >= 2 && selectedInOrder.length < availableSources.length
+        ? selectedInOrder
+        : null;
     try {
       const result = await api<{
         queued: number;
@@ -99,6 +129,7 @@ export function MetadataRefreshDialog({
           ...(target.id ? { id: target.id } : {}),
           mode,
           force,
+          ...(narrowedSources ? { sources: narrowedSources } : {}),
         }),
       });
       const upgraded = (result as { upgraded?: number }).upgraded || 0;
@@ -164,6 +195,33 @@ export function MetadataRefreshDialog({
               {t('metadataRefresh.forceRequery')}
             </label>
             <p className="muted">{t('metadataRefresh.forceRequeryHelp')}</p>
+            {availableSources.length >= 2 && (
+              <div
+                className="source-checkbox-group"
+                role="group"
+                aria-label={t('metadataRefresh.sourcesLabel')}
+              >
+                <span className="source-checkbox-title">{t('metadataRefresh.sourcesLabel')}</span>
+                <div className="source-checkbox-list">
+                  {availableSources.map((source) => (
+                    <label className="check-label" key={source.id}>
+                      <input
+                        type="checkbox"
+                        checked={checkedSources.includes(source.id)}
+                        onChange={(e) =>
+                          setCheckedSources((prev) =>
+                            e.target.checked
+                              ? [...prev, source.id]
+                              : prev.filter((item) => item !== source.id),
+                          )
+                        }
+                      />
+                      {source.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </fieldset>
         ) : (
           <p className="muted">
@@ -249,7 +307,11 @@ export function MetadataRefreshDialog({
             : t('metadataRefresh.cancelButton')}
         </button>
         {!done && (
-          <button className="primary" disabled={busy} onClick={() => void submit()}>
+          <button
+            className="primary"
+            disabled={busy || sourcesMissingSelection}
+            onClick={() => void submit()}
+          >
             {busy ? t('metadataRefresh.submittingButton') : t('metadataRefresh.startButton')}
           </button>
         )}
