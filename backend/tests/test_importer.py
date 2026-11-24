@@ -354,3 +354,113 @@ def test_relink_retry_finishes_partial_job_without_counting_files_twice(
         assert completed["relinked_files"] == 2
         assert completed["reclaimed_bytes"] == first.stat().st_size + second.stat().st_size
         assert {path.stat().st_ino for path in copies} == source_inodes
+
+
+def test_sidecar_restore_cover_overrides_and_reorganize_cleanup(
+    settings, authenticated_client, tmp_path
+):
+    import hashlib
+    import json
+    from io import BytesIO
+
+    from PIL import Image
+
+    from wildstring.library.file_reorganizer import reorganize_track_file
+    from wildstring.library.scanner import scan_library
+    from wildstring.library.sidecar import album_folder, export_music, restore_music_track
+
+    with authenticated_client(settings):
+        path = source(settings, "track.flac", "Original Title")
+        assert import_music(settings)["status"] == "completed"
+        repo = store(settings)
+        track = repo.tracks()["items"][0]
+        img = BytesIO()
+        Image.new("RGB", (32, 32), (80, 120, 90)).save(img, format="JPEG")
+        cover_bytes = img.getvalue()
+        folder = album_folder(Path(track["path"]))
+        export_music(Database(settings.data_dir), settings.library_dir, repo.library_id())
+        sidecar_dir = settings.library_dir / folder / ".wildstring"
+        (sidecar_dir / "cover.jpg").write_bytes(cover_bytes)
+        manifest = json.loads((sidecar_dir / "manifest.json").read_text())
+        manifest["cover_file"] = "cover.jpg"
+        manifest["cover_sha256"] = hashlib.sha256(cover_bytes).hexdigest()
+        (sidecar_dir / "manifest.json").write_text(json.dumps(manifest))
+
+        db = Database(settings.data_dir)
+        with db.connect(write=True) as conn:
+            conn.execute("UPDATE tracks SET has_cover=0 WHERE id=?", (track["id"],))
+            conn.execute(
+                "UPDATE track_metadata SET overrides='{}' WHERE track_id=?", (track["id"],)
+            )
+        assert restore_music_track(
+            db,
+            settings.library_dir,
+            repo.library_id(),
+            Path(track["path"]),
+            settings.library_dir,
+            folder,
+        )
+        with db.connect() as conn:
+            restored = conn.execute(
+                "SELECT has_cover FROM tracks WHERE id=?", (track["id"],)
+            ).fetchone()
+            meta = conn.execute(
+                "SELECT overrides FROM track_metadata WHERE track_id=?", (track["id"],)
+            ).fetchone()
+        assert restored["has_cover"] == 1
+        assert json.loads(meta["overrides"] or "{}") == {}
+
+        # Override album_artists/album and reorganize into a new folder -> old empty parent's .wildstring cleaned up.
+        with db.connect(write=True) as conn:
+            conn.execute(
+                "UPDATE track_metadata SET overrides=? WHERE track_id=?",
+                (
+                    json.dumps({"album_artists": ["Renamed Artist"], "album": "Renamed Album"}),
+                    track["id"],
+                ),
+            )
+        result = reorganize_track_file(repo, track["id"])
+        assert result["changed"] is True
+        assert not sidecar_dir.exists()
+        assert callable(scan_library)
+        assert path.exists()
+
+
+def test_hardlink_to_copy_insufficient_storage_rejected(
+    settings, authenticated_client, tmp_path, monkeypatch
+):
+    import shutil
+    from collections import namedtuple
+
+    from wildstring.library.scope import library_context
+
+    sources = tmp_path / "space-source"
+    sources.mkdir()
+    src = source(settings, "big.flac", "Big")
+    src = src.rename(sources / src.name)
+    target = tmp_path / "space-managed"
+    headers = {"X-Wildstring-Client": "web"}
+    with authenticated_client(settings) as client:
+        created = client.post(
+            "/api/v1/libraries",
+            headers=headers,
+            json={
+                "name": "LowDisk",
+                "source_roots": [str(sources)],
+                "managed_root": str(target),
+                "storage_mode": "hardlink",
+            },
+        )
+        assert created.status_code == 201
+        library = created.json()
+        with library_context("admin", library["id"]):
+            assert import_music(settings)["status"] == "completed"
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+        monkeypatch.setattr(shutil, "disk_usage", lambda _p: Usage(1000, 999, 1))
+        res = client.post(
+            f"/api/v1/libraries/{library['id']}/migrations",
+            headers=headers,
+            json={"version": library["version"], "target_storage_mode": "copy"},
+        )
+        assert res.status_code == 422
+        assert res.json()["detail"] == "insufficient_storage"

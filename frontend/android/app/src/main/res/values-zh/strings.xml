@@ -1946,4 +1946,14 @@
     <string name="books_minutes">%1$d 分钟</string>
     <string name="books_upload">上传电子书</string>
     <string name="books_pick_library">选择书库</string>
+    <string name="books_prev_chapter">上一章</string>
+    <string name="books_next_chapter">下一章</string>
+    <string name="books_search">搜索</string>
+    <string name="books_search_hint">搜索本书正文</string>
+    <string name="books_annotations">批注</string>
+    <string name="books_no_annotations">暂无批注</string>
+    <string name="books_delete">删除</string>
+    <string name="books_upload_failed">上传失败，请检查文件格式与大小后重试。</string>
+    <string name="books_sync_conflict">该书已在其他设备更新进度，请重新打开后再继续同步。</string>
+    <string name="books_now_listening">正在收听：%1$s</string>
 </resources>

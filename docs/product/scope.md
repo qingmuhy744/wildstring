@@ -20,7 +20,7 @@
 
 ## 电台书架与存储扩展
 
-[自托管书架](../../contracts/bookshelf.md)覆盖独立电子书、有声书及双载体配对。书库管理和访问使用独立来源与授权。硬链接和[便携侧车](../../contracts/wildstring-sidecar.md)的设计与各阶段实现状态见[实施方案](../plans/self-hosted-bookshelf.md)。
+[自托管书架](../../contracts/bookshelf.md)已接入服务端、Web 与 Android，覆盖独立电子书、有声书及双载体配对。书库管理和访问使用独立来源与授权。硬链接、模式迁移与[便携侧车](../../contracts/wildstring-sidecar.md)同步覆盖音乐库与书库；当前实现方案状态见[电台自托管书架方案](../plans/self-hosted-bookshelf.md)。
 
 ## 首版范围与验收
 

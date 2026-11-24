@@ -5,11 +5,13 @@ import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 
 data class BookItems<T>(val items: List<T> = emptyList())
@@ -17,17 +19,28 @@ data class BookSummary(
     val id: String,
     val title: String,
     val subtitle: String?,
+    val authors: List<String> = emptyList(),
     @SerializedName("library_id") val libraryId: String,
     @SerializedName("has_ebook") val hasEbook: Boolean,
     @SerializedName("has_audiobook") val hasAudiobook: Boolean,
+    @SerializedName("has_cover") val hasCover: Boolean = false,
+    @SerializedName("progress_status") val progressStatus: String? = null,
+    @SerializedName("resume_kind") val resumeKind: String? = null,
 )
 data class BookLibrary(val id: String, val name: String)
 data class BookChapter(@SerializedName("spine_index") val index: Int, val title: String)
 data class BookManifest(val chapters: List<BookChapter>, val sha256: String)
+data class BookRun(
+    val text: String,
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val code: Boolean = false,
+)
 data class BookBlock(
     @SerializedName("block_index") val index: Int,
     val tag: String,
     val text: String,
+    val runs: List<BookRun>? = null,
     @SerializedName("image_key") val imageKey: String?,
 )
 data class BookChapterContent(val title: String, val blocks: List<BookBlock>)
@@ -38,6 +51,7 @@ data class BookAnnotation(
     @SerializedName("start_char_offset") val startOffset: Int,
     @SerializedName("end_block_index") val endBlock: Int,
     @SerializedName("end_char_offset") val endOffset: Int,
+    @SerializedName("selected_text") val selectedText: String = "",
     val color: String,
 )
 
@@ -81,7 +95,7 @@ interface BookshelfDao {
     suspend fun clearBooks(owner: String)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveBooks(books: List<BookEntity>)
-    @androidx.room.Transaction
+    @Transaction
     suspend fun replaceBooks(owner: String, books: List<BookEntity>) {
         clearBooks(owner)
         saveBooks(books)
@@ -102,47 +116,162 @@ interface BookshelfDao {
     suspend fun annotations(owner: String, bookId: String): List<BookAnnotationSyncEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveAnnotation(annotation: BookAnnotationSyncEntity)
+    @Query("DELETE FROM bookshelf_annotations WHERE owner = :owner AND bookId = :bookId")
+    suspend fun clearAnnotations(owner: String, bookId: String)
+    @Query("DELETE FROM bookshelf_annotations WHERE owner = :owner AND bookId = :bookId AND annotationId = :annotationId")
+    suspend fun deleteAnnotation(owner: String, bookId: String, annotationId: String)
+    @Transaction
+    suspend fun replaceAnnotations(owner: String, bookId: String, items: List<BookAnnotationSyncEntity>) {
+        clearAnnotations(owner, bookId)
+        items.forEach { saveAnnotation(it) }
+    }
+    @Query("DELETE FROM bookshelf_ebook_chapters WHERE owner = :owner")
+    suspend fun clearEbookChapters(owner: String)
+    @Query("DELETE FROM bookshelf_audio_chapters WHERE owner = :owner")
+    suspend fun clearAudioChapters(owner: String)
+    @Query("DELETE FROM bookshelf_progress WHERE owner = :owner")
+    suspend fun clearProgress(owner: String)
+    @Query("DELETE FROM bookshelf_annotations WHERE owner = :owner")
+    suspend fun clearOwnerAnnotations(owner: String)
+    @Transaction
+    suspend fun clearOwner(owner: String) {
+        clearBooks(owner)
+        clearEbookChapters(owner)
+        clearAudioChapters(owner)
+        clearProgress(owner)
+        clearOwnerAnnotations(owner)
+    }
+    @Query("DELETE FROM bookshelf_books")
+    suspend fun dropBooks()
+    @Query("DELETE FROM bookshelf_ebook_chapters")
+    suspend fun dropEbookChapters()
+    @Query("DELETE FROM bookshelf_audio_chapters")
+    suspend fun dropAudioChapters()
+    @Query("DELETE FROM bookshelf_progress")
+    suspend fun dropProgress()
+    @Query("DELETE FROM bookshelf_annotations")
+    suspend fun dropAnnotations()
+    @Transaction
+    suspend fun clearEverything() {
+        dropBooks()
+        dropEbookChapters()
+        dropAudioChapters()
+        dropProgress()
+        dropAnnotations()
+    }
 }
 
-internal class BookSync(private val repository: Repository, private val id: String, private val kind: String) {
+internal class BookSync(
+    private val repository: Repository,
+    private val id: String,
+    private val kind: String,
+    initialVersion: Int? = null,
+    initialIntent: String = "resume",
+) {
     private val owner = repository.session.storageScope()
     private val profile = repository.session.cacheScope()
     private val session = UUID.randomUUID().toString()
-    private val device = UUID.randomUUID().toString()
+    private val device = repository.bookDeviceId()
     private val mutex = kotlinx.coroutines.sync.Mutex()
-    private var version = 0
+    private var version = initialVersion ?: 0
     private var sequence = 0
     private var blocked = false
+    private var pendingIntent = initialIntent
     private val gson = Gson()
+    var conflict: Boolean = false
+        private set
+
+    fun currentVersion(): Int = version
+
+    private data class StoredProgress(
+        val checkpoint: BookCheckpoint? = null,
+        val pendingPayload: JsonObject? = null,
+        val baseVersion: Int = 0,
+    )
 
     suspend fun load(): BookCheckpoint {
-        val fresh = try {
-            repository.api().bookProgress(id, kind, RequestOwner(profile))
+        val localRow = owner?.let { repository.database.books().progress(it, id, kind) }
+        val localStored = localRow?.let { runCatching { gson.fromJson(it.payload, StoredProgress::class.java) }.getOrNull() }
+        val localFallback = localRow?.let { runCatching { gson.fromJson(it.payload, BookCheckpoint::class.java) }.getOrNull() }
+        return try {
+            val fresh = repository.api().bookProgress(id, kind, RequestOwner(profile))
+            version = fresh.version
+            val pending = localStored?.pendingPayload
+            val effective = if (pending != null && localStored.baseVersion == fresh.version) {
+                try {
+                    val push = pending.deepCopy().apply {
+                        addProperty("session_id", session)
+                        addProperty("device_id", device)
+                        addProperty("base_version", fresh.version)
+                        addProperty("sequence", ++sequence)
+                        addProperty("intent", "resume")
+                    }
+                    repository.api().saveBookProgress(id, kind, push, RequestOwner(profile)).also {
+                        version = it.version
+                    }
+                } catch (_: IOException) {
+                    fresh
+                } catch (_: HttpException) {
+                    fresh
+                }
+            } else {
+                fresh
+            }
+            if (owner != null) {
+                repository.database.books().saveProgress(
+                    BookProgressSyncEntity(owner, id, kind, gson.toJson(StoredProgress(checkpoint = effective))),
+                )
+            }
+            effective
         } catch (cause: IOException) {
-            owner?.let { repository.database.books().progress(it, id, kind) }?.let {
-                gson.fromJson(it.payload, BookCheckpoint::class.java)
-            } ?: BookCheckpoint()
+            val offline = localStored?.checkpoint ?: localFallback ?: BookCheckpoint()
+            version = offline.version
+            offline
         }
-        version = fresh.version
-        return fresh
     }
 
     suspend fun save(value: JsonObject) {
-        mutex.lock()
-        try {
+        mutex.withLock {
             if (blocked || profile != repository.session.cacheScope()) return
-            value.addProperty("session_id", session)
-            value.addProperty("device_id", device)
-            value.addProperty("base_version", version)
-            value.addProperty("sequence", ++sequence)
-            val saved = repository.api().saveBookProgress(id, kind, value, RequestOwner(profile))
-            version = saved.version
-            if (owner != null) repository.database.books().saveProgress(BookProgressSyncEntity(owner, id, kind, gson.toJson(saved)))
-        } catch (cause: HttpException) {
-            if (cause.code() == 409) blocked = true
-            throw cause
-        } finally {
-            mutex.unlock()
+            val intent = pendingIntent
+            pendingIntent = "resume"
+            val payload = value.deepCopy().apply {
+                addProperty("session_id", session)
+                addProperty("device_id", device)
+                addProperty("base_version", version)
+                addProperty("sequence", ++sequence)
+                addProperty("intent", intent)
+            }
+            try {
+                val saved = repository.api().saveBookProgress(id, kind, payload, RequestOwner(profile))
+                version = saved.version
+                conflict = false
+                if (owner != null) {
+                    repository.database.books().saveProgress(
+                        BookProgressSyncEntity(owner, id, kind, gson.toJson(StoredProgress(checkpoint = saved))),
+                    )
+                }
+            } catch (cause: IOException) {
+                if (owner != null) {
+                    val localSnapshot = gson.fromJson(value, BookCheckpoint::class.java).copy(version = version)
+                    repository.database.books().saveProgress(
+                        BookProgressSyncEntity(
+                            owner,
+                            id,
+                            kind,
+                            gson.toJson(StoredProgress(checkpoint = localSnapshot, pendingPayload = value, baseVersion = version)),
+                        ),
+                    )
+                }
+                throw cause
+            } catch (cause: HttpException) {
+                if (cause.code() == 409) {
+                    blocked = true
+                    conflict = true
+                    repository.bookSyncConflict.value = id
+                }
+                throw cause
+            }
         }
     }
 }

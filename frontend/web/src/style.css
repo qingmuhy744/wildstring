@@ -22,6 +22,7 @@
   --surface-input: #131110;
   --bg-hover: #34302a;
   --tag-bg: #2e2924;
+  --nav-active: #2e2924;
   --accent-rgb: 233, 138, 109;
   --accent-hover: #f0a48a;
   --on-accent: #211b17;
@@ -4296,6 +4297,7 @@ textarea {
   --surface-input: #fffdf8;
   --bg-hover: #e4e7db;
   --tag-bg: #e0e5d6;
+  --nav-active: #dde2d0;
   --accent-rgb: 188, 84, 56;
   --accent-hover: #a8472e;
   --on-accent: #fffaf3;

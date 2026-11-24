@@ -80,6 +80,8 @@ def test_restricted_books_require_a_book_grant_and_hide_paths(settings, authenti
             "library_id": library_id,
             "title": "Private",
             "subtitle": None,
+            "authors": [],
+            "has_cover": False,
             "has_ebook": False,
             "has_audiobook": False,
         }
@@ -382,6 +384,8 @@ def test_epub_safety_pair_split_and_portable_share(settings, authenticated_clien
 def test_book_metadata_providers_return_only_typed_public_fields(
     settings, authenticated_client, monkeypatch
 ):
+    from urllib.parse import urlsplit
+
     from wildstring.books import providers
 
     answers = {
@@ -401,13 +405,16 @@ def test_book_metadata_providers_return_only_typed_public_fields(
         },
     }
 
-    def fetch(url, mode, proxy):
-        from urllib.parse import urlsplit
+    def fake_request_bytes(request, **kwargs):
+        parts = urlsplit(request.full_url)
+        assert parts.scheme == "https"
+        if parts.hostname == "www.googleapis.com" and "EmptyResultQuery" in parts.query:
+            payload = json.dumps({"totalItems": 0}).encode("utf-8")
+        else:
+            payload = json.dumps(answers[parts.hostname]).encode("utf-8")
+        return 200, {}, payload
 
-        assert urlsplit(url).scheme == "https"
-        return answers[urlsplit(url).hostname]
-
-    monkeypatch.setattr(providers, "fetch_itunes_json", fetch)
+    monkeypatch.setattr(providers, "request_bytes", fake_request_bytes)
     with authenticated_client(settings) as owner:
         library = create_library(owner, "Search")
         response = owner.post(
@@ -429,3 +436,278 @@ def test_book_metadata_providers_return_only_typed_public_fields(
             assert found.status_code == 200, found.text
             assert found.json()["items"][0]["fields"]["title"] == title
             assert "password" not in found.text and "<script>" not in found.text
+        empty_google = owner.get(
+            f"/api/v1/books/{identity}/metadata/search",
+            params={"provider": "google_books", "q": "EmptyResultQuery"},
+        )
+        assert empty_google.status_code == 200 and empty_google.json()["items"] == []
+
+
+def test_ebook_utf16_inline_runs_child_tail_and_zip_spine_decompression_guards(
+    settings, authenticated_client, monkeypatch
+):
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from PIL import Image
+
+    with authenticated_client(settings) as owner:
+        library = create_library(owner, "Guards")
+        lib = library["id"]
+
+        # 1. UTF-16 LE BOM TXT upload must not trigger MPEG sync-byte false positive.
+        utf16_text = "Chapter 1\n\n\ufffd Safe UTF-16 body."
+        up = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib},
+            files={"file": ("utf16.txt", utf16_text.encode("utf-16"), "text/plain")},
+        )
+        assert up.status_code == 201, up.text
+        ch0 = owner.get(f"/api/v1/books/{up.json()['id']}/ebook/chapters/0").json()
+        assert any("Safe UTF-16 body." in block["text"] for block in ch0["blocks"])
+
+        # 2. XHTML preserves child.tail around stripped tags, inline runs, and nested div>span.
+        buf = BytesIO()
+        with ZipFile(buf, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr(
+                "META-INF/container.xml",
+                '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+            )
+            archive.writestr(
+                "book.opf",
+                "<package><metadata><title>Runs Book</title></metadata>"
+                '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+                '<spine><itemref idref="c1"/></spine></package>',
+            )
+            archive.writestr(
+                "c1.xhtml",
+                "<html><body>"
+                "<p>Lead <script>bad()</script>tail <b>bold</b> <em>ital</em> <code>mono</code></p>"
+                "<div><span>Inner</span> span</div>"
+                "</body></html>",
+            )
+        runs_up = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib},
+            files={"file": ("runs.epub", buf.getvalue(), "application/epub+zip")},
+        )
+        assert runs_up.status_code == 201, runs_up.text
+        blocks = owner.get(f"/api/v1/books/{runs_up.json()['id']}/ebook/chapters/0").json()[
+            "blocks"
+        ]
+        assert "Lead tail" in blocks[0]["text"]
+        assert any(r.get("bold") and "bold" in r["text"] for r in blocks[0]["runs"])
+        assert any(r.get("italic") and "ital" in r["text"] for r in blocks[0]["runs"])
+        assert any(r.get("code") and "mono" in r["text"] for r in blocks[0]["runs"])
+        assert blocks[1]["text"] == "Inner span"
+
+        # 3. Excessive spine refs rejected cleanly with 422.
+        spine_buf = BytesIO()
+        with ZipFile(spine_buf, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr(
+                "META-INF/container.xml",
+                '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+            )
+            refs = "".join('<itemref idref="c1"/>' for _ in range(1005))
+            archive.writestr(
+                "book.opf",
+                "<package><metadata><title>Spine DoS</title></metadata>"
+                '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+                f"<spine>{refs}</spine></package>",
+            )
+            archive.writestr("c1.xhtml", "<html><body><p>Hi</p></body></html>")
+        dos_resp = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib},
+            files={"file": ("spine-dos.epub", spine_buf.getvalue(), "application/epub+zip")},
+        )
+        assert dos_resp.status_code == 422
+
+        # 4. DecompressionBombError on oversized cover pixel bomb returns 422 invalid_image.
+        tiny_img = BytesIO()
+        Image.new("RGB", (20, 20), (120, 90, 60)).save(tiny_img, format="PNG")
+        monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 10)
+        bomb_cover = owner.post(
+            f"/api/v1/books/{runs_up.json()['id']}/cover",
+            headers=HEADERS,
+            files={"file": ("bomb.png", tiny_img.getvalue(), "image/png")},
+        )
+        assert bomb_cover.status_code == 422
+
+
+def test_audiobook_incremental_rescan_auto_pair_isolation_and_manual_pair_merge(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    from wildstring.library.importer import import_music
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    source = tmp_path / "audio-books"
+    series = source / "Series One"
+    series.mkdir(parents=True)
+    shutil.copyfile(fixture, series / "part1.mp3")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "AudioRescan", source_roots=[str(source)], auto_pair=True)
+        lib_id = lib["id"]
+
+        # Upload an independent ebook that must NOT be overwritten when scanning same folder.
+        ext = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib_id},
+            files={"file": ("external.txt", b"Series One\nIndependent upload.", "text/plain")},
+        )
+        assert ext.status_code == 201
+        ext_id = ext.json()["id"]
+
+        scan1 = owner.post(f"/api/v1/book-libraries/{lib_id}/scan", headers=HEADERS)
+        assert scan1.status_code == 200 and scan1.json()["added_books"] == 1
+        scanned_audio = next(
+            b
+            for b in owner.get("/api/v1/books", params={"library_id": lib_id}).json()["items"]
+            if b["id"] != ext_id
+        )
+        audio_id = scanned_audio["id"]
+
+        # Save chapter title edit and listening checkpoint before incremental rescan.
+        assert (
+            owner.patch(
+                f"/api/v1/books/{audio_id}/audiobook/chapters/0",
+                headers=HEADERS,
+                json={"title": "Edited Part 1"},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.put(
+                f"/api/v1/books/{audio_id}/listening-progress",
+                headers=HEADERS,
+                json={
+                    "session_id": "audio-session-0001",
+                    "device_id": "d1",
+                    "base_version": 0,
+                    "sequence": 1,
+                    "chapter_index": 0,
+                    "chapter_position_ms": 500,
+                },
+            ).status_code
+            == 200
+        )
+
+        # Add part2.mp3 in same directory and rescan -> same book_id, preserved title & progress!
+        shutil.copyfile(fixture, series / "part2.mp3")
+        scan2 = owner.post(f"/api/v1/book-libraries/{lib_id}/scan", headers=HEADERS)
+        assert scan2.status_code == 200 and scan2.json()["updated_books"] == 1
+        chapters = owner.get(f"/api/v1/books/{audio_id}/audiobook").json()["chapters"]
+        assert len(chapters) == 2 and chapters[0]["title"] == "Edited Part 1"
+        assert owner.get(f"/api/v1/books/{audio_id}/listening-progress").json()["version"] == 1
+        assert owner.get(f"/api/v1/books/{ext_id}/audiobook").status_code == 404
+
+        # Manual pair merges newer reading progress & removes paired directory cleanly.
+        assert (
+            owner.put(
+                f"/api/v1/books/{ext_id}/reading-progress",
+                headers=HEADERS,
+                json={
+                    "session_id": "ebook-session-0001",
+                    "device_id": "d1",
+                    "base_version": 0,
+                    "sequence": 1,
+                    "spine_index": 0,
+                    "block_index": 0,
+                    "char_offset": 2,
+                },
+            ).status_code
+            == 200
+        )
+        paired = owner.post(
+            f"/api/v1/books/{audio_id}/pair",
+            headers=HEADERS,
+            json={"other_book_id": ext_id},
+        )
+        assert paired.status_code == 200
+        assert not (Path(lib["managed_root"]) / ext_id).exists()
+        assert owner.get(f"/api/v1/books/{audio_id}/reading-progress").json()["char_offset"] == 2
+        assert callable(import_music)
+
+
+def test_zero_block_progress_restart_intent_and_access_list(settings, authenticated_client):
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    buf = BytesIO()
+    with ZipFile(buf, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "book.opf",
+            "<package><metadata><title>Blank</title></metadata>"
+            '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+            '<spine><itemref idref="c1"/></spine></package>',
+        )
+        archive.writestr("c1.xhtml", "<html><body><div></div></body></html>")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "BlankCap")
+        music = owner.get("/api/v1/libraries").json()[0]["id"]
+        reader, user_id = listener(owner, [music])
+        assert (
+            owner.put(
+                f"/api/v1/book-libraries/{lib['id']}/access/{user_id}",
+                headers=HEADERS,
+                json={"granted": True},
+            ).status_code
+            == 200
+        )
+        access = owner.get(f"/api/v1/book-libraries/{lib['id']}/access")
+        assert access.status_code == 200 and access.json()["user_ids"] == [user_id]
+        assert reader.get(f"/api/v1/book-libraries/{lib['id']}/access").status_code == 403
+
+        up = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib["id"]},
+            files={"file": ("blank.epub", buf.getvalue(), "application/epub+zip")},
+        )
+        assert up.status_code == 201
+        bid = up.json()["id"]
+        fin = owner.put(
+            f"/api/v1/books/{bid}/reading-progress",
+            headers=HEADERS,
+            json={
+                "session_id": "reading-done-00001",
+                "device_id": "d1",
+                "base_version": 0,
+                "sequence": 1,
+                "spine_index": 0,
+                "block_index": 0,
+                "char_offset": 0,
+                "completed": True,
+            },
+        )
+        assert fin.status_code == 200 and fin.json()["completed"] is True
+        restarted = owner.put(
+            f"/api/v1/books/{bid}/reading-progress",
+            headers=HEADERS,
+            json={
+                "session_id": "reading-restart-01",
+                "device_id": "d1",
+                "base_version": 1,
+                "sequence": 1,
+                "spine_index": 0,
+                "block_index": 0,
+                "char_offset": 0,
+                "intent": "restart",
+            },
+        )
+        assert restarted.status_code == 200 and restarted.json()["completed"] is False

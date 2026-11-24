@@ -137,16 +137,19 @@ class LibraryCatalog:
         with self.database.connect() as db:
             reserved = LibraryStorage.managed_roots(db)
             reserved.extend(
-                Path(row[0]) for row in db.execute("SELECT root FROM book_library_sources")
+                Path(row[0]).resolve()
+                for row in db.execute("SELECT root FROM book_library_sources")
             )
         storage = LibraryStorage(self)
+        managed_resolved = Path(managed_root).resolve()
+        data_resolved = self.settings.data_dir.resolve()
         for root in roots:
             if any(
                 overlapping(root, other)
                 for other in [
                     *reserved,
-                    managed_root,
-                    self.settings.data_dir,
+                    managed_resolved,
+                    data_resolved,
                     *storage.reserved_roots(),
                 ]
             ):

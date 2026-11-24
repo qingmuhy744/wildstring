@@ -1,6 +1,8 @@
 """Versioned reading and audiobook checkpoints, scoped to the authenticated user."""
 
+import json
 import time
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -8,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.content import book_record
+from wildstring.library.scanner import open_source
 from wildstring.permissions import dependency
 
 Index = Annotated[int, Field(strict=True, ge=0)]
@@ -61,41 +64,80 @@ class Annotation(BaseModel):
     color: Color
 
 
-def router(database, auth):
+def router(database, auth, settings=None):
     router = APIRouter()
     read = Annotated[dict, Depends(dependency(auth, "personal:read"))]
     write = Annotated[dict, Depends(dependency(auth, "personal:write"))]
     client = [Depends(auth.require_client)]
+    cache_root = settings.data_dir / "book_cache" if settings is not None else None
 
-    def current(db, table, book_id, user_id):
+    def current(db, table, book_id, user_id, kind):
         row = db.execute(
             f"""SELECT * FROM {table} WHERE book_id=? AND user_id=?""",  # nosec B608
             (book_id, user_id),
         ).fetchone()
         if row is None:
-            return {"book_id": book_id, "version": 0, "sequence": 0, "completed": False}
+            defaults = (
+                {
+                    "spine_index": 0,
+                    "block_index": 0,
+                    "char_offset": 0,
+                    "reading_mode": "scroll",
+                }
+                if kind == "reading"
+                else {
+                    "chapter_index": 0,
+                    "chapter_position_ms": 0,
+                    "book_position_ms": 0,
+                    "playback_rate": 1.0,
+                }
+            )
+            return {"book_id": book_id, "version": 0, "sequence": 0, "completed": False, **defaults}
         value = dict(row)
         value.pop("user_id")
         value["completed"] = bool(value["completed"])
         return value
 
+    def require_carrier(book, kind):
+        if kind == "reading" and not book["has_ebook"]:
+            raise HTTPException(404, "ebook_not_found")
+        if kind == "listening" and not book["has_audiobook"]:
+            raise HTTPException(404, "audiobook_not_found")
+
     def get(book_id, user, kind):
         with database.connect(scoped=False) as db:
-            book_record(db, book_id, user)
-            return current(db, f"book_{kind}_progress", book_id, user["id"])
+            book = book_record(db, book_id, user)
+            require_carrier(book, kind)
+            return current(db, f"book_{kind}_progress", book_id, user["id"], kind)
 
     def validate_anchor(db, book_id, spine, block):
         return db.execute(
-            "SELECT * FROM book_ebook_chapters WHERE book_id=? AND spine_index=? AND block_count>?",
-            (book_id, spine, block),
+            "SELECT * FROM book_ebook_chapters WHERE book_id=? AND spine_index=? "
+            "AND (block_count>? OR (block_count=0 AND ?=0))",
+            (book_id, spine, block, block),
         ).fetchone()
+
+    def exact_chapter_chars(
+        cache_key: str | None, spine_index: int, block_index: int, char_offset: int
+    ) -> int | None:
+        if cache_root is None or not cache_key:
+            return None
+        try:
+            with open_source(cache_root, Path(cache_key) / f"{spine_index}.json") as stream:
+                data = json.load(stream)
+            blocks = data.get("blocks", [])
+            prefix = sum(int(block.get("char_len", 0)) for block in blocks[:block_index])
+            return prefix + char_offset
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
 
     def update(book_id, user, body, kind):
         table = f"book_{kind}_progress"
         with database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
-            book_record(db, book_id, user)
-            saved = current(db, table, book_id, user["id"])
+            book = book_record(db, book_id, user)
+            require_carrier(book, kind)
+            saved = current(db, table, book_id, user["id"], kind)
             same = (
                 saved.get("session_id") == body.session_id
                 and saved.get("device_id") == body.device_id
@@ -109,22 +151,43 @@ def router(database, auth):
                 if chapter is None or body.char_offset > chapter["char_count"]:
                     raise HTTPException(422, "book_anchor_invalid")
                 info = db.execute(
-                    "SELECT total_chars,spine_count FROM book_ebooks WHERE book_id=?", (book_id,)
+                    "SELECT total_chars,spine_count,cache_key FROM book_ebooks WHERE book_id=?",
+                    (book_id,),
                 ).fetchone()
-                chars_before = chapter["start_global_char"]
-                chars_before += chapter["char_count"] * body.block_index / chapter["block_count"]
+                exact = exact_chapter_chars(
+                    info["cache_key"], body.spine_index, body.block_index, body.char_offset
+                )
+                if exact is not None:
+                    in_chapter = min(chapter["char_count"], exact)
+                elif chapter["block_count"] > 0:
+                    in_chapter = min(
+                        chapter["char_count"],
+                        chapter["char_count"] * body.block_index / chapter["block_count"]
+                        + body.char_offset,
+                    )
+                else:
+                    in_chapter = 0
+                chars_before = chapter["start_global_char"] + in_chapter
                 fields = {
                     "spine_index": body.spine_index,
                     "block_index": body.block_index,
                     "char_offset": body.char_offset,
                     "chapter_title": chapter["title"],
-                    "overall_ratio": min(1, chars_before / max(1, info["total_chars"])),
+                    "overall_ratio": min(1.0, chars_before / max(1, info["total_chars"])),
                     "reading_mode": body.reading_mode,
                 }
-                at_end = (
-                    body.spine_index + 1 == info["spine_count"]
-                    and body.block_index + 1 == chapter["block_count"]
-                )
+                last_non_empty = db.execute(
+                    "SELECT spine_index, block_count FROM book_ebook_chapters "
+                    "WHERE book_id=? AND block_count>0 ORDER BY spine_index DESC LIMIT 1",
+                    (book_id,),
+                ).fetchone()
+                if last_non_empty is not None:
+                    at_end = body.spine_index > last_non_empty["spine_index"] or (
+                        body.spine_index == last_non_empty["spine_index"]
+                        and body.block_index + 1 >= last_non_empty["block_count"]
+                    )
+                else:
+                    at_end = body.spine_index + 1 >= info["spine_count"]
             else:
                 chapter = db.execute(
                     "SELECT * FROM book_audiobook_chapters WHERE book_id=? AND chapter_index=?",
@@ -143,11 +206,16 @@ def router(database, auth):
                     "book_position_ms": position,
                     "playback_rate": body.playback_rate,
                 }
-                at_end = duration - position <= 2000
-            fields.update(
-                completed=bool(
+                tail_ms = min(120_000, max(2_000, round(duration * 0.05))) if duration > 0 else 0
+                at_end = duration - position <= tail_ms
+            if same:
+                completed = bool(saved["completed"] or (body.completed and at_end))
+            else:
+                completed = bool(
                     (body.intent == "resume" and saved["completed"]) or (body.completed and at_end)
-                ),
+                )
+            fields.update(
+                completed=completed,
                 version=saved["version"] + 1,
                 session_id=body.session_id,
                 device_id=body.device_id,
@@ -203,18 +271,34 @@ def router(database, auth):
                     (book_id, body.chapter_index),
                 ).fetchone()
                 invalid = (
-                    chapter is None or body.position_ms is None or body.position_ms > chapter[0]
+                    chapter is None
+                    or body.position_ms is None
+                    or body.position_ms > chapter[0]
+                    or body.spine_index is not None
+                    or body.block_index is not None
+                    or body.char_offset is not None
                 )
             elif isinstance(body, Bookmark):
+                chapter = (
+                    validate_anchor(db, book_id, body.spine_index, body.block_index)
+                    if body.spine_index is not None and body.block_index is not None
+                    else None
+                )
                 invalid = (
-                    body.char_offset is None
-                    or validate_anchor(db, book_id, body.spine_index, body.block_index) is None
+                    chapter is None
+                    or body.char_offset is None
+                    or body.char_offset > chapter["char_count"]
+                    or body.chapter_index is not None
+                    or body.position_ms is not None
                 )
             else:
-                invalid = (body.start_block_index, body.start_char_offset) >= (
-                    body.end_block_index,
-                    body.end_char_offset,
-                ) or validate_anchor(db, book_id, body.spine_index, body.end_block_index) is None
+                end_chapter = validate_anchor(db, book_id, body.spine_index, body.end_block_index)
+                invalid = (
+                    (body.start_block_index, body.start_char_offset)
+                    >= (body.end_block_index, body.end_char_offset)
+                    or end_chapter is None
+                    or body.end_char_offset > end_chapter["char_count"]
+                )
             if invalid:
                 raise HTTPException(422, "book_anchor_invalid")
             if identity is None:

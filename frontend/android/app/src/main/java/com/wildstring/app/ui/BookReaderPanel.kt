@@ -39,8 +39,7 @@ internal fun BoxScope.BookReaderPanel(
         TextButton(onClick = close) { Text(stringResource(R.string.books_close)) }
     }
     if (!wide) {
-        if (visible) AlertDialog(onDismissRequest = close, title = { Text(title) },
-            text = content, confirmButton = closeButton)
+        if (visible) BookReaderDialog(title, close, testTag = "book-reader-panel", content = content)
         return
     }
     val progress = readerRevealProgress(visible, animate, "book-reader-panel")
@@ -66,6 +65,46 @@ internal fun BoxScope.BookReaderPanel(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     closeButton()
+                }
+                Box(Modifier.weight(1f, fill = false)) { content() }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun BoxScope.BookReaderDialog(
+    title: String,
+    close: () -> Unit,
+    testTag: String? = null,
+    content: @Composable () -> Unit,
+) {
+    BackHandler(true, close)
+    Box(Modifier.matchParentSize()) {
+        Box(
+            Modifier.matchParentSize()
+                .background(Color.Black.copy(alpha = 0.32f))
+                .pointerInput(close) { detectTapGestures { close() } },
+        )
+        Surface(
+            Modifier.align(Alignment.Center)
+                .padding(16.dp)
+                .widthIn(max = 360.dp)
+                .heightIn(max = 480.dp)
+                .let { if (testTag != null) it.testTag(testTag) else it },
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(
+                Modifier.semantics { paneTitle = title }
+                    .pointerInput(Unit) { detectTapGestures {} }
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = close) { Text(stringResource(R.string.books_close)) }
                 }
                 Box(Modifier.weight(1f, fill = false)) { content() }
             }

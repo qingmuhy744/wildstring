@@ -123,19 +123,54 @@ class HardlinkError(OSError):
         super().__init__(error, self.code)
 
 
-def _link_descriptor(source, directory, name):
-    """Publish the opened inode directly on the Linux server."""
-    if directory is None or not Path("/proc/self/fd").is_dir():
+def _link_descriptor(source, directory, name, *, src_dir_fd=None, src_name=None):
+    """Publish the opened inode directly without following symlinks."""
+    if directory is None:
+        raise HardlinkError(errno.ENOTSUP)
+    if Path("/proc/self/fd").is_dir():
+        try:
+            os.link(f"/proc/self/fd/{source.fileno()}", name, dst_dir_fd=directory)
+            return
+        except FileExistsError:
+            raise
+        except OSError as error:
+            raise HardlinkError(error.errno) from error
+    if src_dir_fd is None or src_name is None:
         raise HardlinkError(errno.ENOTSUP)
     try:
-        os.link(f"/proc/self/fd/{source.fileno()}", name, dst_dir_fd=directory)
+        os.link(src_name, name, src_dir_fd=src_dir_fd, dst_dir_fd=directory, follow_symlinks=False)
     except FileExistsError:
         raise
     except OSError as error:
         raise HardlinkError(error.errno) from error
+    linked_stat = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    if not os.path.samestat(linked_stat, os.fstat(source.fileno())):
+        with suppress(OSError):
+            os.unlink(name, dir_fd=directory)
+        raise SourceChangedError
 
 
-def link_exclusive(source, root: Path, relative: Path, expected: str | None = None) -> str:
+@contextmanager
+def _source_parent(root: Path | None, relative: Path | None):
+    if root is None or relative is None or Path("/proc/self/fd").is_dir():
+        yield None, None
+        return
+    with ExitStack() as stack:
+        directory = stack.enter_context(open_directory(root))
+        for part in relative.parts[:-1]:
+            directory = stack.enter_context(open_directory(part, dir_fd=directory))
+        yield directory, relative.name
+
+
+def link_exclusive(
+    source,
+    root: Path,
+    relative: Path,
+    expected: str | None = None,
+    *,
+    source_root: Path | None = None,
+    source_relative: Path | None = None,
+) -> str:
     """Publish a verified regular source inode without overwriting a target."""
     before = fingerprint(os.fstat(source.fileno()))
     value = digest(source)
@@ -143,8 +178,17 @@ def link_exclusive(source, root: Path, relative: Path, expected: str | None = No
         expected is not None and expected != value
     ):
         raise SourceChangedError
-    with target_directory(root, relative) as directory:
-        _link_descriptor(source, directory, relative.name)
+    with (
+        target_directory(root, relative) as directory,
+        _source_parent(source_root, source_relative) as (src_dir_fd, src_name),
+    ):
+        _link_descriptor(
+            source,
+            directory,
+            relative.name,
+            src_dir_fd=src_dir_fd,
+            src_name=src_name,
+        )
         if fingerprint(os.fstat(source.fileno())) != before:
             os.unlink(relative.name, dir_fd=directory)
             raise SourceChangedError
@@ -172,19 +216,34 @@ def validate_hardlink_capability(source_roots, managed_root: Path, suffixes):
             )
             if sample is not None:
                 name = f".wildstring-probe-{uuid4().hex}"
+                rel = sample.relative_to(root)
                 with (
-                    open_source(root, sample.relative_to(root)) as source,
+                    open_source(root, rel) as source,
                     target_directory(parent, Path(name)) as descriptor,
+                    _source_parent(root, rel) as (src_dir_fd, src_name),
                 ):
-                    _link_descriptor(source, descriptor, name)
+                    _link_descriptor(
+                        source,
+                        descriptor,
+                        name,
+                        src_dir_fd=src_dir_fd,
+                        src_name=src_name,
+                    )
                     os.unlink(name, dir_fd=descriptor)
                 break
 
 
-def replace_managed_file(publish, source, root: Path, relative: Path, expected: str) -> None:
+def replace_managed_file(
+    publish,
+    source,
+    root: Path,
+    relative: Path,
+    expected: str,
+    **kwargs,
+) -> None:
     """Replace one directory entry without writing to its old inode."""
     temporary = relative.with_name(f".wildstring-replace-{uuid4().hex}")
-    publish(source, root, temporary, expected)
+    publish(source, root, temporary, expected, **kwargs)
     with target_directory(root, relative) as directory:
         old = temporary.name if directory is not None else root / temporary
         new = relative.name if directory is not None else root / relative
