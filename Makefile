@@ -238,6 +238,12 @@ hooks-check: ## Check tracked and new project files
 
 check: hooks-check ## Run pre-commit, including Ruff, security and Web checks
 
+CODEQL_LANGS ?=
+
+.PHONY: codeql-local
+codeql-local: ## Run CodeQL locally with the CI query configuration
+	python3 scripts/run_codeql_local.py $(if $(CODEQL_LANGS),--languages "$(CODEQL_LANGS)")
+
 lint: ## Lint Python without modifying files
 	$(RUN) ruff check --config backend/pyproject.toml backend scripts
 
