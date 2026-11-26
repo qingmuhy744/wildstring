@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { audio, login, section } from './helpers';
+import { expect } from '@playwright/test';
+import { audio, login, section, test } from './helpers';
 
 test('默认询问，确认后暂停恢复，不回写；播放后暂停自动保存', async ({ page }, info) => {
   let state = {

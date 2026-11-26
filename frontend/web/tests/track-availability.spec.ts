@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test';
-import { login, audio } from './helpers';
+import { expect } from '@playwright/test';
+import { login, audio, test } from './helpers';
 
 test('失效歌曲保留提示、手动点击不换歌、播放全部跳过并可恢复', async ({ page }, info) => {
   await login(page);

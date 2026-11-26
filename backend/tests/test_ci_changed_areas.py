@@ -105,6 +105,7 @@ def test_changes_outside_android_inputs_skip_the_android_build(files):
         "frontend/android/gradle/libs.versions.toml",
         "tests/fixtures/audio/sample.mp3",
         "scripts/package_android.py",
+        "scripts/retry_on_429.sh",
         "backend/src/wildstring/main.py",
         "Makefile",
         ".github/workflows/android.yml",

@@ -9,6 +9,7 @@ on:
       - "scripts/serve_web_tests.py"
       - "tests/fixtures/audio/**"
       - "scripts/package_android.py"
+      - "scripts/retry_on_429.sh"
       - "scripts/smoke_android_release.py"
       - ".github/workflows/android.yml"
       - ".github/workflows/release.yml"
@@ -151,15 +152,7 @@ jobs:
         run: echo "Fork and Dependabot builds run checks without publishing an installable Dev APK."
       - name: Check, test and package APK
         if: steps.areas.outputs.android == 'true'
-        run: |
-          set -o pipefail
-          log="$RUNNER_TEMP/android-ci.log"
-          for delay in 0 30 60; do
-            if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
-            if make android-ci 2>&1 | tee "$log"; then exit 0; fi
-            if ! grep -Fq 'Received status code 429 from server' "$log"; then exit 1; fi
-          done
-          exit 1
+        run: scripts/retry_on_429.sh make android-ci
       - name: Build and stage instrumented test APKs
         if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { audio, login, manageTab, leaveSettings } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { audio, login, manageTab, leaveSettings, test } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 async function manage(page: Page, mobile: boolean) {

@@ -1,7 +1,7 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { login, manageTab } from './helpers';
+import { login, manageTab, test } from './helpers';
 
 const screenshotDir = process.env.WILDSTRING_SCREENSHOT_DIR || '';
 

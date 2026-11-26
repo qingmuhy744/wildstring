@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { audio } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { audio, test } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_BROWSE_LIBRARY !== '1', '独立的连续浏览曲库夹具');
 

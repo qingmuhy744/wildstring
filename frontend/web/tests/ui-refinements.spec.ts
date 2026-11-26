@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login, section, personalCategory, leaveSettings, manageTab } from './helpers';
+import { expect } from '@playwright/test';
+import { login, section, personalCategory, leaveSettings, manageTab, test } from './helpers';
 
 test('主题表单可读，默认连接参数与折叠导航一致', async ({ page }, info) => {
   await login(page);

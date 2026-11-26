@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import packageInfo from '../package.json' with { type: 'json' };
-import { audio, login, section, personalCategory, leaveSettings, manageTab } from './helpers';
+import { audio, login, section, personalCategory, leaveSettings, manageTab, test } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 

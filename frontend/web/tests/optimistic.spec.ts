@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login, manageTab, personalCategory } from './helpers';
+import { expect } from '@playwright/test';
+import { login, manageTab, personalCategory, test } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
 
 test('收藏在响应前反馈，失败回退，阻止重复提交并可重试', async ({ page }) => {

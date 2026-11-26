@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
-import { login, section } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { login, section, test } from './helpers';
 
 async function fixture(
   page: Page,

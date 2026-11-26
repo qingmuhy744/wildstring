@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login, section } from './helpers';
+import { expect } from '@playwright/test';
+import { login, section, test } from './helpers';
 
 for (const kind of ['intake', 'lyrics']) {
   test(`MCP ${kind} 草案展示具体差异、来源且接受即应用`, async ({ page }, info) => {

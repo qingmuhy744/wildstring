@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { audio, login } from './helpers';
+import { audio, login, test } from './helpers';
 
 const fixture = process.env.WILDSTRING_LYRIC_FIXTURE
   ? JSON.parse(readFileSync(process.env.WILDSTRING_LYRIC_FIXTURE, 'utf8'))

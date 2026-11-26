@@ -70,6 +70,7 @@ ANDROID = (
     "tests/fixtures/audio/",
     "backend/",
     "scripts/package_android.py",
+    "scripts/retry_on_429.sh",
     "scripts/serve_web_tests.py",
     "scripts/smoke_android_release.py",
     "Makefile",

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { audio, login, section } from './helpers';
+import { expect } from '@playwright/test';
+import { audio, login, section, test } from './helpers';
 
 test('歌曲行非按钮区域也可以直接播放', async ({ page }) => {
   await login(page);

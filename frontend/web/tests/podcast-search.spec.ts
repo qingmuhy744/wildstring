@@ -1,5 +1,5 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
-import { login, podcastCatalog } from './helpers';
+import { expect, type Page, type Route } from '@playwright/test';
+import { login, podcastCatalog, test } from './helpers';
 
 test.skip(
   process.env.WILDSTRING_TEST_PODCAST !== '1',
