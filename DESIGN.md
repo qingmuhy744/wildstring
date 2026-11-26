@@ -121,8 +121,8 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 - **Section Heading**: `15px–16px`, `font-weight: 600`, Sans-Serif.
 - **Track / Episode Title**: `13px–14px`, `font-weight: 400` (default) / `600` (currently playing), single-line truncated (`text-overflow: ellipsis`).
 - **Secondary Metadata (Artist / Album / Date)**: `12px`, `color: var(--muted)`.
-- **Recommendation Reason / Tag**: `11px`, `color: var(--olive)`.
-- **Micro Kicker / Table Header**: `10px–11px`, `font-weight: 600`, `letter-spacing: 0.05em`, `color: var(--faint)`.
+- **Recommendation Reason / Tag**: `11px` (`12px` for Chinese), `color: var(--olive)`.
+- **Micro Kicker / Table Header**: `11px`, `font-weight: 600`, `letter-spacing: 0.05em`, `color: var(--faint)`.
 
 ---
 
@@ -154,7 +154,7 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 ### 5.2 Accessibility Floor
 
 - **Text contrast**: body and metadata text must reach 4.5:1 against the surface it sits on, in both themes. `--accent` is for fills, progress and large icons; accent-coloured text uses `--accent-text`. On `--row-active` use `--muted`, not `--faint`.
-- **Type size**: no text below 11px; Chinese text below 12px is limited to micro kickers and table headers.
+- **Type size**: functional text is at least 11px. Chinese body copy, control labels, metadata and state labels are at least 12px; micro kickers and table headers may use 11px. Only purely decorative lettering, such as non-informational markings on analog artwork, may be smaller. This exception never applies to actions, playback times, counts, audio formats or status information.
 - **Touch targets**: interactive controls are at least 44×44pt on iOS and 48×48dp on Android. Visually smaller controls (such as the `32×32` `⋯` button) expand their hit area on touch platforms. Desktop controls are at least 28×28.
 - **Focus**: on Web and macOS every focusable control shows a 2px `--accent` focus ring with a 2px offset. The ring is never removed without a replacement. Android and iOS are touch-first and do not target keyboard focus (see §5.3).
 - **Playback state**: play/pause, favorite, shuffle, repeat and mute expose their current state to assistive technology (`aria-pressed` on Web, `selected` / `stateDescription` on Android and `accessibilityValue` on Apple platforms). Progress sliders announce elapsed and total time.
@@ -223,7 +223,7 @@ Acceptance for any change to a transition: record the animated edges per frame a
   - **Center**: Date badge capsule (`11月3日 · 今日推荐`), optional `AI 整理` sage capsule, display serif title (`今天，听点喜欢的`), and source breakdown subtitle (`15 首 · 6 首来自收藏与常听，9 首来自曲库探索`).
   - **Right**: Prominent `播放全部` coral button above secondary compact buttons (`换一批`, `保存歌单…`, `挑选歌曲`).
 - **Per-Track Recommendation Reason**:
-  - Each track row displays its specific provenance (`来自红心曲目的同专辑作品`, `探索曲库中尚未听过的歌曲`) in `11px` `var(--olive)` directly beneath the track title.
+  - Each track row displays its specific provenance (`来自红心曲目的同专辑作品`, `探索曲库中尚未听过的歌曲`) in `var(--olive)` directly beneath the track title, using the Recommendation Reason / Tag size from §4.
 
 ### 6.3 Podcasts (`电台`) — Two-Pane Master-Detail
 - **Left Sub-pane (`260px`)**:
