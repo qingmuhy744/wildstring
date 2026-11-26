@@ -19,8 +19,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MATRIX="$ROOT/docs/screenshot-matrix.md"
 
-ANDROID_PHONE_AVD="WildString_Pixel_API35"
-ANDROID_PAD_AVD="WildString_Tablet_API35"
+if [ -n "${ANDROID_PHONE_AVD:-}" ]; then
+  ANDROID_PHONE_AVD="$ANDROID_PHONE_AVD"
+elif [ -f "$HOME/.android/avd/WildString_Pixel_API35.avd/config.ini" ]; then
+  ANDROID_PHONE_AVD="WildString_Pixel_API35"
+else
+  ANDROID_PHONE_AVD="wildstring-phone"
+fi
+if [ -n "${ANDROID_PAD_AVD:-}" ]; then
+  ANDROID_PAD_AVD="$ANDROID_PAD_AVD"
+elif [ -f "$HOME/.android/avd/WildString_Tablet_API35.avd/config.ini" ]; then
+  ANDROID_PAD_AVD="WildString_Tablet_API35"
+else
+  ANDROID_PAD_AVD="wildstring-pad"
+fi
 ANDROID_RAW="$ROOT/artifacts/android-instrumented"
 ANDROID_CLASS="PodcastResumeUiTest"
 
@@ -300,8 +312,9 @@ boot_avd() {
   fi
   echo "No $avd-size device is connected. Booting $avd headless (no window) as $serial;"
   echo "this takes a few minutes and no user interaction is required." >&2
-  "$emulator" -avd "$avd" -port "${serial#emulator-}" -no-window -no-audio -no-boot-anim \
-    -no-snapshot-save -gpu swiftshader_indirect >"$STAGING/emulator-$avd.log" 2>&1 &
+  local gpu="${WILDSTRING_EMULATOR_GPU:-swiftshader}"
+  "$emulator" -avd "$avd" -port "${serial#emulator-}" -cores 4 -no-window -no-audio -no-boot-anim \
+    -no-snapshot -no-metrics -feature -Vulkan -gpu "$gpu" >"$STAGING/emulator-$avd.log" 2>&1 &
   pid=$!
   deadline=$((SECONDS + 300))
   while [ "$SECONDS" -lt "$deadline" ]; do

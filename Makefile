@@ -34,7 +34,11 @@ ANDROID_JAVA_HOME ?= $(shell \
 			java -XshowSettings:properties -version 2>&1 | sed -n 's/^[[:space:]]*java\.home = //p' | head -n 1; \
 		fi; \
 	fi)
-ANDROID = test -x "$(ANDROID_JAVA_HOME)/bin/java" && "$(ANDROID_JAVA_HOME)/bin/java" -version 2>&1 | grep -q 'version "21\.' || { echo "Android Gradle requires JDK 21; install JDK 21 or set ANDROID_JAVA_HOME" >&2; exit 1; }; JAVA_HOME="$(ANDROID_JAVA_HOME)" PATH="$(ANDROID_JAVA_HOME)/bin:$$PATH" ./frontend/android/gradlew -p frontend/android --console=plain
+ANDROID_SDK_DIR ?= $(shell \
+	for candidate in "$${ANDROID_HOME:-}" "$${ANDROID_SDK_ROOT:-}" "$$HOME/Android/Sdk" "$$HOME/Library/Android/sdk" "/usr/local/lib/android/sdk"; do \
+		if [ -n "$$candidate" ] && [ -d "$$candidate/platform-tools" ]; then printf '%s' "$$candidate"; break; fi; \
+	done)
+ANDROID = test -x "$(ANDROID_JAVA_HOME)/bin/java" && "$(ANDROID_JAVA_HOME)/bin/java" -version 2>&1 | grep -q 'version "21\.' || { echo "Android Gradle requires JDK 21; install JDK 21 or set ANDROID_JAVA_HOME" >&2; exit 1; }; $(if $(ANDROID_SDK_DIR),ANDROID_HOME="$(ANDROID_SDK_DIR)" ANDROID_SDK_ROOT="$(ANDROID_SDK_DIR)",) JAVA_HOME="$(ANDROID_JAVA_HOME)" PATH="$(ANDROID_JAVA_HOME)/bin:$$PATH" ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
 ANDROID_TEST_CLASSES ?=
 ANDROID_TEST_REPEAT ?= 1
@@ -121,6 +125,57 @@ android-connected-test: ## Run native UI/playback tests on a connected emulator/
 android-instrumented-test: ## Run native UI tests one class per process with class-level retries (device required)
 	$(ANDROID) :app:assembleDebug :app:assembleDebugAndroidTest
 	$(PYTHON) scripts/run_android_instrumented.py --classes "$(ANDROID_TEST_CLASSES)" --repeat $(ANDROID_TEST_REPEAT) --retries $(ANDROID_TEST_RETRIES) $(if $(ANDROID_TEST_BACKEND),--arg realBackend=$(ANDROID_TEST_BACKEND))
+
+ANDROID_EMU_AVD ?= wildstring-phone
+ANDROID_EMU_PORT ?= 5566
+ANDROID_EMU_WINDOW ?= 0
+
+.PHONY: android-emu android-emu-pad android-emu-stop
+android-emu: ## Start/reuse Phone emulator (headless, 4 cores) and install debug APK
+	@set -euo pipefail; \
+	sdk="$(ANDROID_SDK_DIR)"; \
+	emu="$$sdk/emulator/emulator"; adb="$$sdk/platform-tools/adb"; \
+	test -x "$$emu" || { echo "Android emulator not found under ANDROID_SDK_DIR (got '$$sdk')" >&2; exit 1; }; \
+	test -x "$$adb" || { echo "adb not found under ANDROID_SDK_DIR (got '$$sdk')" >&2; exit 1; }; \
+	serial="emulator-$(ANDROID_EMU_PORT)"; \
+	"$$adb" start-server; \
+	if ! "$$adb" devices | awk 'NR > 1 && $$2 == "device" { print $$1 }' | grep -qx "$$serial"; then \
+		test -f "$$HOME/.android/avd/$(ANDROID_EMU_AVD).avd/config.ini" || { echo "AVD $(ANDROID_EMU_AVD) not found in $$HOME/.android/avd/" >&2; exit 1; }; \
+		echo "Starting AVD $(ANDROID_EMU_AVD) on $$serial (window=$(ANDROID_EMU_WINDOW))..."; \
+		nohup "$$emu" -avd "$(ANDROID_EMU_AVD)" -port "$(ANDROID_EMU_PORT)" -cores 4 \
+			-gpu swiftshader -feature -Vulkan -no-snapshot -no-boot-anim -no-metrics \
+			$(if $(filter 1,$(ANDROID_EMU_WINDOW)),,-no-window) \
+			>"/tmp/$(ANDROID_EMU_AVD).log" 2>&1 & \
+		"$$adb" -s "$$serial" wait-for-device; \
+		deadline=$$((SECONDS + 180)); \
+		while [ "$$SECONDS" -lt "$$deadline" ]; do \
+			if [ "$$("$$adb" -s "$$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && \
+				"$$adb" -s "$$serial" shell am get-started-user-state 0 2>/dev/null | tr -d '\r' | grep -qx RUNNING_UNLOCKED && \
+				"$$adb" -s "$$serial" shell pm path android >/dev/null 2>&1; then \
+				break; \
+			fi; \
+			sleep 2; \
+		done; \
+		"$$adb" -s "$$serial" shell pm path android >/dev/null 2>&1 || { echo "AVD $(ANDROID_EMU_AVD) did not become ready within 180s; see /tmp/$(ANDROID_EMU_AVD).log" >&2; exit 1; }; \
+		"$$adb" -s "$$serial" shell wm dismiss-keyguard >/dev/null 2>&1 || true; \
+		"$$adb" -s "$$serial" shell input keyevent 82 >/dev/null 2>&1 || true; \
+	fi
+	$(ANDROID) :app:assembleDebug
+	@"$(ANDROID_SDK_DIR)/platform-tools/adb" -s "emulator-$(ANDROID_EMU_PORT)" install -r -t -g frontend/android/app/build/outputs/apk/debug/app-debug.apk
+	@"$(ANDROID_SDK_DIR)/platform-tools/adb" -s "emulator-$(ANDROID_EMU_PORT)" shell am start -n com.wildstring.app.dev/com.wildstring.app.MainActivity
+	@echo "Ready: emulator-$(ANDROID_EMU_PORT) ($(ANDROID_EMU_AVD)) -> com.wildstring.app.dev"
+
+android-emu-pad: ## Start/reuse Pad emulator (2560x1600) and install debug APK
+	$(MAKE) android-emu ANDROID_EMU_AVD=wildstring-pad ANDROID_EMU_PORT=5568
+
+android-emu-stop: ## Stop running local Android emulators
+	@adb_bin="$(ANDROID_SDK_DIR)/platform-tools/adb"; \
+	test -x "$$adb_bin" || adb_bin="$$(command -v adb || true)"; \
+	test -n "$$adb_bin" || { echo "adb not found" >&2; exit 1; }; \
+	for s in $$("$$adb_bin" devices | awk 'NR > 1 && $$1 ~ /^emulator-/ { print $$1 }'); do \
+		echo "Stopping $$s..."; \
+		"$$adb_bin" -s "$$s" emu kill >/dev/null 2>&1 || true; \
+	done
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256

@@ -47,6 +47,7 @@ class BookPlaybackService : MediaSessionService() {
     private val executor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private val progressLock = Mutex()
     private var checkpointKey: Pair<String, String>? = null
+    private var checkpointToken: String? = null
     private var checkpoint: BookSync? = null
     private var started: Pair<String, String>? = null
     private var sleep: Job? = null
@@ -85,6 +86,7 @@ class BookPlaybackService : MediaSessionService() {
                                 .buildUpon()
                                 .add(SessionCommand(SLEEP, Bundle.EMPTY))
                                 .add(SessionCommand(SLEEP_STATUS, Bundle.EMPTY))
+                                .add(SessionCommand(STOP_CLEAR, Bundle.EMPTY))
                                 .build())
                             .build()
                         controller.isTrusted -> MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
@@ -136,6 +138,11 @@ class BookPlaybackService : MediaSessionService() {
                         return Futures.immediateFuture(
                             SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putInt("minutes", remainingMin) }),
                         )
+                    }
+                    if (customCommand.customAction == STOP_CLEAR) {
+                        save(player.currentMediaItem, player.currentPosition)
+                        clearSessionPlayback()
+                        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                     }
                     if (customCommand.customAction != SLEEP) {
                         return super.onCustomCommand(session, controller, customCommand, args)
@@ -234,6 +241,7 @@ class BookPlaybackService : MediaSessionService() {
         started = null
         checkpoint = null
         checkpointKey = null
+        checkpointToken = null
         sleep?.cancel()
         sleep = null
         sleepEndElapsedMs = 0L
@@ -260,15 +268,17 @@ class BookPlaybackService : MediaSessionService() {
         }
         val initialVersion = extras.getInt("baseVersion", -1).takeIf { it >= 0 }
         val initialIntent = extras.getString("intent") ?: "resume"
+        val syncToken = extras.getString("syncToken")
         work.launch {
             progressLock.withLock {
                 if (key.first != repository.session.cacheScope()) return@withLock
                 try {
-                    if (checkpointKey != key) {
+                    if (checkpointKey != key || checkpointToken != syncToken) {
                         val sync = BookSync(repository, key.second, "listening", initialVersion, initialIntent)
                         if (initialVersion == null) sync.load()
                         checkpoint = sync
                         checkpointKey = key
+                        checkpointToken = syncToken
                     }
                     checkpoint?.save(fields)
                 } catch (cause: CancellationException) {
@@ -293,5 +303,6 @@ class BookPlaybackService : MediaSessionService() {
     companion object {
         const val SLEEP = "wildstring.book.sleep"
         const val SLEEP_STATUS = "wildstring.book.sleep.status"
+        const val STOP_CLEAR = "wildstring.book.stop"
     }
 }

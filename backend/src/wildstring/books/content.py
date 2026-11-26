@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
@@ -138,12 +139,52 @@ def router(database, settings, auth, transcoding):
             )
             return {"items": [dict(row) for row in rows]}
 
+    def default_upload_library(db_user):
+        with database.connect(scoped=False) as db:
+            existing = db.execute(
+                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy'"  # nosec B608
+                " ORDER BY l.created_at,l.id LIMIT 1",
+                (db_user["profile"], db_user["id"]),
+            ).fetchone()
+        if existing is not None:
+            return existing
+        if db_user["profile"] != "owner":
+            raise HTTPException(403, "book_upload_library_required")
+        with database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy'"  # nosec B608
+                " ORDER BY l.created_at,l.id LIMIT 1",
+                (db_user["profile"], db_user["id"]),
+            ).fetchone()
+            if existing is not None:
+                return existing
+            identity = uuid4().hex
+            target = (settings.data_dir / "books" / identity).resolve()
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                raise HTTPException(503, "library_storage_unavailable") from None
+            stamp = time.time()
+            db.execute(
+                """INSERT INTO book_libraries(id,name,managed_root,storage_mode,default_access,auto_pair,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (identity, "默认书库", str(target), "copy", "restricted", 1, stamp, stamp),
+            )
+            return db.execute("SELECT * FROM book_libraries WHERE id=?", (identity,)).fetchone()
+
     @router.post("/books/upload", dependencies=client, status_code=201)
     def upload_ebook(
-        user: upload, file: Annotated[UploadFile, File()], library_id: Annotated[str, Form()]
+        user: upload,
+        file: Annotated[UploadFile, File()],
+        library_id: Annotated[str | None, Form()] = None,
     ):
-        with database.connect(scoped=False) as db:
-            library = library_record(db, library_id, user)
+        requested_id = (library_id or "").strip()
+        if requested_id:
+            with database.connect(scoped=False) as db:
+                library = library_record(db, requested_id, user)
+        else:
+            library = default_upload_library(user)
         return {"id": store_ebook(file, library)}
 
     @router.post("/books/{book_id}/ebook", dependencies=client, status_code=201)

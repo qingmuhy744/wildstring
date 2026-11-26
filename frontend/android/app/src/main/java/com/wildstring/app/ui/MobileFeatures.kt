@@ -21,6 +21,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -32,17 +34,31 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun MobileShortcuts(discovery: Boolean = false, compactWidth: Boolean = false, open: (String) -> Unit) {
+internal fun MobileShortcuts(
+    discovery: Boolean = false,
+    compactWidth: Boolean = false,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 20.dp,
+    open: (String) -> Unit,
+) {
     val entries = if (discovery) listOf(
         Triple("daily", stringResource(R.string.daily_recommendations), Icons.Default.AutoAwesome),
         Triple("rankings", stringResource(R.string.listening_rankings), Icons.Default.BarChart),
         Triple("external", stringResource(R.string.discover_new_music), Icons.Default.Public)
     ) else listOf(
+        Triple("recent", stringResource(R.string.recently_played), Icons.Default.History),
         Triple("offline", stringResource(R.string.offline_save), Icons.Default.Download),
-        Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart),
-        Triple("settings", stringResource(R.string.settings_title), Icons.Default.Settings)
+        Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart)
     )
-    Row((if (compactWidth) Modifier.widthIn(max = 720.dp) else Modifier).fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 20.dp, vertical = 4.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        modifier
+            .then(if (compactWidth) Modifier.widthIn(max = 720.dp) else Modifier)
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .padding(horizontal = horizontalPadding, vertical = 4.dp)
+            .testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         entries.forEach { (route, title, icon) ->
             OutlinedButton(
                 onClick = { open(route) },
@@ -54,7 +70,7 @@ internal fun MobileShortcuts(discovery: Boolean = false, compactWidth: Boolean =
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
                     Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

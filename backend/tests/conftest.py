@@ -42,9 +42,12 @@ def settings(tmp_path: Path) -> Settings:
     )
 
 
-@pytest.fixture(params=[None, 55, 56], ids=["fresh", "upgrade-v55", "upgrade-v56"])
+@pytest.fixture(
+    params=[None, 55, 56, 57],
+    ids=["fresh", "upgrade-v55", "upgrade-v56", "upgrade-v57"],
+)
 def storage_schema(settings, request):
-    from migration_support import pre57
+    from migration_support import pre57, pre58
 
     version = request.param
     if version is None:
@@ -54,15 +57,25 @@ def storage_schema(settings, request):
     database.initialize()
     LibraryCatalog(database, settings).initialize()
     with sqlite3.connect(database.path) as connection:
-        pre57(connection)
+        if version == 57:
+            pre58(connection)
+        else:
+            pre57(connection)
         if version == 55:
             for table in ("lyric_lookup_jobs", "provider_jobs", "provider_refresh_intents"):
                 connection.execute(f"ALTER TABLE {table} DROP COLUMN options")
-        connection.execute(
-            """INSERT INTO imported_files
-            (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256)
-            VALUES ('legacy-source','legacy.flac','legacy-target','legacy.flac',123,456,'legacy-hash')"""
-        )
+        if version in (55, 56):
+            connection.execute(
+                """INSERT INTO imported_files
+                (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256)
+                VALUES ('legacy-source','legacy.flac','legacy-target','legacy.flac',123,456,'legacy-hash')"""
+            )
+        else:
+            connection.execute(
+                """INSERT INTO imported_files
+                (source_root, source_path, target_root, target_path, source_size, source_mtime, sha256, link_mode)
+                VALUES ('legacy-source','legacy.flac','legacy-target','legacy.flac',123,456,'legacy-hash','copy')"""
+            )
         connection.execute(f"PRAGMA user_version={version}")
 
     database.initialize()
@@ -81,6 +94,13 @@ def storage_schema(settings, request):
             assert "options" in {
                 row[1] for row in connection.execute(f"PRAGMA table_info({table})")
             }
+        assert "sha256" in {row[1] for row in connection.execute("PRAGMA table_info(tracks)")}
+        assert "portable_bundle" in {
+            row[1] for row in connection.execute("PRAGMA table_info(track_lyrics)")
+        }
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='music_sidecar_states'"
+        ).fetchone()
 
 
 @pytest.fixture

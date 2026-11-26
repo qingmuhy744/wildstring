@@ -40,7 +40,7 @@ export function AlbumEditor({
   // 封面相关
   const [newCoverFile, setNewCoverFile] = useState<File | null>(null);
   const [previewCoverUrl, setPreviewCoverUrl] = useState<string | null>(null);
-  const [saveSidecar, setSaveSidecar] = useState(true);
+  const [saveSidecar, setSaveSidecar] = useState(false);
   const [coverDeleted, setCoverDeleted] = useState(false);
   const [existingFailed, setExistingFailed] = useState(false);
 

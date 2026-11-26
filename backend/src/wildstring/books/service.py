@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -50,6 +51,7 @@ from wildstring.library.sidecar import (
 
 EBOOK_SUFFIXES = {".epub", ".txt"}
 BOOK_AUDIO_SUFFIXES = AUDIO_SUFFIXES & {".m4b", ".m4a", ".mp3", ".flac", ".ogg", ".opus"}
+logger = logging.getLogger(__name__)
 
 
 def probe_mp4_chapters(stream):
@@ -117,9 +119,9 @@ class Books:
         self.lock = settings.data_dir / "library-scan.lock"
 
     @contextmanager
-    def write(self, library_id):
+    def write(self, library_id, *, timeout: float = 5.0):
         try:
-            with FileLock(self.lock, timeout=0):
+            with FileLock(self.lock, timeout=timeout):
                 with self.database.connect() as db:
                     if db.execute(
                         """SELECT 1 FROM book_library_migrations WHERE library_id=?
@@ -296,12 +298,15 @@ class Books:
                     VALUES (?,?,?,?,?,?,?,?)""",
                     rows,
                 )
-            if extract_cover and metadata.get("cover_bytes"):
-                self._save_cover(root, book_id, metadata["cover_bytes"])
         except Exception:
             if published is not None:
                 published.unlink(missing_ok=True)
             raise
+        if extract_cover and metadata.get("cover_bytes"):
+            try:
+                self._save_cover(root, book_id, metadata["cover_bytes"])
+            except Exception:
+                logger.warning("Failed to save embedded cover for book %s", book_id, exc_info=True)
         return book_id
 
     def audiobook(
@@ -385,7 +390,10 @@ class Books:
         root = Path(library["managed_root"])
         mode = library["storage_mode"]
         existing_paths: dict[str, tuple[str, str]] = {}
-        preserved_titles: dict[tuple[str, int, int], str] = {}
+        preserved_by_source: dict[tuple[str, str, int, int], str] = {}
+        preserved_by_hash: dict[tuple[str, int, int], str] = {}
+        claimed_title_hashes: set[tuple[str, int, int]] = set()
+        current_source_paths = {str(source_root / item["relative"]) for item in entries}
         old_managed_files: set[str] = set()
         with self.database.connect(scoped=False) as db:
             for row in db.execute(
@@ -395,24 +403,30 @@ class Books:
                 existing_paths[row["sha256"]] = (row["managed_path"], row["link_mode"])
                 old_managed_files.add(row["managed_path"])
             for row in db.execute(
-                """SELECT f.sha256, c.start_file_ms, c.end_file_ms, c.title
+                """SELECT f.source_path, f.sha256, c.start_file_ms, c.end_file_ms, c.title
                    FROM book_audiobook_chapters c
                    JOIN book_audiobook_files f ON f.book_id=c.book_id AND f.file_index=c.file_index
                    WHERE c.book_id=?""",
                 (book_id,),
             ):
-                preserved_titles[(row["sha256"], row["start_file_ms"], row["end_file_ms"])] = row[
-                    "title"
-                ]
+                hash_key = (row["sha256"], row["start_file_ms"], row["end_file_ms"])
+                if row["source_path"] is not None:
+                    preserved_by_source[(row["source_path"], *hash_key)] = row["title"]
+                    if row["source_path"] in current_source_paths:
+                        claimed_title_hashes.add(hash_key)
+                preserved_by_hash.setdefault(hash_key, row["title"])
 
         book_position = 0
         files_rows = []
         chapters_rows = []
+        file_source_by_index: dict[int, tuple[str, str]] = {}
         published_paths: list[Path] = []
         new_managed_files: set[str] = set()
         try:
             for index, item in enumerate(entries):
                 relative = item["relative"]
+                source_str = str(source_root / relative)
+                file_source_by_index[index] = (source_str, item["value"])
                 managed = (
                     Path(book_id)
                     / f"{index:04}-{component(relative.stem, 'audio')}{relative.suffix.lower()}"
@@ -441,7 +455,7 @@ class Books:
                         book_id,
                         index,
                         managed.as_posix(),
-                        str(source_root / relative),
+                        source_str,
                         file_mode,
                         relative.name,
                         duration,
@@ -465,9 +479,12 @@ class Books:
                     chapters.insert(0, (0, item["title"]))
                 for offset, (start, chapter_title) in enumerate(chapters):
                     end = chapters[offset + 1][0] if offset + 1 < len(chapters) else duration
-                    effective_title = preserved_titles.get(
-                        (item["value"], start, end), chapter_title
-                    )
+                    hash_key = (item["value"], start, end)
+                    effective_title = preserved_by_source.get((source_str, *hash_key))
+                    if effective_title is None and hash_key not in claimed_title_hashes:
+                        effective_title = preserved_by_hash.get(hash_key)
+                    if effective_title is None:
+                        effective_title = chapter_title
                     chapters_rows.append(
                         (
                             book_id,
@@ -481,9 +498,61 @@ class Books:
                         )
                     )
                 book_position += duration
+
+            new_by_source: dict[tuple[str, str, int, int], tuple[int, int, int]] = {}
+            new_by_hash: dict[tuple[str, int, int], list[tuple[int, int, int]]] = {}
+            for _, ch_idx, f_idx, _, start_f, end_f, start_b, dur in chapters_rows:
+                src_str, file_sha = file_source_by_index[f_idx]
+                target = (ch_idx, start_b, dur)
+                new_by_source[(src_str, file_sha, start_f, end_f)] = target
+                new_by_hash.setdefault((file_sha, start_f, end_f), []).append(target)
+
             stamp = time.time()
             with self.database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
+                old_chapters = db.execute(
+                    """SELECT c.chapter_index, f.source_path, f.sha256, c.start_file_ms, c.end_file_ms
+                       FROM book_audiobook_chapters c
+                       JOIN book_audiobook_files f ON f.book_id=c.book_id AND f.file_index=c.file_index
+                       WHERE c.book_id=?
+                       ORDER BY c.chapter_index""",
+                    (book_id,),
+                ).fetchall()
+                chapter_remap: dict[int, tuple[int, int, int]] = {}
+                claimed_new: set[int] = set()
+                unmatched_old = []
+                for old_row in old_chapters:
+                    hash_key = (
+                        old_row["sha256"],
+                        old_row["start_file_ms"],
+                        old_row["end_file_ms"],
+                    )
+                    matched = (
+                        new_by_source.get((old_row["source_path"], *hash_key))
+                        if old_row["source_path"] is not None
+                        else None
+                    )
+                    if matched is not None:
+                        chapter_remap[old_row["chapter_index"]] = matched
+                        claimed_new.add(matched[0])
+                    else:
+                        unmatched_old.append(old_row)
+                for old_row in unmatched_old:
+                    hash_key = (
+                        old_row["sha256"],
+                        old_row["start_file_ms"],
+                        old_row["end_file_ms"],
+                    )
+                    candidates = new_by_hash.get(hash_key, [])
+                    if not candidates:
+                        continue
+                    chosen = next(
+                        (item for item in candidates if item[0] not in claimed_new),
+                        candidates[0],
+                    )
+                    chapter_remap[old_row["chapter_index"]] = chosen
+                    claimed_new.add(chosen[0])
+
                 db.execute(
                     """INSERT INTO books(id,library_id,managed_dir,title,sort_title,authors_json,
                         has_audiobook,pair_key,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)
@@ -533,15 +602,65 @@ class Books:
                         start_file_ms,end_file_ms,start_book_ms,duration_ms) VALUES (?,?,?,?,?,?,?,?)""",
                     chapters_rows,
                 )
-            for stale in old_managed_files - new_managed_files:
-                with suppress(OSError):
-                    (root / stale).unlink()
-            if extract_cover and embedded_cover is not None:
-                self._save_cover(root, book_id, embedded_cover)
+                if chapter_remap:
+                    for progress_row in db.execute(
+                        """SELECT user_id, chapter_index, chapter_position_ms, book_position_ms
+                           FROM book_listening_progress WHERE book_id=?""",
+                        (book_id,),
+                    ).fetchall():
+                        mapped = chapter_remap.get(progress_row["chapter_index"])
+                        if mapped is None:
+                            continue
+                        new_idx, new_start_book_ms, new_dur_ms = mapped
+                        new_pos = min(progress_row["chapter_position_ms"], new_dur_ms)
+                        new_book_pos = new_start_book_ms + new_pos
+                        if (new_idx, new_pos, new_book_pos) != (
+                            progress_row["chapter_index"],
+                            progress_row["chapter_position_ms"],
+                            progress_row["book_position_ms"],
+                        ):
+                            db.execute(
+                                """UPDATE book_listening_progress
+                                   SET chapter_index=?, chapter_position_ms=?, book_position_ms=?
+                                   WHERE user_id=? AND book_id=?""",
+                                (new_idx, new_pos, new_book_pos, progress_row["user_id"], book_id),
+                            )
+                    for mark_row in db.execute(
+                        """SELECT id, chapter_index, position_ms
+                           FROM book_bookmarks WHERE book_id=? AND kind='audio'""",
+                        (book_id,),
+                    ).fetchall():
+                        mapped = chapter_remap.get(mark_row["chapter_index"])
+                        if mapped is None:
+                            continue
+                        new_idx, _, new_dur_ms = mapped
+                        new_pos = (
+                            min(mark_row["position_ms"], new_dur_ms)
+                            if mark_row["position_ms"] is not None
+                            else None
+                        )
+                        if (new_idx, new_pos) != (
+                            mark_row["chapter_index"],
+                            mark_row["position_ms"],
+                        ):
+                            db.execute(
+                                "UPDATE book_bookmarks SET chapter_index=?, position_ms=? WHERE id=?",
+                                (new_idx, new_pos, mark_row["id"]),
+                            )
         except Exception:
             for path in published_paths:
                 path.unlink(missing_ok=True)
             raise
+        for stale in old_managed_files - new_managed_files:
+            with suppress(OSError):
+                (root / stale).unlink()
+        if extract_cover and embedded_cover is not None:
+            try:
+                self._save_cover(root, book_id, embedded_cover)
+            except Exception:
+                logger.warning(
+                    "Failed to save embedded cover for audiobook %s", book_id, exc_info=True
+                )
         return book_id
 
     def directory_metadata(self, book_id, root, folder):
@@ -720,18 +839,126 @@ class Books:
         restore_book(self.database, managed_root, recovered_id, managed_root, Path(folder_name))
         return True
 
-    def scan(self, library):
+    def watch_probe(self, library) -> tuple[bool, tuple]:
+        """Collect an os.stat snapshot for watched source roots without reading files."""
+        identity = library["id"]
+        with self.database.connect(scoped=False) as db:
+            sources = [
+                Path(row[0])
+                for row in db.execute(
+                    "SELECT root FROM book_library_sources "
+                    "WHERE library_id=? AND watch_enabled=1 ORDER BY id",
+                    (identity,),
+                )
+            ]
+            ebook_sources = {
+                row[0]
+                for row in db.execute(
+                    """SELECT e.source_path FROM book_ebooks e
+                       JOIN books b ON b.id=e.book_id
+                       WHERE b.library_id=? AND e.source_path IS NOT NULL""",
+                    (identity,),
+                )
+            }
+            audio_sources = {
+                row[0]
+                for row in db.execute(
+                    """SELECT a.source_path FROM book_audiobook_files a
+                       JOIN books b ON b.id=a.book_id
+                       WHERE b.library_id=? AND a.source_path IS NOT NULL""",
+                    (identity,),
+                )
+            }
+            known_dirs = {
+                row[0]
+                for row in db.execute(
+                    "SELECT managed_dir FROM books WHERE library_id=?", (identity,)
+                )
+            }
+
+        watched_suffixes = (
+            EBOOK_SUFFIXES
+            | BOOK_AUDIO_SUFFIXES
+            | IMAGE_SUFFIXES
+            | {
+                ".opf",
+                ".json",
+                ".txt",
+            }
+        )
+        has_unimported = False
+        source_entries: list[tuple[str, int, int]] = []
+        for source_root in sources:
+            if not source_root.is_dir() or source_root.is_symlink():
+                continue
+            for folder, dirs, names in os.walk(source_root, followlinks=False):
+                directory = Path(folder)
+                dirs[:] = sorted(
+                    name
+                    for name in dirs
+                    if not name.startswith(".") and not (directory / name).is_symlink()
+                )
+                for name in sorted(names):
+                    if name.startswith("."):
+                        continue
+                    path = directory / name
+                    if path.is_symlink():
+                        continue
+                    suffix = path.suffix.lower()
+                    if suffix not in watched_suffixes:
+                        continue
+                    try:
+                        stat_info = path.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    key_str = str(path)
+                    source_entries.append((key_str, stat_info.st_size, stat_info.st_mtime_ns))
+                    if (
+                        suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
+                        and path.name not in {"desc.txt", "reader.txt"}
+                        and key_str not in ebook_sources
+                        and key_str not in audio_sources
+                    ):
+                        has_unimported = True
+
+        managed_entries: list[tuple[str, int, int]] = []
+        managed_root = Path(library["managed_root"])
+        if managed_root.is_dir() and not managed_root.is_symlink():
+            for entry in sorted(os.scandir(managed_root), key=lambda item: item.name):
+                if (
+                    entry.name.startswith(".")
+                    or entry.is_symlink()
+                    or not entry.is_dir(follow_symlinks=False)
+                    or entry.name in known_dirs
+                ):
+                    continue
+                manifest = managed_root / entry.name / ".wildstring" / "manifest.json"
+                if manifest.is_file() and not manifest.is_symlink():
+                    try:
+                        stat_info = manifest.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    managed_entries.append((entry.name, stat_info.st_size, stat_info.st_mtime_ns))
+                    has_unimported = True
+
+        snapshot = (
+            tuple(str(root) for root in sources),
+            tuple(source_entries),
+            tuple(managed_entries),
+        )
+        return has_unimported, snapshot
+
+    def scan(self, library, *, watched_only: bool = False):
         identity = library["id"]
         job_id = uuid4().hex
-        with self.write(identity):
+        with self.write(identity, timeout=0.0 if watched_only else 5.0):
             with self.database.connect(write=True) as db:
-                sources = [
-                    Path(row[0])
-                    for row in db.execute(
-                        "SELECT root FROM book_library_sources WHERE library_id=? ORDER BY id",
-                        (identity,),
-                    )
-                ]
+                query = (
+                    "SELECT root FROM book_library_sources WHERE library_id=? AND watch_enabled=1 ORDER BY id"
+                    if watched_only
+                    else "SELECT root FROM book_library_sources WHERE library_id=? ORDER BY id"
+                )
+                sources = [Path(row[0]) for row in db.execute(query, (identity,))]
                 ebook_sources = {
                     row[0]: row[1]
                     for row in db.execute(

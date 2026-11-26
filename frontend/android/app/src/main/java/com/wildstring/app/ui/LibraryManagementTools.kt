@@ -401,11 +401,16 @@ internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
             val kind = eff?.text("kind") ?: "none"
             val hasWords = eff?.objects("lines")?.any { it.objects("words").isNotEmpty() } == true
             val hasTrans = eff?.objects("lines")?.any { it.text("translation").isNotBlank() } == true
+            val hasRoman = eff?.objects("lines")?.any { it.text("romanization").isNotBlank() } == true
+            val hasRichStructure = hasWords || hasTrans || hasRoman
+            val hasPortableSidecar = !hasCandidate && hasOverride && hasRichStructure
+            val kindText = if (hasWords) stringResource(R.string.lib_mgmt_lyric_kind_word_timed) else if (kind == "synced") stringResource(R.string.lib_mgmt_lyric_kind_synced) else stringResource(R.string.lib_mgmt_lyric_kind_plain)
+            val bilingualText = if (hasTrans || hasRoman) stringResource(R.string.lib_mgmt_lyric_kind_bilingual_suffix) else ""
 
             val statusText = if (hasCandidate) {
-                val kindText = if (hasWords) stringResource(R.string.lib_mgmt_lyric_kind_word_timed) else if (kind == "synced") stringResource(R.string.lib_mgmt_lyric_kind_synced) else stringResource(R.string.lib_mgmt_lyric_kind_plain)
-                val bilingualText = if (hasTrans) stringResource(R.string.lib_mgmt_lyric_kind_bilingual_suffix) else ""
                 stringResource(R.string.lib_mgmt_lyric_status_candidate, kindText + bilingualText)
+            } else if (hasPortableSidecar) {
+                stringResource(R.string.lib_mgmt_lyric_status_sidecar, kindText + bilingualText)
             } else if (hasOverride) {
                 stringResource(R.string.lib_mgmt_lyric_status_override)
             } else if (kind == "synced") {

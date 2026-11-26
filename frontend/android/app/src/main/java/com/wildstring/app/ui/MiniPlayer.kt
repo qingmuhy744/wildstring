@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -38,6 +39,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /** Shares the navigation surface; the album only lends a soft tint. No per-frame artwork work. */
 @Composable internal fun MiniPlayer(
@@ -110,7 +112,7 @@ import androidx.compose.ui.unit.dp
                                 Modifier
                             }
                         )
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AnimatedContent(
@@ -157,7 +159,11 @@ import androidx.compose.ui.unit.dp
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) stringResource(R.string.pause) else stringResource(R.string.play), Modifier.size(22.dp))
+                        Icon(
+                            if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (state.playing) stringResource(R.string.pause) else stringResource(R.string.play),
+                            Modifier.size(22.dp).offset(x = if (state.playing) 0.dp else 1.dp),
+                        )
                     }
                     IconButton(tactile(onQueue), Modifier.testTag("mini-player-queue")) {
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.play_queue), tint = colors.onSurfaceVariant)
@@ -166,7 +172,7 @@ import androidx.compose.ui.unit.dp
                 MiniPlayerProgress(
                     vm,
                     state.duration,
-                    colors.primary,
+                    includeBottomInset,
                     Modifier.align(if (includeBottomInset) Alignment.TopCenter else Alignment.BottomCenter),
                 )
             }
@@ -174,12 +180,165 @@ import androidx.compose.ui.unit.dp
     }
 }
 
-@Composable private fun MiniPlayerProgress(vm: MusicViewModel, duration: Long, color: Color, modifier: Modifier = Modifier) {
+@Composable
+private fun MiniPlayerProgress(
+    vm: MusicViewModel,
+    duration: Long,
+    includeBottomInset: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val position by vm.position.collectAsStateWithLifecycle()
     val fraction = if (duration > 0L) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    MiniPlayerProgressTrack(fraction, includeBottomInset, modifier)
+}
+
+@Composable
+private fun MiniPlayerProgressTrack(
+    fraction: Float,
+    includeBottomInset: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
     if (fraction > 0f) {
-        Box(modifier.fillMaxWidth().height(2.dp).background(Color.Transparent)) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(color.copy(alpha = 0.85f)))
+        Box(modifier.fillMaxWidth().height(2.dp).background(colors.outlineVariant.copy(alpha = 0.35f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(colors.primary.copy(alpha = 0.9f)))
+        }
+    } else if (!includeBottomInset) {
+        HorizontalDivider(
+            modifier = modifier,
+            thickness = 0.5.dp,
+            color = colors.outlineVariant.copy(alpha = 0.35f),
+        )
+    }
+}
+
+@Composable
+internal fun BookMiniPlayer(
+    vm: MusicViewModel,
+    bookState: BookPlaybackState,
+    includeBottomInset: Boolean = false,
+    onChapters: () -> Unit,
+    expand: () -> Unit,
+) {
+    val book = bookState.book ?: return
+    val colors = MaterialTheme.colorScheme
+    val chapterTitle = bookState.activeChapter?.title ?: book.title
+    val subtitle = if (bookState.activeChapter != null) book.title else book.authors.joinToString(" · ")
+    val positionMs by vm.bookPlayback.positionMs.collectAsStateWithLifecycle()
+    val durationMs = bookState.durationMs.takeIf { it > 0L } ?: bookState.activeChapter?.resolvedDurationMs ?: 0L
+    val fraction = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("book-mini-player")
+            .trackSwipeGestures(
+                enabled = bookState.chapters.size > 1,
+                onPrevious = {
+                    val prev = (bookState.index - 1).coerceAtLeast(0)
+                    if (prev != bookState.index) vm.bookPlayback.selectChapter(prev, bookState.playing)
+                },
+                onNext = {
+                    val next = (bookState.index + 1).coerceAtMost(bookState.chapters.lastIndex)
+                    if (next != bookState.index) vm.bookPlayback.selectChapter(next, bookState.playing)
+                },
+            ),
+        color = colors.surfaceContainer,
+        tonalElevation = 0.dp,
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = colors.outlineVariant.copy(alpha = 0.35f),
+            )
+            Box(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (includeBottomInset) {
+                                Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .testTag("book-mini-player-open")
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = tactile(expand),
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        BookCoverThumb(
+                            vm = vm,
+                            book = book,
+                            modifier = Modifier.size(width = 34.dp, height = 46.dp),
+                            cornerRadius = 6.dp,
+                            monogramSize = 16.sp,
+                        )
+                        Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
+                            Text(
+                                chapterTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (subtitle.isNotBlank()) {
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    FilledIconButton(
+                        onClick = tactile(vm.bookPlayback::togglePlay),
+                        enabled = !bookState.loading,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
+                        ),
+                        modifier = Modifier.size(38.dp).testTag("book-mini-player-toggle"),
+                    ) {
+                        if (bookState.loading || delayed(bookState.buffering, 300)) {
+                            CircularProgressIndicator(
+                                Modifier.size(18.dp),
+                                color = colors.onPrimary,
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                if (bookState.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (bookState.playing) stringResource(R.string.pause) else stringResource(R.string.play),
+                                Modifier.size(22.dp).offset(x = if (bookState.playing) 0.dp else 1.dp),
+                            )
+                        }
+                    }
+                    IconButton(tactile(onChapters), Modifier.testTag("book-mini-player-chapters")) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.FormatListBulleted,
+                            stringResource(R.string.books_chapters),
+                            tint = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+                MiniPlayerProgressTrack(
+                    fraction = fraction,
+                    includeBottomInset = includeBottomInset,
+                    modifier = Modifier.align(if (includeBottomInset) Alignment.TopCenter else Alignment.BottomCenter),
+                )
+            }
         }
     }
 }

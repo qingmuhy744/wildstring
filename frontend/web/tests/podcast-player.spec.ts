@@ -186,7 +186,7 @@ test('服务器下载设置可保存重试选项，个人策略另设入口', as
       path: `../../artifacts/podcast-menu-${theme}-${info.project.name}.png`,
       animations: 'disabled',
     });
-    await page.getByRole('heading', { name: '电台 · 播客', exact: true }).click();
+    await page.keyboard.press('Escape');
   }
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await page.getByRole('button', { name: '存储与下载设置…', exact: true }).click();

@@ -184,8 +184,18 @@ def pre40(connection):
             connection.execute(f"ALTER TABLE podcast_resource_refs DROP COLUMN {name}")
 
 
+def pre58(connection):
+    connection.execute("DROP TABLE IF EXISTS music_sidecar_states")
+    for table, column in (("tracks", "sha256"), ("track_lyrics", "portable_bundle")):
+        columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column in columns:
+            connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+
 def pre57(connection):
+    pre58(connection)
     for table in (
+        "book_metadata_settings",
         "book_annotations",
         "book_bookmarks",
         "book_listening_progress",

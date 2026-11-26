@@ -125,24 +125,99 @@ class TrackAssets:
                 temporary.unlink(missing_ok=True)
         return result
 
+    def _sidecar_cover_bytes(
+        self, relative: Path, expected_sha: str | None = None, *, media_hash: str | None = None
+    ) -> bytes | None:
+        from wildstring.library.sidecar import (
+            MUSIC,
+            album_folder,
+            read_manifest,
+            verified_cover_bytes,
+        )
+
+        folder = album_folder(relative)
+        manifest = read_manifest(self.repository.root, folder, MUSIC)
+        if manifest is None:
+            return None
+        if expected_sha is not None:
+            if (
+                manifest.get("cover_file") == "cover.jpg"
+                and manifest.get("cover_sha256") == expected_sha
+            ):
+                if data := verified_cover_bytes(
+                    self.repository.root, folder, "cover.jpg", expected_sha, reencode=False
+                ):
+                    return data
+            for item in manifest.get("tracks") or ():
+                if (
+                    isinstance(item, dict)
+                    and item.get("cover_sha256") == expected_sha
+                    and isinstance(item.get("cover_file"), str)
+                ):
+                    if data := verified_cover_bytes(
+                        self.repository.root,
+                        folder,
+                        item["cover_file"],
+                        expected_sha,
+                        reencode=False,
+                    ):
+                        return data
+            return None
+        if media_hash:
+            for item in manifest.get("tracks") or ():
+                if (
+                    isinstance(item, dict)
+                    and item.get("sha256") == media_hash
+                    and isinstance(item.get("cover_file"), str)
+                    and isinstance(item.get("cover_sha256"), str)
+                ):
+                    if data := verified_cover_bytes(
+                        self.repository.root,
+                        folder,
+                        item["cover_file"],
+                        item["cover_sha256"],
+                        reencode=False,
+                    ):
+                        return data
+        if manifest.get("cover_file") == "cover.jpg" and isinstance(
+            manifest.get("cover_sha256"), str
+        ):
+            return verified_cover_bytes(
+                self.repository.root, folder, "cover.jpg", manifest["cover_sha256"], reencode=False
+            )
+        return None
+
     def cover(
         self, track_id: str, size: int = 320, *, inherit: bool = True
     ) -> tuple[bytes, str] | None:
         current = self.repository.for_track(track_id)
         if current.root != self.repository.root:
             return TrackAssets(current).cover(track_id, size, inherit=inherit)
+        record = self.repository.source(track_id)
         with self.repository.database.connect() as connection:
             choice = connection.execute(
                 "SELECT filename FROM artwork_choices WHERE track_id=?", (track_id,)
             ).fetchone()
         if choice and choice[0] and re.fullmatch("[a-f0-9]{64}", choice[0]):
+            if record is not None:
+                data = self._sidecar_cover_bytes(Path(record["path"]), choice[0])
+                if data is not None and (result := self.thumbnail(data, size)):
+                    return result, "chosen"
             with suppress(OSError):
                 data = (self.repository.database.path.parent / "artwork" / choice[0]).read_bytes()
                 if result := self.thumbnail(data, size):
                     return result, "chosen"
         result = self.local_cover(track_id, size)
-        if result or not inherit:
+        if result:
             return result
+        if record is not None:
+            data = self._sidecar_cover_bytes(
+                Path(record["path"]), None, media_hash=record.get("sha256")
+            )
+            if data is not None and (sidecar_result := self.thumbnail(data, size)):
+                return sidecar_result, "sidecar"
+        if not inherit:
+            return None
         with self.repository.database.connect() as connection:
             siblings = connection.execute(
                 "SELECT id FROM tracks WHERE id<>? AND album_id=(SELECT album_id FROM tracks WHERE id=?) AND status='available' "
@@ -201,7 +276,8 @@ class TrackAssets:
         if include_override:
             with self.repository.database.connect() as connection:
                 row = connection.execute(
-                    "SELECT text,selected_candidate FROM track_lyrics WHERE track_id=?", (track_id,)
+                    "SELECT text,selected_candidate,portable_bundle FROM track_lyrics WHERE track_id=?",
+                    (track_id,),
                 ).fetchone()
                 if row is not None and row["selected_candidate"]:
                     from wildstring.library.online_lyrics import selected_lyrics
@@ -209,8 +285,31 @@ class TrackAssets:
                     selected = selected_lyrics(connection, row["selected_candidate"])
                     if selected is not None:
                         return selected
+            if row is not None and row["portable_bundle"]:
+                import json
+
+                from wildstring.library.online_lyrics import display_lyrics
+
+                with suppress(ValueError, KeyError, TypeError):
+                    return display_lyrics(json.loads(row["portable_bundle"]))
             if row is not None and row["text"] is not None:
                 return parse_lyrics(row["text"], "user")
+            if row is None:
+                record = self.repository.source(track_id)
+                if record is not None:
+                    from wildstring.library.sidecar import read_music_sidecar_lyrics
+
+                    sidecar_lyrics = read_music_sidecar_lyrics(
+                        self.repository.database,
+                        self.repository.root,
+                        track_id,
+                        relative,
+                        record["size_bytes"],
+                        record["mtime_ns"],
+                        record.get("sha256"),
+                    )
+                    if sidecar_lyrics is not None:
+                        return sidecar_lyrics
         for path in self.candidates(relative, [relative.stem], (".lrc", ".lryc")):
             data = self.read_sidecar(path, MAX_TEXT_BYTES)
             text = decode_text(data) if data is not None else None

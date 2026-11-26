@@ -85,9 +85,51 @@ class DiscoveryShortcutsLayoutTest {
         assertTrue("Shortcut labels overflow:\n" + failures.joinToString("\n"), failures.isEmpty())
     }
 
+    @Test fun personalShortcutLabelsFitInBothLanguagesThemesAndWidths() {
+        val language = mutableStateOf("zh")
+        val dark = mutableStateOf(false)
+        val width = mutableStateOf(390)
+        var expectedPixels = 0
+        compose.setContent {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val density = minOf(LocalDensity.current.density, (constraints.maxWidth - 2).coerceAtLeast(1).toFloat() / width.value)
+                SideEffect { expectedPixels = (width.value * density).roundToInt() }
+                val base = LocalContext.current
+                val system = LocalConfiguration.current
+                val configuration = remember(system, language.value) {
+                    Configuration(system).apply { setLocale(Locale.forLanguageTag(language.value)) }
+                }
+                val localized = remember(configuration) { base.createConfigurationContext(configuration) }
+                CompositionLocalProvider(
+                    LocalContext provides localized,
+                    LocalConfiguration provides configuration,
+                    LocalResources provides localized.resources,
+                    LocalDensity provides Density(density, 1f),
+                    LocalDarkAppearance provides dark.value,
+                ) {
+                    MaterialTheme(colorScheme = if (dark.value) classicDarkColors else classicLightColors) {
+                        Surface(Modifier.width(width.value.dp).testTag("shortcuts-preview")) {
+                            MobileShortcuts(discovery = false, horizontalPadding = 16.dp) {}
+                        }
+                    }
+                }
+            }
+        }
+        val failures = mutableListOf<String>()
+        for (viewport in listOf(390, 540)) for (code in listOf("zh", "en")) for (theme in listOf(false, true)) {
+            compose.runOnIdle { width.value = viewport; language.value = code; dark.value = theme }
+            compose.waitForIdle()
+            val name = "personal-shortcuts-$viewport-$code-${if (theme) "dark" else "light"}"
+            assertEquals("$name: preview must not be clipped", expectedPixels, compose.onNodeWithTag("shortcuts-preview").fetchSemanticsNode().size.width)
+            failures += overflowingLabels("personal-shortcuts").map { "$name: $it" }
+            save(name)
+        }
+        assertTrue("Personal shortcut labels overflow:\n" + failures.joinToString("\n"), failures.isEmpty())
+    }
+
     /** Labels whose full single-line text is wider than the space they were given, or that leave the row. */
-    private fun overflowingLabels(): List<String> {
-        val row = compose.onNodeWithTag("discovery-shortcuts").getUnclippedBoundsInRoot()
+    private fun overflowingLabels(tag: String = "discovery-shortcuts"): List<String> {
+        val row = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
         val labels = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
         return (0 until labels.fetchSemanticsNodes().size).mapNotNull { index ->
             val label = labels[index]

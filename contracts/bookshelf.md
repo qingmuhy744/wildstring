@@ -6,13 +6,13 @@
 
 每个书库有独立托管根目录、库级存储模式、访问设置和自动配对选项。扫描来源统一保存在 `book_library_sources`，每个目录一条，拥有稳定来源 ID 和独立监听开关。配置删除不应删除源文件。
 
-`GET /api/v1/book-libraries` 返回可访问书库的 ID、名称、存储模式、访问策略、自动配对状态和版本。所有者可访问全部书库，其他已登录账号可以访问 `default_access=all` 的库和明确授权的 `restricted` 库。默认访问策略为 `restricted`。
+`GET /api/v1/book-libraries` 返回可访问书库的 ID、名称、存储模式、访问策略（`default_access`）、自动配对状态和版本；仅当调用者为 `owner` 时额外返回 `managed_root` 与每条扫描来源 `{id, root, watch_enabled}`，不向普通成员暴露服务器物理路径。所有者可访问全部书库，其他已登录账号可以访问 `default_access=all` 的库和明确授权的 `restricted` 库。默认访问策略为 `restricted`。
 
-`POST /api/v1/book-libraries` 由所有者提交 `{name, source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?}`。来源可以留空，默认开启自动配对。省略托管目录时使用服务端运行目录下的 `books/<library_id>`。自定义绝对目录须可写且为空，来源须为现存绝对目录。书库与音乐库的托管目录、扫描来源、已保留的迁移目录，以及运行数据、播客和 Web 目录按[共享存储边界](storage-and-podcast-resources.md)校验。硬链接预检和现有库的显式模式迁移使用共享存储契约。
+`POST /api/v1/book-libraries` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?}`，`PUT /api/v1/book-libraries/{library_id}` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?, version}` 更新书库名称、默认访问策略、自动配对、扫描来源与每条目录的 `watch_enabled` 自动监听开关（变更 `managed_root` 或 `storage_mode` 需走存储迁移并返回 409 `library_migration_required`）。后台监听循环按 `watch_enabled=1` 目录的文件快照变化自动增量扫描入库，未开启监听的目录仅在手动扫描时纳入。来源可以留空，默认开启自动配对。省略托管目录时使用服务端运行目录下的 `books/<library_id>`。自定义绝对目录须可写且为空，来源须为现存绝对目录。书库与音乐库的托管目录、扫描来源、已保留的迁移目录，以及运行数据、播客和 Web 目录按[共享存储边界](storage-and-podcast-resources.md)校验。硬链接预检和现有库的显式模式迁移使用共享存储契约。
 
 `GET /api/v1/book-libraries/{library_id}/access` 由所有者查看书库的默认策略与当前明确授权账号列表；`PUT /api/v1/book-libraries/{library_id}/access/{user_id}` 由所有者用 `{granted: true|false}` 保存或收回单个账号的明确授权。操作幂等。建库和授权写请求沿用客户端标头检查。撤销明确授权后，公开库的访问仍由库策略提供。
 
-`GET /api/v1/books` 支持按 `library_id` 过滤与 `limit`、`offset` 分页。返回书籍 ID、所属书库、标题、副标题、作者列表（`authors`）、封面可用状态（`has_cover`）及电子书和有声书载体状态。列表包含请求账号的阅读状态和最近进行中的载体，先返回近期继续阅读或收听的书籍。单本详情读取 `GET /api/v1/books/{book_id}`。书库筛选或单本请求中，无权访问与不存在均返回 404。响应不暴露服务器物理路径，音乐库选择标头不影响书库访问。
+`GET /api/v1/books` 支持按 `library_id`、`q`（书名、副标题、作者）、`format`（`ebook` / `audiobook` / `audio`）、`progress_status`（`unread` / `in_progress` / `finished`）过滤，以及 `limit`、`offset` 分页，返回 `items`、`total` 与 `has_more`。每本书包含 ID、所属书库、标题、副标题、作者列表（`authors`）、封面可用状态（`has_cover`）及电子书和有声书载体状态。列表包含请求账号的阅读状态和最近进行中的载体，先返回近期继续阅读或收听的书籍。单本详情读取 `GET /api/v1/books/{book_id}`。书库筛选或单本请求中，无权访问与不存在均返回 404。响应不暴露服务器物理路径，音乐库选择标头不影响书库访问。
 
 所有角色具备 `books:read`，仍需实际书库授权。所有者和曲库管理员具备书籍编辑、上传（含上传或更换封面）、书库管理和元数据搜刮能力，资料编辑员具备编辑和搜刮能力。涉及服务器路径注册、账号授予书库访问权限和存储模式迁移的操作由所有者执行。读写与删除自己的进度、书签和批注沿用 `personal:read`、`personal:write`。
 
@@ -20,7 +20,9 @@
 
 同一本书可含电子书、有声书或两者。扫描同库识别配对，同文件夹已有外部上传书籍或候选歧义时保持独立，多文件有声书目录追加文件增量保留书目与进度；有管理权限的账号可显式配对（迁移并清理被并入目录的托管副本与侧车）或拆分。章节和媒体请求按书籍真实所属库授权，未授权时返回 404。有声书独立播放和记录进度，音乐和播客继续使用各自的队列、接续和统计。
 
-上传入口只收 EPUB、TXT 和书籍封面（上传封面限制体积与像素解码边界）。音频扩展名、音视频 MIME、音频特征字节或 EPUB 内音频均返回 422 `audio_upload_forbidden`，不支持的电子书格式返回 422 `unsupported_ebook_format`。有声书通过只读扫描来源进入书库。具备 `books:write` 和该书库访问权限的成员可以用 `PATCH /api/v1/books/{book_id}/audiobook/chapters/{chapter_index}` 提交 `{title}` 校对标题。校对保留音频和时间范围，保存后刷新托管目录的便携章节信息。
+上传入口只收 EPUB、TXT 和书籍封面（上传封面限制体积与像素解码边界）。`POST /api/v1/books/upload` 的 `library_id` 可选，省略时自动选择当前账号可访问的独立副本（`copy`）书库；若尚无可用独立副本书库，仅 `owner` 会自动初始化受限（`restricted`）默认托管书库，非 `owner` 账号则返回 403 `book_upload_library_required`（始终不向 `hardlink` 库写入手机/网页直传文件）。音频扩展名、音视频 MIME、音频特征字节或 EPUB 内音频均返回 422 `audio_upload_forbidden`，不支持的电子书格式返回 422 `unsupported_ebook_format`。有声书通过只读扫描来源进入书库。具备 `books:write` 和该书库访问权限的成员可以用 `PATCH /api/v1/books/{book_id}/audiobook/chapters/{chapter_index}` 提交 `{title}` 校对标题。校对保留音频和时间范围，保存后刷新托管目录的便携章节信息。
+
+公共书目元数据基础来源（`Apple iTunes` 含电子书与有声书、`Open Library`、`Google Books`）由 `GET /api/v1/books/metadata/sources` 与 `PUT /api/v1/books/metadata/sources` 管理启用状态（默认启用 `itunes` 与 `openlibrary`，`google_books` 默认不启用）；`GET /api/v1/books/{book_id}/metadata/search` 支持按逗号分隔的 `sources` 或单 `provider` 检索，并透传 Fake-IP 拒绝（422 `remote_url_fake_ip`）与上游限流（429 `book_metadata_rate_limited`）。
 
 阅读内容以章节 manifest 和服务端净化后的语义块返回。块包含 `block_index`、`tag`、`runs`（支持行内 `bold` / `italic` / `code` 样式与 `child.tail` 保序）、`text`、`char_len` 和可选 `image_key`。原 EPUB 的脚本、外部样式和远程资源不交给阅读器执行或加载，压缩归档与 `spine` 条目受解压上限约束。正文与图片放入 `book_cache`，缓存图像与音频流使用同一书库授权。滚动与分页使用同一个 `(spine_index, block_index, char_offset)` 阅读锚点。
 

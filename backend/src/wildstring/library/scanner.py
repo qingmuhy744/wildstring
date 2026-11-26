@@ -79,7 +79,18 @@ def scan_library(
                 path = "."
             record_error(path, "directory_unreadable")
 
-        from wildstring.library.sidecar import album_folder, restore_music_track
+        from wildstring.library.sidecar import (
+            album_folder,
+            clear_removed_sidecar,
+            inspect_folder_sidecar,
+            load_sidecar_states,
+            restore_music_track,
+            save_sidecar_state,
+        )
+
+        library_id = repository.library_id()
+        known_sidecars = load_sidecar_states(database, library_id)
+        folder_checks: dict[Path, tuple[str, int | None, str | None]] = {}
 
         def candidates():
             if paths is not None:
@@ -140,15 +151,26 @@ def scan_library(
                             raise SourceChangedError
                         repository.save(key, metadata, before.st_size, before.st_mtime_ns, run_id)
                         counts["updated" if existing else "added"] += 1
-                    if existing is None or full:
-                        restore_music_track(
-                            database,
+                    folder = album_folder(relative)
+                    if folder not in folder_checks:
+                        folder_checks[folder] = inspect_folder_sidecar(
                             settings.library_dir,
-                            repository.library_id(),
-                            relative,
-                            settings.library_dir,
-                            album_folder(relative),
+                            folder,
+                            known_sidecars.get(folder.as_posix()),
                         )
+                    sidecar_state, _, _ = folder_checks[folder]
+                    if (
+                        existing is None or full or sidecar_state == "changed"
+                    ) and restore_music_track(
+                        database,
+                        settings.library_dir,
+                        library_id,
+                        relative,
+                        settings.library_dir,
+                        folder,
+                        sync_unlocked=(sidecar_state == "changed" and existing is not None),
+                    ):
+                        pass
                 except SourceChangedError:
                     record_error(key, "file_changed")
                 except OSError:
@@ -165,6 +187,15 @@ def scan_library(
                 unchanged.clear()
             if complete and paths is None:
                 counts["missing"] = repository.mark_missing(run_id)
+            for folder, (sidecar_state, mtime_ns, manifest_sha) in folder_checks.items():
+                if (
+                    sidecar_state in {"changed", "touched"}
+                    and mtime_ns is not None
+                    and manifest_sha
+                ):
+                    save_sidecar_state(database, library_id, folder, mtime_ns, manifest_sha)
+                elif sidecar_state == "removed":
+                    clear_removed_sidecar(database, settings.library_dir, library_id, folder)
             status = "completed" if counts["errors"] == 0 else "completed_with_errors"
         except OSError:
             record_error(".", "root_unavailable")

@@ -42,6 +42,66 @@ make ci                   # 全量后端、Web 与构建检查
 
 修改依赖后同步对应锁文件：Python 使用 `uv lock --project backend`，Web 在 `frontend/web` 更新 npm 锁文件，Android 使用 `make android-locks`。Gradle 跨平台校验的补充步骤见 `AGENTS.md` §4。
 
+## Android 本地与远程设备调试
+
+### 1. 本机一键模拟器
+
+本地基准 AVD 为 `wildstring-phone`（`1080×1920`，控制台端口 `5566`）与 `wildstring-pad`（`2560×1600`，控制台端口 `5568`），使用 `system-images;android-35;default;x86_64` 并开启 `hw.keyboard=yes`（见 [AGENTS.md](../AGENTS.md)）。
+
+```sh
+make android-emu          # 启动/复用手机模拟器、构建安装并拉起 Dev 应用
+make android-emu-pad      # 启动/复用平板模拟器、构建安装并拉起 Dev 应用
+make android-emu-stop     # 停止本机运行中的 Android 模拟器
+```
+
+默认以无头后台启动；在 Linux 本机桌面直接弹窗查看时追加 `ANDROID_EMU_WINDOW=1`。
+
+### 2. 跨机轻量操作（SSH 端口转发 + scrcpy，推荐日常交互）
+
+仅需点击屏幕、查看页面布局与动效（无需断点调试或 UI 树检查）时，不需要打开 Android Studio，直接用 `scrcpy` 弹出独立窗口。
+
+远端无头模拟器的 ADB 设备端口仅监听回环地址：`5567`（`emulator-5566`）与 `5569`（`emulator-5568`）。在控制端 `~/.ssh/config` 将其转发到本机高位端口，**不占用本机默认的 `5037` ADB Server 端口**，与本机 USB 真机或本地模拟器零冲突：
+
+```sshconfig
+Host wildstring-adb
+    HostName <build-host-ip-or-alias>
+    User <user>
+    LocalForward 15567 127.0.0.1:5567
+    LocalForward 15569 127.0.0.1:5569
+    ExitOnForwardFailure yes
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
+```
+
+建立后台隧道后直接用 `scrcpy` 打开对应端口（会自动建立 `adb connect`）：
+
+```sh
+ssh -fN wildstring-adb
+scrcpy --tcpip=127.0.0.1:15567   # 手机（平板为 127.0.0.1:15569）
+```
+
+该方式提供 60fps 独立窗口、键鼠点按滑动、双向剪贴板以及音频转发；用完断开隧道与连接（`adb disconnect 127.0.0.1:15567`）即可，远端无头模拟器与安装状态不受影响。
+
+### 3. 跨机接入 Android Studio 深度调试（SSH 端口转发 + adb connect）
+
+需要 `Layout Inspector`（Compose UI 树与重组检查）、断点单步、`Logcat` 或 `Profiler` 时，复用同一条 `15567 / 15569` SSH 隧道：
+
+```sh
+ssh -fN wildstring-adb
+adb connect 127.0.0.1:15567
+```
+
+设备会注册到本机原生的 `127.0.0.1:5037` ADB Server 下，因此硬编码连接 `127.0.0.1:5037` 的 IDE/调试插件以及 `adb reverse` 均可正常工作；请勿改用转发远端 `5037` 端口，以免与本机 IDE 自动拉起的 ADB Server 抢占端口或冲掉本机 USB 真机。需要注意 Android Studio 仅将 `5554–5585` 且带控制台口的设备识别为模拟器，`127.0.0.1:15567` 会显示为标准无线 TCP 设备（界面操作、`Running Devices` 投屏、装包调试与 UI 树检查均正常，仅隐藏依赖偶数控制台口的虚拟来电/电量/定位等模拟器扩展面板；如需控制台指令可在构建机执行 `adb -s emulator-5566 emu ...`）。
+
+### 4. 实体设备跨局域网 / SD-WAN 无线装包与联调
+
+构建机与实体 Android 设备处于同一局域网或 SD-WAN（如 Tailscale）时，可不经过中间拷贝直接远程装包（`adb -s <target> install -r ...` 或 `./gradlew :app:installDebug`）：
+
+- **路由器直通或局域网互通（Android 11+）**：在手机「开发者选项 → 无线调试」开启开关后，构建机执行一次 `adb pair <device-ip>:<pair-port>` 配对，再通过 `adb connect <device-ip>:<connect-port>` 连接。
+- **客户端虚拟网卡组网（如手机端运行 Tailscale / WireGuard `tun0`）**：Android 原生「无线调试」绑定在 Wi-Fi 接口上（切蜂窝网络自动关闭，且部分 ROM 会拦截来自虚拟网卡的握手）。若直连受阻或需要跨 Wi-Fi/蜂窝网固定端口，可在手机开机后插任意电脑执行一次 `adb tcpip 5555`，拔线后构建机即可通过 `adb connect <virtual-ip>:5555` 连接（首次需在手机确认 RSA 授权弹窗；在不可信公共网络使用前执行 `adb usb` 或关闭 USB 调试）。
+
+真机在 SD-WAN 内直连开发机调试后端时，后端需监听可达地址，并在客户端服务器线路中显式放行 `http://`（详见 [服务器线路契约](../contracts/server-connections.md)）。
+
 ## 容器运行
 
 ```sh

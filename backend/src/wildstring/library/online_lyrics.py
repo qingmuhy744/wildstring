@@ -103,6 +103,53 @@ def normalize_bundle(raw, source):
     return value
 
 
+def _shift_bundle_offsets(result: dict, offset: int) -> dict:
+    all_lines = list(result["lines"])
+    for layer in result.get("layers", {}).values():
+        all_lines.extend(layer)
+    for line in all_lines:
+        if line["time_ms"] is not None:
+            line["time_ms"] = max(0, line["time_ms"] + offset)
+        if line.get("end_ms") is not None:
+            line["end_ms"] = max(0, line["end_ms"] + offset)
+        for word in line.get("words", []):
+            if word.get("start_ms") is not None:
+                word["start_ms"] = max(0, word["start_ms"] + offset)
+            if word.get("end_ms") is not None:
+                word["end_ms"] = max(0, word["end_ms"] + offset)
+    return result
+
+
+def build_portable_lyric_bundle(
+    normalized: dict,
+    offset_ms: int = 0,
+    *,
+    source_id: str | None = None,
+    source_url: str | None = None,
+) -> dict:
+    payload = json.loads(json.dumps(normalized))
+    for line in payload.get("lines", []):
+        if isinstance(line, dict):
+            line.pop("translation", None)
+            line.pop("romanization", None)
+    validated = normalize_bundle({"normalized": payload}, "wildstring-sidecar")
+    _shift_bundle_offsets(validated, int(offset_ms or 0))
+    bundle: dict = {
+        "schema": "wildstring.sidecar.lyrics.v1",
+        "kind": validated["kind"],
+        "format": validated.get("format", "lrc"),
+        "source": validated["source"],
+        "lines": validated["lines"],
+    }
+    if validated.get("layers"):
+        bundle["layers"] = validated["layers"]
+    if isinstance(source_id, str) and source_id and len(source_id) <= 256:
+        bundle["source_id"] = source_id
+    if isinstance(source_url, str) and source_url and len(source_url) <= 1024:
+        bundle["source_url"] = source_url
+    return bundle
+
+
 def selected_lyrics(connection, selection):
     if not selection:
         return None
@@ -116,24 +163,11 @@ def selected_lyrics(connection, selection):
             return None
         # Pair before a negative offset can clamp distinct early starts to zero.
         result = display_lyrics(json.loads(row["normalized"]))
-        offset = selection.get("offset_ms", 0)
-        all_lines = list(result["lines"])
-        for layer in result.get("layers", {}).values():
-            all_lines.extend(layer)
-        for line in all_lines:
-            if line["time_ms"] is not None:
-                line["time_ms"] = max(0, line["time_ms"] + offset)
-            if line.get("end_ms") is not None:
-                line["end_ms"] = max(0, line["end_ms"] + offset)
-            for word in line.get("words", []):
-                if word.get("start_ms") is not None:
-                    word["start_ms"] = max(0, word["start_ms"] + offset)
-                if word.get("end_ms") is not None:
-                    word["end_ms"] = max(0, word["end_ms"] + offset)
+        _shift_bundle_offsets(result, selection.get("offset_ms", 0))
         return result | {
             "source_id": row["source_id"],
             "source_url": row["source_url"],
-            "offset_ms": offset,
+            "offset_ms": selection.get("offset_ms", 0),
         }
     except (ValueError, KeyError, TypeError):
         return None

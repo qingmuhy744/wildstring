@@ -248,6 +248,22 @@ class PadLayoutTest {
             appearance(vm, "light")
             compose.onNodeWithTag("nav-mine").performClick()
             compose.waitUntil(15_000) { vm.state.value.playlists.size == 8 }
+            window(1200, 800)
+            val shortcutsBounds = compose.onNodeWithTag("personal-shortcuts").getUnclippedBoundsInRoot()
+            val playlistsHeading = compose.onNodeWithText(uiString(R.string.my_playlists)).getUnclippedBoundsInRoot()
+            val firstPlaylist = compose.onNodeWithTag("catalog-item-0").getUnclippedBoundsInRoot()
+            assertTrue("My playlists heading ($playlistsHeading) must sit below shortcuts ($shortcutsBounds)", playlistsHeading.top >= shortcutsBounds.bottom)
+            assertTrue("My playlists heading ($playlistsHeading) must sit directly above first playlist ($firstPlaylist)", firstPlaylist.top >= playlistsHeading.bottom)
+            assertTrue("My playlists heading left ($playlistsHeading) must align above first playlist ($firstPlaylist), not shifted to right column", playlistsHeading.left <= firstPlaylist.left + 16.dp)
+            val addPlaylistBounds = compose.onNodeWithContentDescription(uiString(R.string.playlist_new)).getUnclippedBoundsInRoot()
+            assertTrue("Personal shortcuts ($shortcutsBounds) must right-align near add-playlist action ($addPlaylistBounds)", kotlin.math.abs(shortcutsBounds.right.value - addPlaylistBounds.right.value) <= 16f)
+            compose.onNode(hasText(uiString(R.string.recently_played)) and hasAnyAncestor(hasTestTag("personal-shortcuts"))).assertIsDisplayed()
+            compose.onNode(hasText(uiString(R.string.settings_title)) and hasAnyAncestor(hasTestTag("personal-shortcuts"))).assertDoesNotExist()
+            capture("pad-landscape-mine-light")
+            appearance(vm, "dark")
+            capture("pad-landscape-mine-dark")
+            appearance(vm, "light")
+            window(800, 1200)
             compose.onNodeWithTag("catalog-list").performScrollToIndex(1)
             capture("pad-portrait-playlists-light")
             compose.onNodeWithTag("nav-search").performClick()
@@ -311,6 +327,7 @@ class PadLayoutTest {
             appearance(vm, "light")
             capture("pad-phone-podcast-light")
             appearance(vm, "dark")
+            compose.onNodeWithTag("nav-library").performClick()
             compose.onNodeWithTag("nav-assistant").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
             // The workspace's initial load keeps History disabled; a click before it finishes is ignored.
@@ -341,10 +358,14 @@ class PadLayoutTest {
             capture("pad-portrait-chat-light")
             window(390, 844)
             compose.onNodeWithTag("agent-single-pane").assertIsDisplayed()
+            compose.onNodeWithTag("bottom-navigation").assertDoesNotExist()
             compose.onNodeWithTag("agent-chat-input").assertTextContains("旋转后保留的草稿")
             compose.onNodeWithText("历史消息 20", substring = true).assertIsDisplayed()
             capture("pad-phone-chat-light")
-            compose.onNodeWithTag("nav-library").performClick()
+            compose.onNodeWithTag("assistant-back").assertIsDisplayed().performClick()
+            compose.waitUntil(15_000) {
+                vm.state.value.tab == "library" && compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithTag("nav-assistant").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-messages").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-chat-input").assertTextContains("旋转后保留的草稿")

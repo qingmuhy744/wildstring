@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { login } from './helpers';
+import { login, manageTab } from './helpers';
 
 test('书架进入全屏阅读，分页保留正文与书签，深链接可刷新', async ({ page }, info) => {
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
@@ -42,11 +42,10 @@ test('书架进入全屏阅读，分页保留正文与书签，深链接可刷�
   });
   expect(checkpoint.status()).toBe(200);
   if (info.project.name === 'mobile') {
-    await page.getByLabel('浏览方式').selectOption('podcasts');
+    await page.getByLabel('浏览方式').selectOption('books');
   } else {
-    await page.getByRole('button', { name: /电台/ }).first().click();
+    await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
   }
-  await page.getByRole('button', { name: '书架', exact: true }).click();
   const status = page.getByLabel('阅读状态');
   await status.selectOption('unread');
   await expect(page.getByRole('button', { name: title, exact: false })).toHaveCount(0);
@@ -66,13 +65,18 @@ test('书架进入全屏阅读，分页保留正文与书签，深链接可刷�
   ).toBeVisible();
   await page.screenshot({ scale: 'css', path: info.outputPath('reader-light.png') });
   await reader.getByRole('button', { name: '分页', exact: true }).click();
+  await reader.getByRole('button', { name: '排版', exact: true }).click();
   await reader.getByRole('button', { name: '深色纸张', exact: true }).click();
+  await reader.getByRole('button', { name: '排版', exact: true }).click();
   await page.screenshot({ scale: 'css', path: info.outputPath('reader-dark.png') });
   await expect(
     reader.getByRole('article').getByText('这段正文在滚动与分页中均可读。'),
   ).toBeVisible();
+  await reader.getByRole('button', { name: '笔记', exact: true }).click();
   await reader.getByRole('button', { name: '添加书签', exact: true }).click();
   await expect(reader.getByText('书签', { exact: true })).toBeVisible();
+  await expect(reader.locator('.bookshelf-note-list')).toContainText('这段正文');
+  await reader.getByRole('button', { name: /^笔记/ }).click();
   await expect
     .poll(async () => {
       const response = await page.request.get(`/api/v1/books/${book}/reading-progress`);
@@ -89,6 +93,14 @@ test('书架进入全屏阅读，分页保留正文与书签，深链接可刷�
   ).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(reader).toBeHidden();
+
+  // Visiting a stale/deleted book deep-link redirects back to '/' cleanly instead of trapping the user with a retry error.
+  await page.goto('/books/nonexistent-book-id/read');
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText('原链接指向的书籍已不存在，已为你返回书架列表。')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(page.getByText('原链接指向的书籍已不存在，已为你返回书架列表。')).toHaveCount(0);
 });
 
 test('阅读位置在滚动、分页和视口重排之间保留到字符', async ({ page }, info) => {
@@ -156,9 +168,11 @@ test('阅读位置在滚动、分页和视口重排之间保留到字符', async
   await markerVisible();
   await reader.getByRole('button', { name: '分页', exact: true }).click();
   await markerVisible();
+  await reader.getByRole('button', { name: '排版', exact: true }).click();
   await reader.getByRole('combobox', { name: '字体' }).selectOption('sans-serif');
   await reader.getByRole('slider', { name: '字号' }).press('End');
   await reader.getByRole('slider', { name: '行距' }).press('End');
+  await reader.getByRole('button', { name: '排版', exact: true }).click();
   await page.setViewportSize(
     info.project.name === 'mobile' ? { width: 360, height: 740 } : { width: 1024, height: 780 },
   );
@@ -166,6 +180,7 @@ test('阅读位置在滚动、分页和视口重排之间保留到字符', async
   await reader.getByRole('button', { name: '滚动', exact: true }).click();
   await markerVisible();
 
+  await reader.getByRole('button', { name: '笔记', exact: true }).click();
   const response = page.waitForResponse(
     (r) => r.url().endsWith('/bookmarks') && r.request().method() === 'POST',
   );
@@ -186,9 +201,8 @@ test('书库管理提供跨卷失败、导出反馈和访问受限说明', async
   const id = (await library.json()).id;
 
   async function openShelf() {
-    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
-    else await page.getByRole('button', { name: /电台/ }).first().click();
-    await page.getByRole('button', { name: '书架', exact: true }).click();
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('books');
+    else await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
   }
 
   let release: () => void;
@@ -209,8 +223,28 @@ test('书库管理提供跨卷失败、导出反馈和访问受限说明', async
   release!();
   await page.getByLabel('书库', { exact: true }).selectOption(id);
   await expect(page.getByText('没有匹配的书籍')).toBeVisible();
-  await page.getByRole('button', { name: '管理书库' }).click();
-  await page.getByText('迁移书库存储', { exact: true }).first().click();
+  await expect(page.getByRole('button', { name: '扫描来源' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '迁移书库存储' })).toHaveCount(0);
+
+  // Foreground bookshelf provides one-step direct ebook upload without any hardlink/library setup UI.
+  const directTitle = `直传书目-${info.project.name}-${Date.now()}`;
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: '上传电子书', exact: true }).click(),
+  ]);
+  await chooser.setFiles({
+    name: `${directTitle}.txt`,
+    mimeType: 'text/plain',
+    buffer: Buffer.from('第一章\n选完文件立即直传。'),
+  });
+  await expect(page.getByRole('heading', { name: directTitle })).toBeVisible();
+  await page.getByRole('button', { name: '返回书架', exact: true }).click();
+  await expect(page.getByRole('button', { name: directTitle, exact: false })).toBeVisible();
+
+  // Heavy library governance, storage migration and portable manifest export live in Management Center -> Bookshelf.
+  await manageTab(page, '书库与存储');
+  const panel = page.getByRole('region', { name: '书库与存储配置', exact: true });
+  await panel.getByRole('button', { name, exact: false }).click();
   await page.route(`**/api/v1/book-libraries/${id}/migrations`, async (route) => {
     if (route.request().method() !== 'POST') {
       await route.continue();
@@ -218,15 +252,21 @@ test('书库管理提供跨卷失败、导出反馈和访问受限说明', async
     }
     await route.fulfill({ status: 422, json: { detail: 'hardlink_cross_device' } });
   });
-  await page.getByRole('button', { name: '迁移书库存储', exact: true }).click();
-  const error = page.getByRole('alert');
+  await panel.getByRole('button', { name: '迁移书库存储', exact: true }).click();
+  const error = panel.getByRole('alert');
   await expect(error).toContainText('同一挂载卷');
   await expect(error).toBeInViewport();
   await page.screenshot({ scale: 'css', path: info.outputPath('storage-cross-mount.png') });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.screenshot({ scale: 'css', path: info.outputPath('storage-cross-mount-dark.png') });
-  await page.getByRole('button', { name: '导出便携元数据' }).click();
-  await expect(page.getByText('已导出 0 份清单')).toBeVisible();
+  await panel.getByRole('button', { name: '导出便携元数据', exact: true }).click();
+  await expect(panel.getByText('已导出 1 份清单')).toBeVisible();
+
+  await manageTab(page, '元数据来源');
+  const sourcesPanel = page.getByRole('region', { name: '元数据来源', exact: true });
+  await expect(sourcesPanel.getByRole('checkbox', { name: 'Apple iTunes' })).toBeChecked();
+  await expect(sourcesPanel.getByRole('checkbox', { name: 'Open Library' })).toBeChecked();
+  await expect(sourcesPanel.getByRole('checkbox', { name: 'Google Books' })).not.toBeChecked();
 
   const credentials = {
     username: `shelf-${info.project.name}-${Date.now()}`,
@@ -244,7 +284,7 @@ test('书库管理提供跨卷失败、导出反馈和访问受限说明', async
   await page.reload();
   await openShelf();
   await expect(page.getByText('当前账号没有可访问的书库，请联系所有者授权。')).toBeVisible();
-  await expect(page.getByRole('button', { name: '管理书库' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '上传电子书', exact: true })).toHaveCount(0);
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.screenshot({ scale: 'css', path: info.outputPath('storage-restricted.png') });
 });
@@ -268,17 +308,18 @@ test('校对有声书章节标题后立即写入侧车', async ({ page }, info) 
     expect(scan.status()).toBe(200);
     const [book] = (await (await page.request.get(`/api/v1/books?library_id=${id}`)).json()).items;
     expect(book.has_audiobook).toBe(true);
-    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
-    else await page.getByRole('button', { name: /电台/ }).first().click();
-    await page.getByRole('button', { name: '书架', exact: true }).click();
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('books');
+    else await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
     await page.getByLabel('书库', { exact: true }).selectOption(id);
     await page.getByRole('button', { name: book.title, exact: false }).click();
-    await page.getByRole('button', { name: '收听', exact: true }).click();
-    await page.getByText('校对章节标题', { exact: true }).click();
+    const chapters = page.locator('.book-detail-chapter-list');
+    await chapters
+      .getByRole('button', { name: /^校对章节标题/ })
+      .first()
+      .click();
     await page.getByRole('textbox', { name: '章节标题' }).fill('校订后的第一章');
-    const headings = page.locator('.book-audio');
-    await headings.getByRole('button', { name: '保存', exact: true }).click();
-    await expect(headings.getByRole('combobox', { name: '目录' })).toContainText('校订后的第一章');
+    await chapters.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(chapters).toContainText('校订后的第一章');
     const file = join(managed_root, book.id, '.wildstring', 'manifest.json');
     const manifest = JSON.parse(await readFile(file, 'utf8'));
     expect(manifest.audiobook.chapters[0].title).toBe('校订后的第一章');
@@ -337,7 +378,18 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
     const reader = page.getByRole('dialog', { name: title });
     const mark = reader.locator('mark[data-color="terracotta"]');
     await expect(mark).toHaveText('这是一段');
-    await reader.getByText(/批注 \(1\)/).click();
+    await reader.getByRole('button', { name: '笔记 (1)', exact: true }).click();
+    await reader.getByRole('button', { name: '写批注 这是一段', exact: true }).click();
+    await reader.getByRole('textbox', { name: '批注想法', exact: true }).fill('关键段落批注');
+    await reader.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(reader.getByText('关键段落批注', { exact: true })).toBeVisible();
+    await page.screenshot({ scale: 'css', path: info.outputPath('reader-notes-light.png') });
+    await expect
+      .poll(async () => {
+        const res = await page.request.get(`/api/v1/books/${ebookId}/annotations`);
+        return (await res.json()).items[0]?.note;
+      })
+      .toBe('关键段落批注');
     await reader.getByRole('button', { name: '删除 这是一段' }).click();
     await expect(mark).toHaveCount(0);
     await page.keyboard.press('Escape');
@@ -348,13 +400,25 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
     ).items.find((item: { id: string; has_audiobook: boolean }) => item.has_audiobook);
     await page.getByLabel('书库', { exact: true }).selectOption(lib.id);
     await page.getByRole('button', { name: audioBook.title, exact: false }).click();
+    const editToggle = page.getByRole('button', { name: '整理与编辑', exact: true });
+    await expect(editToggle).toHaveAttribute('aria-expanded', 'false');
+    await editToggle.click();
+    await expect(editToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('textbox', { name: '书名' })).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'Apple iTunes' })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Open Library' })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Google Books' })).toHaveCount(0);
     await page.getByRole('button', { name: '收听', exact: true }).click();
-    await expect(page.locator('.book-audio')).toBeVisible();
+    const playerBar = page.getByRole('region', { name: '音乐播放器', exact: true });
+    await expect(playerBar).toContainText(audioBook.title);
     if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('tracks');
     else await page.locator('.sidebar').getByRole('button', { name: '歌曲' }).first().click();
-    await expect(page.locator('.book-audio-dock')).toContainText(audioBook.title);
-    await page.locator('.book-audio-dock').getByRole('button', { name: '返回书架' }).click();
+    await expect(playerBar).toContainText(audioBook.title);
     await expect(page.locator('.book-audio-dock')).toHaveCount(0);
+    await playerBar.getByRole('button', { name: audioBook.title, exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: audioBook.title })).toBeVisible();
+    await playerBar.getByRole('button', { name: '结束听书', exact: true }).click();
+    await expect(playerBar).not.toContainText(audioBook.title);
 
     // Owner grants member access in Management UI and member sees restricted book.
     const visitorCreds = {
@@ -366,13 +430,10 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
       data: { ...visitorCreds, library_ids: [] },
     });
     expect(userRes.status()).toBe(201);
-    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
-    else await page.getByRole('button', { name: /电台/ }).first().click();
-    await page.getByRole('button', { name: '书架', exact: true }).click();
-    await page.getByLabel('书库', { exact: true }).selectOption(lib.id);
-    await page.getByRole('button', { name: '管理书库' }).click();
-    await page.getByText('成员访问授权', { exact: true }).click();
-    const memberCheck = page.getByLabel(visitorCreds.username);
+    await manageTab(page, '书库与存储');
+    const panel = page.getByRole('region', { name: '书库与存储配置', exact: true });
+    await panel.getByRole('button', { name: title, exact: false }).click();
+    const memberCheck = panel.getByLabel(visitorCreds.username);
     await memberCheck.scrollIntoViewIfNeeded();
     await Promise.all([
       page.waitForResponse(
@@ -389,11 +450,157 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
       (await page.request.post('/api/v1/auth/login', { headers, data: visitorCreds })).status(),
     ).toBe(200);
     await page.reload();
-    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('podcasts');
-    else await page.getByRole('button', { name: /电台/ }).first().click();
-    await page.getByRole('button', { name: '书架', exact: true }).click();
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('books');
+    else await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
     await expect(page.getByRole('button', { name: title, exact: false })).toBeVisible();
   } finally {
     await rm(source, { recursive: true, force: true });
   }
+});
+
+test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page }, info) => {
+  await login(page);
+  const headers = { 'X-Wildstring-Client': 'web' };
+  const title = `续听竞态 ${info.project.name} ${Date.now()}`;
+  const source = await mkdtemp(join(tmpdir(), 'wildstring-book-audio-race-'));
+  try {
+    await copyFile(
+      new URL('../../../tests/fixtures/audio/playback.mp3', import.meta.url),
+      join(source, '01.mp3'),
+    );
+    await copyFile(
+      new URL('../../../tests/fixtures/audio/playback.mp3', import.meta.url),
+      join(source, '02.mp3'),
+    );
+    const library = await page.request.post('/api/v1/book-libraries', {
+      headers,
+      data: { name: title, source_roots: [source] },
+    });
+    expect(library.status()).toBe(201);
+    const lib = await library.json();
+    expect(
+      (await page.request.post(`/api/v1/book-libraries/${lib.id}/scan`, { headers })).status(),
+    ).toBe(200);
+    const [audioBook] = (
+      await (await page.request.get(`/api/v1/books?library_id=${lib.id}`)).json()
+    ).items;
+    expect(audioBook.has_audiobook).toBe(true);
+
+    const progressPath = `/api/v1/books/${audioBook.id}/listening-progress`;
+    const seeded = await page.request.put(progressPath, {
+      headers,
+      data: {
+        session_id: 'audio-race-seed-0001',
+        device_id: 'seed',
+        base_version: 0,
+        sequence: 1,
+        chapter_index: 1,
+        chapter_position_ms: 500,
+        playback_rate: 1.25,
+      },
+    });
+    expect(seeded.status()).toBe(200);
+
+    await page.route(`**${progressPath}`, async (route) => {
+      if (route.request().method() === 'GET') {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
+      await route.continue();
+    });
+
+    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('books');
+    else await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
+    await page.getByLabel('书库', { exact: true }).selectOption(lib.id);
+    await page
+      .locator('.bookshelf-grid')
+      .getByRole('button', { name: audioBook.title, exact: false })
+      .click();
+
+    await page.getByRole('button', { name: '收听', exact: true }).click();
+    const audioEl = page.locator(`audio[src*="/api/v1/books/${audioBook.id}/audiobook/files/"]`);
+    await expect(audioEl).toHaveAttribute('src', new RegExp(`/files/1/stream$`));
+    await expect
+      .poll(() => audioEl.evaluate((node: HTMLAudioElement) => node.playbackRate))
+      .toBe(1.25);
+    await expect.poll(() => audioEl.evaluate((node: HTMLAudioElement) => node.paused)).toBe(false);
+
+    const playerBar = page.getByRole('region', { name: '音乐播放器', exact: true });
+    const [saveResponse] = await Promise.all([
+      page.waitForResponse(
+        (res) => res.url().endsWith(progressPath) && res.request().method() === 'PUT',
+      ),
+      playerBar.getByRole('button', { name: '结束听书', exact: true }).click(),
+    ]);
+    expect(saveResponse.status()).toBe(200);
+    const saved = await (await page.request.get(progressPath)).json();
+    expect(saved.chapter_index).toBe(1);
+    expect(saved.playback_rate).toBe(1.25);
+  } finally {
+    await rm(source, { recursive: true, force: true });
+  }
+});
+
+test('书架支持超过 100 本书的分页加载与服务端搜索筛选', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await login(page);
+
+  const pageOneBooks = Array.from({ length: 100 }, (_, i) => ({
+    id: `paged-book-${i + 1}`,
+    library_id: 'paged-lib',
+    title: `馆藏样本 ${String(i + 1).padStart(3, '0')}`,
+    subtitle: null,
+    authors: ['馆藏作者'],
+    has_cover: false,
+    has_ebook: true,
+    has_audiobook: false,
+    progress_status: 'unread' as const,
+    resume_kind: null,
+  }));
+  const book101 = {
+    id: 'paged-book-101',
+    library_id: 'paged-lib',
+    title: '第101本长篇小说',
+    subtitle: '末页检索目标',
+    authors: ['远方作者'],
+    has_cover: false,
+    has_ebook: true,
+    has_audiobook: false,
+    progress_status: 'unread' as const,
+    resume_kind: null,
+  };
+
+  await page.route('**/api/v1/books?**', async (route) => {
+    const url = new URL(route.request().url());
+    const q = url.searchParams.get('q') || '';
+    const offset = Number(url.searchParams.get('offset') || '0');
+    if (q === '第101本') {
+      await route.fulfill({ json: { items: [book101], total: 1, has_more: false } });
+      return;
+    }
+    if (offset >= 100) {
+      await route.fulfill({ json: { items: [book101], total: 101, has_more: false } });
+      return;
+    }
+    await route.fulfill({ json: { items: pageOneBooks, total: 101, has_more: true } });
+  });
+
+  if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('books');
+  else await page.locator('.sidebar').getByRole('button', { name: '书架', exact: true }).click();
+
+  const loadMore = page.getByRole('button', { name: '加载更多', exact: true });
+  await expect(loadMore).toBeVisible();
+  await loadMore.scrollIntoViewIfNeeded();
+  await page.screenshot({ scale: 'css', path: info.outputPath('bookshelf-pagination-light.png') });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.screenshot({ scale: 'css', path: info.outputPath('bookshelf-pagination-dark.png') });
+  await page.emulateMedia({ colorScheme: 'light' });
+
+  await loadMore.click();
+  await expect(page.getByRole('button', { name: '第101本长篇小说', exact: false })).toBeVisible();
+  await expect(loadMore).toHaveCount(0);
+
+  await page.getByRole('searchbox', { name: '查找书籍', exact: true }).fill('第101本');
+  await expect(page.getByRole('button', { name: '第101本长篇小说', exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: '馆藏样本 001', exact: false })).toHaveCount(0);
 });

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from contextlib import suppress
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -66,8 +67,9 @@ class LyricsEditor:
         record = self.repository.source(track_id)
         if record is None:
             raise HTTPException(404, "track_not_found")
+        stable = {key: value for key, value in record.items() if key != "sha256"}
         lyrics = self.assets.lyrics(track_id, include_override=False)
-        signature = json.dumps([record, lyrics], sort_keys=True, ensure_ascii=False).encode()
+        signature = json.dumps([stable, lyrics], sort_keys=True, ensure_ascii=False).encode()
         return lyrics, hashlib.sha256(signature).hexdigest()
 
     def read(self, track_id):
@@ -78,11 +80,20 @@ class LyricsEditor:
             ).fetchone()
         override = row["text"] if row else None
         effective = parse_lyrics(override, "user") if override is not None else observed
+        resolved_candidate = False
         if row and row["selected_candidate"]:
             from wildstring.library.online_lyrics import selected_lyrics
 
             with self.repository.database.connect() as connection:
-                effective = selected_lyrics(connection, row["selected_candidate"]) or effective
+                candidate = selected_lyrics(connection, row["selected_candidate"])
+                if candidate is not None:
+                    effective = candidate
+                    resolved_candidate = True
+        if not resolved_candidate and row and row["portable_bundle"]:
+            from wildstring.library.online_lyrics import display_lyrics
+
+            with suppress(ValueError, KeyError, TypeError):
+                effective = display_lyrics(json.loads(row["portable_bundle"]))
         return {
             "track_id": track_id,
             "version": row["version"] if row else 1,
@@ -104,7 +115,7 @@ class LyricsEditor:
             connection.execute("BEGIN IMMEDIATE")
             _, signature = self.observed(track_id)
             row = connection.execute(
-                "SELECT version, text, selected_candidate FROM track_lyrics WHERE track_id=?",
+                "SELECT version, text, selected_candidate, portable_bundle FROM track_lyrics WHERE track_id=?",
                 (track_id,),
             ).fetchone()
             current_ver = row["version"] if row else 1
@@ -112,17 +123,27 @@ class LyricsEditor:
                 raise HTTPException(409, "lyrics_version_conflict")
 
             keep_candidate = False
-            if row and row["selected_candidate"]:
+            keep_bundle = False
+            if body.text is not None and row and row["selected_candidate"]:
                 from wildstring.library.online_lyrics import selected_lyrics
 
                 cand_lyrics = selected_lyrics(connection, row["selected_candidate"])
-                if cand_lyrics and lyric_text(cand_lyrics) == (body.text or ""):
+                if cand_lyrics and lyric_text(cand_lyrics) == body.text:
                     keep_candidate = True
+            if body.text is not None and not keep_candidate and row and row["portable_bundle"]:
+                with suppress(ValueError, KeyError, TypeError):
+                    existing_bundle = json.loads(row["portable_bundle"])
+                    if lyric_text(existing_bundle) == body.text:
+                        keep_bundle = True
 
             cand_val = row["selected_candidate"] if (keep_candidate and row) else None
+            bundle_val = (
+                row["portable_bundle"] if ((keep_candidate or keep_bundle) and row) else None
+            )
             connection.execute(
-                "INSERT INTO track_lyrics(track_id,text,version,selected_candidate) VALUES (?,?,?,?) "
-                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=excluded.selected_candidate",
-                (track_id, body.text, body.version + 1, cand_val),
+                "INSERT INTO track_lyrics(track_id,text,version,selected_candidate,portable_bundle) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,"
+                "selected_candidate=excluded.selected_candidate,portable_bundle=excluded.portable_bundle",
+                (track_id, body.text, body.version + 1, cand_val, bundle_val),
             )
         return self.read(track_id)

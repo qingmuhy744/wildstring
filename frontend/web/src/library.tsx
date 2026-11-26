@@ -54,7 +54,7 @@ import { LyricScanDialog } from './lyric-scans';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
 import { Bookshelf, readingBookId } from './bookshelf';
-import { BookAudioHost, useBookAudioSession, type Book } from './book-reader';
+import { BookAudioElement, useBookAudioSession, type Book } from './book-reader';
 import { ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
 import type { TrackBlockMeasurements } from './track-window';
@@ -99,6 +99,7 @@ type View =
   | 'listening'
   | 'discover'
   | 'podcasts'
+  | 'books'
   | 'offline'
   | 'devices'
   | 'assistant'
@@ -135,6 +136,7 @@ const labels: Record<View, string> = {
   listening: 'views.listening',
   discover: 'views.discover',
   podcasts: 'views.podcasts',
+  books: 'views.books',
   offline: 'views.offline',
   devices: 'views.devices',
   assistant: 'views.assistant',
@@ -154,6 +156,7 @@ const viewIcons: Record<
   | 'assistant'
   | 'compass'
   | 'podcast'
+  | 'book'
   | 'download'
   | 'refresh'
   | 'draft'
@@ -169,6 +172,7 @@ const viewIcons: Record<
   listening: 'history',
   discover: 'compass',
   podcasts: 'podcast',
+  books: 'book',
   offline: 'download',
   devices: 'refresh',
   assistant: 'assistant',
@@ -246,6 +250,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     assistantTab: AssistantSettingsTab = 'connections',
   ) {
     navigationRequest.current?.abort();
+    if (readingBookId()) window.history.replaceState(null, '', '/');
     setSettingsLocation({ section, assistantTab });
     setConnectionSettingsRevision((value) => value + 1);
     setAccountOpen(true);
@@ -258,6 +263,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   function openManagement(tab: ManagementTab = 'home') {
     navigationRequest.current?.abort();
+    if (readingBookId()) window.history.replaceState(null, '', '/');
     setAccountOpen(false);
     setManageOpen(true);
     setManagementTab(tab);
@@ -265,7 +271,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     window.scrollTo(0, 0);
   }
   const [view, setView] = useState<View>(() => {
-    if (readingBookId()) return 'podcasts';
+    if (readingBookId()) return 'books';
     try {
       const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
@@ -279,6 +285,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const specialView = [
     'discover',
     'podcasts',
+    'books',
     'offline',
     'devices',
     'assistant',
@@ -334,11 +341,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [manageOpen, setManageOpen] = useState(false);
   const [managementTab, setManagementTab] = useState<ManagementTab>('home');
   const [focusPodcastId, setFocusPodcastId] = useState<string | null>(null);
-  const [radioTab, setRadioTab] = useState<'podcasts' | 'books'>(() =>
-    readingBookId() ? 'books' : 'podcasts',
-  );
   const [focusedAudioBook, setFocusedAudioBook] = useState<Book | null>(null);
-  const [inlineBookAudioVisible, setInlineBookAudioVisible] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   const [metadataReviewBatch, setMetadataReviewBatch] = useState<string | null>(null);
@@ -416,9 +419,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const player = usePlayer(currentUser.id),
     favorites = useFavorites(revision, setNotice);
   const bookAudio = useBookAudioSession({
-    activeElsewhere: player.playing,
-    onPlay: () => player.audio.current?.pause(),
+    activeElsewhere: player.wantsPlayback || player.playing,
+    onPlay: () => player.pause(),
     userId: currentUser.id,
+    volume: player.volume,
   });
   const favoritesPlaylist = catalog.find((item) => item.kind === 'favorites');
   const activePlaylist = view === 'favorites' ? favoritesPlaylist : playlist;
@@ -755,6 +759,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     if (target === 'assistant-settings') return openPersonalSettings('assistant');
     if (target === 'devices') return openPersonalSettings('downloads');
     if (!Object.hasOwn(labels, target)) return;
+    if (target !== 'books' && readingBookId()) window.history.replaceState(null, '', '/');
     setAccountOpen(false);
     try {
       writePreference('wildstring:active_view', target);
@@ -1165,7 +1170,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           <Brand onClick={() => switchView('discover')} />
           <nav aria-label={t('nav.main')} className="sidebar-navigation">
             <p className="sidebar-group-label">{t('nav.discoverGroup')}</p>
-            {(['discover', 'podcasts', 'assistant'] as View[]).map(nav)}
+            {(['discover', 'podcasts', 'books', 'assistant'] as View[]).map(nav)}
             <p className="sidebar-group-label">{t('nav.library')}</p>
             {(
               [
@@ -1342,24 +1347,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </button>
             </div>
           </header>
-          <BookAudioHost
-            session={bookAudio}
-            showDock={Boolean(
-              bookAudio.book &&
-              !(
-                view === 'podcasts' &&
-                radioTab === 'books' &&
-                !focusPodcastId &&
-                inlineBookAudioVisible
-              ),
-            )}
-            onOpenBook={(book) => {
-              setFocusedAudioBook(book);
-              setRadioTab('books');
-              setFocusPodcastId(null);
-              switchView('podcasts');
-            }}
-          />
+          <BookAudioElement session={bookAudio} />
           {view === 'discover' && (
             <Discover
               playlists={operations.playlists}
@@ -1387,26 +1375,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </p>
             }
           >
-            {view === 'podcasts' && (
-              <nav className="workspace-tabs radio-tabs" aria-label={t('bookshelf.radio')}>
-                <button
-                  aria-pressed={radioTab === 'podcasts' || !!focusPodcastId}
-                  onClick={() => setRadioTab('podcasts')}
-                >
-                  {t('bookshelf.podcasts')}
-                </button>
-                <button
-                  aria-pressed={radioTab === 'books' && !focusPodcastId}
-                  onClick={() => {
-                    setRadioTab('books');
-                    setFocusPodcastId(null);
-                  }}
-                >
-                  {t('bookshelf.title')}
-                </button>
-              </nav>
-            )}
-            {view === 'podcasts' && radioTab === 'books' && !focusPodcastId && (
+            {view === 'books' && !focusPodcastId && (
               <Bookshelf
                 key={currentUser.id}
                 owner={currentUser.profile === 'owner'}
@@ -1415,10 +1384,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 audioSession={bookAudio}
                 focusedBook={focusedAudioBook}
                 onFocusBookHandled={() => setFocusedAudioBook(null)}
-                onInlineAudioChange={setInlineBookAudioVisible}
               />
             )}
-            {view === 'podcasts' && (radioTab === 'podcasts' || !!focusPodcastId) && (
+            {(view === 'podcasts' || !!focusPodcastId) && (
               <PodcastsPage
                 userId={currentUser.id}
                 canEditPublishers={canManage}
@@ -1431,7 +1399,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 queuedEpisodeIds={player.podcastQueueItems.map((item) => item.episode_id)}
                 focusPodcastId={focusPodcastId}
                 onFocusHandled={() => {
-                  setRadioTab('podcasts');
                   setFocusPodcastId(null);
                 }}
                 onQueueTrack={(track, next) => {
@@ -2076,6 +2043,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           favorites={favorites}
           onOpenArtist={(name) => void openArtistName(name)}
           onOpenAlbum={(track) => void openTrackAlbum(track)}
+          bookAudio={bookAudio}
+          onOpenBook={(book) => {
+            setFocusedAudioBook(book);
+            setFocusPodcastId(null);
+            switchView('books');
+          }}
         />
         {notice && !lyricsOpen && (
           <p className="toast" role="status">

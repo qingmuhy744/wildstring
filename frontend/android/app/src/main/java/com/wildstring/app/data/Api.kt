@@ -69,8 +69,36 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
-    @GET("api/v1/books") suspend fun books(@Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): BookItems<BookSummary>
+    @GET("api/v1/books") suspend fun books(@Query("library_id") libraryId: String? = null, @Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): BookItems<BookSummary>
     @GET("api/v1/book-libraries") suspend fun bookLibraries(): BookItems<BookLibrary>
+    @GET("api/v1/books/{id}") suspend fun book(@Path("id") id: String): BookSummary
+    @GET("api/v1/books/metadata/sources") suspend fun bookMetadataSources(): BookItems<BookMetadataSource>
+    @GET("api/v1/books/{id}/metadata/search") suspend fun searchBookMetadata(
+        @Path("id") id: String,
+        @Query("provider") provider: String? = null,
+        @Query("sources") sources: String? = null,
+        @Query("q") q: String? = null,
+    ): BookItems<BookMetadataCandidate>
+    @PATCH("api/v1/books/{id}/metadata") suspend fun updateBookMetadata(
+        @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
+    @PATCH("api/v1/books/{id}/audiobook/chapters/{index}") suspend fun updateBookAudioChapter(
+        @Path("id") id: String, @Path("index") index: Int, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
+    @Multipart
+    @POST("api/v1/books/{id}/cover") suspend fun uploadBookCover(
+        @Path("id") id: String, @Part file: okhttp3.MultipartBody.Part, @Tag owner: RequestOwner,
+    ): JsonObject
+    @Multipart
+    @POST("api/v1/books/{id}/ebook") suspend fun attachBookEbook(
+        @Path("id") id: String, @Part file: okhttp3.MultipartBody.Part, @Tag owner: RequestOwner,
+    ): JsonObject
+    @POST("api/v1/books/{id}/pair") suspend fun pairBook(
+        @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
+    @POST("api/v1/books/{id}/split") suspend fun splitBook(
+        @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
     @GET("api/v1/books/{id}/ebook/manifest") suspend fun bookManifest(@Path("id") id: String): BookManifest
     @GET("api/v1/books/{id}/ebook/chapters/{index}") suspend fun bookChapter(
         @Path("id") id: String, @Path("index") index: Int,
@@ -96,12 +124,15 @@ interface Api {
     @POST("api/v1/books/{id}/annotations") suspend fun addBookAnnotation(
         @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
     ): JsonObject
+    @PUT("api/v1/books/{id}/annotations/{annId}") suspend fun updateBookAnnotation(
+        @Path("id") id: String, @Path("annId") annId: String, @Body body: JsonObject, @Tag owner: RequestOwner,
+    ): JsonObject
     @DELETE("api/v1/books/{id}/annotations/{annId}") suspend fun deleteBookAnnotation(
         @Path("id") id: String, @Path("annId") annId: String, @Tag owner: RequestOwner,
     ): retrofit2.Response<Unit>
     @Multipart
     @POST("api/v1/books/upload") suspend fun uploadEbook(
-        @Part("library_id") library: okhttp3.RequestBody,
+        @Part("library_id") library: okhttp3.RequestBody? = null,
         @Part file: okhttp3.MultipartBody.Part,
         @Tag owner: RequestOwner,
     ): JsonObject

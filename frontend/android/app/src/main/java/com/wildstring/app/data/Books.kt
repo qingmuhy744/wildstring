@@ -27,7 +27,17 @@ data class BookSummary(
     @SerializedName("progress_status") val progressStatus: String? = null,
     @SerializedName("resume_kind") val resumeKind: String? = null,
 )
-data class BookLibrary(val id: String, val name: String)
+data class BookLibrary(
+    val id: String,
+    val name: String,
+    @SerializedName("storage_mode") val storageMode: String = "copy",
+)
+data class BookMetadataSource(
+    val id: String,
+    val name: String,
+    val kind: String = "builtin",
+    val enabled: Boolean = true,
+)
 data class BookChapter(@SerializedName("spine_index") val index: Int, val title: String)
 data class BookManifest(val chapters: List<BookChapter>, val sha256: String)
 data class BookRun(
@@ -53,15 +63,29 @@ data class BookAnnotation(
     @SerializedName("end_char_offset") val endOffset: Int,
     @SerializedName("selected_text") val selectedText: String = "",
     val color: String,
+    val note: String? = null,
 )
 
-data class BookAudioManifest(val chapters: List<BookAudioChapter>)
+data class BookAudioManifest(
+    @SerializedName("total_duration_ms") val totalDurationMs: Long = 0,
+    val chapters: List<BookAudioChapter> = emptyList(),
+)
 data class BookAudioChapter(
     @SerializedName("chapter_index") val index: Int,
     @SerializedName("file_index") val fileIndex: Int,
     @SerializedName("start_file_ms") val start: Long,
     @SerializedName("end_file_ms") val end: Long,
+    @SerializedName("start_book_ms") val startBookMs: Long = 0,
+    @SerializedName("duration_ms") val durationMs: Long = 0,
     val title: String,
+) {
+    val resolvedDurationMs: Long get() = if (durationMs > 0L) durationMs else (end - start).coerceAtLeast(0L)
+}
+data class BookMetadataCandidate(
+    val provider: String = "",
+    @SerializedName("provider_name") val providerName: String? = null,
+    @SerializedName("external_id") val externalId: String = "",
+    val fields: JsonObject = JsonObject(),
 )
 data class BookCheckpoint(
     val version: Int = 0,
