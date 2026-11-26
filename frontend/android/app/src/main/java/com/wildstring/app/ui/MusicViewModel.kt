@@ -53,6 +53,9 @@ data class MusicState(
     val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
     val handoff: SharedPlayback? = null, val serverVersion: String? = null,
     val podcastId: String? = null,
+    val readingBook: Boolean = false,
+    val focusedBookId: String? = null,
+    val bookBarActive: Boolean = false,
     val libraries: List<MusicLibrary> = emptyList(), val selectedLibraryId: String = "all", val librariesSupported: Boolean = false,
 )
 
@@ -64,6 +67,8 @@ class MusicViewModel @Inject constructor(
     /** Player-only landscape the user asked for; most phones keep system auto-rotate off. Reset when the player collapses. */
     val playerLandscape = MutableStateFlow(false)
     val agent = AgentPlatform(repository)
+    internal lateinit var bookPlayback: BookPlaybackController
+        private set
     private var agentJob: Job? = null
     private var agentNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private fun connectionState(error: String? = null) = MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), serverSelection = repository.session.requestState()?.selection.orEmpty(), localHttp = repository.session.localHttp, error = error)
@@ -177,6 +182,18 @@ class MusicViewModel @Inject constructor(
     private val offlineRequestLock = kotlinx.coroutines.sync.Mutex()
 
     init {
+        bookPlayback = BookPlaybackController(
+            repository = repository,
+            scope = viewModelScope,
+            context = context,
+            onPlayStarted = {
+                pausePlayback()
+                mutable.update { it.copy(bookBarActive = true) }
+            },
+            onSessionCleared = {
+                mutable.update { it.copy(bookBarActive = false) }
+            },
+        )
         settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
         viewModelScope.launch { state.map { it.connected to it.account?.id }.distinctUntilChanged().collect { (connected, _) -> if (connected) refreshLibraries() } }
         viewModelScope.launch { podcastProgress.queueChanges.collect { podcastQueues.refresh() } }
@@ -194,7 +211,7 @@ class MusicViewModel @Inject constructor(
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
             authGeneration++; optimisticFavorites.clear(); pendingPodcastFavorites.value = emptySet(); podcastFavoriteOverrides.value = emptyMap()
-            loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
+            loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems(); bookPlayback.stopAndClose()
             val message = invalidationMessage ?: AppLanguage.string(R.string.vm_login_expired)
             invalidationMessage = null
             mutable.value = connectionState(message.takeIf { it.isNotBlank() })
@@ -288,7 +305,7 @@ class MusicViewModel @Inject constructor(
         loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear(); pendingPodcastFavorites.value = emptySet(); podcastFavoriteOverrides.value = emptyMap()
         loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear()
         repository.client.dispatcher.cancelAll(); sleep.cancel()
-        controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
+        controller?.stop(); controller?.clearMediaItems(); bookPlayback.stopAndClose(); repository.knownTracks.clear(); queueSnapshot = emptyList()
         withContext(Dispatchers.IO) { repository.downloads.awaitPendingPause(); repository.downloads.pauseAll(); repository.database.queue().clear() }
         if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
         imageLoader.memoryCache?.clear()
@@ -405,6 +422,7 @@ class MusicViewModel @Inject constructor(
             "mine" -> "playlists"
             "search" -> "discover"
             "podcast" -> "podcast"
+            "books" -> "books"
             "assistant" -> "assistant"
             else -> "albums"
         },
@@ -412,6 +430,7 @@ class MusicViewModel @Inject constructor(
             "mine" -> AppLanguage.string(R.string.vm_title_mine)
             "search" -> AppLanguage.string(R.string.vm_title_discover)
             "podcast" -> AppLanguage.string(R.string.vm_title_podcast)
+            "books" -> AppLanguage.string(R.string.vm_title_books)
             "assistant" -> AppLanguage.string(R.string.vm_title_assistant)
             else -> AppLanguage.string(R.string.vm_title_music)
         }
@@ -517,9 +536,24 @@ class MusicViewModel @Inject constructor(
         if (mutable.value.tab == "podcast" && mutable.value.podcastId != null) mutable.update { it.copy(podcastId = null) }
         else history[mutable.value.tab]?.removeLastOrNull()?.let { show(it) }
     }
+    fun setReadingBook(active: Boolean) {
+        mutable.update { if (it.readingBook == active) it else it.copy(readingBook = active) }
+    }
+    fun openBookDetail(bookId: String) {
+        navigate("books")
+        mutable.update {
+            it.copy(
+                readingBook = false,
+                focusedBookId = bookId,
+            )
+        }
+    }
+    fun consumeFocusedBook() {
+        mutable.update { if (it.focusedBookId == null) it else it.copy(focusedBookId = null) }
+    }
     fun openPodcast(id: String) {
         navigate("podcast")
-        mutable.update { it.copy(podcastId = id) }
+        mutable.update { it.copy(readingBook = false, podcastId = id) }
     }
     fun openPlayingPodcast() {
         val track = mutable.value.current ?: return
@@ -776,7 +810,7 @@ class MusicViewModel @Inject constructor(
         }
         loadJob = viewModelScope.launch {
             if (!mutable.value.connected) return@launch
-            if (request.tab in listOf("podcast", "assistant")) {
+            if (request.tab in listOf("podcast", "books", "assistant")) {
                 mutable.update {
                     it.copy(
                         tab = request.tab,
@@ -985,6 +1019,8 @@ class MusicViewModel @Inject constructor(
         val readyItems = preparedItems?.filterIndexed { i, _ -> tracks[i].isAvailable }
         val tracks = tracks.filter { it.isAvailable }
         require(tracks.size <= 5000) { AppLanguage.string(R.string.vm_queue_limit_exceeded) }
+        bookPlayback.pause()
+        mutable.update { it.copy(bookBarActive = false) }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val startPos = (positionMs ?: target.podcast?.resumePositionMs?.takeIf { it > 0L } ?: 0L).coerceAtLeast(0L)
@@ -1231,7 +1267,18 @@ class MusicViewModel @Inject constructor(
     fun notify(message: String) { mutable.update { it.copy(mutationMessage = message) } }
     fun acknowledgeMessage(message: String) { mutable.update { if (it.mutationMessage == message) it.copy(mutationMessage = null) else it } }
     fun pausePlayback() { controller?.pause() }
-    fun toggle() { localPlaybackEpoch++; controller?.let { if (it.playWhenReady) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
+    fun toggle() {
+        localPlaybackEpoch++
+        controller?.let {
+            if (it.playWhenReady) it.pause()
+            else {
+                bookPlayback.pause()
+                mutable.update { s -> s.copy(bookBarActive = false) }
+                if (it.playbackState == Player.STATE_IDLE) it.prepare()
+                it.play()
+            }
+        }
+    }
     fun seek(ms: Long) {
         val target = ms.coerceAtLeast(0L)
         localPlaybackEpoch++
@@ -1524,7 +1571,11 @@ class MusicViewModel @Inject constructor(
         lastPositionEntryId = currentEntry
         mutablePosition.value = resolvedPos
         mutableBuffered.value = c.bufferedPosition.coerceAtLeast(0L)
+        if (c.isPlaying || c.playbackState == Player.STATE_BUFFERING) {
+            if (mutable.value.bookBarActive) bookPlayback.pause()
+        }
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
+            bookBarActive = if (c.isPlaying || c.playbackState == Player.STATE_BUFFERING) false else it.bookBarActive,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, heartBatch = item.heartBatch(), playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
             playbackError = c.playerError?.let { error -> com.wildstring.app.playback.playbackErrorMessage(error, podcast = id?.let(::podcastEpisodeId) != null) }) }
@@ -1545,6 +1596,7 @@ class MusicViewModel @Inject constructor(
     }
     override fun onCleared() {
         agentNetworkCallback?.let { callback -> runCatching { context.getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(callback) } }
+        bookPlayback.release()
         controller?.removeListener(playerListener); MediaController.releaseFuture(controllerFuture); super.onCleared()
     }
 }

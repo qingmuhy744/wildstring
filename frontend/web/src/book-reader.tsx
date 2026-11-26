@@ -56,7 +56,7 @@ interface Block {
   runs?: TextRun[];
   image_key?: string | null;
 }
-interface Chapter {
+export interface EbookChapter {
   spine_index: number;
   title: string;
 }
@@ -65,15 +65,23 @@ interface Bookmark extends Anchor {
   kind: 'ebook' | 'audio';
   excerpt?: string;
 }
-interface Annotation {
-  id: string;
-  color: Color;
+interface SelectionRange {
   spine_index: number;
   start_block_index: number;
   start_char_offset: number;
   end_block_index: number;
   end_char_offset: number;
   selected_text: string;
+}
+interface PopoverAnchor {
+  x: number;
+  y: number;
+  placement: 'above' | 'below';
+}
+interface Annotation extends SelectionRange {
+  id: string;
+  color: Color;
+  note?: string | null;
 }
 interface Match extends Anchor {
   excerpt: string;
@@ -100,6 +108,8 @@ function useCheckpoint<T>(
   initialIntent: 'resume' | 'restart' = 'resume',
 ) {
   const [error, setError] = useState('');
+  const requestKey = path ? `${path}|${initialIntent}` : '';
+  const [settledKey, setSettledKey] = useState('');
   const load = useRef(onLoad);
   load.current = onLoad;
   const session = useRef({
@@ -121,16 +131,24 @@ function useCheckpoint<T>(
       intent: initialIntent,
     };
     setError('');
-    if (!path) return;
+    if (!path) {
+      setSettledKey('');
+      return;
+    }
+    const currentKey = `${path}|${initialIntent}`;
     const controller = new AbortController();
     void api<T & Checkpoint>(path, { signal: controller.signal })
       .then((value) => {
         session.current.version = value.version;
         session.current.ready = true;
         load.current(value);
+        setSettledKey(currentKey);
       })
       .catch((cause: Error) => {
-        if (!controller.signal.aborted) setError(cause.message);
+        if (!controller.signal.aborted) {
+          setError(cause.message);
+          setSettledKey(currentKey);
+        }
       });
     return () => controller.abort();
   }, [path, initialIntent]);
@@ -165,7 +183,7 @@ function useCheckpoint<T>(
     },
     [path],
   );
-  return { save, error };
+  return { save, error, ready: !path || settledKey === requestKey };
 }
 
 function codePointLength(value: string): number {
@@ -326,11 +344,27 @@ function renderBlockContent(block: Block, highlights: Annotation[]): ReactNode {
   });
 }
 
-export function BookReader({ book }: { book: Book }) {
+export function BookReader({
+  book,
+  initialSpine = null,
+  onClose,
+  listening = false,
+  onToggleListen,
+  audioSession,
+}: {
+  book: Book;
+  initialSpine?: number | null;
+  onClose?: () => void;
+  listening?: boolean;
+  onToggleListen?: () => void;
+  audioSession?: BookAudioSession;
+  canEdit?: boolean;
+}) {
   const { t } = useTranslation();
   const prefix = `/books/${book.id}`;
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [spine, setSpine] = useState(0);
+  const [chapters, setChapters] = useState<EbookChapter[]>([]);
+  const [spine, setSpine] = useState(initialSpine ?? 0);
+  const initialJump = useRef<number | null>(initialSpine);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [loadedSpine, setLoadedSpine] = useState(-1);
   const [mode, setMode] = useState<Mode>('scroll');
@@ -342,8 +376,24 @@ export function BookReader({ book }: { book: Book }) {
   const [marks, setMarks] = useState<Bookmark[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
-  const [selection, setSelection] = useState<Omit<Annotation, 'id' | 'color'> | null>(null);
+  const [searchedQuery, setSearchedQuery] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{
+    range: SelectionRange;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const [draftNoteMode, setDraftNoteMode] = useState(false);
+  const [draftColor, setDraftColor] = useState<Color>('amber');
+  const [draftNote, setDraftNote] = useState('');
+  const [activeMark, setActiveMark] = useState<{
+    annotation: Annotation;
+    anchor: PopoverAnchor;
+  } | null>(null);
+  const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
+  const [editingAnnColor, setEditingAnnColor] = useState<Color>('amber');
+  const [editingAnnNote, setEditingAnnNote] = useState('');
   const [query, setQuery] = useState('');
+  const [panel, setPanel] = useState<'contents' | 'notes' | 'search' | 'appearance' | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const pending = useRef<Anchor | null>(null);
   const visible = useRef<Anchor>({ spine_index: 0, block_index: 0, char_offset: 0 });
@@ -373,8 +423,17 @@ export function BookReader({ book }: { book: Book }) {
   const checkpoint = useCheckpoint<Reading>(
     prefix + '/reading-progress',
     (value) => {
+      if (value.version) setMode(value.reading_mode);
+      if (initialJump.current !== null) {
+        const target = initialJump.current;
+        initialJump.current = null;
+        const anchor = { spine_index: target, block_index: 0, char_offset: 0 };
+        pending.current = anchor;
+        setSpine(target);
+        checkpoint.save({ ...anchor, reading_mode: value.version ? value.reading_mode : mode });
+        return;
+      }
       if (value.version) {
-        setMode(value.reading_mode);
         jump(value, false);
       }
     },
@@ -383,10 +442,12 @@ export function BookReader({ book }: { book: Book }) {
 
   useEffect(() => {
     completedSent.current = false;
+    setPanel(null);
+    setSearchedQuery(null);
     const request = new AbortController();
     const load = <T,>(path: string) => api<T>(prefix + path, { signal: request.signal });
     void Promise.all([
-      load<{ chapters: Chapter[] }>('/ebook/manifest'),
+      load<{ chapters: EbookChapter[] }>('/ebook/manifest'),
       load<{ items: Bookmark[] }>('/bookmarks'),
       load<{ items: Annotation[] }>('/annotations'),
     ])
@@ -402,6 +463,9 @@ export function BookReader({ book }: { book: Book }) {
   }, [prefix]);
 
   useEffect(() => {
+    setSelection(null);
+    setDraftNoteMode(false);
+    setActiveMark(null);
     const request = new AbortController();
     void api<{ blocks: Block[] }>(prefix + `/ebook/chapters/${spine}`, { signal: request.signal })
       .then((data) => {
@@ -596,14 +660,29 @@ export function BookReader({ book }: { book: Book }) {
     }
   }
 
+  function anchorFromRect(rect: DOMRect, minAboveSpace = 58, halfWidth = 148): PopoverAnchor {
+    const stageBox = stageRef.current?.getBoundingClientRect();
+    if (!stageBox || !stageBox.width) return { x: 180, y: 12, placement: 'below' };
+    const fittedHalf = Math.min(halfWidth, Math.max(88, stageBox.width / 2 - 12));
+    const center = (rect.left + rect.right) / 2 - stageBox.left;
+    const x = Math.max(fittedHalf + 12, Math.min(stageBox.width - fittedHalf - 12, center));
+    const placement = rect.top - stageBox.top >= minAboveSpace ? 'above' : 'below';
+    const rawY =
+      placement === 'above' ? rect.top - stageBox.top - 10 : rect.bottom - stageBox.top + 10;
+    const y = Math.max(8, Math.min(stageBox.height - 16, rawY));
+    return { x, y, placement };
+  }
+
   function selectText() {
     const viewport = scroll.current;
     const value = window.getSelection();
     if (!viewport || !value?.rangeCount || value.isCollapsed) {
       setSelection(null);
+      setDraftNoteMode(false);
       return;
     }
     const range = value.getRangeAt(0);
+    if (!viewport.contains(range.commonAncestorContainer)) return;
     const first = resolveBlockFromBoundary(
       range.startContainer,
       range.startOffset,
@@ -639,15 +718,23 @@ export function BookReader({ book }: { book: Book }) {
     const selectedText = value.toString().trim();
     if (!selectedText || (startBlockIndex === endBlockIndex && endCharOffset <= startCharOffset)) {
       setSelection(null);
+      setDraftNoteMode(false);
       return;
     }
+    setActiveMark(null);
+    setDraftNoteMode(false);
+    setDraftColor('amber');
+    setDraftNote('');
     setSelection({
-      spine_index: spine,
-      start_block_index: startBlockIndex,
-      start_char_offset: startCharOffset,
-      end_block_index: endBlockIndex,
-      end_char_offset: endCharOffset,
-      selected_text: value.toString(),
+      range: {
+        spine_index: spine,
+        start_block_index: startBlockIndex,
+        start_char_offset: startCharOffset,
+        end_block_index: endBlockIndex,
+        end_char_offset: endCharOffset,
+        selected_text: value.toString(),
+      },
+      anchor: anchorFromRect(range.getBoundingClientRect()),
     });
   }
 
@@ -678,18 +765,52 @@ export function BookReader({ book }: { book: Book }) {
     }
   }
 
-  async function annotate(color: Color) {
+  async function annotate(color: Color, noteText?: string) {
     if (!selection) return;
     try {
+      const cleanNote = noteText?.trim() || null;
       const saved = await api<Annotation>(prefix + '/annotations', {
         method: 'POST',
-        body: JSON.stringify({ ...selection, color }),
+        body: JSON.stringify({
+          ...selection.range,
+          color,
+          ...(cleanNote ? { note: cleanNote } : {}),
+        }),
       });
       setAnnotations((items) => [...items, saved]);
       setSelection(null);
+      setDraftNoteMode(false);
+      setDraftNote('');
       window.getSelection()?.removeAllRanges();
     } catch (cause) {
       setError((cause as Error).message);
+    }
+  }
+
+  async function updateAnnotation(annotation: Annotation, color: Color, noteText: string) {
+    try {
+      const cleanNote = noteText.trim() || null;
+      const saved = await api<Annotation>(prefix + `/annotations/${annotation.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          spine_index: annotation.spine_index,
+          start_block_index: annotation.start_block_index,
+          start_char_offset: annotation.start_char_offset,
+          end_block_index: annotation.end_block_index,
+          end_char_offset: annotation.end_char_offset,
+          selected_text: annotation.selected_text,
+          note: cleanNote,
+          color,
+        }),
+      });
+      setAnnotations((items) => items.map((item) => (item.id === annotation.id ? saved : item)));
+      setActiveMark((current) =>
+        current?.annotation.id === annotation.id ? { ...current, annotation: saved } : current,
+      );
+      return saved;
+    } catch (cause) {
+      setError((cause as Error).message);
+      return null;
     }
   }
 
@@ -697,249 +818,647 @@ export function BookReader({ book }: { book: Book }) {
     try {
       await api(prefix + `/annotations/${id}`, { method: 'DELETE' });
       setAnnotations((items) => items.filter((item) => item.id !== id));
+      setEditingAnnId((current) => (current === id ? null : current));
+      setActiveMark((current) => (current?.annotation.id === id ? null : current));
     } catch (cause) {
       setError((cause as Error).message);
     }
   }
 
   const spineAnnotations = annotations.filter((ann) => ann.spine_index === spine);
+  const noteCount = marks.length + annotations.length;
+  const activeChapter =
+    chapters.find((chapter) => chapter.spine_index === spine) || chapters[spine];
+
+  function togglePanel(next: 'contents' | 'notes' | 'search' | 'appearance') {
+    setPanel((current) => (current === next ? null : next));
+  }
 
   return (
     <section className={`book-reader ${dark ? 'book-reader-dark' : ''}`}>
-      <div className="bookshelf-controls" aria-label={t('bookshelf.read')}>
-        <button aria-pressed={mode === 'scroll'} onClick={() => selectMode('scroll')}>
-          {t('bookshelf.scroll')}
-        </button>
-        <button aria-pressed={mode === 'paginated'} onClick={() => selectMode('paginated')}>
-          {t('bookshelf.pages')}
-        </button>
-        <button aria-pressed={dark} onClick={() => setDark(!dark)}>
-          {t('bookshelf.dark')}
-        </button>
-        <select
-          aria-label={t('bookshelf.font')}
-          value={font}
-          onChange={(event) => setFont(event.target.value)}
-        >
-          <option value="serif">{t('bookshelf.serif')}</option>
-          <option value="sans-serif">{t('bookshelf.sans')}</option>
-        </select>
-        <label className="bookshelf-range">
-          <span>{t('bookshelf.fontSize')}</span>
-          <input
-            aria-label={t('bookshelf.fontSize')}
-            type="range"
-            value={size}
-            min={14}
-            max={24}
-            onChange={(event) => setSize(Number(event.target.value))}
-          />
-          <output className="tnum">{size}px</output>
-        </label>
-        <label className="bookshelf-range">
-          <span>{t('bookshelf.lineHeight')}</span>
-          <input
-            aria-label={t('bookshelf.lineHeight')}
-            type="range"
-            value={lineHeight}
-            min={1.2}
-            max={2.2}
-            step={0.1}
-            onChange={(event) => setLineHeight(Number(event.target.value))}
-          />
-          <output className="tnum">{lineHeight.toFixed(1)}</output>
-        </label>
-      </div>
-      <div className="bookshelf-controls">
-        <select
-          aria-label={t('bookshelf.contents')}
-          value={spine}
-          onChange={(event) =>
-            jump({
-              spine_index: Number(event.target.value),
-              block_index: 0,
-              char_offset: 0,
-            })
-          }
-        >
-          {chapters.map((chapter) => (
-            <option key={chapter.spine_index} value={chapter.spine_index}>
-              {chapter.title}
-            </option>
-          ))}
-        </select>
-        <button onClick={() => void addMark()}>{t('bookshelf.bookmark')}</button>
-        <form
-          className="bookshelf-controls"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void api<{ items: Match[] }>(prefix + `/ebook/search?q=${encodeURIComponent(query)}`)
-              .then((value) => setMatches(value.items))
-              .catch((cause: Error) => setError(cause.message));
-          }}
-        >
-          <input
-            aria-label={t('bookshelf.searchText')}
-            placeholder={t('bookshelf.searchText')}
-            value={query}
-            required
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <button>{t('bookshelf.search')}</button>
-        </form>
-      </div>
-      {(error || checkpoint.error) && <p role="alert">{error || checkpoint.error}</p>}
-      {selection && (
-        <div className="bookshelf-controls" role="toolbar" aria-label={t('bookshelf.annotations')}>
-          {colors.map((color) => (
-            <button key={color} data-color={color} onClick={() => void annotate(color)}>
-              {t(`bookshelf.colors.${color}`)}
+      <header className="book-reader-topbar">
+        <div className="book-reader-rail book-reader-topbar-inner">
+          <div className="book-reader-top-start">
+            {onClose && (
+              <button type="button" className="book-reader-btn" onClick={onClose}>
+                {t('bookshelf.back')}
+              </button>
+            )}
+            <strong className="book-reader-title">{book.title}</strong>
+          </div>
+          <div className="book-reader-top-end" role="toolbar" aria-label={t('bookshelf.read')}>
+            <div className="book-segmented" role="group" aria-label={t('bookshelf.read')}>
+              <button
+                type="button"
+                aria-pressed={mode === 'scroll'}
+                onClick={() => selectMode('scroll')}
+              >
+                {t('bookshelf.scroll')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === 'paginated'}
+                onClick={() => selectMode('paginated')}
+              >
+                {t('bookshelf.pages')}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="book-reader-btn"
+              aria-expanded={panel === 'contents'}
+              onClick={() => togglePanel('contents')}
+            >
+              {t('bookshelf.contents')}
             </button>
-          ))}
+            <button
+              type="button"
+              className="book-reader-btn tnum"
+              aria-expanded={panel === 'notes'}
+              onClick={() => togglePanel('notes')}
+            >
+              {noteCount > 0
+                ? t('bookshelf.notesCount', { count: noteCount })
+                : t('bookshelf.notes')}
+            </button>
+            <button
+              type="button"
+              className="book-reader-btn"
+              aria-expanded={panel === 'search'}
+              onClick={() => togglePanel('search')}
+            >
+              {t('bookshelf.search')}
+            </button>
+            <button
+              type="button"
+              className="book-reader-btn"
+              aria-expanded={panel === 'appearance'}
+              onClick={() => togglePanel('appearance')}
+            >
+              {t('bookshelf.appearance')}
+            </button>
+            {book.has_audiobook && onToggleListen && (
+              <button
+                type="button"
+                className="book-reader-btn"
+                aria-pressed={Boolean(listening)}
+                onClick={onToggleListen}
+              >
+                {t('bookshelf.listen')}
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+      {listening && audioSession && (
+        <div className="book-reader-panel-wrap book-reader-audio-wrap">
+          <div className="book-reader-rail">
+            <BookAudio key={book.id} book={book} session={audioSession} />
+          </div>
         </div>
       )}
-      {!!marks.length && (
-        <details>
-          <summary>
-            <span>{t('bookshelf.bookmarks')}</span>{' '}
-            <span className="muted tnum">({marks.length})</span>
-          </summary>
-          <ul className="bookshelf-note-list">
-            {marks.map((mark) => (
-              <li key={mark.id}>
-                <button onClick={() => jump(mark)}>
-                  {mark.excerpt || t('bookshelf.bookmark')}
-                </button>
-                <button
-                  type="button"
-                  className="bookshelf-note-delete"
-                  aria-label={`${t('bookshelf.delete')} ${mark.excerpt || t('bookshelf.bookmark')}`}
-                  onClick={() => void removeMark(mark.id)}
-                >
-                  {t('bookshelf.delete')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
+      {(error || checkpoint.error) && (
+        <p className="book-reader-alert book-reader-rail" role="alert">
+          {error || checkpoint.error}
+        </p>
       )}
-      {!!annotations.length && (
-        <details>
-          <summary>
-            <span>{t('bookshelf.annotations')}</span>{' '}
-            <span className="muted tnum">({annotations.length})</span>
-          </summary>
-          <ul className="bookshelf-note-list">
-            {annotations.map((annotation) => (
-              <li key={annotation.id}>
-                <button
-                  data-color={annotation.color}
-                  onClick={() =>
-                    jump({
-                      spine_index: annotation.spine_index,
-                      block_index: annotation.start_block_index,
-                      char_offset: annotation.start_char_offset,
-                    })
-                  }
+      <div ref={stageRef} className="book-reader-stage">
+        {panel !== null && (
+          <div className="book-reader-drawer">
+            {panel === 'contents' &&
+              (chapters.length ? (
+                <ul className="book-chapter-list">
+                  {chapters.map((chapter) => (
+                    <li key={chapter.spine_index}>
+                      <button
+                        type="button"
+                        aria-current={chapter.spine_index === spine ? 'true' : undefined}
+                        onClick={() => {
+                          jump({
+                            spine_index: chapter.spine_index,
+                            block_index: 0,
+                            char_offset: 0,
+                          });
+                          setPanel(null);
+                        }}
+                      >
+                        <span className="book-chapter-num tnum">
+                          {String(chapter.spine_index + 1).padStart(2, '0')}
+                        </span>
+                        <span className="book-chapter-name">{chapter.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p role="status" className="muted book-sheet-status">
+                  {t('bookshelf.empty')}
+                </p>
+              ))}
+            {panel === 'notes' && (
+              <div className="book-notes-panel">
+                <div className="book-notes-header">
+                  <strong>{t('bookshelf.notes')}</strong>
+                  <button type="button" onClick={() => void addMark()}>
+                    {t('bookshelf.bookmark')}
+                  </button>
+                </div>
+                {!marks.length && !annotations.length && (
+                  <p role="status" className="muted book-sheet-status">
+                    {t('bookshelf.empty')}
+                  </p>
+                )}
+                {!!marks.length && (
+                  <div className="book-notes-group">
+                    <div className="book-notes-heading">
+                      <span>{t('bookshelf.bookmarks')}</span>{' '}
+                      <span className="muted tnum">({marks.length})</span>
+                    </div>
+                    <ul className="bookshelf-note-list">
+                      {marks.map((mark) => (
+                        <li key={mark.id} className="book-bookmark-card">
+                          <button
+                            type="button"
+                            className="book-bookmark-quote"
+                            onClick={() => {
+                              jump(mark);
+                              setPanel(null);
+                            }}
+                          >
+                            {mark.excerpt || t('bookshelf.bookmark')}
+                          </button>
+                          <button
+                            type="button"
+                            className="bookshelf-note-delete"
+                            aria-label={`${t('bookshelf.delete')} ${mark.excerpt || t('bookshelf.bookmark')}`}
+                            onClick={() => void removeMark(mark.id)}
+                          >
+                            {t('bookshelf.delete')}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!!annotations.length && (
+                  <div className="book-notes-group">
+                    <div className="book-notes-heading">
+                      <span>{t('bookshelf.annotations')}</span>{' '}
+                      <span className="muted tnum">({annotations.length})</span>
+                    </div>
+                    <ul className="bookshelf-note-list">
+                      {annotations.map((annotation) => (
+                        <li
+                          key={annotation.id}
+                          className="book-annotation-card"
+                          data-color={annotation.color}
+                        >
+                          <div className="book-annotation-card-head">
+                            <button
+                              type="button"
+                              className="book-annotation-quote"
+                              onClick={() => {
+                                jump({
+                                  spine_index: annotation.spine_index,
+                                  block_index: annotation.start_block_index,
+                                  char_offset: annotation.start_char_offset,
+                                });
+                                setPanel(null);
+                              }}
+                            >
+                              {annotation.selected_text}
+                            </button>
+                            <div className="book-annotation-card-actions">
+                              <button
+                                type="button"
+                                className="bookshelf-note-edit"
+                                aria-label={`${annotation.note ? t('bookshelf.editNote') : t('bookshelf.addNote')} ${annotation.selected_text}`}
+                                onClick={() => {
+                                  setEditingAnnId(annotation.id);
+                                  setEditingAnnColor(annotation.color);
+                                  setEditingAnnNote(annotation.note || '');
+                                }}
+                              >
+                                {annotation.note ? t('bookshelf.editNote') : t('bookshelf.addNote')}
+                              </button>
+                              <button
+                                type="button"
+                                className="bookshelf-note-delete"
+                                aria-label={`${t('bookshelf.delete')} ${annotation.selected_text}`}
+                                onClick={() => void removeAnnotation(annotation.id)}
+                              >
+                                {t('bookshelf.delete')}
+                              </button>
+                            </div>
+                          </div>
+                          {editingAnnId === annotation.id ? (
+                            <form
+                              className="book-annotation-editor"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void updateAnnotation(
+                                  annotation,
+                                  editingAnnColor,
+                                  editingAnnNote,
+                                ).then((saved) => {
+                                  if (saved) setEditingAnnId(null);
+                                });
+                              }}
+                            >
+                              <div
+                                className="book-color-dots"
+                                role="radiogroup"
+                                aria-label={t('bookshelf.annotations')}
+                              >
+                                {colors.map((color) => (
+                                  <button
+                                    type="button"
+                                    key={color}
+                                    className="book-color-dot"
+                                    data-color={color}
+                                    role="radio"
+                                    aria-checked={editingAnnColor === color}
+                                    aria-label={t(`bookshelf.colors.${color}`)}
+                                    title={t(`bookshelf.colors.${color}`)}
+                                    onClick={() => setEditingAnnColor(color)}
+                                  />
+                                ))}
+                              </div>
+                              <textarea
+                                aria-label={t('bookshelf.note')}
+                                placeholder={t('bookshelf.notePlaceholder')}
+                                rows={2}
+                                maxLength={4096}
+                                value={editingAnnNote}
+                                onChange={(event) => setEditingAnnNote(event.target.value)}
+                              />
+                              <div className="book-annotation-editor-actions">
+                                <button type="button" onClick={() => setEditingAnnId(null)}>
+                                  {t('bookshelf.cancel')}
+                                </button>
+                                <button type="submit" className="primary">
+                                  {t('bookshelf.save')}
+                                </button>
+                              </div>
+                            </form>
+                          ) : annotation.note ? (
+                            <p className="book-annotation-note">{annotation.note}</p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            {panel === 'search' && (
+              <div className="book-search-panel">
+                <form
+                  className="book-search-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const submitted = query;
+                    void api<{ items: Match[] }>(
+                      prefix + `/ebook/search?q=${encodeURIComponent(submitted)}`,
+                    )
+                      .then((value) => {
+                        setMatches(value.items);
+                        setSearchedQuery(submitted);
+                      })
+                      .catch((cause: Error) => setError(cause.message));
+                  }}
                 >
-                  {annotation.selected_text}
-                </button>
-                <button
-                  type="button"
-                  className="bookshelf-note-delete"
-                  aria-label={`${t('bookshelf.delete')} ${annotation.selected_text}`}
-                  onClick={() => void removeAnnotation(annotation.id)}
-                >
-                  {t('bookshelf.delete')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {!!matches.length && (
-        <ul className="bookshelf-note-list">
-          {matches.map((match, index) => (
-            <li key={index}>
-              <button onClick={() => jump(match)}>{match.excerpt}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div
-        ref={scroll}
-        className={`book-reader-viewport book-reader-${mode}`}
-        onScroll={syncAnchor}
-        onPointerUp={selectText}
-        onKeyUp={selectText}
-        tabIndex={0}
-        aria-label={book.title}
-      >
-        {loadedSpine !== spine && !error ? (
-          <p role="status">{t('bookshelf.loading')}</p>
-        ) : (
-          <article
-            className="book-reader-document"
-            style={{ fontFamily: font, fontSize: size, lineHeight }}
-          >
-            {blocks.map((block) => {
-              if (block.image_key) {
-                return (
-                  <img
-                    key={block.block_index}
-                    data-block={block.block_index}
-                    alt=""
-                    onLoad={() => {
-                      if (loadedSpine === spine) restore(visible.current);
-                    }}
-                    src={`/api/v1${prefix}/ebook/assets/${block.image_key}`}
+                  <input
+                    type="search"
+                    aria-label={t('bookshelf.searchText')}
+                    placeholder={t('bookshelf.searchText')}
+                    value={query}
+                    required
+                    onChange={(event) => setQuery(event.target.value)}
                   />
-                );
-              }
-              const children = renderBlockContent(block, spineAnnotations);
-              if (/^h[1-6]$/.test(block.tag)) {
-                return (
-                  <h2 key={block.block_index} data-block={block.block_index}>
-                    {children}
-                  </h2>
-                );
-              }
-              if (block.tag === 'blockquote') {
-                return (
-                  <blockquote key={block.block_index} data-block={block.block_index}>
-                    {children}
-                  </blockquote>
-                );
-              }
-              if (block.tag === 'li') {
-                return (
-                  <p
-                    key={block.block_index}
-                    data-block={block.block_index}
-                    className="book-list-item"
+                  <button type="submit">{t('bookshelf.search')}</button>
+                </form>
+                {!!matches.length ? (
+                  <ul className="bookshelf-note-list">
+                    {matches.map((match, index) => (
+                      <li key={index} className="book-bookmark-card">
+                        <button
+                          type="button"
+                          className="book-bookmark-quote"
+                          onClick={() => {
+                            jump(match);
+                            setPanel(null);
+                          }}
+                        >
+                          {match.excerpt}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : searchedQuery !== null ? (
+                  <p role="status" className="muted book-sheet-status">
+                    {t('bookshelf.empty')}
+                  </p>
+                ) : null}
+              </div>
+            )}
+            {panel === 'appearance' && (
+              <div className="book-appearance-panel">
+                <button type="button" aria-pressed={dark} onClick={() => setDark(!dark)}>
+                  {t('bookshelf.dark')}
+                </button>
+                <select
+                  aria-label={t('bookshelf.font')}
+                  value={font}
+                  onChange={(event) => setFont(event.target.value)}
+                >
+                  <option value="serif">{t('bookshelf.serif')}</option>
+                  <option value="sans-serif">{t('bookshelf.sans')}</option>
+                </select>
+                <label className="bookshelf-range">
+                  <span>{t('bookshelf.fontSize')}</span>
+                  <input
+                    aria-label={t('bookshelf.fontSize')}
+                    type="range"
+                    value={size}
+                    min={14}
+                    max={24}
+                    onChange={(event) => setSize(Number(event.target.value))}
+                  />
+                  <output className="tnum">{size}px</output>
+                </label>
+                <label className="bookshelf-range">
+                  <span>{t('bookshelf.lineHeight')}</span>
+                  <input
+                    aria-label={t('bookshelf.lineHeight')}
+                    type="range"
+                    value={lineHeight}
+                    min={1.2}
+                    max={2.2}
+                    step={0.1}
+                    onChange={(event) => setLineHeight(Number(event.target.value))}
+                  />
+                  <output className="tnum">{lineHeight.toFixed(1)}</output>
+                </label>
+              </div>
+            )}
+          </div>
+        )}
+        {selection && (
+          <div
+            className={`book-highlight-bar is-${selection.anchor.placement}${draftNoteMode ? ' is-composing' : ''}`}
+            style={{ left: `${selection.anchor.x}px`, top: `${selection.anchor.y}px` }}
+            role="toolbar"
+            aria-label={t('bookshelf.annotations')}
+          >
+            {draftNoteMode ? (
+              <form
+                className="book-annotation-editor"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void annotate(draftColor, draftNote);
+                }}
+              >
+                <div
+                  className="book-color-dots"
+                  role="radiogroup"
+                  aria-label={t('bookshelf.annotations')}
+                >
+                  {colors.map((color) => (
+                    <button
+                      type="button"
+                      key={color}
+                      className="book-color-dot"
+                      data-color={color}
+                      role="radio"
+                      aria-checked={draftColor === color}
+                      aria-label={t(`bookshelf.colors.${color}`)}
+                      title={t(`bookshelf.colors.${color}`)}
+                      onClick={() => setDraftColor(color)}
+                    />
+                  ))}
+                </div>
+                <textarea
+                  aria-label={t('bookshelf.note')}
+                  placeholder={t('bookshelf.notePlaceholder')}
+                  rows={2}
+                  maxLength={4096}
+                  autoFocus
+                  value={draftNote}
+                  onChange={(event) => setDraftNote(event.target.value)}
+                />
+                <div className="book-annotation-editor-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftNoteMode(false);
+                      setDraftNote('');
+                    }}
                   >
+                    {t('bookshelf.cancel')}
+                  </button>
+                  <button type="submit" className="primary">
+                    {t('bookshelf.save')}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                {colors.map((color) => (
+                  <button
+                    type="button"
+                    key={color}
+                    className="book-color-dot"
+                    data-color={color}
+                    aria-label={t(`bookshelf.colors.${color}`)}
+                    title={t(`bookshelf.colors.${color}`)}
+                    onClick={() => void annotate(color)}
+                  />
+                ))}
+                <span className="book-highlight-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  className="book-highlight-note-btn"
+                  onClick={() => setDraftNoteMode(true)}
+                >
+                  {t('bookshelf.addNote')}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {!selection && activeMark && (
+          <div
+            className={`book-highlight-bar is-${activeMark.anchor.placement} is-composing`}
+            style={{ left: `${activeMark.anchor.x}px`, top: `${activeMark.anchor.y}px` }}
+            role="dialog"
+            aria-label={t('bookshelf.annotations')}
+          >
+            <form
+              className="book-annotation-editor"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void updateAnnotation(activeMark.annotation, editingAnnColor, editingAnnNote).then(
+                  (saved) => {
+                    if (saved) setActiveMark(null);
+                  },
+                );
+              }}
+            >
+              <div
+                className="book-color-dots"
+                role="radiogroup"
+                aria-label={t('bookshelf.annotations')}
+              >
+                {colors.map((color) => (
+                  <button
+                    type="button"
+                    key={color}
+                    className="book-color-dot"
+                    data-color={color}
+                    role="radio"
+                    aria-checked={editingAnnColor === color}
+                    aria-label={t(`bookshelf.colors.${color}`)}
+                    title={t(`bookshelf.colors.${color}`)}
+                    onClick={() => setEditingAnnColor(color)}
+                  />
+                ))}
+              </div>
+              <textarea
+                aria-label={t('bookshelf.note')}
+                placeholder={t('bookshelf.notePlaceholder')}
+                rows={2}
+                maxLength={4096}
+                value={editingAnnNote}
+                onChange={(event) => setEditingAnnNote(event.target.value)}
+              />
+              <div className="book-annotation-editor-actions">
+                <button
+                  type="button"
+                  onClick={() => void removeAnnotation(activeMark.annotation.id)}
+                >
+                  {t('bookshelf.delete')}
+                </button>
+                <button type="button" onClick={() => setActiveMark(null)}>
+                  {t('bookshelf.cancel')}
+                </button>
+                <button type="submit" className="primary">
+                  {t('bookshelf.save')}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+        <div
+          ref={scroll}
+          className={`book-reader-viewport book-reader-${mode}`}
+          onScroll={() => {
+            setActiveMark(null);
+            syncAnchor();
+          }}
+          onPointerUp={selectText}
+          onKeyUp={selectText}
+          onClick={(event) => {
+            const currentSel = window.getSelection();
+            if (currentSel && !currentSel.isCollapsed) return;
+            const mark = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+              'mark[data-annotation-id]',
+            );
+            if (!mark) {
+              setActiveMark(null);
+              return;
+            }
+            const found = annotations.find((item) => item.id === mark.dataset.annotationId);
+            if (!found) return;
+            setEditingAnnColor(found.color);
+            setEditingAnnNote(found.note || '');
+            setActiveMark({
+              annotation: found,
+              anchor: anchorFromRect(mark.getBoundingClientRect(), 158, 168),
+            });
+          }}
+          tabIndex={0}
+          aria-label={book.title}
+        >
+          {loadedSpine !== spine && !error ? (
+            <p role="status" className="muted book-reader-loading">
+              {t('bookshelf.loading')}
+            </p>
+          ) : (
+            <article
+              className="book-reader-document"
+              style={{ fontFamily: font, fontSize: size, lineHeight }}
+            >
+              {blocks.map((block) => {
+                if (block.image_key) {
+                  return (
+                    <img
+                      key={block.block_index}
+                      data-block={block.block_index}
+                      alt=""
+                      onLoad={() => {
+                        if (loadedSpine === spine) restore(visible.current);
+                      }}
+                      src={`/api/v1${prefix}/ebook/assets/${block.image_key}`}
+                    />
+                  );
+                }
+                const children = renderBlockContent(block, spineAnnotations);
+                if (/^h[1-6]$/.test(block.tag)) {
+                  return (
+                    <h2 key={block.block_index} data-block={block.block_index}>
+                      {children}
+                    </h2>
+                  );
+                }
+                if (block.tag === 'blockquote') {
+                  return (
+                    <blockquote key={block.block_index} data-block={block.block_index}>
+                      {children}
+                    </blockquote>
+                  );
+                }
+                if (block.tag === 'li') {
+                  return (
+                    <p
+                      key={block.block_index}
+                      data-block={block.block_index}
+                      className="book-list-item"
+                    >
+                      {children}
+                    </p>
+                  );
+                }
+                return (
+                  <p key={block.block_index} data-block={block.block_index}>
                     {children}
                   </p>
                 );
-              }
-              return (
-                <p key={block.block_index} data-block={block.block_index}>
-                  {children}
-                </p>
-              );
-            })}
-          </article>
-        )}
+              })}
+            </article>
+          )}
+        </div>
       </div>
-      <div className="bookshelf-controls">
-        <button onClick={() => page(-1)}>{t('bookshelf.previous')}</button>
-        <button onClick={() => page(1)}>{t('bookshelf.next')}</button>
-        {!!chapters.length && (
-          <span className="muted tnum">
-            {t('bookshelf.chapterProgress', { current: spine + 1, total: chapters.length })}
-          </span>
-        )}
-      </div>
+      <footer className="book-reader-footer">
+        <div className="book-reader-rail book-reader-footer-inner">
+          {chapters.length ? (
+            <span className="book-reader-progress muted tnum">
+              {t('bookshelf.chapterProgress', { current: spine + 1, total: chapters.length })}
+              {activeChapter?.title ? ` · ${activeChapter.title}` : ''}
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="book-reader-pager">
+            <button type="button" onClick={() => page(-1)}>
+              {t('bookshelf.previous')}
+            </button>
+            <button type="button" onClick={() => page(1)}>
+              {t('bookshelf.next')}
+            </button>
+          </div>
+        </div>
+      </footer>
     </section>
   );
 }
@@ -957,6 +1476,7 @@ export interface BookAudioSession {
   book: Book | null;
   chapters: AudioChapter[] | null;
   current: AudioChapter | undefined;
+  audioReady: boolean;
   index: number;
   rate: number;
   timer: number;
@@ -964,7 +1484,7 @@ export interface BookAudioSession {
   positionMs: number;
   error: string;
   audio: RefObject<HTMLAudioElement | null>;
-  open: (nextBook: Book, autoplayNow?: boolean) => void;
+  open: (nextBook: Book, autoplayNow?: boolean, targetChapterIndex?: number) => void;
   close: () => void;
   choose: (next: number, play?: boolean) => void;
   seekBy: (seconds: number) => void;
@@ -987,10 +1507,12 @@ export function useBookAudioSession({
   activeElsewhere,
   onPlay,
   userId,
+  volume,
 }: {
   activeElsewhere: boolean;
   onPlay: () => void;
   userId: string;
+  volume: number;
 }): BookAudioSession {
   const audio = useRef<HTMLAudioElement>(null);
   const [book, setBook] = useState<Book | null>(null);
@@ -1001,9 +1523,14 @@ export function useBookAudioSession({
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [error, setError] = useState('');
+  const [manualStart, setManualStart] = useState(false);
   const restore = useRef(0);
   const touched = useRef(false);
   const autoplay = useRef(false);
+  const pendingChapter = useRef<number | null>(null);
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const prevElsewhere = useRef(activeElsewhere);
   const lastSavedAt = useRef(0);
   const current = chapters?.[index];
   const prefix = book ? `/books/${book.id}` : '';
@@ -1011,7 +1538,7 @@ export function useBookAudioSession({
   const checkpoint = useCheckpoint<Listening>(
     prefix ? `${prefix}/listening-progress` : '',
     (value) => {
-      if (value.version && !touched.current) {
+      if (value.version && !touched.current && pendingChapter.current === null) {
         restore.current = value.chapter_position_ms;
         setIndex(value.chapter_index);
         setRate(value.playback_rate);
@@ -1024,6 +1551,7 @@ export function useBookAudioSession({
     audio.current?.pause();
     setPlaying(false);
     setTimer(0);
+    setManualStart(false);
     setBook(null);
     setChapters(null);
   }, [userId]);
@@ -1031,15 +1559,31 @@ export function useBookAudioSession({
   useEffect(() => {
     setChapters(null);
     setIndex(0);
+    setRate(1);
     setPositionMs(0);
     setError('');
     setPlaying(false);
+    setManualStart(false);
     restore.current = 0;
     touched.current = false;
-    if (!prefix) return;
+    if (!prefix) {
+      pendingChapter.current = null;
+      return;
+    }
     const request = new AbortController();
     void api<{ chapters: AudioChapter[] }>(prefix + '/audiobook', { signal: request.signal })
-      .then((value) => setChapters(value.chapters))
+      .then((value) => {
+        setChapters(value.chapters);
+        if (pendingChapter.current !== null && value.chapters?.[pendingChapter.current]) {
+          restore.current = 0;
+          touched.current = true;
+          setManualStart(true);
+          setIndex(pendingChapter.current);
+          pendingChapter.current = null;
+        } else if (value.chapters.length > 0) {
+          setIndex((prev) => Math.min(prev, value.chapters.length - 1));
+        }
+      })
       .catch((cause: Error) => {
         if (!request.signal.aborted) setError(cause.message);
       });
@@ -1051,10 +1595,8 @@ export function useBookAudioSession({
   }, [rate]);
 
   useEffect(() => {
-    if (activeElsewhere && audio.current && !audio.current.paused) {
-      audio.current.pause();
-    }
-  }, [activeElsewhere]);
+    if (audio.current) audio.current.volume = volume;
+  }, [volume]);
 
   useEffect(() => {
     if (!timer) return;
@@ -1083,52 +1625,73 @@ export function useBookAudioSession({
     [checkpoint, current, index, rate],
   );
 
-  const open = useCallback(
-    (nextBook: Book, autoplayNow = false) => {
-      if (book?.id === nextBook.id) {
-        if (autoplayNow && audio.current?.paused) {
-          onPlay();
-          void audio.current.play().catch((cause: Error) => setError(cause.message));
-        }
-        return;
-      }
-      save();
-      audio.current?.pause();
-      setPlaying(false);
-      autoplay.current = autoplayNow;
-      setBook(nextBook);
-    },
-    [book?.id, onPlay, save],
-  );
-
   const close = useCallback(() => {
     save();
     audio.current?.pause();
+    pendingChapter.current = null;
+    autoplay.current = false;
+    setManualStart(false);
     setPlaying(false);
     setTimer(0);
     setBook(null);
     setChapters(null);
   }, [save]);
 
+  useEffect(() => {
+    const rising = activeElsewhere && !prevElsewhere.current;
+    prevElsewhere.current = activeElsewhere;
+    if (rising && book) {
+      close();
+    }
+  }, [activeElsewhere, book, close]);
+
   const choose = useCallback(
     (next: number, play = false) => {
       if (!chapters?.[next]) return;
+      if (play) onPlay();
       save();
       restore.current = 0;
       touched.current = true;
+      setManualStart(true);
       autoplay.current = play;
       if (audio.current && chapters[next].file_index === current?.file_index) {
         audio.current.currentTime = chapters[next].start_file_ms / 1000;
         setPositionMs(0);
         if (play) {
           autoplay.current = false;
-          onPlay();
           void audio.current.play().catch((cause: Error) => setError(cause.message));
         }
       }
       setIndex(next);
     },
     [chapters, current?.file_index, onPlay, save],
+  );
+
+  const open = useCallback(
+    (nextBook: Book, autoplayNow = false, targetChapterIndex?: number) => {
+      if (autoplayNow) onPlay();
+      if (book?.id === nextBook.id) {
+        if (targetChapterIndex !== undefined && chapters?.[targetChapterIndex]) {
+          choose(targetChapterIndex, autoplayNow);
+        } else if (autoplayNow && audio.current) {
+          if (audio.current.paused) {
+            touched.current = true;
+            setManualStart(true);
+            void audio.current.play().catch((cause: Error) => setError(cause.message));
+          } else {
+            audio.current.pause();
+          }
+        }
+        return;
+      }
+      save();
+      audio.current?.pause();
+      setPlaying(false);
+      pendingChapter.current = targetChapterIndex ?? null;
+      autoplay.current = autoplayNow;
+      setBook(nextBook);
+    },
+    [book?.id, chapters, choose, onPlay, save],
   );
 
   const seekBy = useCallback(
@@ -1158,6 +1721,7 @@ export function useBookAudioSession({
     if (!audio.current) return;
     if (audio.current.paused) {
       touched.current = true;
+      setManualStart(true);
       onPlay();
       void audio.current.play().catch((cause: Error) => setError(cause.message));
     } else {
@@ -1173,10 +1737,13 @@ export function useBookAudioSession({
     );
   }, []);
 
+  const audioReady = Boolean(chapters && current && (checkpoint.ready || manualStart));
+
   return {
     book,
     chapters,
     current,
+    audioReady,
     index,
     rate,
     timer,
@@ -1199,6 +1766,7 @@ export function useBookAudioSession({
         const targetMs = current.start_file_ms + restore.current;
         audio.current.currentTime = targetMs / 1000;
         audio.current.playbackRate = rate;
+        audio.current.volume = volumeRef.current;
         setPositionMs(restore.current);
         restore.current = 0;
         if (autoplay.current) {
@@ -1245,77 +1813,29 @@ export function useBookAudioSession({
   };
 }
 
-export function BookAudioHost({
-  session,
-  showDock,
-  onOpenBook,
-}: {
-  session: BookAudioSession;
-  showDock: boolean;
-  onOpenBook: (book: Book) => void;
-}) {
-  const { t } = useTranslation();
+export function BookAudioElement({ session }: { session: BookAudioSession }) {
   if (!session.book) return null;
-  const src = session.current
-    ? `/api/v1/books/${session.book.id}/audiobook/files/${session.current.file_index}/stream`
-    : undefined;
+  const src =
+    session.audioReady && session.current
+      ? `/api/v1/books/${session.book.id}/audiobook/files/${session.current.file_index}/stream`
+      : undefined;
   return (
-    <>
-      <audio
-        ref={session.audio}
-        preload="metadata"
-        src={src}
-        onLoadedMetadata={session.bindHandlers.onLoadedMetadata}
-        onPlay={session.bindHandlers.onPlay}
-        onPause={session.bindHandlers.onPause}
-        onSeeked={session.bindHandlers.onSeeked}
-        onEnded={session.bindHandlers.onEnded}
-        onTimeUpdate={session.bindHandlers.onTimeUpdate}
-      />
-      {showDock && session.current && (
-        <aside className="book-audio-dock" aria-label={session.book.title}>
-          <button
-            type="button"
-            className="text-button book-audio-dock-title"
-            onClick={() => session.book && onOpenBook(session.book)}
-          >
-            <strong>{session.book.title}</strong>
-            <span> · {session.current.title}</span>
-          </button>
-          <span className="muted tnum">
-            {time(session.positionMs / 1000)} / {time(session.current.duration_ms / 1000)}
-          </span>
-          <div className="bookshelf-controls">
-            <button type="button" onClick={() => session.seekBy(-15)}>
-              -15s
-            </button>
-            <button type="button" className="primary" onClick={session.togglePlay}>
-              {t(session.playing ? 'bookshelf.pause' : 'bookshelf.play')}
-            </button>
-            <button type="button" onClick={() => session.seekBy(30)}>
-              +30s
-            </button>
-            <button type="button" aria-label={t('bookshelf.back')} onClick={session.close}>
-              ×
-            </button>
-          </div>
-        </aside>
-      )}
-    </>
+    <audio
+      ref={session.audio}
+      preload="metadata"
+      src={src}
+      onLoadedMetadata={session.bindHandlers.onLoadedMetadata}
+      onPlay={session.bindHandlers.onPlay}
+      onPause={session.bindHandlers.onPause}
+      onSeeked={session.bindHandlers.onSeeked}
+      onEnded={session.bindHandlers.onEnded}
+      onTimeUpdate={session.bindHandlers.onTimeUpdate}
+    />
   );
 }
 
-export function BookAudio({
-  book,
-  session,
-  canEdit,
-}: {
-  book: Book;
-  session: BookAudioSession;
-  canEdit: boolean;
-}) {
+export function BookAudio({ book, session }: { book: Book; session: BookAudioSession }) {
   const { t } = useTranslation();
-  const [editError, setEditError] = useState('');
 
   useEffect(() => {
     if (session.book?.id !== book.id) {
@@ -1325,15 +1845,40 @@ export function BookAudio({
 
   const current = session.book?.id === book.id ? session.current : undefined;
   const chapters = session.book?.id === book.id ? session.chapters : null;
-  if (!current) {
+  if (!current || !session.audioReady) {
     return (
       <p role={session.error ? 'alert' : 'status'}>{session.error || t('bookshelf.loading')}</p>
     );
   }
   return (
     <section className="book-audio">
-      <div className="bookshelf-controls">
+      <div className="book-audio-transport-buttons">
+        <button type="button" className="book-skip-pill tnum" onClick={() => session.seekBy(-15)}>
+          -15s
+        </button>
+        <button type="button" className="primary book-play-pill" onClick={session.togglePlay}>
+          {t(session.playing ? 'bookshelf.pause' : 'bookshelf.play')}
+        </button>
+        <button type="button" className="book-skip-pill tnum" onClick={() => session.seekBy(30)}>
+          +30s
+        </button>
+      </div>
+      <div className="book-audio-timeline">
+        <span className="book-time tnum">{time(session.positionMs / 1000)}</span>
+        <input
+          type="range"
+          className="book-audio-scrubber"
+          aria-label={current.title}
+          min={0}
+          max={Math.max(1, current.duration_ms)}
+          value={Math.min(current.duration_ms, session.positionMs)}
+          onChange={(event) => session.seekToChapterMs(Number(event.target.value))}
+        />
+        <span className="book-time tnum">{time(current.duration_ms / 1000)}</span>
+      </div>
+      <div className="book-audio-bar-options">
         <select
+          className="book-audio-chapter"
           aria-label={t('bookshelf.contents')}
           value={session.index}
           onChange={(event) => session.choose(Number(event.target.value), session.playing)}
@@ -1368,62 +1913,7 @@ export function BookAudio({
           ))}
         </select>
       </div>
-      <div className="bookshelf-controls">
-        <button type="button" className="primary" onClick={session.togglePlay}>
-          {t(session.playing ? 'bookshelf.pause' : 'bookshelf.play')}
-        </button>
-        <button type="button" onClick={() => session.seekBy(-15)}>
-          -15s
-        </button>
-        <button type="button" onClick={() => session.seekBy(30)}>
-          +30s
-        </button>
-        <input
-          type="range"
-          className="book-audio-scrubber"
-          aria-label={current.title}
-          min={0}
-          max={Math.max(1, current.duration_ms)}
-          value={Math.min(current.duration_ms, session.positionMs)}
-          onChange={(event) => session.seekToChapterMs(Number(event.target.value))}
-        />
-        <span className="muted tnum">
-          {time(session.positionMs / 1000)} / {time(current.duration_ms / 1000)}
-        </span>
-      </div>
-      {canEdit && (
-        <details>
-          <summary>{t('bookshelf.editChapter')}</summary>
-          <form
-            key={session.index}
-            className="bookshelf-controls"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const title = String(new FormData(event.currentTarget).get('title') || '').trim();
-              if (!title) return;
-              void api<Pick<AudioChapter, 'chapter_index' | 'title'>>(
-                `/books/${book.id}/audiobook/chapters/${session.index}`,
-                { method: 'PATCH', body: JSON.stringify({ title }) },
-              )
-                .then((edited) => {
-                  session.renameChapter(edited.chapter_index, edited.title);
-                  setEditError('');
-                })
-                .catch((cause: Error) => setEditError(cause.message));
-            }}
-          >
-            <input
-              name="title"
-              aria-label={t('bookshelf.chapterTitle')}
-              required
-              maxLength={4096}
-              defaultValue={current.title}
-            />
-            <button>{t('bookshelf.save')}</button>
-          </form>
-        </details>
-      )}
-      {(session.error || editError) && <p role="alert">{editError || session.error}</p>}
+      {session.error && <p role="alert">{session.error}</p>}
     </section>
   );
 }

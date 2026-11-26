@@ -531,6 +531,9 @@ class MobileCompletionTest {
                 // on the software-rendered CI emulator.
                 compose.waitUntil(30_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
+                compose.onNodeWithTag("bottom-navigation").assertDoesNotExist()
+                compose.onNodeWithTag("assistant-back").assertIsDisplayed().performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription(uiString(R.string.playlist_new)).performClick()
                 compose.onNodeWithText(uiString(R.string.pl_tools_playlist_name)).performTextInput("手机规则歌单")

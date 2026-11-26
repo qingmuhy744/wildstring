@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -18,11 +19,12 @@ from wildstring.library.import_files import HardlinkError, validate_hardlink_cap
 from wildstring.library.storage import LibraryStorage, MigrationInput, overlapping
 from wildstring.permissions import dependency
 
-LIBRARY_FIELDS = "l.id, l.name, l.storage_mode, l.auto_pair, l.version"
+LIBRARY_FIELDS = "l.id, l.name, l.storage_mode, l.default_access, l.auto_pair, l.version"
 BOOK_FIELDS = (
     "b.id, b.library_id, b.title, b.subtitle, b.authors_json, "
     "b.cover_path, b.has_ebook, b.has_audiobook"
 )
+BOOK_MEDIA_SUFFIXES = {".epub", ".txt", ".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus"}
 
 
 def public_book(row):
@@ -40,15 +42,87 @@ class BookLibraryInput(BaseModel):
     source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(
         default_factory=list, max_length=32
     )
+    paused_source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] | None = Field(
+        default=None, max_length=32
+    )
     managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
     storage_mode: Literal["copy", "hardlink"] = "copy"
     default_access: Literal["all", "restricted"] = "restricted"
     auto_pair: bool = Field(default=True, strict=True)
 
 
+class BookLibraryUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=100)
+    source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(
+        default_factory=list, max_length=32
+    )
+    paused_source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] | None = Field(
+        default=None, max_length=32
+    )
+    managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
+    storage_mode: Literal["copy", "hardlink"] | None = None
+    default_access: Literal["all", "restricted"] | None = None
+    auto_pair: bool | None = Field(default=None, strict=True)
+    version: int = Field(ge=1, strict=True)
+
+
 class BookLibraryGrant(BaseModel):
     model_config = ConfigDict(extra="forbid")
     granted: bool = Field(strict=True)
+
+
+def _normalize_paused_roots(raw_paused: list[str] | None, sources: list[Path]) -> set[str]:
+    if raw_paused is None:
+        return set()
+    paused: set[str] = set()
+    for value in raw_paused:
+        if not Path(value).is_absolute():
+            raise HTTPException(422, "library_source_invalid")
+        try:
+            paused.add(str(Path(value).resolve()))
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(422, "library_source_invalid") from None
+    allowed = {str(source) for source in sources}
+    if not paused <= allowed:
+        raise HTTPException(422, "library_source_invalid")
+    return paused
+
+
+def _check_book_source_overlaps(
+    db, catalog, storage: LibraryStorage, sources: list[Path], *, library_id: str | None = None
+) -> None:
+    reserved = [
+        catalog.settings.data_dir.resolve(),
+        *storage.reserved_roots(),
+        *LibraryStorage.managed_roots(db),
+        *(Path(row[0]).resolve() for row in db.execute("SELECT root FROM library_sources")),
+        *(
+            Path(row[0]).resolve()
+            for row in db.execute(
+                "SELECT root FROM book_library_sources WHERE (? IS NULL OR library_id<>?)",
+                (library_id, library_id),
+            )
+        ),
+    ]
+    for source in sources:
+        if any(overlapping(source, other) for other in reserved):
+            raise HTTPException(422, "library_sources_overlap")
+
+
+def _serialize_library(db, row, *, owner: bool) -> dict:
+    item = dict(row, auto_pair=bool(row["auto_pair"]))
+    if owner:
+        item["sources"] = [
+            dict(src)
+            for src in db.execute(
+                "SELECT id, root, watch_enabled FROM book_library_sources WHERE library_id=? ORDER BY id",
+                (row["id"],),
+            )
+        ]
+    else:
+        item.pop("managed_root", None)
+    return item
 
 
 def router(
@@ -67,13 +141,15 @@ def router(
 
     @router.get("/book-libraries")
     def list_libraries(user: book_reader):
+        is_owner = user["profile"] == "owner"
+        fields = f"{LIBRARY_FIELDS}, l.managed_root" if is_owner else LIBRARY_FIELDS
         with database.connect(scoped=False) as db:
             rows = db.execute(
-                f"SELECT {LIBRARY_FIELDS} FROM book_libraries l WHERE {VISIBLE}"  # nosec B608
+                f"SELECT {fields} FROM book_libraries l WHERE {VISIBLE}"  # nosec B608
                 " ORDER BY l.name,l.id",
                 (user["profile"], user["id"]),
-            )
-            return {"items": [dict(row, auto_pair=bool(row["auto_pair"])) for row in rows]}
+            ).fetchall()
+            return {"items": [_serialize_library(db, row, owner=is_owner) for row in rows]}
 
     @router.post(
         "/book-libraries",
@@ -83,28 +159,21 @@ def router(
     def create_library(body: BookLibraryInput):
         identity = uuid4().hex
         sources = normalize_source_roots(body.source_roots)
+        paused = _normalize_paused_roots(body.paused_source_roots, sources)
         default_root = catalog.settings.data_dir / "books" / identity
         target = storage.destination(body.managed_root or default_root, sources, collection="books")
         if body.storage_mode == "hardlink":
             try:
-                validate_hardlink_capability(
-                    sources,
-                    target,
-                    {".epub", ".txt", ".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus"},
-                )
+                validate_hardlink_capability(sources, target, BOOK_MEDIA_SUFFIXES)
             except HardlinkError as error:
                 raise HTTPException(422, error.code) from error
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
-        reserved_roots = [catalog.settings.data_dir.resolve(), *storage.reserved_roots()]
         stamp = time.time()
         with database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             storage.available(db, target)
-            for source in sources:
-                if any(overlapping(source, reserved) for reserved in reserved_roots):
-                    raise HTTPException(422, "library_sources_overlap")
-                storage.available(db, source, error="library_sources_overlap")
+            _check_book_source_overlaps(db, catalog, storage, sources)
             try:
                 target.mkdir(parents=True, exist_ok=True)
             except OSError:
@@ -124,18 +193,94 @@ def router(
                 ),
             )
             db.executemany(
-                "INSERT INTO book_library_sources(library_id,id,root) VALUES (?,?,?)",
-                [(identity, uuid4().hex, str(source)) for source in sources],
+                "INSERT INTO book_library_sources(library_id,id,root,watch_enabled) VALUES (?,?,?,?)",
+                [
+                    (identity, uuid4().hex, str(source), int(str(source) not in paused))
+                    for source in sources
+                ],
             )
-        return {
-            "id": identity,
-            "name": body.name,
-            "managed_root": str(target),
-            "default_access": body.default_access,
-            "auto_pair": body.auto_pair,
-            "storage_mode": body.storage_mode,
-            "version": 1,
-        }
+            row = db.execute(
+                f"SELECT {LIBRARY_FIELDS}, l.managed_root FROM book_libraries l WHERE l.id=?",  # nosec B608
+                (identity,),
+            ).fetchone()
+            return _serialize_library(db, row, owner=True)
+
+    @router.put(
+        "/book-libraries/{library_id}",
+        dependencies=[Depends(auth.require_owner), Depends(auth.require_client)],
+    )
+    def update_library(library_id: str, body: BookLibraryUpdate):
+        with database.connect(scoped=False) as db:
+            old = db.execute("SELECT * FROM book_libraries WHERE id=?", (library_id,)).fetchone()
+        if old is None:
+            raise HTTPException(404, "book_library_not_found")
+        old_root = Path(old["managed_root"]).resolve()
+        if body.managed_root is not None:
+            if not Path(body.managed_root).is_absolute():
+                raise HTTPException(422, "library_target_invalid")
+            if Path(body.managed_root).resolve() != old_root:
+                raise HTTPException(409, "library_migration_required")
+        if body.storage_mode is not None and body.storage_mode != old["storage_mode"]:
+            raise HTTPException(409, "library_migration_required")
+        sources = normalize_source_roots(body.source_roots)
+        paused = _normalize_paused_roots(body.paused_source_roots, sources)
+        if old["storage_mode"] == "hardlink":
+            try:
+                validate_hardlink_capability(sources, old_root, BOOK_MEDIA_SUFFIXES)
+            except HardlinkError as error:
+                raise HTTPException(422, error.code) from error
+            except OSError as error:
+                raise HTTPException(422, "hardlink_not_supported") from error
+        stamp = time.time()
+        with database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            storage.check_busy(db, library_id)
+            _check_book_source_overlaps(db, catalog, storage, sources, library_id=library_id)
+            if not db.execute(
+                """UPDATE book_libraries
+                SET name=?,
+                    default_access=COALESCE(?, default_access),
+                    auto_pair=COALESCE(?, auto_pair),
+                    version=version+1,
+                    updated_at=?
+                WHERE id=? AND version=?""",
+                (
+                    body.name,
+                    body.default_access,
+                    body.auto_pair,
+                    stamp,
+                    library_id,
+                    body.version,
+                ),
+            ).rowcount:
+                raise HTTPException(409, "library_version_conflict")
+            previous = {
+                r["root"]: dict(r)
+                for r in db.execute(
+                    "SELECT id, root, watch_enabled FROM book_library_sources WHERE library_id=?",
+                    (library_id,),
+                )
+            }
+            db.execute("DELETE FROM book_library_sources WHERE library_id=?", (library_id,))
+            db.executemany(
+                "INSERT INTO book_library_sources(library_id,id,root,watch_enabled) VALUES (?,?,?,?)",
+                [
+                    (
+                        library_id,
+                        previous.get(str(source), {}).get("id", uuid4().hex),
+                        str(source),
+                        int(str(source) not in paused)
+                        if body.paused_source_roots is not None
+                        else previous.get(str(source), {}).get("watch_enabled", 1),
+                    )
+                    for source in sources
+                ],
+            )
+            row = db.execute(
+                f"SELECT {LIBRARY_FIELDS}, l.managed_root FROM book_libraries l WHERE l.id=?",  # nosec B608
+                (library_id,),
+            ).fetchone()
+            return _serialize_library(db, row, owner=True)
 
     @router.get(
         "/book-libraries/{library_id}/access",
@@ -218,9 +363,59 @@ def router(
     def list_books(
         user: book_reader,
         library_id: str | None = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        format: Literal["ebook", "audiobook", "audio"] | None = None,
+        progress_status: Literal["unread", "in_progress", "finished"] | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
+        query_text = (q or "").strip()
+        like_pattern: str | None = None
+        if query_text:
+            escaped = (
+                query_text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            like_pattern = f"%{escaped}%"
+        normalized_format = "audiobook" if format == "audio" else format
+        where_clauses = [VISIBLE, "(? IS NULL OR l.id=?)"]
+        params: list[object] = [
+            user["id"],
+            user["id"],
+            user["profile"],
+            user["id"],
+            library_id,
+            library_id,
+        ]
+        if normalized_format == "ebook":
+            where_clauses.append("b.has_ebook=1")
+        elif normalized_format == "audiobook":
+            where_clauses.append("b.has_audiobook=1")
+        if like_pattern is not None:
+            where_clauses.append(
+                r"""(
+                    LOWER(b.title) LIKE ? ESCAPE '\'
+                    OR LOWER(COALESCE(b.subtitle, '')) LIKE ? ESCAPE '\'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM json_each(CASE WHEN json_valid(b.authors_json) THEN b.authors_json ELSE '[]' END) je
+                        WHERE LOWER(CAST(je.value AS TEXT)) LIKE ? ESCAPE '\'
+                    )
+                )"""
+            )
+            params.extend((like_pattern, like_pattern, like_pattern))
+        cte = f"""WITH catalog AS (
+            SELECT {BOOK_FIELDS}, b.sort_title,
+                MAX(CASE WHEN r.completed=0 THEN r.updated_at ELSE 0 END,
+                    CASE WHEN a.completed=0 THEN a.updated_at ELSE 0 END) AS progress_at,
+                CASE WHEN r.completed=0 AND (a.completed IS NOT 0 OR r.updated_at>=a.updated_at)
+                     THEN 'reading' WHEN a.completed=0 THEN 'listening' END AS resume_kind,
+                CASE WHEN r.completed=0 OR a.completed=0 THEN 'in_progress'
+                     WHEN r.completed=1 OR a.completed=1 THEN 'finished' ELSE 'unread' END AS progress_status
+            FROM books b JOIN book_libraries l ON l.id=b.library_id
+            LEFT JOIN book_reading_progress r ON r.book_id=b.id AND r.user_id=?
+            LEFT JOIN book_listening_progress a ON a.book_id=b.id AND a.user_id=?
+            WHERE {" AND ".join(where_clauses)}
+        )"""  # nosec B608
         with database.connect(scoped=False) as db:
             if (
                 library_id is not None
@@ -231,31 +426,22 @@ def router(
                 is None
             ):
                 raise HTTPException(404, "book_library_not_found")
+            total = db.execute(
+                f"{cte} SELECT COUNT(*) FROM catalog WHERE (? IS NULL OR progress_status=?)",  # nosec B608
+                (*params, progress_status, progress_status),
+            ).fetchone()[0]
             rows = db.execute(
-                f"""SELECT {BOOK_FIELDS},
-                    MAX(CASE WHEN r.completed=0 THEN r.updated_at ELSE 0 END,
-                        CASE WHEN a.completed=0 THEN a.updated_at ELSE 0 END) AS progress_at,
-                    CASE WHEN r.completed=0 AND (a.completed IS NOT 0 OR r.updated_at>=a.updated_at)
-                         THEN 'reading' WHEN a.completed=0 THEN 'listening' END AS resume_kind,
-                    CASE WHEN r.completed=0 OR a.completed=0 THEN 'in_progress'
-                         WHEN r.completed=1 OR a.completed=1 THEN 'finished' ELSE 'unread' END AS progress_status
-                FROM books b JOIN book_libraries l ON l.id=b.library_id
-                LEFT JOIN book_reading_progress r ON r.book_id=b.id AND r.user_id=?
-                LEFT JOIN book_listening_progress a ON a.book_id=b.id AND a.user_id=?
-                WHERE {VISIBLE} AND (? IS NULL OR l.id=?)
-                ORDER BY progress_at DESC,b.sort_title,b.id LIMIT ? OFFSET ?""",  # nosec B608
-                (
-                    user["id"],
-                    user["id"],
-                    user["profile"],
-                    user["id"],
-                    library_id,
-                    library_id,
-                    limit,
-                    offset,
-                ),
+                f"""{cte}
+                SELECT id, library_id, title, subtitle, authors_json, cover_path,
+                       has_ebook, has_audiobook, resume_kind, progress_status
+                FROM catalog
+                WHERE (? IS NULL OR progress_status=?)
+                ORDER BY progress_at DESC, sort_title, id
+                LIMIT ? OFFSET ?""",  # nosec B608
+                (*params, progress_status, progress_status, limit, offset),
             )
-            return {"items": [public_book(row) for row in rows]}
+            items = [public_book(row) for row in rows]
+            return {"items": items, "total": total, "has_more": offset + len(items) < total}
 
     @router.get("/books/{book_id}")
     def get_book(book_id: str, user: book_reader):

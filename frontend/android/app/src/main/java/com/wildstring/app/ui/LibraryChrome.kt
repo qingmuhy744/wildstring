@@ -17,13 +17,21 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
-@Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, settings: () -> Unit, compact: Boolean = false,
-    unread: Int = 0, notifications: (() -> Unit)? = null) {
+@Composable internal fun CatalogTopBar(
+    state: MusicState,
+    back: () -> Unit,
+    settings: () -> Unit,
+    compact: Boolean = false,
+    unread: Int = 0,
+    notifications: (() -> Unit)? = null,
+    assistant: (() -> Unit)? = null,
+) {
     val title: @Composable () -> Unit = {
         Text(
             catalogTitle(state),
@@ -34,6 +42,11 @@ import androidx.compose.ui.unit.dp
         )
     }
     val actions: @Composable RowScope.() -> Unit = {
+        assistant?.let { open ->
+            IconButton(open, Modifier.testTag("nav-assistant")) {
+                Icon(Icons.Default.AutoAwesome, stringResource(R.string.nav_assistant))
+            }
+        }
         notifications?.let { open -> IconButton(open, Modifier.testTag("open-notifications")) {
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) { Icon(Icons.Default.NotificationsNone, stringResource(R.string.notifications)) }
         } }
@@ -95,19 +108,25 @@ import androidx.compose.ui.unit.dp
         }))
 }
 
-@Composable internal fun PersonalHeader(vm: MusicViewModel, state: MusicState, recent: () -> Unit, compact: Boolean = false) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            AccountAvatar(vm, Modifier.size(56.dp))
-            Column {
-                Text(state.account?.username ?: stringResource(R.string.my_music), style = MaterialTheme.typography.titleLarge)
-            }
-        }
-        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            ListItem(headlineContent = { Text(stringResource(R.string.recently_played)) },
-                leadingContent = { Icon(Icons.Default.History, null) }, trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow), modifier = Modifier.clickable(onClick = recent))
-        }
+@Composable internal fun PersonalHeader(
+    vm: MusicViewModel,
+    state: MusicState,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+) {
+    Row(
+        modifier = modifier.padding(contentPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AccountAvatar(vm, Modifier.size(if (compact) 40.dp else 48.dp))
+        Text(
+            state.account?.username ?: stringResource(R.string.my_music),
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -119,6 +138,7 @@ import androidx.compose.ui.unit.dp
     else -> stringResource(when (state.tab) {
         "mine" -> R.string.nav_mine
         "podcast" -> R.string.nav_radio
+        "books" -> R.string.nav_books
         "assistant" -> R.string.nav_assistant
         "library" -> R.string.nav_music
         else -> R.string.nav_discover

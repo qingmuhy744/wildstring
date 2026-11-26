@@ -127,6 +127,7 @@ class Management:
         self.next_discovery = 0
         self.next_recommendation = 0
         self.discovery_due = {}
+        self.book_watch_snapshots: dict[str, tuple] = {}
         self._recommendation_lock = Lock()
         self.recommendation_thread: Thread | None = None
         self.recommendation_inflight: set[tuple[str, str]] = set()
@@ -478,17 +479,23 @@ class Management:
     ):
         if len(file_bytes) > MAX_COVER_BYTES:
             raise HTTPException(413, "cover_too_large")
+        from wildstring.books.ebooks import normalized_image
+
+        try:
+            jpeg_bytes = normalized_image(file_bytes)
+        except (OSError, ValueError):
+            raise HTTPException(422, "invalid_cover_image") from None
         assets = TrackAssets(self.repository)
-        if assets.thumbnail(file_bytes, 320) is None:
+        if assets.thumbnail(jpeg_bytes, 320) is None:
             raise HTTPException(422, "invalid_cover_image")
 
         artwork_folder = self.database.path.parent / "artwork"
         artwork_folder.mkdir(parents=True, exist_ok=True)
-        key = hashlib.sha256(file_bytes).hexdigest()
+        key = hashlib.sha256(jpeg_bytes).hexdigest()
         with NamedTemporaryFile(dir=artwork_folder, delete=False) as stream:
             temp_path = Path(stream.name)
             try:
-                stream.write(file_bytes)
+                stream.write(jpeg_bytes)
                 stream.flush()
                 os.fsync(stream.fileno())
                 temp_path.replace(artwork_folder / key)
@@ -517,7 +524,7 @@ class Management:
                 )
 
         if save_sidecar:
-            self._save_album_sidecar_cover(tracks, file_bytes)
+            self._save_album_sidecar_cover(tracks, jpeg_bytes)
         refresh_music_tracks(self.repository, (track["id"] for track in tracks))
 
         return {"album_id": album_id, "image_sha256": key, "tracks_updated": len(tracks)}
@@ -990,7 +997,7 @@ class Management:
                         if time.monotonic() >= self.next_discovery:
                             self.next_discovery = time.monotonic() + 15
                             try:
-                                self.discover_sources()
+                                self.discover_sources(automatic=True)
                             except HTTPException as error:
                                 if error.status_code != 409:
                                     raise
@@ -1010,7 +1017,7 @@ class Management:
                 self.stopping.wait(1)
         self.worker_lock.release(force=True)
 
-    def discover_sources(self):
+    def discover_sources(self, *, automatic: bool = False):
         from wildstring.library.scope import library_context
 
         with self.database.connect() as db:
@@ -1046,6 +1053,63 @@ class Management:
                     raise
                 # A source may be removed or its library disabled after taking the snapshot.
                 self.discovery_due.pop(key, None)
+
+        self._discover_book_sources(automatic=automatic)
+
+    def _discover_book_sources(self, *, automatic: bool = False):
+        from wildstring.books.service import Books
+
+        with self.database.connect(scoped=False) as db:
+            book_libraries = [
+                dict(row)
+                for row in db.execute(
+                    """SELECT l.* FROM book_libraries l
+                    WHERE EXISTS(
+                        SELECT 1 FROM book_library_sources s
+                        WHERE s.library_id=l.id AND s.watch_enabled=1
+                    )
+                    AND NOT EXISTS(
+                        SELECT 1 FROM book_library_migrations m
+                        WHERE m.library_id=l.id AND m.status IN ('queued','running')
+                    )"""
+                ).fetchall()
+            ]
+        active_ids = {lib["id"] for lib in book_libraries}
+        for stale_id in list(self.book_watch_snapshots):
+            if stale_id not in active_ids:
+                self.book_watch_snapshots.pop(stale_id, None)
+
+        now_wall = time.time()
+        now_ns = time.time_ns()
+        books_service = Books(self.database, self._settings)
+        for book_library in book_libraries:
+            if automatic and now_wall - float(book_library.get("updated_at") or 0) < 5.0:
+                continue
+            lib_id = book_library["id"]
+            has_unimported, snapshot = books_service.watch_probe(book_library)
+            previous = self.book_watch_snapshots.get(lib_id)
+            if previous is None:
+                if not has_unimported:
+                    self.book_watch_snapshots[lib_id] = snapshot
+                    continue
+            elif snapshot == previous:
+                continue
+            if automatic and any(
+                now_ns - mtime_ns < 2_000_000_000 for _, _, mtime_ns in snapshot[1]
+            ):
+                continue
+
+            try:
+                books_service.scan(book_library, watched_only=True)
+            except HTTPException as error:
+                if error.status_code == 409:
+                    continue
+                raise
+            except OSError:
+                logger.warning("Book library watch source is unavailable; will retry")
+                continue
+            _, post_snapshot = books_service.watch_probe(book_library)
+            self.book_watch_snapshots[lib_id] = post_snapshot
 
     def _trigger_scheduled_recommendations(self):
         with self._recommendation_lock:

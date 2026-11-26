@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.wildstring.app.R
 
@@ -116,6 +117,9 @@ internal fun BoxScope.BookReaderDialog(
 internal fun BoxScope.BookReaderToolbar(
     visible: Boolean,
     animate: Boolean,
+    close: () -> Unit = {},
+    contentMaxWidth: Dp = Dp.Unspecified,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable () -> Unit,
 ) {
     val progress = readerRevealProgress(visible, animate, "book-reader-tools")
@@ -123,16 +127,74 @@ internal fun BoxScope.BookReaderToolbar(
 
     val travel = with(LocalDensity.current) { 20.dp.toPx() }
     val access = if (visible) Modifier else Modifier.clearAndSetSemantics {}
-    Surface(
-        Modifier.align(Alignment.TopStart)
-            .graphicsLayer { alpha = progress; translationY = (progress - 1f) * travel }
-            .testTag("book-reader-tools"),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Box(access.then(if (visible) Modifier.pointerInput(Unit) { detectTapGestures {} } else Modifier)) {
-            content()
+    Box(Modifier.matchParentSize()) {
+        if (visible) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .testTag("book-reader-tools-backdrop")
+                    .pointerInput(close) { detectTapGestures { close() } },
+            )
+        }
+        Box(
+            Modifier
+                .let { if (contentMaxWidth != Dp.Unspecified) it.widthIn(max = contentMaxWidth) else it }
+                .fillMaxHeight()
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(contentPadding),
+        ) {
+            Surface(
+                Modifier.align(Alignment.TopEnd)
+                    .graphicsLayer { alpha = progress; translationY = (progress - 1f) * travel }
+                    .testTag("book-reader-tools"),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Box(access.then(if (visible) Modifier.pointerInput(Unit) { detectTapGestures {} } else Modifier)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun BoxScope.BookReaderChrome(
+    visible: Boolean,
+    animate: Boolean,
+    topBar: @Composable () -> Unit,
+    bottomBar: (@Composable () -> Unit)? = null,
+    showBottomBar: Boolean = bottomBar != null,
+    onTopBarTap: (() -> Unit)? = null,
+) {
+    val topProgress = readerRevealProgress(visible, animate, "book-reader-chrome")
+    val bottomProgress = readerRevealProgress(visible && showBottomBar && bottomBar != null, animate, "book-reader-bottom")
+    val travel = with(LocalDensity.current) { 20.dp.toPx() }
+    if (visible || topProgress > 0.001f) {
+        val access = if (visible) Modifier else Modifier.clearAndSetSemantics {}
+        val pointer = if (visible) Modifier.pointerInput(onTopBarTap) { detectTapGestures { onTopBarTap?.invoke() } } else Modifier
+        Box(
+            Modifier.align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .graphicsLayer { alpha = topProgress; translationY = (topProgress - 1f) * travel }
+                .testTag("book-reader-top-bar"),
+        ) {
+            Box(access.then(pointer)) { topBar() }
+        }
+    }
+    if (bottomBar != null && ((visible && showBottomBar) || bottomProgress > 0.001f)) {
+        val bottomVisible = visible && showBottomBar
+        val access = if (bottomVisible) Modifier else Modifier.clearAndSetSemantics {}
+        val pointer = if (bottomVisible) Modifier.pointerInput(Unit) { detectTapGestures {} } else Modifier
+        Box(
+            Modifier.align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .graphicsLayer { alpha = bottomProgress; translationY = (1f - bottomProgress) * travel }
+                .testTag("book-reader-bottom-bar"),
+        ) {
+            Box(access.then(pointer)) { bottomBar() }
         }
     }
 }

@@ -57,6 +57,13 @@ class ChapterTitleUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=4096)
 
 
+class BookMetadataSourcesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    itunes: bool | None = None
+    openlibrary: bool | None = None
+    google_books: bool | None = None
+
+
 def public_metadata(row):
     values = {key: row[key] for key in BOOK_TEXT if key != "sort_title"}
     values.update({key: json.loads(row[column]) for key, column in BOOK_ARRAY.items()})
@@ -79,13 +86,23 @@ def router(
     router = APIRouter()
     read = Annotated[dict, Depends(dependency(auth, "books:read"))]
     edit = Annotated[dict, Depends(dependency(auth, "books:write"))]
+    manage = Annotated[dict, Depends(dependency(auth, "books:manage_libraries"))]
     service = Books(database, settings)
     providers = BookProviders(
+        database=database,
         network_policy=podcasts.get_network_policy if podcasts is not None else None,
         itunes_gate=search_gate,
         allow_fake_ip=allow_fake_ip,
     )
     scrape = Annotated[dict, Depends(dependency(auth, "books:scrape_metadata"))]
+
+    @router.get("/books/metadata/sources")
+    def metadata_sources(user: scrape):
+        return providers.sources_state()
+
+    @router.put("/books/metadata/sources", dependencies=[Depends(auth.require_client)])
+    def update_metadata_sources(user: manage, body: BookMetadataSourcesUpdate):
+        return providers.update_sources(body.model_dump(exclude_unset=True))
 
     @router.get("/books/{book_id}/metadata")
     def get_metadata(book_id: str, user: read):
@@ -95,14 +112,31 @@ def router(
     @router.get("/books/{book_id}/metadata/search")
     def search(
         book_id: str,
-        provider: Provider,
         user: scrape,
+        provider: Provider | None = None,
+        sources: Annotated[str | None, Query(max_length=256)] = None,
         q: Annotated[str | None, Query(max_length=256)] = None,
     ):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         term = (q or "").strip() or book["title"]
-        return {"items": providers.search(provider, term, user["id"])}
+        if provider is not None:
+            chosen: list[Provider] = [provider]
+        else:
+            enabled = providers.sources_state()["items"]
+            enabled_ids = [item["id"] for item in enabled]
+            if sources is not None:
+                requested = list(
+                    dict.fromkeys(part.strip() for part in sources.split(",") if part.strip())
+                )
+                if not requested or any(item not in enabled_ids for item in requested):
+                    raise HTTPException(422, "invalid_provider_sources")
+                chosen = requested
+            else:
+                chosen = enabled_ids
+                if not chosen:
+                    return {"items": []}
+        return {"items": providers.search_many(chosen, term, user["id"])}
 
     @router.patch("/books/{book_id}/metadata", dependencies=[Depends(auth.require_client)])
     def update(book_id: str, user: edit, body: MetadataUpdate):

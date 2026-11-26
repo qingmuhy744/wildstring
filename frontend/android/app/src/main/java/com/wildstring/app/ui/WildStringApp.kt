@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -227,10 +228,14 @@ fun WildStringApp(model: MusicViewModel) {
     val dark = when (preferences.appearance) { "light" -> false; "dark" -> true; else -> systemDark }
     val window = LocalActivity.current?.window
     val view = androidx.compose.ui.platform.LocalView.current
-    SideEffect { window?.let { WindowCompat.getInsetsController(it, view).apply {
-        isAppearanceLightStatusBars = !dark
-        isAppearanceLightNavigationBars = !dark
-    } } }
+    SideEffect {
+        if (!(state.tab == "books" && state.readingBook)) {
+            window?.let { WindowCompat.getInsetsController(it, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            } }
+        }
+    }
     CompositionLocalProvider(LocalDarkAppearance provides dark,
         LocalAndroidLayoutMode provides currentAndroidLayoutMode(),
         LocalSongListSize provides preferences.songListSize,
@@ -250,7 +255,7 @@ fun WildStringApp(model: MusicViewModel) {
                     if (state.playing && state.current != null && state.handoff != null) model.dismissHandoff()
                 }
                 AnimatedVisibility(
-                    visible = state.handoff != null && !state.playing,
+                    visible = state.handoff != null && !state.playing && !state.readingBook,
                     enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
                         scaleIn(
                             initialScale = 0.86f,
@@ -275,8 +280,14 @@ fun WildStringApp(model: MusicViewModel) {
                         val countdown = remember(saved.version) { Animatable(1f) }
                         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         val isTablet = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
-                        val miniVisible = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
-                        val dockHeight = (if (miniVisible) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)
+                        val bookState by model.bookPlayback.state.collectAsStateWithLifecycle()
+                        val bookBarVisible = bookState.book != null &&
+                            (state.bookBarActive || state.current == null) &&
+                            !state.playing && !state.buffering &&
+                            (state.tab != "assistant" || bookState.playing || bookState.buffering)
+                        val miniVisible = bookBarVisible ||
+                            (state.current != null && (state.tab != "assistant" || state.playing || state.buffering))
+                        val dockHeight = (if (miniVisible) 62.dp else 0.dp) + (if (!isTablet && state.tab != "assistant") 80.dp else 0.dp)
                         val assistantComposer = if (state.tab == "assistant") 72.dp else 0.dp
                         val bottomPad = navBarBottom + dockHeight + assistantComposer + 12.dp
                         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp).padding(bottom = bottomPad), contentAlignment = Alignment.BottomCenter) {
@@ -440,6 +451,15 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var lyrics by rememberSaveable { mutableStateOf(false) }
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
+    val bookState by vm.bookPlayback.state.collectAsStateWithLifecycle()
+    var bookExpanded by rememberSaveable { mutableStateOf(false) }
+    var bookChaptersOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(bookState.book?.id) {
+        if (bookState.book == null) {
+            bookExpanded = false
+            bookChaptersOpen = false
+        }
+    }
     var feature by remember { mutableStateOf<String?>(null) }
     var playerReturnFeature by remember { mutableStateOf<String?>(null) }
     var featureTrack by remember { mutableStateOf<Track?>(null) }
@@ -594,9 +614,21 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         )
     val savedPages = rememberSaveableStateHolder()
     val tabReselections = remember { MutableSharedFlow<String>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
+    var assistantReturnTab by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.tab) {
+        if (state.tab != "assistant") assistantReturnTab = null
+    }
+    fun exitAssistant() {
+        val target = assistantReturnTab?.takeIf { it != "assistant" } ?: "search"
+        assistantReturnTab = null
+        vm.navigate(target)
+    }
     fun selectTab(tab: String) {
-        if (tab != vm.state.value.tab) vm.navigate(tab)
-        else if (tab != "assistant" && (tab == "podcast" || !vm.returnToCatalogHome())) tabReselections.tryEmit(tab)
+        val currentTab = vm.state.value.tab
+        if (tab == "assistant" && currentTab != "assistant") assistantReturnTab = currentTab
+        else if (tab != "assistant") assistantReturnTab = null
+        if (tab != currentTab) vm.navigate(tab)
+        else if (tab != "assistant" && (tab == "podcast" || tab == "books" || !vm.returnToCatalogHome())) tabReselections.tryEmit(tab)
     }
     val pullRefresh = rememberPullToRefreshState()
     val savedKeys = remember { ArrayDeque<String>() }
@@ -604,7 +636,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         savedKeys.remove(state.contentKey); savedKeys.addLast(state.contentKey)
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
-    val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
+    val destination = when {
+        settings -> "settings"
+        bookExpanded && bookState.book != null -> "book-player"
+        expanded && state.current != null -> "player"
+        else -> "catalog"
+    }
     // Upward pulls reveal the queue sheet and stay in composition; the downward offset is read only
     // while drawing, so following the finger redraws the player without recomposing the app shell.
     var rawPlayerDragY by remember { mutableFloatStateOf(0f) }
@@ -666,22 +703,57 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         DisposableEffect(state.contentKey, settings, feature, selectedTracks != null, expanded) {
             onDispose { vm.cancelCollectionPlayback() }
         }
-        BackHandler(enabled = !settings && (expanded || queue || selectedTracks != null || state.canGoBack || state.tab != "search")) {
+        BackHandler(enabled = !settings && (bookExpanded || expanded || queue || selectedTracks != null || state.canGoBack || state.tab != "search")) {
             vm.cancelCollectionPlayback()
-            when { queue -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false; expanded -> collapsePlayer(); selectedTracks != null -> exitTrackSelection(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+            when {
+                bookExpanded -> {
+                    if (bookChaptersOpen) bookChaptersOpen = false else bookExpanded = false
+                }
+                queue -> queue = false
+                lyrics && !wide && state.current?.isPodcast != true -> lyrics = false
+                expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false
+                expanded -> collapsePlayer()
+                selectedTracks != null -> exitTrackSelection()
+                state.tab == "podcast" && state.podcastId != null -> vm.back()
+                state.canGoBack -> vm.back()
+                state.tab == "assistant" -> exitAssistant()
+                else -> vm.navigate("search")
+            }
         }
         val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+            val readingBook = target != "settings" && state.tab == "books" && state.readingBook
+            Box(
+                Modifier.fillMaxSize().then(
+                    if (readingBook) Modifier
+                    else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+                ),
+            ) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, wide = rail && safeWidth >= 840.dp, bottomBar = {
-                MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = true) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+                val showBookInSettings = bookState.book != null && (state.bookBarActive || state.current == null) && !state.playing && !state.buffering
+                if (showBookInSettings) {
+                    BookMiniPlayer(
+                        vm = vm,
+                        bookState = bookState,
+                        includeBottomInset = true,
+                        onChapters = { settings = false; bookExpanded = true; bookChaptersOpen = true },
+                        expand = { settings = false; bookExpanded = true; bookChaptersOpen = false },
+                    )
+                } else {
+                    MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = true) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+                }
             }) { settings = false } }
             else {
                 Row(Modifier.fillMaxSize()) {
-                    if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
+                    if (rail && !readingBook) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
                         Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
                         RailItems(state, ::selectTab)
                     }
-                    val showMiniPlayer = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
+                    val showBookMini = bookState.book != null &&
+                        (state.bookBarActive || state.current == null) &&
+                        !state.playing && !state.buffering &&
+                        (state.tab != "assistant" || bookState.playing || bookState.buffering)
+                    val showMiniPlayer = showBookMini ||
+                        (state.current != null && (state.tab != "assistant" || state.playing || state.buffering))
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = {
@@ -735,38 +807,59 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     )
                                     if (selectionBusy) LinearProgressIndicator(Modifier.align(Alignment.BottomCenter).fillMaxWidth())
                                 }
-                            } else if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null || rail)) {
-                                CatalogTopBar(if (rail && state.tab == "podcast") state.copy(canGoBack = false) else state, vm::back,
-                                    { settings = true }, compact = true, unread = unread, notifications = { feature = "notifications" })
+                            } else if (state.tab != "assistant" &&
+                                !readingBook &&
+                                (state.tab != "podcast" || state.podcastId == null || rail)
+                            ) {
+                                CatalogTopBar(
+                                    state = if (rail && state.tab == "podcast") state.copy(canGoBack = false) else state,
+                                    back = vm::back,
+                                    settings = { settings = true },
+                                    compact = true,
+                                    unread = unread,
+                                    notifications = { feature = "notifications" },
+                                    assistant = if (!rail) ({ selectTab("assistant") }) else null,
+                                )
                             }
                         },
                         bottomBar = {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceContainer,
-                                tonalElevation = 0.dp,
-                            ) {
-                                Column(
-                                    Modifier.fillMaxWidth().then(
-                                        if (!rail || !showMiniPlayer) {
-                                            Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
+                            if (!readingBook) {
+                                val showBottomNav = !rail && state.tab != "assistant"
+                                Surface(
+                                    color = if (showBookMini || showMiniPlayer || showBottomNav) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+                                    tonalElevation = 0.dp,
                                 ) {
-                                    if (showMiniPlayer) {
-                                        MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = rail) {
-                                            playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+                                    Column(
+                                        Modifier.fillMaxWidth().then(
+                                            if (!rail || !showMiniPlayer) {
+                                                Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                    ) {
+                                        if (showBookMini) {
+                                            BookMiniPlayer(
+                                                vm = vm,
+                                                bookState = bookState,
+                                                includeBottomInset = rail,
+                                                onChapters = { bookExpanded = true; bookChaptersOpen = true },
+                                                expand = { bookExpanded = true; bookChaptersOpen = false },
+                                            )
+                                        } else if (showMiniPlayer) {
+                                            MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = rail) {
+                                                playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+                                            }
                                         }
-                                    }
-                                    if (!rail) {
-                                        NavigationBar(
-                                            windowInsets = WindowInsets(0, 0, 0, 0),
-                                            containerColor = Color.Transparent,
-                                            tonalElevation = 0.dp,
-                                            modifier = Modifier.testTag("bottom-navigation"),
-                                        ) {
-                                            BottomItems(state, ::selectTab)
+                                        if (showBottomNav) {
+                                            NavigationBar(
+                                                windowInsets = WindowInsets(0, 0, 0, 0),
+                                                containerColor = Color.Transparent,
+                                                tonalElevation = 0.dp,
+                                                modifier = Modifier.testTag("bottom-navigation"),
+                                            ) {
+                                                BottomItems(state, ::selectTab)
+                                            }
                                         }
                                     }
                                 }
@@ -775,10 +868,18 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     ) { padding ->
                         Box(Modifier.fillMaxSize().padding(padding)) {
                             if (state.tab == "podcast") {
-                                savedPages.SaveableStateProvider("podcast") { RadioPage(vm, tabReselections) }
+                                savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm, tabReselections, Modifier.fillMaxSize()) }
+                            } else if (state.tab == "books") {
+                                savedPages.SaveableStateProvider("books") {
+                                    BookshelfScreen(
+                                        vm = vm,
+                                        suppressSystemBars = bookExpanded,
+                                        onExpandBookPlayer = { bookExpanded = true; bookChaptersOpen = false },
+                                    )
+                                }
                             } else if (state.tab == "assistant") {
                                 savedPages.SaveableStateProvider("assistant") {
-                                MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true }) {
+                                MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true }, onBack = if (!rail) ::exitAssistant else null) {
                                     playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
                                 }
                                 }
@@ -796,21 +897,54 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 val header: @Composable () -> Unit = {
                                 Column(Modifier.fillMaxWidth()) {
                                     if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
+                                        val openShortcut: (String) -> Unit = { route ->
+                                            if (route == "recent") vm.recent() else feature = route
+                                        }
                                         if (rail) {
-                                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.Top) {
-                                                Column(Modifier.width(336.dp)) { PersonalHeader(vm, state, { vm.recent() }, compact = false) }
-                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                                    MobileShortcuts { if (it == "settings") settings = true else feature = it }
-                                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                                        Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
-                                                        IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
+                                            Column(Modifier.fillMaxWidth()) {
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    PersonalHeader(
+                                                        vm = vm,
+                                                        state = state,
+                                                        compact = false,
+                                                        modifier = Modifier.widthIn(max = 280.dp),
+                                                        contentPadding = PaddingValues(0.dp),
+                                                    )
+                                                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                                                        MobileShortcuts(
+                                                            modifier = Modifier.widthIn(max = 540.dp),
+                                                            horizontalPadding = 0.dp,
+                                                            open = openShortcut,
+                                                        )
                                                     }
+                                                }
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
+                                                    IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
                                                 }
                                             }
                                         } else {
-                                            PersonalHeader(vm, state, { vm.recent() }, compact = compact)
-                                            MobileShortcuts { if (it == "settings") settings = true else feature = it }
-                                            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            PersonalHeader(
+                                                vm = vm,
+                                                state = state,
+                                                compact = compact,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                            )
+                                            MobileShortcuts(horizontalPadding = 16.dp, open = openShortcut)
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
                                                 Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
                                                 IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
                                             }
@@ -910,6 +1044,28 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }, label = "app-destination") { currentDestination ->
                     BaseDestination(currentDestination)
                 }
+            }
+            val motionAllowed = preferences.interfaceAnimations && playbackMotionAllowed()
+            AnimatedVisibility(
+                visible = destination == "book-player" && bookState.book != null,
+                modifier = Modifier.fillMaxSize(),
+                enter = if (motionAllowed) fadeIn(tween(220)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 12 } else EnterTransition.None,
+                exit = if (motionAllowed) fadeOut(tween(180)) + slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it } else ExitTransition.None,
+                label = "book-player-overlay",
+            ) {
+                BookAudioPlayerScreen(
+                    vm = vm,
+                    bookState = bookState,
+                    wide = wide,
+                    chaptersSheetOpen = bookChaptersOpen,
+                    onChaptersSheetChange = { bookChaptersOpen = it },
+                    onDismiss = { bookExpanded = false; bookChaptersOpen = false },
+                    onOpenBook = { bookId ->
+                        bookExpanded = false
+                        bookChaptersOpen = false
+                        vm.openBookDetail(bookId)
+                    },
+                )
             }
             AnimatedVisibility(
                 visibleState = playerVisibleState,
@@ -1059,7 +1215,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
     }
-    val playerFeedback = expanded && state.current != null && !settings
+    val playerFeedback = ((expanded && state.current != null) || (bookExpanded && bookState.book != null)) && !settings
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = if (playerFeedback) Alignment.TopCenter else Alignment.BottomCenter) {
         SnackbarHost(mutationSnackbar, Modifier.padding(horizontal = 16.dp, vertical = if (playerFeedback) 64.dp else 16.dp).testTag("mutation-feedback"))
     }
@@ -1307,35 +1463,46 @@ private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = fal
 
 
 @Composable
-private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications: () -> Unit, onSettings: () -> Unit, onPlayer: () -> Unit) {
+private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications: () -> Unit, onSettings: () -> Unit, onBack: (() -> Unit)? = null, onPlayer: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf<String?>(null) }
     AgentChat(vm, onNotifications, onSettings, unread,
-        onPlayer = onPlayer.takeIf { state.current != null && !state.playing && !state.buffering }) { draft = it }
+        onPlayer = onPlayer.takeIf { state.current != null && !state.playing && !state.buffering },
+        onBack = onBack) { draft = it }
     draft?.let { FeatureDialog(vm, "drafts", initialBatchId = it) { draft = null } }
 }
 
-/** Main navigation destinations; labels follow the interface language. */
+/** Rail keeps Discover at top; phone bottom bar centers Discover symmetrically across 5 destinations. */
 @Composable
-private fun navItems() = listOf(
+private fun railNavItems(): List<Triple<String, String, ImageVector>> = listOf(
     Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Explore),
-    Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
-    Triple("assistant", androidx.compose.ui.res.stringResource(R.string.nav_assistant), Icons.Default.AutoAwesome),
     Triple("library", androidx.compose.ui.res.stringResource(R.string.nav_music), Icons.Default.LibraryMusic),
+    Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
+    Triple("books", androidx.compose.ui.res.stringResource(R.string.nav_books), Icons.AutoMirrored.Filled.MenuBook),
+    Triple("assistant", androidx.compose.ui.res.stringResource(R.string.nav_assistant), Icons.Default.AutoAwesome),
+    Triple("mine", androidx.compose.ui.res.stringResource(R.string.nav_mine), Icons.Default.Person),
+)
+
+@Composable
+private fun bottomNavItems(): List<Triple<String, String, ImageVector>> = listOf(
+    Triple("library", androidx.compose.ui.res.stringResource(R.string.nav_music), Icons.Default.LibraryMusic),
+    Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
+    Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Explore),
+    Triple("books", androidx.compose.ui.res.stringResource(R.string.nav_books), Icons.AutoMirrored.Filled.MenuBook),
     Triple("mine", androidx.compose.ui.res.stringResource(R.string.nav_mine), Icons.Default.Person),
 )
 
 @Composable
 private fun RailItems(state: MusicState, select: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    navItems().forEach { (id, label, icon) ->
+    railNavItems().forEach { (id, label, icon) ->
         NavigationRailItem(state.tab == id, { keyboard?.hide(); select(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, select: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    navItems().forEach { (id, label, icon) ->
+    bottomNavItems().forEach { (id, label, icon) ->
         NavigationBarItem(
             selected = state.tab == id,
             onClick = { keyboard?.hide(); select(id) },

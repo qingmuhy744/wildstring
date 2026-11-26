@@ -384,9 +384,11 @@ def test_epub_safety_pair_split_and_portable_share(settings, authenticated_clien
 def test_book_metadata_providers_return_only_typed_public_fields(
     settings, authenticated_client, monkeypatch
 ):
+    from urllib.error import HTTPError
     from urllib.parse import urlsplit
 
     from wildstring.books import providers
+    from wildstring.podcasts import PodcastURLRejected
 
     answers = {
         "openlibrary.org": {
@@ -401,13 +403,22 @@ def test_book_metadata_providers_return_only_typed_public_fields(
             ]
         },
         "itunes.apple.com": {
-            "results": [{"collectionId": 17, "collectionName": "Apple", "artistName": "Three"}]
+            "results": [
+                {"collectionId": 17, "collectionName": "Apple", "artistName": "Three"},
+                {"trackId": 29, "trackName": "Apple Ebook", "artistName": "Author"},
+            ]
         },
     }
+    observed_queries = []
 
     def fake_request_bytes(request, **kwargs):
         parts = urlsplit(request.full_url)
+        observed_queries.append((parts.hostname, parts.query))
         assert parts.scheme == "https"
+        if "FakeIpQuery" in parts.query:
+            raise PodcastURLRejected("remote_url_fake_ip")
+        if "RateLimitQuery" in parts.query:
+            raise HTTPError(request.full_url, 429, "Too Many Requests", {"Retry-After": "12"}, None)
         if parts.hostname == "www.googleapis.com" and "EmptyResultQuery" in parts.query:
             payload = json.dumps({"totalItems": 0}).encode("utf-8")
         else:
@@ -425,6 +436,57 @@ def test_book_metadata_providers_return_only_typed_public_fields(
         )
         assert response.status_code == 201, response.text
         identity = response.json()["id"]
+
+        # Google Books is disabled by default; Apple iTunes and Open Library are enabled.
+        sources = owner.get("/api/v1/books/metadata/sources").json()
+        assert [item["id"] for item in sources["items"]] == ["itunes", "openlibrary"]
+        assert {item["id"]: item["enabled"] for item in sources["all_sources"]} == {
+            "itunes": True,
+            "openlibrary": True,
+            "google_books": False,
+        }
+        assert (
+            owner.get(
+                f"/api/v1/books/{identity}/metadata/search",
+                params={"sources": "google_books"},
+            ).status_code
+            == 422
+        )
+
+        # Multi-source search merges iTunes (including ebook trackName) and Open Library.
+        multi = owner.get(
+            f"/api/v1/books/{identity}/metadata/search",
+            params={"sources": "itunes,openlibrary", "q": "Walden"},
+        )
+        assert multi.status_code == 200, multi.text
+        titles = [item["fields"]["title"] for item in multi.json()["items"]]
+        assert "Apple" in titles and "Apple Ebook" in titles and "Open" in titles
+
+        # Short (<3 char) Open Library query uses `title=` instead of `q=`.
+        short_ol = owner.get(
+            f"/api/v1/books/{identity}/metadata/search",
+            params={"sources": "openlibrary", "q": "三体"},
+        )
+        assert short_ol.status_code == 200
+        assert any(
+            host == "openlibrary.org" and "title=" in query and "&q=" not in f"&{query}"
+            for host, query in observed_queries
+        )
+
+        # Enabling Google Books allows selecting it via `sources=`.
+        updated = owner.put(
+            "/api/v1/books/metadata/sources",
+            headers=HEADERS,
+            json={"google_books": True},
+        )
+        assert updated.status_code == 200
+        assert [item["id"] for item in updated.json()["items"]] == [
+            "itunes",
+            "openlibrary",
+            "google_books",
+        ]
+
+        # Explicit provider parameter stays backward-compatible, including Fake-IP 422 & 429.
         for provider, title in (
             ("openlibrary", "Open"),
             ("google_books", "Google"),
@@ -441,6 +503,58 @@ def test_book_metadata_providers_return_only_typed_public_fields(
             params={"provider": "google_books", "q": "EmptyResultQuery"},
         )
         assert empty_google.status_code == 200 and empty_google.json()["items"] == []
+        fake_ip = owner.get(
+            f"/api/v1/books/{identity}/metadata/search",
+            params={"provider": "openlibrary", "q": "FakeIpQuery"},
+        )
+        assert fake_ip.status_code == 422 and fake_ip.json()["detail"] == "remote_url_fake_ip"
+        limited = owner.get(
+            f"/api/v1/books/{identity}/metadata/search",
+            params={"provider": "google_books", "q": "RateLimitQuery"},
+        )
+        assert (
+            limited.status_code == 429 and limited.json()["detail"] == "book_metadata_rate_limited"
+        )
+
+
+def test_ebook_upload_without_library_id_uses_or_creates_copy_library_never_hardlink(
+    settings, authenticated_client, tmp_path
+):
+    source = tmp_path / "hardlink-source"
+    source.mkdir()
+    with authenticated_client(settings) as owner:
+        hardlink_lib = create_library(
+            owner,
+            "Studio",
+            source_roots=[str(source)],
+            storage_mode="hardlink",
+        )
+        first = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            files={"file": ("DirectOne.txt", "第一章\n直接上传".encode(), "text/plain")},
+        )
+        assert first.status_code == 201, first.text
+        first_book = owner.get(f"/api/v1/books/{first.json()['id']}").json()
+        assert first_book["library_id"] != hardlink_lib["id"]
+        libs = owner.get("/api/v1/book-libraries").json()["items"]
+        copy_libs = [item for item in libs if item["storage_mode"] == "copy"]
+        assert len(copy_libs) == 1
+        assert copy_libs[0]["default_access"] == "restricted"
+        assert first_book["library_id"] == copy_libs[0]["id"]
+
+        music = owner.get("/api/v1/libraries").json()[0]["id"]
+        ungranted_reader, _ = listener(owner, [music])
+        assert ungranted_reader.get(f"/api/v1/books/{first_book['id']}").status_code == 404
+
+        second = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            files={"file": ("DirectTwo.txt", "第一章\n再次直传".encode(), "text/plain")},
+        )
+        assert second.status_code == 201, second.text
+        second_book = owner.get(f"/api/v1/books/{second.json()['id']}").json()
+        assert second_book["library_id"] == copy_libs[0]["id"]
 
 
 def test_ebook_utf16_inline_runs_child_tail_and_zip_spine_decompression_guards(
@@ -711,3 +825,528 @@ def test_zero_block_progress_restart_intent_and_access_list(settings, authentica
             },
         )
         assert restarted.status_code == 200 and restarted.json()["completed"] is False
+
+
+def test_book_library_update_owner_path_privacy_and_watch_discovery(
+    settings, authenticated_client, tmp_path
+):
+    watched_dir = tmp_path / "watched-books"
+    paused_dir = tmp_path / "paused-books"
+    watched_dir.mkdir()
+    paused_dir.mkdir()
+    with authenticated_client(settings) as owner:
+        created = create_library(
+            owner,
+            "Governance",
+            source_roots=[str(watched_dir)],
+            default_access="restricted",
+        )
+        assert [src["root"] for src in created["sources"]] == [str(watched_dir)]
+        assert created["sources"][0]["watch_enabled"] == 1
+
+        # Owner update can attach a paused source directory, rename, and flip default_access.
+        updated = owner.put(
+            f"/api/v1/book-libraries/{created['id']}",
+            headers=HEADERS,
+            json={
+                "name": "Governance v2",
+                "source_roots": [str(watched_dir), str(paused_dir)],
+                "paused_source_roots": [str(paused_dir)],
+                "default_access": "all",
+                "auto_pair": False,
+                "version": created["version"],
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        updated_body = updated.json()
+        assert updated_body["name"] == "Governance v2"
+        assert updated_body["default_access"] == "all"
+        assert updated_body["auto_pair"] is False
+        assert updated_body["version"] == 2
+        assert {src["root"]: src["watch_enabled"] for src in updated_body["sources"]} == {
+            str(watched_dir): 1,
+            str(paused_dir): 0,
+        }
+
+        # Version conflict and direct storage_mode swap require migration.
+        stale = owner.put(
+            f"/api/v1/book-libraries/{created['id']}",
+            headers=HEADERS,
+            json={"name": "Stale", "version": 1},
+        )
+        assert stale.status_code == 409 and stale.json()["detail"] == "library_version_conflict"
+        swap = owner.put(
+            f"/api/v1/book-libraries/{created['id']}",
+            headers=HEADERS,
+            json={"name": "Governance v2", "storage_mode": "hardlink", "version": 2},
+        )
+        assert swap.status_code == 409 and swap.json()["detail"] == "library_migration_required"
+
+        # Non-owner gets metadata only, never managed_root or physical source paths.
+        music = owner.get("/api/v1/libraries").json()[0]["id"]
+        reader, _ = listener(owner, [music])
+        owner_listing = next(
+            item
+            for item in owner.get("/api/v1/book-libraries").json()["items"]
+            if item["id"] == created["id"]
+        )
+        assert owner_listing["managed_root"] == created["managed_root"]
+        assert len(owner_listing["sources"]) == 2
+        reader_listing = next(
+            item
+            for item in reader.get("/api/v1/book-libraries").json()["items"]
+            if item["id"] == created["id"]
+        )
+        assert reader_listing["default_access"] == "all"
+        assert "managed_root" not in reader_listing
+        assert "sources" not in reader_listing
+
+        # Daemon discover_sources() skips empty unchanged folders, imports watched files, ignores paused ones.
+        manager = owner.app.state.management
+        manager.stop()
+        manager.discover_sources()
+        assert owner.get(f"/api/v1/book-libraries/{created['id']}/scans").json()["items"] == []
+
+        (watched_dir / "WatchedBook.txt").write_text("第一章\n自动监听入库")
+        (paused_dir / "PausedBook.txt").write_text("第一章\n暂停监听目录")
+        manager.discover_sources()
+
+        books = owner.get("/api/v1/books", params={"library_id": created["id"]}).json()["items"]
+        assert [b["title"] for b in books] == ["WatchedBook"]
+        scans_after_first = owner.get(f"/api/v1/book-libraries/{created['id']}/scans").json()[
+            "items"
+        ]
+        assert len(scans_after_first) == 1
+
+        # Calling discover_sources() again with no disk changes must not enqueue duplicate scan jobs.
+        manager.discover_sources()
+        scans_after_idle = owner.get(f"/api/v1/book-libraries/{created['id']}/scans").json()[
+            "items"
+        ]
+        assert len(scans_after_idle) == 1
+
+
+def test_unlibrary_upload_restricted_for_non_owner_and_authorized_reuse(
+    settings, authenticated_client, tmp_path
+):
+    source = tmp_path / "hardlink-only"
+    source.mkdir()
+    with authenticated_client(settings) as owner:
+        create_library(owner, "Studio", source_roots=[str(source)], storage_mode="hardlink")
+        music = owner.get("/api/v1/libraries").json()[0]["id"]
+        librarian, lib_user_id = listener(owner, [music], profile="librarian")
+        denied = librarian.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            files={"file": ("NoCopyLib.txt", "第一章\n未授权建库".encode(), "text/plain")},
+        )
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "book_upload_library_required"
+        assert len(owner.get("/api/v1/book-libraries").json()["items"]) == 1
+
+        team_copy = create_library(owner, "Team Copy", default_access="restricted")
+        assert (
+            owner.put(
+                f"/api/v1/book-libraries/{team_copy['id']}/access/{lib_user_id}",
+                headers=HEADERS,
+                json={"granted": True},
+            ).status_code
+            == 200
+        )
+        ungranted_resp = owner.post(
+            "/api/v1/manage/users",
+            headers=HEADERS,
+            json={
+                "username": "ungranted-reader",
+                "password": "ungranted-test-password",
+                "profile": "listener",
+                "library_ids": [music],
+            },
+        )
+        assert ungranted_resp.status_code == 201
+        reader = TestClient(owner.app)
+        assert (
+            reader.post(
+                "/api/v1/auth/login",
+                headers=HEADERS,
+                json={"username": "ungranted-reader", "password": "ungranted-test-password"},
+            ).status_code
+            == 200
+        )
+
+        uploaded = librarian.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            files={"file": ("SharedTeamBook.txt", "第一章\n副本书库直传".encode(), "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        book_id = uploaded.json()["id"]
+        assert librarian.get(f"/api/v1/books/{book_id}").json()["library_id"] == team_copy["id"]
+        assert reader.get(f"/api/v1/books/{book_id}").status_code == 404
+
+
+def test_cover_save_failure_preserves_committed_ebook_and_audiobook(
+    settings, authenticated_client, monkeypatch, tmp_path
+):
+    import shutil
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from mutagen.id3 import APIC, ID3
+    from mutagen.mp3 import MP3
+    from PIL import Image
+
+    from wildstring.books.service import Books
+
+    img_buf = BytesIO()
+    Image.new("RGB", (16, 16), (90, 120, 80)).save(img_buf, format="PNG")
+    epub_buf = BytesIO()
+    with ZipFile(epub_buf, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "book.opf",
+            "<package><metadata><title>Cover Fail EPUB</title></metadata>"
+            '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="cov" href="cover.png" media-type="image/png" properties="cover-image"/></manifest>'
+            '<spine><itemref idref="c1"/></spine></package>',
+        )
+        archive.writestr("c1.xhtml", "<html><body><p>Body keeps living.</p></body></html>")
+        archive.writestr("cover.png", img_buf.getvalue())
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    audio_dir = tmp_path / "audio-cover-fail"
+    audio_dir.mkdir()
+    shutil.copyfile(fixture, audio_dir / "track.mp3")
+    mp3 = MP3(audio_dir / "track.mp3", ID3=ID3)
+    if mp3.tags is None:
+        mp3.add_tags()
+    mp3.tags.add(APIC(encoding=3, mime="image/png", type=3, desc="Cover", data=img_buf.getvalue()))
+    mp3.save()
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "CoverFail")
+        cover_attempts = 0
+
+        def broken_cover(self, managed_root, book_id, jpeg):
+            nonlocal cover_attempts
+            cover_attempts += 1
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Books, "_save_cover", broken_cover)
+
+        up = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib["id"]},
+            files={"file": ("coverfail.epub", epub_buf.getvalue(), "application/epub+zip")},
+        )
+        assert up.status_code == 201, up.text
+        ebook_id = up.json()["id"]
+        assert cover_attempts >= 1
+        assert owner.get(f"/api/v1/books/{ebook_id}").json()["has_cover"] is False
+        assert owner.get(f"/api/v1/books/{ebook_id}/ebook/download").status_code == 200
+        with Database(settings.data_dir).connect() as db:
+            ebook_row = db.execute(
+                "SELECT managed_path FROM book_ebooks WHERE book_id=?", (ebook_id,)
+            ).fetchone()
+            assert (Path(lib["managed_root"]) / ebook_row["managed_path"]).is_file()
+
+        with Database(settings.data_dir).connect() as db:
+            lib_row = db.execute("SELECT * FROM book_libraries WHERE id=?", (lib["id"],)).fetchone()
+        audio_id = Books(Database(settings.data_dir), settings).audiobook(
+            lib_row, audio_dir, [Path("track.mp3")], "Cover Fail Audio", extract_cover=True
+        )
+        assert cover_attempts >= 2
+        assert owner.get(f"/api/v1/books/{audio_id}").json()["has_cover"] is False
+        assert owner.get(f"/api/v1/books/{audio_id}/audiobook/files/0/stream").status_code == 200
+        with Database(settings.data_dir).connect() as db:
+            audio_row = db.execute(
+                "SELECT managed_path FROM book_audiobook_files WHERE book_id=?", (audio_id,)
+            ).fetchone()
+            assert (Path(lib["managed_root"]) / audio_row["managed_path"]).is_file()
+
+
+def test_audiobook_prepend_track_remaps_progress_bookmarks_and_manual_scan_lock(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+    import time
+    from threading import Event, Thread
+
+    import pytest
+    from fastapi import HTTPException
+    from filelock import FileLock
+    from mutagen.id3 import ID3, TIT2
+    from mutagen.mp3 import MP3
+
+    from wildstring.books.service import Books
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    source = tmp_path / "prepend-audio"
+    series = source / "Serial Story"
+    series.mkdir(parents=True)
+
+    def write_tagged_mp3(target: Path, title: str) -> None:
+        shutil.copyfile(fixture, target)
+        audio = MP3(target, ID3=ID3)
+        if audio.tags is None:
+            audio.add_tags()
+        audio.tags.delall("TIT2")
+        audio.tags.add(TIT2(encoding=3, text=title))
+        audio.save()
+
+    write_tagged_mp3(series / "02.mp3", "Part Two")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "PrependAudio", source_roots=[str(source)])
+        assert (
+            owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS).status_code
+            == 200
+        )
+        book_id = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"][0][
+            "id"
+        ]
+
+        assert (
+            owner.patch(
+                f"/api/v1/books/{book_id}/audiobook/chapters/0",
+                headers=HEADERS,
+                json={"title": "Chapter Two Edited"},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.put(
+                f"/api/v1/books/{book_id}/listening-progress",
+                headers=HEADERS,
+                json={
+                    "session_id": "prepend-audio-session",
+                    "device_id": "d1",
+                    "base_version": 0,
+                    "sequence": 1,
+                    "chapter_index": 0,
+                    "chapter_position_ms": 400,
+                    "playback_rate": 1.25,
+                },
+            ).status_code
+            == 200
+        )
+        mark = owner.post(
+            f"/api/v1/books/{book_id}/bookmarks",
+            headers=HEADERS,
+            json={"kind": "audio", "chapter_index": 0, "position_ms": 300, "excerpt": "Two"},
+        )
+        assert mark.status_code == 201
+
+        write_tagged_mp3(series / "01.mp3", "Part One")
+        rescan = owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS)
+        assert rescan.status_code == 200 and rescan.json()["updated_books"] == 1
+
+        chapters = owner.get(f"/api/v1/books/{book_id}/audiobook").json()["chapters"]
+        assert [c["title"] for c in chapters] == ["Part One", "Chapter Two Edited"]
+
+        progress = owner.get(f"/api/v1/books/{book_id}/listening-progress").json()
+        assert progress["version"] == 1
+        assert progress["chapter_index"] == 1
+        assert progress["chapter_position_ms"] == 400
+        assert progress["book_position_ms"] == chapters[1]["start_book_ms"] + 400
+
+        marks = owner.get(f"/api/v1/books/{book_id}/bookmarks").json()["items"]
+        assert len(marks) == 1
+        assert marks[0]["chapter_index"] == 1
+        assert marks[0]["position_ms"] == 300
+
+        # Background watched_only scan fails fast with 409; manual scan waits briefly for lock.
+        with Database(settings.data_dir).connect() as db:
+            lib_row = db.execute("SELECT * FROM book_libraries WHERE id=?", (lib["id"],)).fetchone()
+        books_svc = Books(Database(settings.data_dir), settings)
+        with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
+            with pytest.raises(HTTPException) as exc:
+                books_svc.scan(lib_row, watched_only=True)
+            assert exc.value.status_code == 409 and exc.value.detail == "scan_busy"
+
+        acquired = Event()
+
+        def hold_lock() -> None:
+            with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
+                acquired.set()
+                time.sleep(0.25)
+
+        worker = Thread(target=hold_lock)
+        worker.start()
+        assert acquired.wait(timeout=2)
+        manual_scan = owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS)
+        worker.join(timeout=2)
+        assert manual_scan.status_code == 200
+
+
+def test_books_catalog_server_search_filters_and_pagination(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    audio_dir = tmp_path / "catalog-audio"
+    audio_dir.mkdir()
+    shutil.copyfile(fixture, audio_dir / "Voice_Episode.mp3")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "ServerSearch", source_roots=[str(audio_dir)])
+        assert (
+            owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS).status_code
+            == 200
+        )
+        alpha = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib["id"]},
+            files={"file": ("alpha.txt", "第一章\n正文".encode(), "text/plain")},
+        ).json()["id"]
+        beta = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib["id"]},
+            files={"file": ("beta.txt", "第一章\n正文".encode(), "text/plain")},
+        ).json()["id"]
+        bracket = owner.post(
+            "/api/v1/books/upload",
+            headers=HEADERS,
+            data={"library_id": lib["id"]},
+            files={"file": ("bracket.txt", "第一章\n正文".encode(), "text/plain")},
+        ).json()["id"]
+
+        assert (
+            owner.patch(
+                f"/api/v1/books/{alpha}/metadata",
+                headers=HEADERS,
+                json={
+                    "title": "Alpha 50% Story",
+                    "subtitle": "Sub_Title",
+                    "authors": ["Alice Smith"],
+                },
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.patch(
+                f"/api/v1/books/{beta}/metadata",
+                headers=HEADERS,
+                json={"title": "Beta_Guide", "authors": ["陈默"]},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.patch(
+                f"/api/v1/books/{bracket}/metadata",
+                headers=HEADERS,
+                json={"title": "[Bracket] Notes", "authors": []},
+            ).status_code
+            == 200
+        )
+
+        assert (
+            owner.put(
+                f"/api/v1/books/{alpha}/reading-progress",
+                headers=HEADERS,
+                json={
+                    "session_id": "search-alpha-session",
+                    "device_id": "d1",
+                    "base_version": 0,
+                    "sequence": 1,
+                    "spine_index": 0,
+                    "block_index": 0,
+                    "char_offset": 1,
+                },
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.put(
+                f"/api/v1/books/{beta}/reading-progress",
+                headers=HEADERS,
+                json={
+                    "session_id": "search-beta-session1",
+                    "device_id": "d1",
+                    "base_version": 0,
+                    "sequence": 1,
+                    "spine_index": 0,
+                    "block_index": 1,
+                    "char_offset": 0,
+                    "completed": True,
+                },
+            ).status_code
+            == 200
+        )
+
+        assert [
+            b["id"]
+            for b in owner.get(
+                "/api/v1/books", params={"library_id": lib["id"], "q": "50%"}
+            ).json()["items"]
+        ] == [alpha]
+        assert [
+            b["id"]
+            for b in owner.get(
+                "/api/v1/books", params={"library_id": lib["id"], "q": "sub_title"}
+            ).json()["items"]
+        ] == [alpha]
+        assert [
+            b["id"]
+            for b in owner.get(
+                "/api/v1/books", params={"library_id": lib["id"], "q": "陈默"}
+            ).json()["items"]
+        ] == [beta]
+        assert [
+            b["id"]
+            for b in owner.get("/api/v1/books", params={"library_id": lib["id"], "q": "["}).json()[
+                "items"
+            ]
+        ] == [bracket]
+        assert (
+            len(
+                owner.get(
+                    "/api/v1/books", params={"library_id": lib["id"], "format": "ebook"}
+                ).json()["items"]
+            )
+            == 3
+        )
+        audio_items = owner.get(
+            "/api/v1/books", params={"library_id": lib["id"], "format": "audio"}
+        ).json()["items"]
+        assert len(audio_items) == 1 and audio_items[0]["has_audiobook"] is True
+        assert [
+            b["id"]
+            for b in owner.get(
+                "/api/v1/books", params={"library_id": lib["id"], "progress_status": "in_progress"}
+            ).json()["items"]
+        ] == [alpha]
+        assert [
+            b["id"]
+            for b in owner.get(
+                "/api/v1/books", params={"library_id": lib["id"], "progress_status": "finished"}
+            ).json()["items"]
+        ] == [beta]
+        assert (
+            len(
+                owner.get(
+                    "/api/v1/books", params={"library_id": lib["id"], "progress_status": "unread"}
+                ).json()["items"]
+            )
+            == 2
+        )
+
+        page1 = owner.get(
+            "/api/v1/books", params={"library_id": lib["id"], "limit": 2, "offset": 0}
+        ).json()
+        page2 = owner.get(
+            "/api/v1/books", params={"library_id": lib["id"], "limit": 2, "offset": 2}
+        ).json()
+        assert len(page1["items"]) == 2 and page1["total"] == 4 and page1["has_more"] is True
+        assert len(page2["items"]) == 2 and page2["total"] == 4 and page2["has_more"] is False
+        assert {item["id"] for item in page1["items"]}.isdisjoint(
+            {item["id"] for item in page2["items"]}
+        )

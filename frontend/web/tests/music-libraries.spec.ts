@@ -67,7 +67,9 @@ test('切换音乐库保留获授权的播放，跨库歌单统一显示', async
     'aria-pressed',
     'true',
   );
-  await expect(page.getByRole('heading', { name: '电台 · 播客', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 2, name: '电台 · 播客', exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel('选择音乐库', { exact: true })).toBeHidden();
   await expect(page.getByRole('search')).toHaveCount(0);
   await expect(page.getByText('YOUR OWN COLLECTION', { exact: true })).toHaveCount(0);

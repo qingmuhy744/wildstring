@@ -816,22 +816,38 @@ class MusicSources:
                 "selected_candidate": json.loads(previous["selected_candidate"])
                 if previous and previous["selected_candidate"]
                 else None,
+                "portable_bundle": previous["portable_bundle"] if previous else None,
             }
             db.execute(
                 "UPDATE lyric_scan_items SET previous=?,applied_version=?,status='applied',updated_at=? WHERE id=?",
                 (json.dumps(snapshot), current_version + 1, time.time(), scan_item),
             )
-        normalized = json.loads(row["normalized"])
+        from wildstring.library.online_lyrics import build_portable_lyric_bundle
+
+        raw_normalized = json.loads(row["normalized"])
+        portable = json.dumps(
+            build_portable_lyric_bundle(
+                raw_normalized,
+                body.offset_ms,
+                source_id=row["source_id"],
+                source_url=row["source_url"],
+            ),
+            ensure_ascii=False,
+        )
+        normalized = raw_normalized
         for line in normalized["lines"]:
             if line["time_ms"] is not None:
                 line["time_ms"] = max(0, line["time_ms"] + body.offset_ms)
         db.execute(
-            "INSERT INTO track_lyrics(track_id,text,version,selected_candidate) VALUES (?,?,?,?) ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=excluded.selected_candidate",
+            "INSERT INTO track_lyrics(track_id,text,version,selected_candidate,portable_bundle) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,"
+            "selected_candidate=excluded.selected_candidate,portable_bundle=excluded.portable_bundle",
             (
                 row["track_id"],
                 lyric_text(normalized),
                 current_version + 1,
                 json.dumps({"id": identity, "offset_ms": body.offset_ms}),
+                portable,
             ),
         )
         return {

@@ -879,12 +879,13 @@ class LyricScans:
             if file_version != json.loads(item["baseline"])["file_version"]:
                 raise HTTPException(409, "lyrics_version_conflict")
             db.execute(
-                "UPDATE track_lyrics SET text=?,selected_candidate=?,version=version+1 WHERE track_id=?",
+                "UPDATE track_lyrics SET text=?,selected_candidate=?,portable_bundle=?,version=version+1 WHERE track_id=?",
                 (
                     previous["text"],
                     json.dumps(previous["selected_candidate"])
                     if previous["selected_candidate"]
                     else None,
+                    previous.get("portable_bundle"),
                     item["track_id"],
                 ),
             )

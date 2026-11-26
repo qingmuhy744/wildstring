@@ -187,7 +187,15 @@ class LibraryRepository:
                 ((run_id, track_id) for track_id in track_ids),
             )
 
-    def save(self, path: str, metadata: Metadata, size: int, mtime: int, run_id: str) -> None:
+    def save(
+        self,
+        path: str,
+        metadata: Metadata,
+        size: int,
+        mtime: int,
+        run_id: str,
+        sha256: str | None = None,
+    ) -> None:
         fields = asdict(metadata)
         fields.update(
             id=uuid4().hex,
@@ -214,15 +222,31 @@ class LibraryRepository:
             self.library_id(), path, metadata.album, metadata.album_artists
         )
         with self.database.connect(write=True) as connection:
+            resolved_sha = sha256
+            if resolved_sha is None:
+                imported = connection.execute(
+                    """SELECT i.sha256 FROM imported_files i
+                    JOIN libraries l ON l.id = ?
+                    WHERE i.target_root = l.root
+                      AND i.target_path = ?
+                      AND i.source_size = ?
+                      AND i.link_mode != 'generated'
+                    LIMIT 1""",
+                    (fields["library_id"], path, size),
+                ).fetchone()
+                resolved_sha = imported[0] if imported else None
+            fields["sha256"] = resolved_sha
             connection.execute(
                 """INSERT INTO tracks (
                     id, library_id, path, title, title_source, artists, album, album_artists,
                     track_number, disc_number, duration_ms, format, sample_rate, channels,
-                    has_cover, size_bytes, mtime_ns, status, seen_run, search_text, album_id, added_at
+                    has_cover, size_bytes, mtime_ns, status, seen_run, search_text, album_id, added_at,
+                    sha256
                 ) VALUES (
                     :id, :library_id, :path, :title, :title_source, :artists, :album, :album_artists,
                     :track_number, :disc_number, :duration_ms, :format, :sample_rate, :channels,
-                    :has_cover, :size_bytes, :mtime_ns, 'available', :seen_run, :search_text, :album_id, :added_at
+                    :has_cover, :size_bytes, :mtime_ns, 'available', :seen_run, :search_text, :album_id, :added_at,
+                    :sha256
                 ) ON CONFLICT(library_id, path) DO UPDATE SET
                     title=excluded.title, title_source=excluded.title_source, artists=excluded.artists,
                     album=excluded.album, album_artists=excluded.album_artists,
@@ -231,7 +255,13 @@ class LibraryRepository:
                     sample_rate=excluded.sample_rate, channels=excluded.channels,
                     has_cover=excluded.has_cover, size_bytes=excluded.size_bytes,
                     mtime_ns=excluded.mtime_ns, status='available', seen_run=excluded.seen_run,
-                    search_text=excluded.search_text, album_id=excluded.album_id""",
+                    search_text=excluded.search_text, album_id=excluded.album_id,
+                    sha256=CASE
+                        WHEN excluded.sha256 IS NOT NULL THEN excluded.sha256
+                        WHEN tracks.size_bytes = excluded.size_bytes AND tracks.mtime_ns = excluded.mtime_ns
+                            THEN tracks.sha256
+                        ELSE NULL
+                    END""",
                 fields,
             )
             track_id = connection.execute(
@@ -253,7 +283,7 @@ class LibraryRepository:
         from wildstring.library.tag_fields import DETAIL_DEFAULTS
 
         result.update(DETAIL_DEFAULTS | json.loads(result.pop("extra", "{}")))
-        for key in ("seen_run", "search_text", "mtime_ns", "title_sort", "title_group"):
+        for key in ("seen_run", "search_text", "mtime_ns", "sha256", "title_sort", "title_group"):
             result.pop(key, None)
         for key in ("artists", "album_artists"):
             result[key] = json.loads(result[key])
@@ -342,7 +372,7 @@ class LibraryRepository:
     def source(self, track_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT t.path,t.format,t.size_bytes,t.mtime_ns,t.status,t.library_id,l.root AS library_root "
+                "SELECT t.path,t.format,t.size_bytes,t.mtime_ns,t.sha256,t.status,t.library_id,l.root AS library_root "
                 "FROM tracks t JOIN libraries l ON l.id=t.library_id WHERE library_visible(t.library_id) AND t.id=?",
                 (track_id,),
             ).fetchone()

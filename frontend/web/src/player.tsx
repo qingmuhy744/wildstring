@@ -3,6 +3,7 @@ import { hints } from './help-content';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
+import type { Book, BookAudioSession } from './book-reader';
 import {
   api,
   eventId,
@@ -1591,6 +1592,7 @@ export function usePlayer(userId: string) {
     step,
     seek,
     toggle,
+    pause: pauseUser,
     setVolume,
     refreshTrack: (track: Track) => {
       setQueue((items) => items.map((item) => (item.id === track.id ? track : item)));
@@ -1714,6 +1716,217 @@ export function usePlayer(userId: string) {
 
 export type Player = ReturnType<typeof usePlayer>;
 
+const BOOK_PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5] as const;
+
+function BookSleepControl({ session }: { session: BookAudioSession }) {
+  const { t } = useTranslation();
+  const id = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const label = session.timer
+    ? t('playerPage.stopAfterMinutes', { minutes: session.timer })
+    : t('playerPage.sleepTimer');
+  return (
+    <div className="sleep-setting">
+      <button
+        type="button"
+        className={`icon-button sleep-trigger ${session.timer > 0 ? 'active' : ''}`}
+        aria-label={t('playerPage.sleepTimerSettingsAria')}
+        title={label}
+        data-help={label}
+        popoverTarget={id}
+        onClick={(event) => {
+          if (panel.current) {
+            const box = event.currentTarget.getBoundingClientRect();
+            panel.current.style.left = `${Math.max(12, Math.min(innerWidth - 232, box.right - 220))}px`;
+            panel.current.style.top = `${Math.max(12, box.top - 145)}px`;
+          }
+        }}
+      >
+        ☾
+      </button>
+      <div id={id} ref={panel} popover="auto" className="sleep-popover">
+        <p>{label}</p>
+        <label>
+          {t('playerPage.stopTime')}
+          <select
+            aria-label={t('playerPage.sleepTimer')}
+            value={String(session.timer)}
+            onChange={(event) => {
+              session.setTimer(Number(event.target.value));
+              panel.current?.hidePopover();
+            }}
+          >
+            <option value="0">{t('playerPage.sleepOff')}</option>
+            {[15, 30, 45, 60].map((minutes) => (
+              <option key={minutes} value={String(minutes)}>
+                {t('bookshelf.minutes', { minutes })}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function BookPlayerBarContent({
+  book,
+  session,
+  player,
+  onOpenBook,
+}: {
+  book: Book;
+  session: BookAudioSession;
+  player: Player;
+  onOpenBook?: (book: Book) => void;
+}) {
+  const { t } = useTranslation();
+  const chapter = session.current;
+  const durationSeconds = (chapter?.duration_ms || 0) / 1000;
+  const positionSeconds = session.positionMs / 1000;
+  const chaptersCount = session.chapters?.length ?? 0;
+  return (
+    <>
+      <div className="now-playing">
+        <button
+          type="button"
+          className="playing-art"
+          onClick={() => onOpenBook?.(book)}
+          aria-label={book.title}
+          title={book.title}
+        >
+          {book.has_cover ? (
+            <img className="cover" src={`/api/v1/books/${book.id}/cover`} alt="" />
+          ) : (
+            <span className="playing-art-placeholder" aria-hidden="true">
+              <Icon name="podcast" />
+            </span>
+          )}
+        </button>
+        <div className="now-playing-text">
+          <strong title={chapter?.title || book.title}>{chapter?.title || book.title}</strong>
+          <div className="now-playing-credits">
+            <button type="button" className="now-playing-link" onClick={() => onOpenBook?.(book)}>
+              {book.title}
+            </button>
+          </div>
+        </div>
+        <span className="format">{t('bookshelf.audiobook')}</span>
+      </div>
+      <div className="transport">
+        <div className="transport-buttons podcast-transport">
+          <button
+            type="button"
+            className="icon-button podcast-skip podcast-skip-backward"
+            aria-label={t('playerPage.podcastSkipAria', {
+              device: '',
+              dir: t('playerPage.skipBackward'),
+              seconds: 15,
+            })}
+            onClick={() => session.seekBy(-15)}
+            disabled={!chapter}
+          >
+            <PodcastSkipGlyph seconds={15} direction="backward" />
+          </button>
+          <button
+            type="button"
+            className="icon-button transport-track-button"
+            onClick={() => session.choose(session.index - 1, session.playing)}
+            disabled={!chaptersCount || session.index <= 0}
+            aria-label={t('bookshelf.prevChapter')}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 5v14M18 5l-8 7 8 7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="play-button"
+            onClick={session.togglePlay}
+            disabled={!chapter}
+            aria-label={session.playing ? t('playerPage.pause') : t('playerPage.play')}
+            aria-pressed={session.playing}
+          >
+            <PlaybackGlyph playing={session.playing} buffering={!chapter && !session.error} />
+          </button>
+          <button
+            type="button"
+            className="icon-button transport-track-button"
+            onClick={() => session.choose(session.index + 1, session.playing)}
+            disabled={!chaptersCount || session.index >= chaptersCount - 1}
+            aria-label={t('bookshelf.nextChapter')}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 5v14M6 5l8 7-8 7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="icon-button podcast-skip podcast-skip-forward"
+            aria-label={t('playerPage.podcastSkipAria', {
+              device: '',
+              dir: t('playerPage.skipForward'),
+              seconds: 30,
+            })}
+            onClick={() => session.seekBy(30)}
+            disabled={!chapter}
+          >
+            <PodcastSkipGlyph seconds={30} direction="forward" />
+          </button>
+        </div>
+        <div className="timeline">
+          <time>{time(positionSeconds)}</time>
+          <input
+            type="range"
+            aria-label={t('playerPage.progressAria')}
+            min="0"
+            max={durationSeconds || 1}
+            step="0.1"
+            value={Math.min(positionSeconds, durationSeconds || 0)}
+            disabled={!chapter}
+            onChange={(event) =>
+              session.seekToChapterMs(Math.round(Number(event.target.value) * 1000))
+            }
+          />
+          <time>{time(durationSeconds)}</time>
+        </div>
+      </div>
+      <div className="player-options">
+        <BookSleepControl session={session} />
+        <label className="playback-rate-control">
+          <span>{t('playerPage.playbackRate')}</span>
+          <select
+            aria-label={t('playerPage.playbackRateAria')}
+            value={session.rate}
+            onChange={(event) => session.setRate(Number(event.target.value))}
+          >
+            {BOOK_PLAYBACK_RATES.map((value) => (
+              <option key={value} value={value}>
+                {value}×
+              </option>
+            ))}
+          </select>
+        </label>
+        <VolumeControl player={player} />
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={t('bookshelf.stopListening')}
+          title={t('bookshelf.stopListening')}
+          onClick={session.close}
+        >
+          <Icon name="close" />
+        </button>
+      </div>
+      {session.error ? (
+        <div className="player-error" role="alert">
+          {session.error}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function PlayerBar({
   player,
   onQueue,
@@ -1723,6 +1936,8 @@ export function PlayerBar({
   favorites,
   onOpenArtist,
   onOpenAlbum,
+  bookAudio,
+  onOpenBook,
 }: {
   player: Player;
   onQueue: () => void;
@@ -1732,6 +1947,8 @@ export function PlayerBar({
   favorites: Favorites;
   onOpenArtist: (name: string) => void;
   onOpenAlbum: (track: Track) => void;
+  bookAudio?: BookAudioSession;
+  onOpenBook?: (book: Book) => void;
 }) {
   const { t } = useTranslation();
   const { current, queue } = player;
@@ -1755,113 +1972,154 @@ export function PlayerBar({
   return (
     <section ref={bar} className="player" aria-label={t('playerPage.playerAria')}>
       <audio ref={player.audio} preload="metadata" {...player.audioEvents} />
-      <div className="now-playing">
-        <button
-          className="playing-art"
-          onClick={onLyrics}
-          disabled={!current}
-          aria-label={t('playerPage.fullscreenAria')}
-          title={current ? t('playerPage.fullscreenAria') : undefined}
-          aria-haspopup="dialog"
-          aria-expanded={lyricsOpen}
-        >
-          {current ? (
-            <Cover
-              trackId={current.id}
-              title={current.album || current.title}
-              source={current.cover_url}
-            />
-          ) : (
-            <span className="playing-art-placeholder" aria-hidden="true">
-              <Icon name="album" />
-            </span>
-          )}
-          {current && (
-            <span className="expand-art" aria-hidden="true">
-              <Icon name="up" />
-            </span>
-          )}
-        </button>
-        <div className="now-playing-text">
-          <strong title={current?.title}>
-            {current?.title || t('playerPage.emptyTrackTitle')}
-          </strong>
-          {current && !current.podcast_id ? (
-            <div className="now-playing-credits">
-              <span className="now-playing-artists">
-                {current.artists.length
-                  ? current.artists.map((name, index) => (
-                      <span className="now-playing-artist" key={`${name}-${index}`}>
-                        {index > 0 && <span aria-hidden="true">/</span>}
+      {bookAudio?.book ? (
+        <BookPlayerBarContent
+          book={bookAudio.book}
+          session={bookAudio}
+          player={player}
+          onOpenBook={onOpenBook}
+        />
+      ) : (
+        <>
+          <div className="now-playing">
+            <button
+              className="playing-art"
+              onClick={onLyrics}
+              disabled={!current}
+              aria-label={t('playerPage.fullscreenAria')}
+              title={current ? t('playerPage.fullscreenAria') : undefined}
+              aria-haspopup="dialog"
+              aria-expanded={lyricsOpen}
+            >
+              {current ? (
+                <Cover
+                  trackId={current.id}
+                  title={current.album || current.title}
+                  source={current.cover_url}
+                />
+              ) : (
+                <span className="playing-art-placeholder" aria-hidden="true">
+                  <Icon name="album" />
+                </span>
+              )}
+              {current && (
+                <span className="expand-art" aria-hidden="true">
+                  <Icon name="up" />
+                </span>
+              )}
+            </button>
+            <div className="now-playing-text">
+              <strong title={current?.title}>
+                {current?.title || t('playerPage.emptyTrackTitle')}
+              </strong>
+              {current && !current.podcast_id ? (
+                <div className="now-playing-credits">
+                  <span className="now-playing-artists">
+                    {current.artists.length
+                      ? current.artists.map((name, index) => (
+                          <span className="now-playing-artist" key={`${name}-${index}`}>
+                            {index > 0 && <span aria-hidden="true">/</span>}
+                            <button
+                              className="now-playing-link"
+                              title={name}
+                              aria-label={t('library.viewArtistAria', { name })}
+                              onClick={() => onOpenArtist(name)}
+                            >
+                              {name}
+                            </button>
+                          </span>
+                        ))
+                      : artist(current)}
+                  </span>
+                  {(current.album_id || current.album) && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      {current.album_id ? (
                         <button
                           className="now-playing-link"
-                          title={name}
-                          aria-label={t('library.viewArtistAria', { name })}
-                          onClick={() => onOpenArtist(name)}
+                          title={album}
+                          aria-label={t('nowPlaying.viewAlbumAria', { album })}
+                          onClick={() => onOpenAlbum(current)}
                         >
-                          {name}
+                          {album}
                         </button>
-                      </span>
-                    ))
-                  : artist(current)}
-              </span>
-              {(current.album_id || current.album) && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  {current.album_id ? (
-                    <button
-                      className="now-playing-link"
-                      title={album}
-                      aria-label={t('nowPlaying.viewAlbumAria', { album })}
-                      onClick={() => onOpenAlbum(current)}
-                    >
-                      {album}
-                    </button>
-                  ) : (
-                    <span className="now-playing-album" title={album}>
-                      {album}
-                    </span>
+                      ) : (
+                        <span className="now-playing-album" title={album}>
+                          {album}
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
+                </div>
+              ) : (
+                <small>{current ? artist(current) : t('playerPage.emptyTrackArtist')}</small>
               )}
             </div>
-          ) : (
-            <small>{current ? artist(current) : t('playerPage.emptyTrackArtist')}</small>
-          )}
-        </div>
-        {current && <span className="format">{current.format.toUpperCase()}</span>}
-      </div>
-      <PlaybackControls player={player} />
-      <div className="player-options">
-        <SleepControl player={player} />
-        {current?.podcast_id && <PlaybackRateControl player={player} />}
-        {!current?.podcast_id && <QualityControl player={player} />}
-        {!current?.podcast_id && <GainControls trackId={current?.id} />}
-        {current && !current.podcast_id && <FavoriteButton track={current} favorites={favorites} />}
-        {!current?.podcast_id && (
-          <button
-            className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
-            onClick={onLyrics}
-            aria-expanded={lyricsOpen}
-            disabled={!current}
-            aria-label={t('playerPage.showLyrics')}
-            data-help={t('playerPage.viewSyncedLyrics')}
-          >
-            {t('playerPage.lyricsShort')}
-          </button>
-        )}
-        <VolumeControl player={player} />
-        <button
-          className={`icon-button ${queueOpen ? 'active' : ''}`}
-          onClick={onQueue}
-          aria-expanded={queueOpen}
-          aria-label={t('playerPage.queueAria')}
-        >
-          ☷ <small>{queue.length}</small>
-        </button>
-      </div>
-      <PlaybackError player={player} />
+            {current && <span className="format">{current.format.toUpperCase()}</span>}
+          </div>
+          <PlaybackControls player={player} />
+          <div className="player-options">
+            <SleepControl player={player} />
+            {current?.podcast_id && <PlaybackRateControl player={player} />}
+            {!current?.podcast_id && <QualityControl player={player} />}
+            {!current?.podcast_id && <GainControls trackId={current?.id} />}
+            {current && !current.podcast_id && (
+              <FavoriteButton track={current} favorites={favorites} />
+            )}
+            {!current?.podcast_id && (
+              <button
+                className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
+                onClick={onLyrics}
+                aria-expanded={lyricsOpen}
+                disabled={!current}
+                aria-label={t('playerPage.showLyrics')}
+                data-help={t('playerPage.viewSyncedLyrics')}
+              >
+                {t('playerPage.lyricsShort')}
+              </button>
+            )}
+            <VolumeControl player={player} />
+            <button
+              className={`icon-button ${queueOpen ? 'active' : ''}`}
+              onClick={onQueue}
+              aria-expanded={queueOpen}
+              aria-label={t('playerPage.queueAria')}
+            >
+              ☷ <small>{queue.length}</small>
+            </button>
+          </div>
+          <PlaybackError player={player} />
+        </>
+      )}
     </section>
+  );
+}
+
+function PodcastSkipGlyph({
+  seconds,
+  direction,
+}: {
+  seconds: 15 | 30;
+  direction: 'backward' | 'forward';
+}) {
+  return (
+    <span className="podcast-skip-glyph" aria-hidden="true">
+      <svg viewBox="0 0 32 32">
+        <path
+          d={
+            direction === 'backward'
+              ? 'M8.93 8.93A10 10 0 1 1 6 16M8.93 3.93v5h5'
+              : 'M23.07 8.93A10 10 0 1 0 26 16M23.07 3.93v5h-5'
+          }
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <b>{seconds}</b>
+    </span>
   );
 }
 
@@ -1891,23 +2149,7 @@ export function PodcastSkipButton({
       onClick={() => player.seek(player.playbackTime() + amount)}
       disabled={!player.duration}
     >
-      <span className="podcast-skip-glyph" aria-hidden="true">
-        <svg viewBox="0 0 32 32">
-          <path
-            d={
-              direction === 'backward'
-                ? 'M8.93 8.93A10 10 0 1 1 6 16M8.93 3.93v5h5'
-                : 'M23.07 8.93A10 10 0 1 0 26 16M23.07 3.93v5h-5'
-            }
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <b>{seconds}</b>
-      </span>
+      <PodcastSkipGlyph seconds={seconds} direction={direction} />
     </button>
   );
 }

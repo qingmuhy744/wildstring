@@ -210,7 +210,7 @@ v57 表结构、既有音乐写入兼容、共享目录校验和书库的注册�
 
 - **双通道 CAS 进度同步**（`progress.py`）：`GET / PUT /api/v1/books/{book_id}/reading-progress` 与 `GET / PUT /api/v1/books/{book_id}/listening-progress`，复刻 [contracts/podcast-progress.md](../../contracts/podcast-progress.md) `session_id` / `device_id` / `base_version` / `sequence` / `intent` 机制（过期心跳返回 `409`，结尾自动完成规则一致）。
 - **个人书签与批注 CRUD**：`/api/v1/books/{book_id}/bookmarks` 与 `/api/v1/books/{book_id}/annotations`（仅限定当前登录 `user_id`，批注颜色仅限 `amber` / `terracotta` / `sage` / `stone`）。
-- **元信息与在线搜刮**（`metadata.py`, `providers.py`）：支持 **`openlibrary`**、**`google_books`**、**`itunes`**（遵循 [contracts/metadata-providers.md](../../contracts/metadata-providers.md) SSRF 防护与节流），应用后写入 `books.overrides_json` + `locked_fields_json` **并自动同步更新该书 `.wildstring/` 侧车**（绝不写回原媒体文件）。
+- **元信息与在线搜刮**（`metadata.py`, `providers.py`）：支持 **`itunes`**（电子书 + 有声书，默认启用）、**`openlibrary`**（含 `<3` 字符标题短词回退，默认启用）、**`google_books`**（默认不启用，可在 `/books/metadata/sources` 开关）（遵循 [contracts/metadata-providers.md](../../contracts/metadata-providers.md) SSRF 防护与节流），应用后写入 `books.overrides_json` + `locked_fields_json` **并自动同步更新该书 `.wildstring/` 侧车**（绝不写回原媒体文件）。
 
 ---
 
@@ -218,17 +218,14 @@ v57 表结构、既有音乐写入兼容、共享目录校验和书库的注册�
 
 所有色彩、间距、字号层级、等宽数字（`tabular-nums`）与减少动态效果严格遵循 [DESIGN.md](../../DESIGN.md)。
 
-#### 4.1 「电台 → 书架」与管理员控制面
+#### 4.1 「电台 / 书架」与管理中心控制面
 
-- 改造 [frontend/web/src/podcasts.tsx](../../frontend/web/src/podcasts.tsx) 等电台壳层，增加分段切换器 **`播客 | 书架`**；新增 `bookshelf.tsx`、`book-detail.tsx`：
+- 前台「书架」（`bookshelf.tsx`）保持轻量阅读与浏览体验，不包含建库或硬件/硬链接管理入口：
   - 书架列表筛选（载体、阅读状态、搜索）、置顶继续栏、明确载体角标，严格提供 `Loading / Empty / Error / 权限不足` 边界状态；
-  - 上传对话框前端限定 `accept=".epub,.txt,application/epub+zip,text/plain"`，拦截音频文件并展示平静提示；
+  - 前台仅保留单一轻量的 `上传电子书` 按钮，浏览器文件选择器限定 `.epub` / `.txt`，选完即上传入默认托管副本库（屏蔽 `hardlink` 库），拦截音频文件并展示平静提示；
   - 书籍详情支持双载体操持、独立章节/书签/批注面板、管理员合配/拆分以及 OpenLibrary / Google Books / Apple iTunes 在线搜刮字段应用（附注修改仅落库与 `.wildstring/`，不修改源文件）。
-- **音乐曲库 & 书库管理页扩展存储模式与迁移向导**（面向 `owner`）：
-  - 在音乐曲库设置与书库设置内共同新增：
-    1. **存储模式选择器**：`独立副本 (Copy)` 与 `硬链接保种 (Hardlink)`，展示当前设备对齐检测结果（若跨卷则明确给出 Docker 同挂载点配置指引，禁用不安全保存）；
-    2. **便携 `.wildstring/` 侧车操作**：显示已导出侧车计数与时间戳，提供 `立即导出 .wildstring 元数据` 按钮（清楚说明仅含公共元数据、封面与歌词，绝不导出个人进度与账号信息）；
-    3. **「迁移至硬链接模式」任务向导**：支持选择「原地直接重连释放重复空间」或「迁移到新同卷路径并启用硬链接」，任务进度条与历史记录展示精确数字（`relinked_files`、`reclaimed_bytes`、`kept_standalone_files`、`sidecars_written`）。
+- **「管理中心」统一承载音乐曲库与书库/存储管理**（`management.tsx` + `book-libraries-admin.tsx`）：
+  - 在「管理中心」与「音乐库与导入」「播客」平级增设「书架」管理分类（`书库与存储`、`元数据来源`），集中提供多源目录与每目录 `watch_enabled` 自动监听勾选、默认访问策略与成员授权、**存储模式选择器（`copy | hardlink`）**、**便携 `.wildstring/` 侧车导出**、**`copy ↔ hardlink` 存储迁移向导**，以及全局书目元数据来源开关。
 
 #### 4.2 Web 双模式电子书阅读器（`book-reader.tsx`）
 

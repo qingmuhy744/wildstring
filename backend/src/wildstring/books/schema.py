@@ -225,4 +225,10 @@ TABLES = (
     )""",
     """CREATE INDEX IF NOT EXISTS book_bookmarks_by_user_book ON book_bookmarks(user_id,book_id)""",
     """CREATE INDEX IF NOT EXISTS book_annotations_by_user_book ON book_annotations(user_id,book_id)""",
+    """CREATE TABLE IF NOT EXISTS book_metadata_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1),
+        itunes INTEGER NOT NULL DEFAULT 1 CHECK(itunes IN (0,1)),
+        openlibrary INTEGER NOT NULL DEFAULT 1 CHECK(openlibrary IN (0,1)),
+        google_books INTEGER NOT NULL DEFAULT 0 CHECK(google_books IN (0,1))
+    )""",
 )

@@ -181,6 +181,11 @@ def main() -> None:
             scan_library(settings.model_copy(update={"library_dir": second_root}))
         if os.environ.get("WILDSTRING_TEST_PODCAST") == "1":
             seed_podcast(settings, picture.getvalue())
+        if (
+            os.environ.get("WILDSTRING_TEST_API_ONLY") == "1"
+            or os.environ.get("WILDSTRING_TEST_BOOKSHELF") == "1"
+        ):
+            seed_bookshelf(settings, root, picture.getvalue())
         if os.environ.get("WILDSTRING_TEST_PUBLISHERS") == "1":
             with Database(settings.data_dir).connect(write=True) as connection:
                 for identifier, title, author in (
@@ -247,6 +252,109 @@ def seed_podcast(settings: Settings, picture: bytes) -> None:
             "'https://example.invalid/not-downloaded.mp3',25,"
             "'2025-12-31T00:00:00Z','2025-12-31T00:00:00Z','none')"
         )
+
+
+def _minimal_epub_bytes(title: str, author: str, cover: bytes) -> bytes:
+    from zipfile import ZipFile
+
+    long_paragraph = (
+        "The window opened onto the quiet garden where morning light settled across cedar shelves and cotton paper. "
+        * 26
+    ).strip()
+    buf = io.BytesIO()
+    with ZipFile(buf, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>',
+        )
+        archive.writestr("OEBPS/images/cover.png", cover)
+        archive.writestr(
+            "OEBPS/ch1.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            "<h1>Chapter 1 — A Window</h1>"
+            f"<p>{long_paragraph}</p>"
+            "</body></html>",
+        )
+        archive.writestr(
+            "OEBPS/ch2.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            "<h1>Chapter 2 — The Door</h1>"
+            "<p>A second room stood beyond the courtyard with warm analog meters.</p>"
+            "</body></html>",
+        )
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+            '<body><nav epub:type="toc"><ol>'
+            '<li><a href="ch1.xhtml">Chapter 1 — A Window</a></li>'
+            '<li><a href="ch2.xhtml">Chapter 2 — The Door</a></li>'
+            "</ol></nav></body></html>",
+        )
+        archive.writestr(
+            "OEBPS/book.opf",
+            "<package><metadata>"
+            f"<title>{title}</title>"
+            f"<creator>{author}</creator>"
+            '<meta name="cover" content="cover-img"/>'
+            "</metadata>"
+            "<manifest>"
+            '<item id="cover-img" href="images/cover.png" media-type="image/png" properties="cover-image"/>'
+            '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+            '<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/>'
+            "</manifest>"
+            '<spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>',
+        )
+    return buf.getvalue()
+
+
+def seed_bookshelf(settings: Settings, root: Path, picture: bytes) -> None:
+    """Seed an accessible ebook and multi-chapter audiobook for native bookshelf tests."""
+    import time
+    from uuid import uuid4
+
+    from wildstring.books.service import Books
+
+    book_src = root / "books_source"
+    book_managed = root / "books_managed"
+    book_managed.mkdir(parents=True, exist_ok=True)
+    ebook_dir = book_src / "portable-pages"
+    ebook_dir.mkdir(parents=True, exist_ok=True)
+    (ebook_dir / "portable-pages.epub").write_bytes(
+        _minimal_epub_bytes("Portable Pages", "WildString Press", picture)
+    )
+    audio_dir = book_src / "rainy-stories"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    (audio_dir / "cover.png").write_bytes(picture)
+    for chapter_no, ch_title in enumerate(("第一话：雨夜来信", "第二话：长街回声"), start=1):
+        audio = audio_dir / f"0{chapter_no}.mp3"
+        shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", audio)
+        tags = MP3(audio)
+        tags["TIT2"] = TIT2(encoding=3, text=[ch_title])
+        tags["TALB"] = TALB(encoding=3, text=["雨夜电台故事集"])
+        tags["TPE1"] = TPE1(encoding=3, text=["深夜电台"])
+        tags["TPE2"] = TPE2(encoding=3, text=["深夜电台"])
+        tags["TRCK"] = TRCK(encoding=3, text=[str(chapter_no)])
+        tags.save()
+
+    database = Database(settings.data_dir)
+    lib_id = uuid4().hex
+    now = time.time()
+    with database.connect(write=True) as connection:
+        connection.execute(
+            """INSERT INTO book_libraries(id,name,managed_root,storage_mode,default_access,auto_pair,created_at,updated_at)
+               VALUES (?,?,?,'copy','all',0,?,?)""",
+            (lib_id, "Synthetic Books", str(book_managed), now, now),
+        )
+        connection.execute(
+            "INSERT INTO book_library_sources(library_id,id,root,watch_enabled) VALUES (?,?,?,1)",
+            (lib_id, uuid4().hex, str(book_src)),
+        )
+        library = dict(
+            connection.execute("SELECT * FROM book_libraries WHERE id=?", (lib_id,)).fetchone()
+        )
+    Books(database, settings).scan(library)
 
 
 if __name__ == "__main__":

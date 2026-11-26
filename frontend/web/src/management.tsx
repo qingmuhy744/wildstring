@@ -19,6 +19,7 @@ import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { BookLibraryManager, BookMetadataSourcesAdmin } from './book-libraries-admin';
 import { PodcastIdentityAdmin } from './podcast-identity-admin';
 import { PodcastProgrammesAdmin } from './podcast-programmes-admin';
 import { PodcastSearchSettings } from './podcast-search-settings';
@@ -201,6 +202,8 @@ export type ManagementTab =
   | 'identity'
   | 'resources'
   | 'downloads'
+  | 'book-libraries'
+  | 'book-metadata'
   | 'providers'
   | 'models'
   | 'transcoding'
@@ -424,6 +427,16 @@ export function Management({
                     { id: 'resources' as const, label: t('management.tabResources') },
                   ]
                 : []),
+            ],
+          },
+          {
+            id: 'bookshelf',
+            label: t('management.groupBookshelf'),
+            description: t('management.groupBookshelfDescription'),
+            icon: 'book' as const,
+            tabs: [
+              { id: 'book-libraries' as const, label: t('management.tabBookLibraries') },
+              { id: 'book-metadata' as const, label: t('management.tabBookMetadata') },
             ],
           },
         ]
@@ -787,6 +800,8 @@ export function Management({
               {tab === 'identity' && canPodcastAdmin && <PodcastIdentityAdmin />}
               {tab === 'resources' && canOwner && <PodcastResourceManager />}
               {tab === 'downloads' && canPodcastAdmin && <PodcastDownloadManager />}
+              {tab === 'book-libraries' && canImport && <BookLibraryManager canOwner={canOwner} />}
+              {tab === 'book-metadata' && canImport && <BookMetadataSourcesAdmin />}
               {tab === 'providers' && canOwner && <ProviderSettings />}
               {tab === 'models' && canOwner && (
                 <section className="management-card">

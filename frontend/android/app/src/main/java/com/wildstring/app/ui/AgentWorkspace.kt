@@ -375,6 +375,7 @@ internal fun summarizeConversationTitle(userText: String): String {
     onSettings: (() -> Unit)? = null,
     unread: Int = 0,
     onPlayer: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     openDraft: (String) -> Unit,
 ) {
     val links = LocalUriHandler.current
@@ -460,7 +461,11 @@ internal fun summarizeConversationTitle(userText: String): String {
             }
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .then(if (pageChrome) Modifier.windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)) else Modifier),
+    ) {
         val split = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad && maxWidth >= 760.dp
         Row(Modifier.fillMaxSize().testTag(if (split) "agent-two-pane" else "agent-single-pane")) {
             if (split) {
@@ -477,9 +482,18 @@ internal fun summarizeConversationTitle(userText: String): String {
             }
             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                 Column(Modifier.widthIn(max = 760.dp).fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (pageChrome && playback.canGoBack) {
-                            IconButton(vm::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.agent_ws_back)) }
+                    val showBack = pageChrome && (playback.canGoBack || onBack != null)
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = if (showBack) 4.dp else 12.dp, end = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (showBack) {
+                            IconButton(
+                                onClick = { if (playback.canGoBack) vm.back() else onBack?.invoke() },
+                                modifier = Modifier.testTag("assistant-back"),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.agent_ws_back))
+                            }
                         }
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                             AgentConnectionChoice(connections, connection, !action.busy, compact = true) { connection = it }
