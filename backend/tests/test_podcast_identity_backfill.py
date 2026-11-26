@@ -131,7 +131,8 @@ def test_backfill_accepts_feed_matches_only_and_is_idempotent(
         status = run_backfill(client)
         assert status["last_run"]["processed"] == 5
         assert status["last_run"]["matched"] == 3
-        assert status["last_run"]["no_match"] == 2
+        assert status["last_run"]["no_match"] == 1
+        assert status["last_run"]["failed"] == 1
         assert status["last_run"]["ambiguous"] == 1
         rows = statuses(settings)
         assert rows["etw"]["itunes_id"] == SHENGDONG
@@ -140,14 +141,15 @@ def test_backfill_accepts_feed_matches_only_and_is_idempotent(
         assert rows["copy"]["itunes_id"] is None
         assert rows["copy"]["itunes_check_status"] == "no_match"
         assert rows["anchor"]["itunes_id"] == "1740872075"
-        assert rows["broken"]["itunes_check_status"] == "no_match"
+        assert rows["broken"]["itunes_check_status"] == "failed"
         assert rows["broken"]["resolved_feed_url_normalized"] is None
 
         calls, fetched = len(itunes.calls), len(feeds)
         again = run_backfill(client)
-        assert again["last_run"]["processed"] == 0
-        assert (len(itunes.calls), len(feeds)) == (calls, fetched)
-        assert again["unchecked"] == 0
+        assert again["last_run"]["processed"] == again["last_run"]["failed"] == 1
+        assert len(itunes.calls) == calls
+        assert len(feeds) == fetched + 1
+        assert again["unchecked"] == 1  # The failed RSS fetch remains eligible.
         assert again["with_itunes_id"] == 3
 
         retried = run_backfill(client, retry_unmatched=True, limit=10)
@@ -285,6 +287,18 @@ def test_duplicates_are_reported_and_only_verified_pairs_merge(
         assert (busy.status_code, busy.json()["detail"]) == (409, "podcast_merge_busy")
         with connect(settings) as db:
             db.execute("UPDATE podcast_episodes SET download_status='none' WHERE id='fs-1'")
+            db.execute(
+                "INSERT INTO podcast_resource_leases VALUES ('active-stream','fs-1',?)",
+                (time.time() + 60,),
+            )
+            db.commit()
+        leased = client.post(
+            f"{API}/merge", headers=HEADERS, json={"podcast_ids": ["fireside", "etw"]}
+        )
+        assert (leased.status_code, leased.json()["detail"]) == (409, "podcast_merge_busy")
+        assert all(path.exists() for path in files.values())
+        with connect(settings) as db:
+            db.execute("UPDATE podcast_resource_leases SET expires_at=0")
             db.commit()
 
         merged = client.post(

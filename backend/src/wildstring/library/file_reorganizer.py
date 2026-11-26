@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
 
+from wildstring.library.edits import apply_effective
 from wildstring.library.fs import open_parent_directory, open_source
 from wildstring.library.import_files import organized_path, target_directory
 from wildstring.library.metadata import Metadata
@@ -162,6 +163,7 @@ def reorganize_track_file(repository, track_id: str):
                     "UPDATE tracks SET path=?, mtime_ns=? WHERE id=? AND library_id=?",
                     (suggested_path, new_mtime_ns, track_id, repository.library_id()),
                 )
+                apply_effective(connection, track_id)
                 connection.execute(
                     "UPDATE imported_files SET target_path=? WHERE target_root=? AND target_path=?",
                     (suggested_path, str(root), current_path),

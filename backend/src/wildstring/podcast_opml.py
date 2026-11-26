@@ -27,7 +27,7 @@ MAX_IMPORT_BATCH = 10
 
 class OpmlParseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    content: str = Field(min_length=1, max_length=MAX_OPML_BYTES)
+    content: str = Field(min_length=1)
 
 
 class OpmlImportItem(BaseModel):

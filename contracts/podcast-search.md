@@ -22,6 +22,10 @@
 
 节目无人关注时暂停定时抓取 RSS；重新关注后恢复原定时策略。取消关注保留节目资料、单集、收听进度和个人保存引用。音频仍使用既有零引用保留期清理，不按关注人数直接删除。
 
+### `GET /api/v1/podcasts/directory-cover/{key}`
+
+- 需要会话。榜单和搜索返回的 `artwork_key` 用于请求目录封面。每账号独立限流，超限返回 429 和 `Retry-After`。相同封面的并发请求共享一次上游抓取。
+
 ### `GET /api/v1/podcasts/search?q=&limit=`
 
 - 需要会话；`limit` 1–50，默认 25；`q` 去除多余空白后 1–100 字符，否则 `422 podcast_search_query_invalid`；以 `http(s)://` 开头时 `422 podcast_search_query_is_url`（客户端应改走预览）。
@@ -79,7 +83,7 @@
 
 ### `POST /api/v1/podcasts/opml/parse`
 
-- 需要登录会话与客户端头；请求体 `{"content": "<OPML 文本>"}`，最多 1 MB（超出为 `413 podcast_opml_too_large`）。
+- 需要登录会话与客户端头；请求体 `{"content": "<OPML 文本>"}`，文本按 UTF-8 编码最多 1,000,000 字节，超出返回 `413 podcast_opml_too_large`。
 - 含 `DOCTYPE`/`ENTITY` 声明、不是 XML 或根元素不是 `opml` 时返回 `422 podcast_opml_invalid`；没有任何 RSS 节目时返回 `422 podcast_opml_empty`；超过 1000 个节目返回 `413 podcast_opml_too_many`。
 - 读取任意层级 `outline` 的 `xmlUrl`（属性名不区分大小写；`type="rss"` 时也接受 `url`），按规范化 RSS 地址去重，非 http(s) 地址计入 `invalid`。
 - 响应：`{"feeds": [{"title", "feed_url", "html_url", "in_catalog", "catalog_podcast_id", "followed"}], "invalid": n, "duplicates": n}`；`in_catalog`/`followed` 与搜索结果一样只反映当前账号可见的节目。
@@ -134,6 +138,7 @@
 - `GET /api/v1/podcasts/identity/backfill`（所有者与曲库管理员）：`{"running", "processed", "matched", "no_match", "failed", "ambiguous", "paused_until", "trigger", "last_run", "total", "with_itunes_id", "unchecked", "counts"}`。
 - 每个待检查节目：先请求一次 RSS 以得到重定向后的地址（两次请求至少间隔 2 秒），再以节目名称、必要时「名称 + 作者」在当前设置的区域搜索 Apple（iTunes 没有按 RSS 地址查询的接口）。**只有** Apple 记录的 `feedUrl` 规范化后等于本节目的规范化地址或重定向后的地址时才写入 `itunes_id`，绝不只按名称匹配。同一 RSS 在 Apple 有多个编号时取数值最小（最早上架）的一个，并计入 `ambiguous`。
 - 与用户搜索共用每分钟约 20 次的 Apple 预算，并为用户保留 5 次；预算用尽或 Apple 限流时任务等待（`paused_until`，单节目最多等 5 分钟），服务停止时立即结束。
+- RSS 抓取失败且无法核实匹配时记录 `failed`，后续可自动重试。
 - 幂等：只处理 `itunes_id` 为空且未检查（或上次 `failed`）的节目；`no_match` 的节目以 `itunes_checked_at` 为准 7 天内不再重试，`retry_unmatched=true` 时立即重试。`last_run` 额外给出 `trigger`（`manual` / `auto`）与结束时的重复统计 `duplicates: {"verified", "possible"}`。已有的 `itunes_id` 和重定向地址从不被覆盖。可随时中断，下次从剩余节目继续。
 
 ### 启动后自动回填
@@ -146,7 +151,7 @@
 
 - `GET /api/v1/podcasts/identity/duplicates`（所有者与曲库管理员）：成对列出可能重复的节目，`{"duplicates": [{"confidence", "reasons", "itunes_id", "suggested_keep_id", "podcasts": [两条摘要]}], "verified", "possible"}`。`reasons` 取自 `itunes_id`（同一编号）、`feed`（规范化地址或重定向地址相同）、`title`（规范化名称相同且作者相同或其一为空）。
 - 只有两条记录的 `itunes_id` 相同（该编号已按 RSS 核实）才是 `verified`；其余都是 `possible`，只报告、不合并。保留规则（`suggested_keep_id`，合并时由服务器执行）：订阅地址未重定向的优先；两个都重定向或都未重定向时保留关注多的，再依次比较下载多、更早添加。
-- `POST /api/v1/podcasts/identity/merge`（所有者与曲库管理员）`{"podcast_ids": [两个节目 ID]}`：顺序无关，保留哪一个按上面的保留规则由服务器决定。未核实 `409 podcast_merge_unverified`；任一节目有排队或下载中的单集 `409 podcast_merge_busy`；同一节目 `422 podcast_merge_same`；不存在 `404 podcast_not_found`。在一个事务内：
+- `POST /api/v1/podcasts/identity/merge`（所有者与曲库管理员）`{"podcast_ids": [两个节目 ID]}`：顺序无关，保留哪一个按上面的保留规则由服务器决定。未核实 `409 podcast_merge_unverified`；任一节目有排队、下载中的单集或未过期的播放／传输租约时返回 `409 podcast_merge_busy`；同一节目 `422 podcast_merge_same`；不存在 `404 podcast_not_found`。在一个事务内：
   - 单集按 `guid`、其次按音频地址对齐；对不上的单集整条移入保留节目（进度、引用、下载随之）。
   - 对齐的单集：同一账号两边都有进度时保留最近收听的一条（版本号递增）；播放缓存、资源引用（手动/自动标记取并集）、保护状态和租约迁到保留的单集。保留的单集没有下载而另一边有时，转移已下载文件；两边都有时删除重复的那份。
   - 关注、个人目录与个人节目设置迁到保留节目（已存在则以保留节目为准）；出品方为空时继承。随后删除被合并的节目。

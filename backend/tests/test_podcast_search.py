@@ -2,7 +2,10 @@
 
 import json
 import sqlite3
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
@@ -111,6 +114,41 @@ def feeds(monkeypatch):
 
 def search(client, q, **params):
     return client.get("/api/v1/podcasts/search", params={"q": q, **params})
+
+
+def test_directory_cover_rate_is_per_account_and_cold_fetch_is_shared(monkeypatch):
+    service = podcast_search.PodcastSearch(SimpleNamespace(database=None), clock=lambda: 10)
+    service.artwork_sources["cover"] = (20, "https://example.test/cover.jpg")
+    monkeypatch.setattr(podcast_search, "USER_COVERS_PER_MINUTE", 1)
+    fetching, waiting, release = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+
+    class ObservedFuture(Future):
+        def result(self, timeout=None):
+            waiting.set()
+            return super().result(timeout)
+
+    def fetch(_manager, source):
+        calls.append(source)
+        fetching.set()
+        assert release.wait(5)
+        return b"synthetic artwork"
+
+    monkeypatch.setattr(podcast_search, "Future", ObservedFuture)
+    monkeypatch.setattr(podcast_search.podcast_artwork, "fetch", fetch)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(service.directory_cover, "cover", "owner")
+        try:
+            assert fetching.wait(5)
+            second = pool.submit(service.directory_cover, "cover", "listener")
+            assert waiting.wait(5)
+        finally:
+            release.set()
+        assert first.result().body == second.result().body == b"synthetic artwork"
+    assert calls == ["https://example.test/cover.jpg"]
+    with pytest.raises(SearchRateLimited):
+        service.directory_cover("cover", "owner")
+    assert service.directory_cover("cover", "another-user").body == b"synthetic artwork"
 
 
 def test_feed_urls_normalize_without_dropping_meaningful_parts():

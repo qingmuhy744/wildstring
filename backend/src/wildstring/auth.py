@@ -240,26 +240,32 @@ class Auth:
             raise HTTPException(403, "owner_required")
 
     @staticmethod
-    def verify_password(connection, hashed, password, guard_key):
-        current = int(time.time())
-        connection.execute("DELETE FROM login_attempts WHERE last_attempt<?", (current - 86400,))
+    def login_attempt(connection, guard_key, current):
         guard = connection.execute(
             "SELECT * FROM login_attempts WHERE guard_key=?", (guard_key,)
         ).fetchone()
         if guard and guard["blocked_until"] > current:
             raise HTTPException(429, "login_throttled", headers={"Retry-After": "60"})
+        return guard
+
+    @staticmethod
+    def password_matches(hashed, password):
         expected = hashed or DUMMY_HASH
         try:
-            valid = (
+            return (
                 hmac.compare_digest(password_hash(password, expected.split(":")[0]), expected)
                 and hashed is not None
             )
         except (ValueError, UnicodeError):
-            valid = False
+            return False
+
+    @staticmethod
+    def record_login_attempt(connection, guard_key, guard, current, valid):
+        connection.execute("DELETE FROM login_attempts WHERE last_attempt<?", (current - 86400,))
         if not valid:
             failures = (
                 1
-                if guard and guard["blocked_until"] and guard["blocked_until"] <= current
+                if guard and (guard["blocked_until"] or guard["last_attempt"] < current - 86400)
                 else (guard["failures"] if guard else 0) + 1
             )
             connection.execute(
@@ -274,29 +280,49 @@ class Auth:
             raise HTTPException(401, "invalid_credentials")
         connection.execute("DELETE FROM login_attempts WHERE guard_key=?", (guard_key,))
 
+    def verify_password(self, connection, hashed, password, guard_key):
+        current = int(time.time())
+        guard = self.login_attempt(connection, guard_key, current)
+        self.record_login_attempt(
+            connection, guard_key, guard, current, self.password_matches(hashed, password)
+        )
+
+    @staticmethod
+    def check_login_configured(connection):
+        if (
+            connection.execute(
+                "SELECT 1 FROM users WHERE profile='owner' AND enabled=1 AND password_hash IS NOT NULL"
+            ).fetchone()
+            is None
+        ):
+            raise HTTPException(503, "owner_setup_required")
+
     def login(
         self, username: str, password: str, *, client_host: str | None = None, transport: str = ""
     ) -> tuple[str, dict]:
+        guard_key = login_guard_key(username, client_host)
+        lookup = "SELECT * FROM users WHERE username=? COLLATE NOCASE AND enabled=1"
+        with self.database.connect() as connection:
+            self.check_login_configured(connection)
+            self.login_attempt(connection, guard_key, int(time.time()))
+            before = connection.execute(lookup, (username,)).fetchone()
+        hashed = before["password_hash"] if before else None
+        valid = self.password_matches(hashed, password)
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if (
-                connection.execute(
-                    "SELECT 1 FROM users WHERE profile='owner' AND enabled=1 AND password_hash IS NOT NULL"
-                ).fetchone()
-                is None
-            ):
-                raise HTTPException(503, "owner_setup_required")
+            self.check_login_configured(connection)
             current = int(time.time())
-            connection.execute("DELETE FROM sessions WHERE expires_at<=?", (current,))
-            row = connection.execute(
-                "SELECT * FROM users WHERE username=? COLLATE NOCASE AND enabled=1", (username,)
-            ).fetchone()
-            self.verify_password(
-                connection,
-                row["password_hash"] if row else None,
-                password,
-                login_guard_key(username, client_host),
+            guard = self.login_attempt(connection, guard_key, current)
+            row = connection.execute(lookup, (username,)).fetchone()
+            verified = (
+                valid
+                and before is not None
+                and row is not None
+                and row["id"] == before["id"]
+                and row["password_hash"] == hashed
             )
+            self.record_login_attempt(connection, guard_key, guard, current, verified)
+            connection.execute("DELETE FROM sessions WHERE expires_at<=?", (current,))
             token = secrets.token_urlsafe(32)
             connection.execute(
                 "INSERT INTO sessions(token_hash,expires_at,user_id,transport) VALUES (?,?,?,?)",

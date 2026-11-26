@@ -22,6 +22,51 @@ def login(client, password=PASSWORD):
     )
 
 
+def test_login_hash_allows_other_writers_and_rejects_a_replaced_password(settings, monkeypatch):
+    settings.admin_password = SecretStr(PASSWORD)
+    with TestClient(create_app(settings)) as client:
+        database = Database(settings.data_dir)
+        replacement = password_hash("other-test-password")
+        attempts = []
+
+        def hash_during_write(password, salt):
+            with database.connect(write=True) as db:
+                db.execute("PRAGMA busy_timeout=0")
+                db.execute("BEGIN IMMEDIATE")
+                if attempts:
+                    db.execute("UPDATE users SET password_hash=? WHERE id='admin'", (replacement,))
+            attempts.append(salt)
+            return password_hash(password, salt)
+
+        monkeypatch.setattr("wildstring.auth.password_hash", hash_during_write)
+        assert login(client).status_code == 200
+        assert login(client).status_code == 401
+        assert len(attempts) == 2
+        with database.connect() as db:
+            assert db.execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
+            assert db.execute("SELECT failures FROM login_attempts").fetchone()[0] == 1
+
+
+def test_schema_62_preserves_sessions_and_removes_legacy_login_guard(settings):
+    settings.admin_password = SecretStr(PASSWORD)
+    with TestClient(create_app(settings)) as client:
+        assert login(client).status_code == 200
+        database = Database(settings.data_dir)
+        with database.connect(write=True) as db:
+            before = [tuple(row) for row in db.execute("SELECT * FROM sessions")]
+            db.execute("DROP INDEX sessions_by_expiry")
+            db.execute("CREATE TABLE login_guard(id INTEGER PRIMARY KEY, failures INTEGER)")
+            db.execute("INSERT INTO login_guard VALUES (1, 3)")
+            db.execute("PRAGMA user_version=61")
+        database.initialize()
+        with database.connect() as db:
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 62
+            assert db.execute("PRAGMA index_info(sessions_by_expiry)").fetchone()[2] == "expires_at"
+            assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='login_guard'").fetchone()
+            assert [tuple(row) for row in db.execute("SELECT * FROM sessions")] == before
+        assert client.get("/api/v1/auth/status").json()["authenticated"]
+
+
 def test_no_default_admin_or_unauthenticated_library_access(settings):
     with TestClient(create_app(settings)) as client:
         status_data = client.get("/api/v1/auth/status").json()

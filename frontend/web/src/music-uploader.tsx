@@ -11,7 +11,7 @@ export interface UploadItem {
   targetPath?: string;
 }
 
-const SUPPORTED_EXTENSIONS = new Set(['.mp3', '.flac', '.m4a', '.wav', '.lrc', '.lryc', '.txt']);
+const SUPPORTED_EXTENSIONS = new Set(['.mp3', '.flac', '.m4a', '.lrc', '.lryc', '.txt']);
 
 function isSupportedFile(filename: string): boolean {
   const dot = filename.lastIndexOf('.');
@@ -280,7 +280,7 @@ export function MusicUploader({
       <input
         ref={fileInputRef}
         type="file"
-        accept="audio/*,.lrc,.lryc,.txt"
+        accept={[...SUPPORTED_EXTENSIONS].join(',')}
         multiple
         style={{ display: 'none' }}
         onChange={(e) => {
@@ -306,7 +306,7 @@ export function MusicUploader({
           <p>
             <strong>{t('musicUploader.dropzonePrompt')}</strong>
           </p>
-          <span className="muted">{t('musicUploader.dropzoneFormats')}</span>
+          <span className="muted dropzone-formats">{t('musicUploader.dropzoneFormats')}</span>
           <div className="dropzone-buttons">
             <button
               type="button"

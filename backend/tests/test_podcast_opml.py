@@ -209,6 +209,16 @@ def test_export_lists_only_followed_shows_and_round_trips(
         ]
 
 
+@pytest.mark.parametrize("content", ["a" * 1_000_001, "中" * 333_334], ids=["ascii", "utf8"])
+def test_opml_byte_limit_returns_413_for_ascii_and_multibyte(
+    settings, authenticated_client, content
+):
+    with authenticated_client(settings) as client:
+        response = parse(client, content)
+        assert response.status_code == 413
+        assert response.json()["detail"] == "podcast_opml_too_large"
+
+
 def test_build_opml_is_valid_for_an_empty_follow_list():
     document = build_opml([]).decode()
     assert document.startswith("<?xml") and "<body" in document

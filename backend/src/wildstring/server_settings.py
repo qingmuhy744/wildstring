@@ -54,8 +54,8 @@ class ServerSettings:
             if row[key] is not None:
                 values[key], values["sources"][key] = row[key], "database"
             elif environment is not None:
-                if key == "connection_policy" and environment == "legacy":
-                    values[key], values["sources"][key] = "legacy", "environment"
+                if key == "connection_policy":
+                    values[key], values["sources"][key] = environment, "environment"
                 else:
                     try:
                         effective = ServerUpdate.model_validate({key: environment})
@@ -91,11 +91,9 @@ class ServerSettings:
             changes = body.model_dump(exclude_unset=True)
             # Validate inheritance before clearing a working DB override.
             for key, value in changes.items():
-                if value is None:
-                    fallback = getattr(self.settings, "server_name" if key == "name" else key)
-                    if fallback is not None and not (
-                        key == "connection_policy" and fallback == "legacy"
-                    ):
+                if value is None and key == "name":
+                    fallback = self.settings.server_name
+                    if fallback is not None:
                         try:
                             ServerUpdate.model_validate({key: fallback})
                         except ValidationError:

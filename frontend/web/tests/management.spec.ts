@@ -129,6 +129,31 @@ test('元数据预览、版本冲突、重扫保留、撤销与当前音频连�
   }
 });
 
+test('直传跳过 WAV 并提示从来源目录导入', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await manageTab(page, '导入与整理');
+  const uploader = page.getByRole('region', { name: '上传音乐工作台' });
+  await expect(uploader.getByText('WAV 请通过来源目录导入。', { exact: false })).toBeVisible();
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await uploader.screenshot({
+      animations: 'disabled',
+      scale: 'css',
+      path: info.outputPath(`direct-upload-${theme}.png`),
+    });
+  }
+  const files = uploader.locator('input[accept]');
+  await expect(files).toHaveAttribute('accept', '.mp3,.flac,.m4a,.lrc,.lryc,.txt');
+  await files.setInputFiles([
+    { name: 'skip.wav', mimeType: 'audio/wav', buffer: Buffer.from('fixture') },
+    { name: 'keep.flac', mimeType: 'audio/flac', buffer: Buffer.from('fixture') },
+  ]);
+  await expect(uploader.getByText('keep.flac', { exact: true })).toBeVisible();
+  await expect(uploader.getByText('skip.wav', { exact: true })).toHaveCount(0);
+});
+
 test('导入任务关闭页面继续处理、持久历史与逐文件错误', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');

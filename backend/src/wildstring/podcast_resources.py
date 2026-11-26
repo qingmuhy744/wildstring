@@ -274,13 +274,16 @@ class PodcastResources:
             else set(getattr(self.manager, "_active_downloads", {}))
         )
         items, total_bytes = [], 0
+        counted: set[Path] = set()
         for row in rows:
             path = self.manager._safe_local_path(row.pop("local_path"))
             try:
                 size = path.stat().st_size if path and path.is_file() else 0
             except OSError:
                 size = 0
-            total_bytes += size
+            if path is not None and path not in counted:
+                counted.add(path)
+                total_bytes += size
             row.update(
                 size_bytes=size,
                 protected=bool(row["protected"]),

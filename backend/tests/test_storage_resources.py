@@ -191,6 +191,10 @@ def test_collector_respects_manual_pins_streams_aliases_and_grace(resources):
             (str(path),),
         )
         store.downloaded(conn, "ep-coffee")
+    listing = store.listing()
+    assert len(listing["items"]) == 2
+    assert all(row["size_bytes"] == path.stat().st_size for row in listing["items"])
+    assert listing["total_bytes"] == path.stat().st_size
     store.save("ep-coffee", "admin")
     collection = store.cleanup(dry_run=False)
     assert collection["deleted_count"] == 0

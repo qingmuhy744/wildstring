@@ -101,6 +101,18 @@ def test_idna_and_exact_ip_normalization():
     assert normalize_host("2001:0db8::1") == "2001:db8::1"
 
 
+def test_mcp_responses_are_not_cacheable_even_if_host_is_denied(settings, authenticated_client):
+    with authenticated_client(settings) as client:
+        for path in ("/mcp", "/mcp/"):
+            response = client.post(path, json={}, follow_redirects=False)
+            assert response.headers["cache-control"] == "no-store"
+        policy = {"enabled": True, "hosts": ["testserver"], "version": 1}
+        assert client.put(ENDPOINT, headers=HEADERS, json=policy).status_code == 200
+        denied = client.get("/mcp", headers={"Host": "disallowed.example"})
+        assert denied.status_code == 400
+        assert denied.headers["cache-control"] == "no-store"
+
+
 def test_unscoped_connection_guards_and_single_connection_library_access(settings, monkeypatch):
     from contextvars import ContextVar
 

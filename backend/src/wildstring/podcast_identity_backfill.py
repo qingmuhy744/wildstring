@@ -354,7 +354,7 @@ class IdentityBackfill:
                 break
         if ids:
             status = "matched"
-        elif searched:
+        elif searched and fetched:
             status = "no_match"
         else:
             status = "failed"
@@ -485,6 +485,17 @@ class IdentityBackfill:
         }
 
     # Merge ------------------------------------------------------------------------------
+    @staticmethod
+    def _resources_busy(db, first_id, second_id):
+        return db.execute(
+            """SELECT 1 FROM podcast_episodes e WHERE e.podcast_id IN (?, ?)
+               AND (e.download_status IN ('queued','downloading') OR EXISTS (
+                   SELECT 1 FROM podcast_resource_leases l
+                   WHERE l.episode_id=e.id AND l.expires_at>?
+               )) LIMIT 1""",
+            (first_id, second_id, time.time()),
+        ).fetchone()
+
     def merge(self, first_id: str, second_id: str) -> dict[str, Any]:
         """Merge a verified pair into the show ``keeper`` picks; the order given is ignored."""
         if first_id == second_id:
@@ -507,11 +518,7 @@ class IdentityBackfill:
                     (keep_id, merge_id),
                 )
             ]
-            busy = db.execute(
-                "SELECT 1 FROM podcast_episodes WHERE podcast_id IN (?, ?) "
-                "AND download_status IN ('queued','downloading') LIMIT 1",
-                (keep_id, merge_id),
-            ).fetchone()
+            busy = self._resources_busy(db, keep_id, merge_id)
         active = (
             manager.active_or_queued_episode_ids()
             if hasattr(manager, "active_or_queued_episode_ids")
@@ -534,11 +541,7 @@ class IdentityBackfill:
         episode_map: dict[str, str] = {}
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
-            recheck_busy = db.execute(
-                "SELECT 1 FROM podcast_episodes WHERE podcast_id IN (?, ?) "
-                "AND download_status IN ('queued','downloading') LIMIT 1",
-                (keep_id, merge_id),
-            ).fetchone()
+            recheck_busy = self._resources_busy(db, keep_id, merge_id)
             in_flight_now = (
                 manager.active_or_queued_episode_ids()
                 if hasattr(manager, "active_or_queued_episode_ids")
@@ -603,16 +606,16 @@ class IdentityBackfill:
                 "UPDATE podcasts SET publisher_id=COALESCE(publisher_id, ?) WHERE id=?",
                 (shows[merge_id]["publisher_id"], keep_id),
             )
-            db.execute("DELETE FROM podcasts WHERE id=?", (merge_id,))
-            db.commit()
             referenced = [
                 row[0]
                 for row in db.execute(
-                    "SELECT local_path FROM podcast_episodes WHERE local_path IS NOT NULL"
+                    "SELECT local_path FROM podcast_episodes WHERE podcast_id<>? AND local_path IS NOT NULL",
+                    (merge_id,),
                 )
             ]
-        if orphans:
-            manager._delete_local_paths(orphans, protected=referenced)
+            if orphans:
+                manager._delete_local_paths(orphans, protected=referenced)
+            db.execute("DELETE FROM podcasts WHERE id=?", (merge_id,))
         folder = Path(manager._podcast_dir(merge_id))
         if folder.exists() and not any(
             Path(path).resolve().is_relative_to(folder.resolve()) for path in referenced
@@ -697,7 +700,6 @@ class IdentityBackfill:
                 stats["downloads_moved"] += 1
             else:
                 orphans.append(old["local_path"])
-        db.execute("UPDATE podcast_episodes SET local_path=NULL WHERE id=?", (old_id,))
 
     # HTTP -------------------------------------------------------------------------------
     def routes(self, router: APIRouter, auth) -> None:

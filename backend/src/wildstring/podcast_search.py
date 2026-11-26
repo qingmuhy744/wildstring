@@ -15,7 +15,7 @@ import time
 import urllib.request
 from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Annotated, Any
@@ -54,6 +54,7 @@ PREVIEW_TTL_SECONDS = 300
 UPSTREAM_CALLS_PER_MINUTE = 18
 USER_SEARCHES_PER_MINUTE = 30
 USER_PREVIEWS_PER_MINUTE = 12
+USER_COVERS_PER_MINUTE = 120
 THROTTLE_COOLDOWN_SECONDS = 60
 UPSTREAM_TIMEOUT_SECONDS = 10
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -339,6 +340,7 @@ class PodcastSearch:
         self.seen_ids: dict[str, tuple[float, set[str]]] = {}
         self.artwork_sources: OrderedDict[str, tuple[float, str]] = OrderedDict()
         self.artwork_images: OrderedDict[str, tuple[float, bytes]] = OrderedDict()
+        self.artwork_pending: dict[str, Future[bytes]] = {}
 
     # Settings ---------------------------------------------------------------------------
     def settings(self) -> dict[str, Any]:
@@ -395,7 +397,8 @@ class PodcastSearch:
                 self.cache.popitem(last=False)
         self._remember(items)
 
-    def directory_cover(self, key: str, request: Request | None = None):
+    def directory_cover(self, key: str, user_id: str, request: Request | None = None):
+        self.gate.admit_user(f"cover:{user_id}", USER_COVERS_PER_MINUTE)
         with self.lock:
             source = self.artwork_sources.get(key)
             if source is None or source[0] <= self.clock():
@@ -406,12 +409,26 @@ class PodcastSearch:
             if hit is not None and hit[0] > self.clock():
                 self.artwork_images.move_to_end(key)
                 return podcast_artwork.image_response(hit[1], request=request)
-        data = podcast_artwork.fetch(self.manager, source[1])
-        with self.lock:
-            self.artwork_images[key] = (self.clock() + CHART_TTL_SECONDS, data)
-            self.artwork_images.move_to_end(key)
-            while len(self.artwork_images) > 64:
-                self.artwork_images.popitem(last=False)
+            pending = self.artwork_pending.get(key)
+            leader = pending is None
+            if pending is None:
+                pending = self.artwork_pending[key] = Future()
+        if not leader:
+            return podcast_artwork.image_response(pending.result(), request=request)
+        try:
+            data = podcast_artwork.fetch(self.manager, source[1])
+            with self.lock:
+                self.artwork_images[key] = (self.clock() + CHART_TTL_SECONDS, data)
+                self.artwork_images.move_to_end(key)
+                while len(self.artwork_images) > 64:
+                    self.artwork_images.popitem(last=False)
+            pending.set_result(data)
+        except BaseException as error:
+            pending.set_exception(error)
+            raise
+        finally:
+            with self.lock:
+                self.artwork_pending.pop(key, None)
         return podcast_artwork.image_response(data, request=request)
 
     # Upstream ---------------------------------------------------------------------------
@@ -779,7 +796,10 @@ class PodcastSearch:
             request: Request,
             user: Annotated[dict, Depends(auth.require_session)],
         ):
-            return self.directory_cover(key, request=request)
+            try:
+                return self.directory_cover(key, user["id"], request=request)
+            except SearchRateLimited as exc:
+                raise rate_limited(exc) from None
 
         @router.post("/preview", dependencies=[Depends(auth.require_client)])
         def preview_feed(

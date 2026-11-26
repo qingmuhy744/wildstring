@@ -94,12 +94,16 @@ class HostAllowlist:
         if scope["type"] != "http" or scope["path"] in {"/health", "/health/ready"}:
             await self.app(scope, receive, send)
             return
+        path = scope["path"]
+        is_mcp = path == "/mcp" or path.startswith("/mcp/")
+        private_headers = {"Cache-Control": "no-store"} if is_mcp else None
+
         try:
             settings = await anyio.to_thread.run_sync(self.access.read)
         except (sqlite3.Error, OSError):
-            await JSONResponse({"detail": "access_settings_unavailable"}, status_code=503)(
-                scope, receive, send
-            )
+            await JSONResponse(
+                {"detail": "access_settings_unavailable"}, status_code=503, headers=private_headers
+            )(scope, receive, send)
             return
         if settings["enabled"]:
             values = [value for name, value in scope["headers"] if name.lower() == b"host"]
@@ -136,22 +140,21 @@ class HostAllowlist:
                 except (ValueError, UnicodeError):
                     allowed = False
             if not allowed:
-                await JSONResponse({"detail": "host_not_allowed"}, status_code=400)(
-                    scope, receive, send
-                )
+                await JSONResponse(
+                    {"detail": "host_not_allowed"}, status_code=400, headers=private_headers
+                )(scope, receive, send)
                 return
 
         async def private_send(message):
-            if message["type"] == "http.response.start" and scope["path"].startswith("/api/v1/"):
+            if message["type"] == "http.response.start" and (is_mcp or path.startswith("/api/v1/")):
                 raw_headers = list(message.get("headers", []))
-                cache_control = b"private, no-store"
-                for key, value in raw_headers:
-                    if (
-                        key.lower() == b"cache-control"
-                        and value.strip().lower() == b"private, no-cache"
-                    ):
-                        cache_control = b"private, no-cache"
-                        break
+                cache_control = b"no-store" if is_mcp else b"private, no-store"
+                if not is_mcp and any(
+                    key.lower() == b"cache-control"
+                    and value.strip().lower() == b"private, no-cache"
+                    for key, value in raw_headers
+                ):
+                    cache_control = b"private, no-cache"
                 message = dict(message)
                 message["headers"] = [
                     (key, value) for key, value in raw_headers if key.lower() != b"cache-control"

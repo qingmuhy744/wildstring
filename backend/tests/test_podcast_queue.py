@@ -370,6 +370,24 @@ def test_queue_read_repairs_entries_hidden_by_a_role_change_once(context):
     assert queue(client) == repaired
 
 
+def test_queue_preferences_save_after_demotion_with_stale_show(context):
+    client, database = context
+    set_preference(client, "queue_next")
+    endpoint = "/api/v1/podcasts/queue/preferences"
+    before = client.get(endpoint).json()
+    assert SHOW in before["shows"]
+    with database.connect(write=True) as db:
+        db.execute("UPDATE users SET profile='listener' WHERE username='admin'")
+        db.execute("DELETE FROM podcast_user_catalog WHERE podcast_id=?", (SHOW,))
+    hidden = client.get(endpoint).json()
+    assert hidden["shows"] == {} and hidden["dropped_podcast_ids"] == [SHOW]
+    saved = client.put(endpoint, headers=HEADERS, json=before | {"auto_continue": False})
+    assert saved.status_code == 200
+    assert saved.json()["auto_continue"] is False
+    assert saved.json()["shows"] == {}
+    assert saved.json()["dropped_podcast_ids"] == [SHOW]
+
+
 def test_queue_put_stamps_and_preserves_added_at(context):
     client, database = context
     follow(client)
