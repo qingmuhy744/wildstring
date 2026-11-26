@@ -12,6 +12,7 @@ import threading
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from tempfile import TemporaryFile
 from urllib.parse import urlencode
@@ -29,6 +30,8 @@ from starlette.responses import Response, StreamingResponse
 
 from wildstring.library.scanner import fingerprint, open_source
 from wildstring.library.streaming import AudioResponse
+from wildstring.storage.accounts import drive_http_error
+from wildstring.storage.gdrive import DriveError
 
 RATES = (128, 192, 256, 320)
 MIB = 1024 * 1024
@@ -52,6 +55,7 @@ class Plan:
     start_ms: int
     key: str
     requested_bitrate: int | None
+    remote: dict | None = None
 
     def public(self, cache_state="none"):
         transcode = self.bitrate is not None
@@ -104,6 +108,7 @@ class Entry:
     complete: bool = False
     purge: bool = False
     error: str | None = None
+    retry_after: int | None = None
     ready: threading.Event = field(default_factory=threading.Event)
     done: threading.Event = field(default_factory=threading.Event)
     lock: FileLock | None = None
@@ -113,6 +118,7 @@ class Entry:
 class Transcoding:
     def __init__(self, repository):
         self.repository = repository
+        self.remote_storage = None
         self.database = repository.database
         self.root = self.database.path.parent / "cache" / "transcoding"
         self.lock = threading.RLock()
@@ -177,51 +183,77 @@ class Transcoding:
             raise HTTPException(404, "track_not_found")
         if record["status"] != "available":
             raise HTTPException(409, "track_unavailable")
-        try:
-            with open_source(Path(record["library_root"]), Path(record["path"])) as source:
-                stat = os.fstat(source.fileno())
-                if (stat.st_size, stat.st_mtime_ns) != (record["size_bytes"], record["mtime_ns"]):
-                    raise HTTPException(409, "file_changed_rescan_required")
-                signature = json.dumps([track_id, record, fingerprint(stat)], sort_keys=True)
-                with self.lock:
-                    observed = self.probes.get(signature)
-                if observed is None:
-                    audio = File(source)
-                    if isinstance(audio, FLAC):
-                        codec, lossless = "flac", True
-                    elif isinstance(audio, MP3):
-                        codec, lossless = "mp3", False
-                    elif isinstance(audio, MP4):
-                        codec = getattr(audio.info, "codec", "").lower()
-                        codec = "aac" if codec.startswith("mp4a") else codec
-                        lossless = codec == "alac"
-                        if codec not in {"aac", "alac", "ac-3", "ec-3", "opus", "mp3"}:
-                            raise HTTPException(409, "unsupported_audio_codec")
-                    else:
-                        raise HTTPException(409, "unsupported_audio_codec")
-                    duration = float(audio.info.length)
-                    if not math.isfinite(duration) or duration <= 0:
-                        raise HTTPException(409, "audio_unavailable")
-                    observed = {
-                        "codec": codec,
-                        "container": record["format"],
-                        "lossless": lossless,
-                        "bitrate_kbps": round(getattr(audio.info, "bitrate", 0) / 1000) or None,
-                        "sample_rate": getattr(audio.info, "sample_rate", None),
-                        "channels": getattr(audio.info, "channels", 2) or 2,
-                        "bit_depth": getattr(audio.info, "bits_per_sample", None),
-                        "duration_ms": round(duration * 1000),
-                    }
-                    if fingerprint(os.fstat(source.fileno())) != fingerprint(stat):
+        remote = None
+        if record["storage_backend"] == "gdrive":
+            remote = self.remote_storage.cache.ref(
+                "track", track_id, library_id=record["library_id"]
+            )
+            if remote is None or not remote["available"]:
+                raise HTTPException(404, "audio_not_found")
+            observed = json.loads(remote["media_info"])
+            observed = {
+                key: observed[key]
+                for key in (
+                    "codec",
+                    "container",
+                    "lossless",
+                    "bitrate_kbps",
+                    "sample_rate",
+                    "channels",
+                    "bit_depth",
+                    "duration_ms",
+                )
+            }
+            signature = [track_id, remote["remote_version"], remote["remote_md5"]]
+        else:
+            try:
+                with open_source(Path(record["library_root"]), Path(record["path"])) as source:
+                    stat = os.fstat(source.fileno())
+                    if (stat.st_size, stat.st_mtime_ns) != (
+                        record["size_bytes"],
+                        record["mtime_ns"],
+                    ):
                         raise HTTPException(409, "file_changed_rescan_required")
+                    signature = json.dumps([track_id, record, fingerprint(stat)], sort_keys=True)
                     with self.lock:
-                        if len(self.probes) >= 512:
-                            self.probes.clear()
-                        self.probes[signature] = observed
-        except (FileNotFoundError, NotADirectoryError) as error:
-            raise HTTPException(404, "audio_not_found") from error
-        except (OSError, MutagenError, ValueError, TypeError) as error:
-            raise HTTPException(409, "audio_unavailable") from error
+                        observed = self.probes.get(signature)
+                    if observed is None:
+                        audio = File(source)
+                        if isinstance(audio, FLAC):
+                            codec, lossless = "flac", True
+                        elif isinstance(audio, MP3):
+                            codec, lossless = "mp3", False
+                        elif isinstance(audio, MP4):
+                            codec = getattr(audio.info, "codec", "").lower()
+                            codec = "aac" if codec.startswith("mp4a") else codec
+                            lossless = codec == "alac"
+                            if codec not in {"aac", "alac", "ac-3", "ec-3", "opus", "mp3"}:
+                                raise HTTPException(409, "unsupported_audio_codec")
+                        else:
+                            raise HTTPException(409, "unsupported_audio_codec")
+                        duration = float(audio.info.length)
+                        if not math.isfinite(duration) or duration <= 0:
+                            raise HTTPException(409, "audio_unavailable")
+                        observed = {
+                            "codec": codec,
+                            "container": record["format"],
+                            "lossless": lossless,
+                            "bitrate_kbps": round(getattr(audio.info, "bitrate", 0) / 1000) or None,
+                            "sample_rate": getattr(audio.info, "sample_rate", None),
+                            "channels": getattr(audio.info, "channels", 2) or 2,
+                            "bit_depth": getattr(audio.info, "bits_per_sample", None),
+                            "duration_ms": round(duration * 1000),
+                        }
+                        if fingerprint(os.fstat(source.fileno())) != fingerprint(stat):
+                            raise HTTPException(409, "file_changed_rescan_required")
+                        with self.lock:
+                            if len(self.probes) >= 512:
+                                self.probes.clear()
+                            self.probes[signature] = observed
+            except (FileNotFoundError, NotADirectoryError) as error:
+                raise HTTPException(404, "audio_not_found") from error
+            except (OSError, MutagenError, ValueError, TypeError) as error:
+                raise HTTPException(409, "audio_unavailable") from error
         encode = format_name == "aac" and observed["lossless"]
         if encode and start_ms >= observed["duration_ms"]:
             raise HTTPException(416, "playback_position_out_of_range")
@@ -245,20 +277,22 @@ class Transcoding:
             if encode
             else ""
         )
-        return Plan(track_id, record, observed, target, offset, key, bitrate)
+        return Plan(track_id, record, observed, target, offset, key, bitrate, remote)
 
-    def book_plan(self, book_id, index, root, file, bitrate, start_ms):
+    def book_plan(self, book_id, index, root, file, bitrate, start_ms, *, remote=None):
         if bitrate not in RATES:
             raise HTTPException(422, "playback_bitrate_invalid")
         if start_ms >= file["duration_ms"]:
             raise HTTPException(416, "playback_position_out_of_range")
-        try:
-            with open_source(root, Path(file["managed_path"])) as source:
-                info = os.fstat(source.fileno())
-                if info.st_size != file["file_size"]:
-                    raise HTTPException(409, "file_changed_rescan_required")
-        except (OSError, ValueError) as error:
-            raise HTTPException(404, "audio_not_found") from error
+        info = None
+        if remote is None:
+            try:
+                with open_source(root, Path(file["managed_path"])) as source:
+                    info = os.fstat(source.fileno())
+                    if info.st_size != file["file_size"]:
+                        raise HTTPException(409, "file_changed_rescan_required")
+            except (OSError, ValueError) as error:
+                raise HTTPException(404, "audio_not_found") from error
         channels = file["channels"] or 2
         target = min(bitrate, 256 if channels == 1 else 320)
         key = hashlib.sha256(
@@ -268,7 +302,7 @@ class Transcoding:
                     book_id,
                     index,
                     file["sha256"],
-                    fingerprint(info),
+                    fingerprint(info) if info else [remote["remote_version"], remote["remote_md5"]],
                     start_ms,
                     target,
                     self.settings()["generation"],
@@ -281,14 +315,15 @@ class Transcoding:
                 "path": file["managed_path"],
                 "library_root": str(root),
                 "format": file["codec"],
-                "size_bytes": info.st_size,
-                "mtime_ns": info.st_mtime_ns,
+                "size_bytes": file["file_size"],
+                "mtime_ns": info.st_mtime_ns if info else None,
             },
             {"duration_ms": file["duration_ms"], "channels": channels, "codec": file["codec"]},
             target,
             start_ms,
             key,
             bitrate,
+            remote,
         )
 
     def cache_state(self, plan):
@@ -527,14 +562,22 @@ class Transcoding:
         process = None
         try:
             plan = entry.plan
+            if plan.remote is not None:
+                drive = self.remote_storage.accounts.drive(plan.remote["account_id"])
+                source_cache = self.remote_storage.cache
+                opened = drive.materialize(
+                    source_cache.object(plan.remote),
+                    partial(source_cache.materialize, row=plan.remote),
+                )
+            else:
+                opened = open_source(Path(plan.record["library_root"]), Path(plan.record["path"]))
             with (
-                open_source(Path(plan.record["library_root"]), Path(plan.record["path"])) as source,
+                opened as source,
                 TemporaryFile() as errors,
             ):
                 before = os.fstat(source.fileno())
-                if (before.st_size, before.st_mtime_ns) != (
-                    plan.record["size_bytes"],
-                    plan.record["mtime_ns"],
+                if before.st_size != plan.record["size_bytes"] or (
+                    plan.remote is None and before.st_mtime_ns != plan.record["mtime_ns"]
                 ):
                     raise ValueError("Source changed")
                 with entry.path.open("xb", buffering=0) as output:
@@ -611,6 +654,9 @@ class Transcoding:
                             (entry.key, entry.final.name, plan.track_id, entry.size, time.time()),
                         )
                     self._cache_epoch += 1
+        except DriveError as error:
+            entry.error, entry.retry_after, entry.purge = error.code, error.retry_after, True
+            self.remote_storage.accounts.record_failure(plan.remote["account_id"], error)
         except (
             OSError,
             ValueError,
@@ -636,6 +682,18 @@ class Transcoding:
 
     def response(self, plan, request):
         if not plan.bitrate:
+            if plan.remote is not None:
+                return self.remote_storage.response(
+                    "track",
+                    plan.track_id,
+                    plan.record["format"],
+                    request,
+                    library_id=plan.record["library_id"],
+                    headers={
+                        "X-Wildstring-Playback": "original",
+                        "X-Wildstring-Codec": plan.source["codec"],
+                    },
+                )
             return AudioResponse(
                 Path(plan.record["library_root"]),
                 plan.record,
@@ -743,6 +801,8 @@ class AACResponse(Response):
         try:
             await anyio.to_thread.run_sync(entry.ready.wait)
             if entry.error:
+                if entry.error.startswith("remote_storage_"):
+                    raise drive_http_error(DriveError(entry.error, retry_after=entry.retry_after))
                 raise HTTPException(503, entry.error)
             with ExitStack() as stack:
                 with self.service.lock:

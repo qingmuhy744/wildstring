@@ -13,10 +13,11 @@ export interface UploadItem {
 
 const SUPPORTED_EXTENSIONS = new Set(['.mp3', '.flac', '.m4a', '.lrc', '.lryc', '.txt']);
 
-function isSupportedFile(filename: string): boolean {
+function isSupportedFile(filename: string, cloud: boolean): boolean {
   const dot = filename.lastIndexOf('.');
   if (dot === -1) return false;
-  return SUPPORTED_EXTENSIONS.has(filename.slice(dot).toLowerCase());
+  const suffix = filename.slice(dot).toLowerCase();
+  return SUPPORTED_EXTENSIONS.has(suffix) || (cloud && (suffix === '.ogg' || suffix === '.opus'));
 }
 
 function formatBytes(bytes: number): string {
@@ -40,14 +41,15 @@ interface WebkitEntry {
 
 async function scanFileSystemEntry(
   entry: WebkitEntry,
-  currentPath = '',
+  currentPath: string,
+  cloud: boolean,
 ): Promise<{ file: File; relativePath: string }[]> {
   if (entry.isFile) {
     return new Promise((resolve) => {
       entry.file(
         (file: File) => {
           const relativePath = currentPath ? `${currentPath}/${file.name}` : file.name;
-          resolve(isSupportedFile(file.name) ? [{ file, relativePath }] : []);
+          resolve(isSupportedFile(file.name, cloud) ? [{ file, relativePath }] : []);
         },
         () => resolve([]),
       );
@@ -73,7 +75,7 @@ async function scanFileSystemEntry(
     const allChildren = await readBatch();
     const dirPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
     const subResults = await Promise.all(
-      allChildren.map((child) => scanFileSystemEntry(child, dirPath)),
+      allChildren.map((child) => scanFileSystemEntry(child, dirPath, cloud)),
     );
     return subResults.flat();
   }
@@ -82,9 +84,11 @@ async function scanFileSystemEntry(
 
 export function MusicUploader({
   canImport,
+  cloud = false,
   onUploaded,
 }: {
   canImport: boolean;
+  cloud?: boolean;
   onUploaded: () => void;
 }) {
   const { t } = useTranslation();
@@ -102,27 +106,30 @@ export function MusicUploader({
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSelectedFiles = useCallback((fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    const added: UploadItem[] = [];
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (isSupportedFile(file.name)) {
-        const relativePath =
-          (file as { webkitRelativePath?: string }).webkitRelativePath || file.name;
-        added.push({
-          id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`,
-          file,
-          relativePath,
-          status: 'pending',
-        });
+  const handleSelectedFiles = useCallback(
+    (fileList: FileList | null) => {
+      if (!fileList || fileList.length === 0) return;
+      const added: UploadItem[] = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (isSupportedFile(file.name, cloud)) {
+          const relativePath =
+            (file as { webkitRelativePath?: string }).webkitRelativePath || file.name;
+          added.push({
+            id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`,
+            file,
+            relativePath,
+            status: 'pending',
+          });
+        }
       }
-    }
-    if (added.length > 0) {
-      setItems((prev) => [...prev, ...added]);
-      setSummary(null);
-    }
-  }, []);
+      if (added.length > 0) {
+        setItems((prev) => [...prev, ...added]);
+        setSummary(null);
+      }
+    },
+    [cloud],
+  );
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
@@ -141,10 +148,10 @@ export function MusicUploader({
             item as unknown as { webkitGetAsEntry?: () => WebkitEntry | null }
           ).webkitGetAsEntry?.();
           if (entry) {
-            entryPromises.push(scanFileSystemEntry(entry));
+            entryPromises.push(scanFileSystemEntry(entry, '', cloud));
           } else {
             const file = item.getAsFile();
-            if (file && isSupportedFile(file.name)) {
+            if (file && isSupportedFile(file.name, cloud)) {
               collected.push({ file, relativePath: file.name });
             }
           }
@@ -154,7 +161,7 @@ export function MusicUploader({
       } else if (dataTransfer.files) {
         for (let i = 0; i < dataTransfer.files.length; i++) {
           const file = dataTransfer.files[i];
-          if (isSupportedFile(file.name)) {
+          if (isSupportedFile(file.name, cloud)) {
             collected.push({ file, relativePath: file.name });
           }
         }
@@ -171,7 +178,7 @@ export function MusicUploader({
         setSummary(null);
       }
     },
-    [canImport],
+    [canImport, cloud],
   );
 
   const startUpload = async () => {
@@ -184,12 +191,15 @@ export function MusicUploader({
     let errorCount = 0;
 
     const queue = [...items];
+    if (cloud) {
+      const lyric = (item: UploadItem) => /\.(lrc|lryc|txt)$/i.test(item.relativePath);
+      queue.sort((a, b) => Number(lyric(a)) - Number(lyric(b)));
+    }
     const updateItem = (id: string, patch: Partial<UploadItem>) => {
       setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
     };
 
-    // Upload with concurrency = 2
-    const concurrency = 2;
+    const concurrency = cloud ? 1 : 2;
     let cursor = 0;
 
     const uploadWorker = async () => {
@@ -218,6 +228,7 @@ export function MusicUploader({
           }>('/manage/library/upload', {
             method: 'POST',
             body: formData,
+            ...(cloud ? { timeoutMs: 0 } : {}),
           });
 
           if (res.status === 'duplicate') {
@@ -280,7 +291,7 @@ export function MusicUploader({
       <input
         ref={fileInputRef}
         type="file"
-        accept={[...SUPPORTED_EXTENSIONS].join(',')}
+        accept={[...SUPPORTED_EXTENSIONS, ...(cloud ? ['.ogg', '.opus'] : [])].join(',')}
         multiple
         style={{ display: 'none' }}
         onChange={(e) => {

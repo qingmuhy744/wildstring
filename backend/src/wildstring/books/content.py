@@ -36,7 +36,7 @@ VISIBLE = """(
 
 def book_record(db, identity, user):
     row = db.execute(
-        f"""SELECT b.*, l.managed_root FROM books b JOIN book_libraries l ON l.id=b.library_id
+        f"""SELECT b.*, l.managed_root, l.storage_backend FROM books b JOIN book_libraries l ON l.id=b.library_id
         WHERE b.id=? AND {VISIBLE}""",  # nosec B608
         (identity, user["profile"], user["id"]),
     ).fetchone()
@@ -62,7 +62,7 @@ def ebook_record(db, identity):
     return row
 
 
-def router(database, settings, auth, transcoding):
+def router(database, settings, auth, transcoding, remote_storage=None):
     router = APIRouter()
     service = Books(database, settings)
     read = Annotated[dict, Depends(dependency(auth, "books:read"))]
@@ -84,7 +84,7 @@ def router(database, settings, auth, transcoding):
         except OSError as error:
             raise HTTPException(404, "book_chapter_not_found") from error
 
-    def store_ebook(file, library, book_id=None):
+    def store_ebook(file, library, user, book_id=None):
         filename = file.filename or ""
         raw_suffix = validate_upload(filename, file.content_type or "", file.file.read(4096))
         suffix = next((ext for ext in sorted(EBOOK_SUFFIXES) if ext == raw_suffix), None)
@@ -92,6 +92,8 @@ def router(database, settings, auth, transcoding):
             raise HTTPException(422, "unsupported_ebook_format")
         file.file.seek(0)
         with service.write(library["id"]):
+            if library["storage_backend"] == "gdrive" and user["profile"] != "owner":
+                raise HTTPException(403, "owner_required")
             if book_id is not None:
                 with database.connect(scoped=False) as db:
                     existing = db.execute(
@@ -101,6 +103,9 @@ def router(database, settings, auth, transcoding):
                         raise HTTPException(404, "book_not_found")
                     if existing["has_ebook"]:
                         raise HTTPException(409, "book_ebook_already_attached")
+            if library["storage_backend"] == "gdrive":
+                binding = remote_storage.binding("books", library["id"])
+                return remote_storage.upload_book(binding, file, library, filename, book_id)
             path, _, _ = save_upload_to_temp(file, temporary, MAX_EBOOK_BYTES)
             try:
                 with path.open("rb") as stream:
@@ -116,12 +121,18 @@ def router(database, settings, auth, transcoding):
     def scan(library_id: str, user: manage):
         with database.connect(scoped=False) as db:
             library = library_record(db, library_id, user)
+        if library["storage_backend"] == "gdrive":
+            if user["profile"] != "owner":
+                raise HTTPException(403, "owner_required")
+            return remote_storage.synchronize("books", library_id)
         return service.scan(library)
 
     @router.post("/book-libraries/{library_id}/export-sidecars", dependencies=client)
     def export_sidecars(library_id: str, user: manage):
         with database.connect(scoped=False) as db:
             library = library_record(db, library_id, user)
+        if library["storage_backend"] == "gdrive":
+            raise HTTPException(409, "remote_storage_local_operation")
         with service.write(library["id"]):
             return {
                 "sidecars_written": export_books(
@@ -142,7 +153,7 @@ def router(database, settings, auth, transcoding):
     def default_upload_library(db_user):
         with database.connect(scoped=False) as db:
             existing = db.execute(
-                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy'"  # nosec B608
+                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy' AND l.storage_backend='local'"  # nosec B608
                 " ORDER BY l.created_at,l.id LIMIT 1",
                 (db_user["profile"], db_user["id"]),
             ).fetchone()
@@ -153,7 +164,7 @@ def router(database, settings, auth, transcoding):
         with database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute(
-                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy'"  # nosec B608
+                f"SELECT l.* FROM book_libraries l WHERE {VISIBLE} AND l.storage_mode='copy' AND l.storage_backend='local'"  # nosec B608
                 " ORDER BY l.created_at,l.id LIMIT 1",
                 (db_user["profile"], db_user["id"]),
             ).fetchone()
@@ -185,7 +196,7 @@ def router(database, settings, auth, transcoding):
                 library = library_record(db, requested_id, user)
         else:
             library = default_upload_library(user)
-        return {"id": store_ebook(file, library)}
+        return {"id": store_ebook(file, library, user)}
 
     @router.post("/books/{book_id}/ebook", dependencies=client, status_code=201)
     def attach_ebook(book_id: str, user: upload, file: Annotated[UploadFile, File()]):
@@ -194,7 +205,7 @@ def router(database, settings, auth, transcoding):
             library = library_record(db, book["library_id"], user)
             if book["has_ebook"]:
                 raise HTTPException(409, "book_ebook_already_attached")
-        return {"id": store_ebook(file, library, book["id"])}
+        return {"id": store_ebook(file, library, user, book["id"])}
 
     @router.get("/books/{book_id}/ebook/manifest")
     def manifest(book_id: str, user: read):
@@ -281,6 +292,16 @@ def router(database, settings, auth, transcoding):
             book = book_record(db, book_id, user)
             ebook = ebook_record(db, book_id)
         filename = quote(f"{book['title']}.{ebook['format']}", safe="")
+        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+        if book["storage_backend"] == "gdrive":
+            return remote_storage.response(
+                "book_ebook",
+                book_id,
+                ebook["format"],
+                request,
+                library_id=book["library_id"],
+                headers=headers,
+            )
         return AudioResponse(
             Path(book["managed_root"]),
             {
@@ -289,7 +310,7 @@ def router(database, settings, auth, transcoding):
                 "format": ebook["format"],
             },
             request,
-            {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+            headers,
         )
 
     @router.get("/books/{book_id}/audiobook")
@@ -328,9 +349,30 @@ def router(database, settings, auth, transcoding):
         if file is None:
             raise HTTPException(404, "audio_not_found")
         root = Path(book["managed_root"])
+        remote_id = f"{book_id}:{file_index}"
+        is_remote = book["storage_backend"] == "gdrive"
         if format == "aac":
-            plan = transcoding.book_plan(book_id, file_index, root, file, bitrate_kbps, start_ms)
+            remote = (
+                remote_storage.cache.ref(
+                    "book_audiobook_file", remote_id, library_id=book["library_id"]
+                )
+                if is_remote
+                else None
+            )
+            if is_remote and (remote is None or not remote["available"]):
+                raise HTTPException(404, "audio_not_found")
+            plan = transcoding.book_plan(
+                book_id, file_index, root, file, bitrate_kbps, start_ms, remote=remote
+            )
             return transcoding.response(plan, request)
+        if is_remote:
+            return remote_storage.response(
+                "book_audiobook_file",
+                remote_id,
+                file["codec"],
+                request,
+                library_id=book["library_id"],
+            )
         return AudioResponse(
             root,
             {
@@ -369,7 +411,10 @@ def router(database, settings, auth, transcoding):
                         target_book_id,
                     ),
                 )
-            export_books(database, Path(book["managed_root"]), book["library_id"], target_book_id)
+            if book["storage_backend"] == "local":
+                export_books(
+                    database, Path(book["managed_root"]), book["library_id"], target_book_id
+                )
         return {"id": target_book_id}
 
     @router.get("/books/{book_id}/cover")

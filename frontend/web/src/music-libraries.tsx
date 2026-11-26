@@ -4,6 +4,15 @@ import { api } from './api';
 import { selectLibrary, selectedLibrary } from './library-context';
 import { LibraryStorage } from './library-storage';
 import { FolderPicker } from './folder-picker';
+import {
+  createDriveLibrary,
+  defaultDriveDraft,
+  DriveFields,
+  DriveLibraryControls,
+  driveAccountChanged,
+  StorageBackendField,
+  type DriveBinding,
+} from './remote-storage';
 import './music-libraries.css';
 
 export interface MusicLibrary {
@@ -16,6 +25,8 @@ export interface MusicLibrary {
   sources?: { id: string; root: string; watch_enabled?: number }[];
   managed_root?: string;
   storage_mode?: 'copy' | 'hardlink';
+  storage_backend?: 'local' | 'gdrive';
+  remote?: DriveBinding;
 }
 
 export function LibrarySwitcher({
@@ -108,6 +119,8 @@ export function MusicLibraryManager() {
   const [folders, setFolders] = useState('');
   const [paused, setPaused] = useState<string[]>([]);
   const [managedRoot, setManagedRoot] = useState('');
+  const [backend, setBackend] = useState<'local' | 'gdrive'>('local');
+  const [drive, setDrive] = useState(defaultDriveDraft);
   const [storageMode, setStorageMode] = useState<'copy' | 'hardlink'>('copy');
   const [defaultAccess, setDefaultAccess] = useState(false);
   const [picker, setPicker] = useState<'source' | 'managed' | null>(null);
@@ -120,10 +133,22 @@ export function MusicLibraryManager() {
     return items;
   }
   useEffect(() => {
-    void load().catch((reason: Error) => setError(reason.message));
+    const refresh = () =>
+      void load()
+        .then((items) =>
+          setEditing((selected) =>
+            selected ? items.find((item) => item.id === selected.id) || null : null,
+          ),
+        )
+        .catch((reason: Error) => setError(reason.message));
+    refresh();
+    window.addEventListener(driveAccountChanged, refresh);
+    return () => window.removeEventListener(driveAccountChanged, refresh);
   }, []);
   function edit(item: MusicLibrary | null) {
     setEditing(item);
+    setBackend(item?.storage_backend || 'local');
+    setDrive(defaultDriveDraft);
     setName(item?.name || '');
     setDefaultAccess(item?.default_access ?? item?.is_default ?? false);
     setFolders(item?.sources?.map((s) => s.root).join('\n') || '');
@@ -138,27 +163,33 @@ export function MusicLibraryManager() {
     setError('');
     setNotice('');
     try {
-      await api(`/libraries${editing ? `/${editing.id}` : ''}`, {
-        method: editing ? 'PUT' : 'POST',
-        body: JSON.stringify({
-          name,
-          default_access: defaultAccess,
-          source_roots: folders
-            .split('\n')
-            .map((s) => s.trim())
-            .filter(Boolean),
-          paused_source_roots: paused.filter((root) =>
-            folders
+      if (!editing && backend === 'gdrive') {
+        const created = await createDriveLibrary(drive, name, 'music', defaultAccess);
+        const items = await load();
+        edit(items.find((item) => item.id === created.id) || null);
+      } else {
+        await api(`/libraries${editing ? `/${editing.id}` : ''}`, {
+          method: editing ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            name,
+            default_access: defaultAccess,
+            source_roots: folders
               .split('\n')
               .map((s) => s.trim())
-              .includes(root),
-          ),
-          ...(!editing && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
-          ...(editing ? { version: editing.version, enabled } : { storage_mode: storageMode }),
-        }),
-      });
-      edit(null);
-      await load();
+              .filter(Boolean),
+            paused_source_roots: paused.filter((root) =>
+              folders
+                .split('\n')
+                .map((s) => s.trim())
+                .includes(root),
+            ),
+            ...(!editing && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
+            ...(editing ? { version: editing.version, enabled } : { storage_mode: storageMode }),
+          }),
+        });
+        edit(null);
+        await load();
+      }
       setNotice(t('musicLibraries.savedNotice'));
       window.dispatchEvent(new Event('wildstring:libraries-updated'));
     } catch (reason) {
@@ -198,12 +229,14 @@ export function MusicLibraryManager() {
           <button type="button" key={item.id} onClick={() => edit(item)} disabled={busy}>
             <strong>{item.name}</strong>
             <span>
-              {t('musicLibraries.sourcesCount', {
-                count: item.sources?.length || 0,
-                status: item.enabled
-                  ? t('musicLibraries.statusEnabled')
-                  : t('musicLibraries.statusDisabled'),
-              })}
+              {item.storage_backend === 'gdrive'
+                ? 'Google Drive'
+                : t('musicLibraries.sourcesCount', {
+                    count: item.sources?.length || 0,
+                    status: item.enabled
+                      ? t('musicLibraries.statusEnabled')
+                      : t('musicLibraries.statusDisabled'),
+                  })}
               {item.is_default ? t('musicLibraries.defaultTag') : ''}
             </span>
           </button>
@@ -242,66 +275,74 @@ export function MusicLibraryManager() {
           <span>{t('musicLibraries.defaultAccessCheckbox')}</span>
         </label>
         <p className="muted">{t('musicLibraries.defaultAccessHint')}</p>
-        <div className="library-folder-heading">
-          <label htmlFor={`${id}-folders`}>{t('musicLibraries.sourceFoldersLabel')}</label>
-          <button type="button" disabled={busy} onClick={() => setPicker('source')}>
-            {t('musicLibraries.browseSourceFolders')}
-          </button>
-        </div>
-        <textarea
-          id={`${id}-folders`}
-          value={folders}
-          onChange={(event) => setFolders(event.target.value)}
-          required
-          rows={4}
-          disabled={busy}
-        />
-        <fieldset disabled={busy}>
-          <legend>{t('musicLibraries.watchFoldersLegend')}</legend>
-          {folders
-            .split('\n')
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((root, index) => (
-              <label className="music-library-grant-option" key={`${root}:${index}`}>
-                <input
-                  type="checkbox"
-                  checked={!paused.includes(root)}
-                  onChange={(e) =>
-                    setPaused(
-                      e.target.checked ? paused.filter((p) => p !== root) : [...paused, root],
-                    )
-                  }
-                />
-                <span className="storage-path">{root}</span>
-              </label>
-            ))}
-          <p className="muted">{t('musicLibraries.watchFoldersHint')}</p>
-        </fieldset>
-        {!editing && (
+        {!editing && <StorageBackendField value={backend} onChange={setBackend} disabled={busy} />}
+        {!editing && backend === 'gdrive' && (
+          <DriveFields draft={drive} onChange={setDrive} disabled={busy} />
+        )}
+        {backend === 'local' && (
           <>
-            <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
-            <select
-              id={`${id}-mode`}
-              value={storageMode}
-              disabled={busy}
-              onChange={(event) => setStorageMode(event.target.value as 'copy' | 'hardlink')}
-            >
-              <option value="copy">{t('bookshelf.copy')}</option>
-              <option value="hardlink">{t('bookshelf.hardlink')}</option>
-            </select>
-            <label htmlFor={`${id}-managed`}>{t('musicLibraries.managedDirLabel')}</label>
-            <input
-              id={`${id}-managed`}
-              value={managedRoot}
-              onChange={(e) => setManagedRoot(e.target.value)}
-              placeholder={t('musicLibraries.managedDirPlaceholder')}
+            <div className="library-folder-heading">
+              <label htmlFor={`${id}-folders`}>{t('musicLibraries.sourceFoldersLabel')}</label>
+              <button type="button" disabled={busy} onClick={() => setPicker('source')}>
+                {t('musicLibraries.browseSourceFolders')}
+              </button>
+            </div>
+            <textarea
+              id={`${id}-folders`}
+              value={folders}
+              onChange={(event) => setFolders(event.target.value)}
+              required
+              rows={4}
               disabled={busy}
             />
-            <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
-              {t('musicLibraries.browseManagedDir')}
-            </button>
-            <p className="muted">{t('musicLibraries.managedDirHint')}</p>
+            <fieldset disabled={busy}>
+              <legend>{t('musicLibraries.watchFoldersLegend')}</legend>
+              {folders
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .map((root, index) => (
+                  <label className="music-library-grant-option" key={`${root}:${index}`}>
+                    <input
+                      type="checkbox"
+                      checked={!paused.includes(root)}
+                      onChange={(e) =>
+                        setPaused(
+                          e.target.checked ? paused.filter((p) => p !== root) : [...paused, root],
+                        )
+                      }
+                    />
+                    <span className="storage-path">{root}</span>
+                  </label>
+                ))}
+              <p className="muted">{t('musicLibraries.watchFoldersHint')}</p>
+            </fieldset>
+            {!editing && (
+              <>
+                <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
+                <select
+                  id={`${id}-mode`}
+                  value={storageMode}
+                  disabled={busy}
+                  onChange={(event) => setStorageMode(event.target.value as 'copy' | 'hardlink')}
+                >
+                  <option value="copy">{t('bookshelf.copy')}</option>
+                  <option value="hardlink">{t('bookshelf.hardlink')}</option>
+                </select>
+                <label htmlFor={`${id}-managed`}>{t('musicLibraries.managedDirLabel')}</label>
+                <input
+                  id={`${id}-managed`}
+                  value={managedRoot}
+                  onChange={(e) => setManagedRoot(e.target.value)}
+                  placeholder={t('musicLibraries.managedDirPlaceholder')}
+                  disabled={busy}
+                />
+                <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
+                  {t('musicLibraries.browseManagedDir')}
+                </button>
+                <p className="muted">{t('musicLibraries.managedDirHint')}</p>
+              </>
+            )}
           </>
         )}
         <div className="music-library-actions">
@@ -348,7 +389,18 @@ export function MusicLibraryManager() {
           }}
         />
       )}
-      {editing && <LibraryStorage library={editing} onChanged={reread} />}
+      {editing?.remote ? (
+        <DriveLibraryControls
+          key={editing.id}
+          binding={editing.remote}
+          refresh={async () => {
+            const items = await load();
+            setEditing(items.find((item) => item.id === editing.id) || null);
+          }}
+        />
+      ) : (
+        editing && <LibraryStorage library={editing} onChanged={reread} />
+      )}
     </section>
   );
 }

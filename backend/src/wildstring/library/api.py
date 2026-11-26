@@ -28,7 +28,7 @@ class Track(BaseModel):
     track_number: int | None
     disc_number: int | None
     duration_ms: int
-    format: Literal["mp3", "flac", "m4a"]
+    format: Literal["mp3", "flac", "m4a", "ogg", "opus"]
     sample_rate: int | None
     channels: int | None
     has_cover: bool
@@ -343,6 +343,10 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             raise HTTPException(404, "track_not_found")
         if source["status"] != "available":
             raise HTTPException(409, "track_unavailable")
+        if source["storage_backend"] == "gdrive":
+            return request.app.state.remote_storage.response(
+                "track", track_id, source["format"], request, library_id=source["library_id"]
+            )
         return AudioResponse(repository.root, source, request)
 
     @router.get("/tracks/{track_id}/playback")

@@ -19,6 +19,7 @@ interface Library {
   name: string;
   default_access?: 'restricted' | 'all';
   storage_mode: 'copy' | 'hardlink';
+  ebook_upload_enabled?: boolean;
   version: number;
 }
 interface Candidate {
@@ -200,6 +201,7 @@ export function Bookshelf({
   }, [selected?.id, selected?.has_audiobook, selected?.has_ebook]);
 
   const selection = libraries.find((library) => library.id === libraryId);
+  const selectedLibrary = libraries.find((library) => library.id === selected?.library_id);
 
   function buildBooksQuery(offset: number) {
     const params = new URLSearchParams({ limit: String(BOOKS_PAGE_SIZE) });
@@ -605,7 +607,7 @@ export function Bookshelf({
       {!selected && (
         <header className="workspace-heading bookshelf-heading">
           <h1>{t('bookshelf.title')}</h1>
-          {canUpload && (
+          {canUpload && selection?.ebook_upload_enabled !== false && (
             <div className="bookshelf-heading-actions">
               <input
                 ref={uploadInputRef}
@@ -929,33 +931,35 @@ export function Bookshelf({
                   </div>
                 </div>
               )}
-              {canUpload && !selected.has_ebook && (
-                <div className="book-edit-row">
-                  <span className="book-edit-label">{t('bookshelf.ebook')}</span>
-                  <input
-                    ref={attachEbookInputRef}
-                    className="sr-only"
-                    type="file"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    accept=".epub,.txt,application/epub+zip,text/plain"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      event.currentTarget.value = '';
-                      if (file) void uploadEbookFile(file, selected);
-                    }}
-                  />
-                  <div className="book-edit-row-actions">
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => attachEbookInputRef.current?.click()}
-                    >
-                      {uploading ? t('bookshelf.uploading') : t('bookshelf.upload')}
-                    </button>
+              {canUpload &&
+                selectedLibrary?.ebook_upload_enabled !== false &&
+                !selected.has_ebook && (
+                  <div className="book-edit-row">
+                    <span className="book-edit-label">{t('bookshelf.ebook')}</span>
+                    <input
+                      ref={attachEbookInputRef}
+                      className="sr-only"
+                      type="file"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      accept=".epub,.txt,application/epub+zip,text/plain"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = '';
+                        if (file) void uploadEbookFile(file, selected);
+                      }}
+                    />
+                    <div className="book-edit-row-actions">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => attachEbookInputRef.current?.click()}
+                      >
+                        {uploading ? t('bookshelf.uploading') : t('bookshelf.upload')}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               {canUpload &&
                 ((selected.has_ebook && selected.has_audiobook) || pairableBooks.length > 0) && (
                   <div className="book-edit-row">

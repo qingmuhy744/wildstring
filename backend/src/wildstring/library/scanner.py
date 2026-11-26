@@ -50,6 +50,14 @@ def scan_library(
 
         settings = scoped_settings(settings, database)
         repository = LibraryRepository(database, settings.library_dir)
+        with database.connect() as db:
+            backend = db.execute(
+                "SELECT storage_backend FROM libraries WHERE id=?", (repository.library_id(),)
+            ).fetchone()
+        if backend is not None and backend[0] == "gdrive":
+            from fastapi import HTTPException
+
+            raise HTTPException(409, "remote_storage_local_operation")
         run_id = repository.begin_scan()
         if on_start is not None:
             on_start(run_id)

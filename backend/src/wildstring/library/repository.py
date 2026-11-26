@@ -1,6 +1,7 @@
 """Parameterized library persistence and query operations."""
 
 import json
+from contextlib import nullcontext
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -195,7 +196,9 @@ class LibraryRepository:
         mtime: int,
         run_id: str,
         sha256: str | None = None,
-    ) -> None:
+        *,
+        connection=None,
+    ) -> str:
         fields = asdict(metadata)
         fields.update(
             id=uuid4().hex,
@@ -221,7 +224,9 @@ class LibraryRepository:
         fields["album_id"] = album_key(
             self.library_id(), path, metadata.album, metadata.album_artists
         )
-        with self.database.connect(write=True) as connection:
+        with (
+            nullcontext(connection) if connection is not None else self.database.connect(write=True)
+        ) as connection:
             resolved_sha = sha256
             if resolved_sha is None:
                 imported = connection.execute(
@@ -270,6 +275,7 @@ class LibraryRepository:
                 (self.library_id(), path),
             ).fetchone()[0]
             observe(connection, track_id, asdict(metadata))
+            return track_id
 
     def mark_missing(self, run_id: str) -> int:
         with self.database.connect(write=True) as connection:
@@ -373,7 +379,7 @@ class LibraryRepository:
     def source(self, track_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT t.path,t.format,t.size_bytes,t.mtime_ns,t.sha256,t.status,t.library_id,l.root AS library_root "
+                "SELECT t.path,t.format,t.size_bytes,t.mtime_ns,t.sha256,t.status,t.library_id,l.storage_backend,l.root AS library_root "
                 "FROM tracks t JOIN libraries l ON l.id=t.library_id WHERE library_visible(t.library_id) AND t.id=?",
                 (track_id,),
             ).fetchone()

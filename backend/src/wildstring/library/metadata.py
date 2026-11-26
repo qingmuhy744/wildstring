@@ -11,6 +11,8 @@ from mutagen import File
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
+from mutagen.oggopus import OggOpus
+from mutagen.oggvorbis import OggVorbis
 from mutagen.wave import WAVE
 
 from wildstring.library.tag_fields import TagReader
@@ -44,9 +46,9 @@ def number(value: str | None) -> int | None:
     return int(match[1]) if match else None
 
 
-def read_metadata(source: BinaryIO, path: Path) -> Metadata:
-    audio = File(source)
-    if not isinstance(audio, MP3 | FLAC | MP4 | WAVE):
+def read_metadata(source: BinaryIO, path: Path, *, audio=None) -> Metadata:
+    audio = File(source) if audio is None else audio
+    if not isinstance(audio, MP3 | FLAC | MP4 | WAVE | OggOpus | OggVorbis):
         raise ValueError("Unsupported or invalid audio")
     tags = audio.tags or {}
     reader = TagReader(audio)
@@ -56,7 +58,7 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
             frame = tags.get(id3)
             raw = frame.text if frame is not None else []
         else:
-            raw = tags.get(vorbis if isinstance(audio, FLAC) else mp4, [])
+            raw = tags.get(vorbis if isinstance(audio, FLAC | OggOpus | OggVorbis) else mp4, [])
         return list(dict.fromkeys(text for value in raw if (text := str(value).strip())))
 
     def first(id3: str, vorbis: str, mp4: str) -> str | None:
@@ -77,6 +79,8 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
         format_name, cover = "wav", bool(audio.tags and audio.tags.getall("APIC"))
     elif isinstance(audio, FLAC):
         format_name, cover = "flac", bool(audio.pictures)
+    elif isinstance(audio, OggOpus | OggVorbis):
+        format_name, cover = path.suffix[1:], bool(tags.get("metadata_block_picture"))
     else:
         format_name, cover = "m4a", bool(tags.get("covr"))
     title = first("TIT2", "title", "\xa9nam")

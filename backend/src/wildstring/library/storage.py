@@ -172,6 +172,8 @@ class LibraryStorage:
         ).fetchone()
         if row is None:
             raise HTTPException(404, "book_library_not_found" if self.book else "library_not_found")
+        if row["storage_backend"] != "local":
+            raise HTTPException(409, "remote_storage_local_operation")
         return row
 
     def listing(self, library_id):

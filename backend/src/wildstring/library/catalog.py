@@ -38,9 +38,7 @@ def normalize_source_roots(values: list[str]) -> list[Path]:
 class LibraryInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=100)
-    source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(
-        min_length=1, max_length=32
-    )
+    source_roots: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(max_length=32)
     paused_source_roots: list[str] | None = Field(default=None, max_length=32)
     managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
     storage_mode: Literal["copy", "hardlink"] | None = None
@@ -61,6 +59,7 @@ class AccessUpdate(BaseModel):
 class LibraryCatalog:
     def __init__(self, database, settings):
         self.database, self.settings = database, settings
+        self.remote_storage = None
 
     def initialize(self):
         with self.database.connect(write=True) as db:
@@ -113,6 +112,10 @@ class LibraryCatalog:
                     (identity,),
                 )
             ]
+            if row["storage_backend"] == "gdrive" and self.remote_storage is not None:
+                remote = self.remote_storage.lookup(db, "music", identity)
+                if remote is not None:
+                    result["remote"] = self.remote_storage.binding_public(remote)
             return result
 
     def listing(self, user, include_disabled=False):
@@ -133,7 +136,10 @@ class LibraryCatalog:
         result = {k: record[k] for k in ("id", "name", "enabled", "is_default", "version")}
         result["enabled"] = bool(result["enabled"])
         result["is_default"] = bool(result["is_default"])
+        result["storage_backend"] = record.get("storage_backend", "local")
         if owner:
+            if "remote" in record:
+                result["remote"] = record["remote"]
             result["default_access"] = bool(record["default_access"])
             result["sources"] = record["sources"]
             result["managed_root"] = record["root"]
@@ -169,6 +175,11 @@ class LibraryCatalog:
         identity = identity or uuid4().hex
         old = None if creating else self.record(identity)
         root = Path(old["root"]) if old else self.settings.data_dir / "libraries" / identity
+        if old and old["storage_backend"] == "gdrive":
+            if body.source_roots or body.managed_root or body.storage_mode == "hardlink":
+                raise HTTPException(409, "remote_storage_local_operation")
+        elif not body.source_roots:
+            raise HTTPException(422, "library_source_invalid")
         if old and body.managed_root:
             try:
                 requested_root = normalize_absolute_path(

@@ -53,6 +53,7 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
     "browse-real.spec.ts": {"WILDSTRING_TEST_BROWSE_LIBRARY": "1"},
     "catalog-sort-real.spec.ts": {"WILDSTRING_TEST_DISC_LIBRARY": "1"},
     "transcoding.spec.ts": {"WILDSTRING_TEST_TRANSCODING": "1"},
+    "gdrive-storage.spec.ts": {"WILDSTRING_TEST_GDRIVE": "1"},
 }
 
 # Mapping from Web source file stems to primary Playwright specs
@@ -93,6 +94,7 @@ WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
         "track-availability.spec.ts",
     ],
     "library-storage": ["music-libraries.spec.ts", "music-rebind.spec.ts"],
+    "remote-storage": ["gdrive-storage.spec.ts"],
     "music-libraries": ["music-libraries.spec.ts", "music-rebind.spec.ts"],
     "music-rebind": ["music-rebind.spec.ts"],
     "track-file-info-dialog": ["track-file-info.spec.ts", "music-rebind.spec.ts"],

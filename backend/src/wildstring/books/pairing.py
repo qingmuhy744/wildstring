@@ -80,7 +80,7 @@ def _cleanup_empty_book_dir(root: Path, managed_dir: str) -> None:
         folder.rmdir()
 
 
-def move_carrier(db, root, source, target, carrier, published, retired):
+def move_carrier(db, root, source, target, carrier, published, retired, *, remote=False):
     table = "book_ebooks" if carrier == "ebook" else "book_audiobook_files"
     rows = db.execute(
         f"SELECT managed_path,link_mode,sha256 FROM {table} WHERE book_id=?",  # nosec B608
@@ -89,14 +89,34 @@ def move_carrier(db, root, source, target, carrier, published, retired):
     for row in rows:
         old = Path(row["managed_path"])
         destination = Path(target) / old.name
-        publish = link_exclusive if row["link_mode"] == "hardlink" else copy_exclusive
-        with open_source(root, old) as stream:
-            publish(stream, root, destination, row["sha256"])
-        published.append(root / destination)
-        retired.append(root / old)
+        if not remote:
+            publish = link_exclusive if row["link_mode"] == "hardlink" else copy_exclusive
+            with open_source(root, old) as stream:
+                publish(stream, root, destination, row["sha256"])
+            published.append(root / destination)
+            retired.append(root / old)
         db.execute(
             f"UPDATE {table} SET managed_path=? WHERE book_id=? AND managed_path=?",  # nosec B608
             (destination.as_posix(), source, old.as_posix()),
+        )
+    if remote and carrier == "ebook":
+        db.execute(
+            "UPDATE remote_media_objects SET entity_id=? WHERE entity_kind='book_ebook' AND entity_id=?",
+            (target, source),
+        )
+    elif remote:
+        db.execute(
+            """UPDATE remote_media_objects SET entity_id=? || substr(entity_id,?)
+               WHERE entity_kind='book_audiobook_file' AND entity_id LIKE ?""",
+            (target, len(source) + 1, f"{source}:%"),
+        )
+    if remote:
+        prefix = "book_ebook:" if carrier == "ebook" else "book_audiobook_file:"
+        matching = prefix + source + ("" if carrier == "ebook" else ":%")
+        db.execute(
+            """UPDATE remote_media_cache SET cache_key=? || substr(cache_key,?)
+               WHERE cache_key LIKE ?""",
+            (prefix + target, len(prefix + source) + 1, matching),
         )
     if carrier == "ebook":
         tables = ("book_ebooks", "book_ebook_chapters", "book_annotations")
@@ -122,6 +142,7 @@ def router(database, settings, auth):
     def pair(book_id: str, body: PairInput, user: manage):
         with database.connect(scoped=False) as db:
             first = book_record(db, book_id, user)
+        remote = first["storage_backend"] == "gdrive"
         target_id = first["id"]
         root = Path(first["managed_root"])
         published, retired = [], []
@@ -145,7 +166,9 @@ def router(database, settings, auth):
                     ):
                         raise HTTPException(409, "book_pair_invalid")
                     carrier = "ebook" if other["has_ebook"] else "audiobook"
-                    move_carrier(db, root, other_id, target_id, carrier, published, retired)
+                    move_carrier(
+                        db, root, other_id, target_id, carrier, published, retired, remote=remote
+                    )
                     # Migrate any remaining bookmarks/annotations on `other` too.
                     db.execute(
                         "UPDATE book_bookmarks SET book_id=? WHERE book_id=?",
@@ -204,13 +227,15 @@ def router(database, settings, auth):
                     path.unlink()
             if other_managed_dir:
                 _cleanup_empty_book_dir(root, other_managed_dir)
-            export_books(database, root, first["library_id"], target_id)
+            if not remote:
+                export_books(database, root, first["library_id"], target_id)
         return {"id": target_id}
 
     @router.post("/books/{book_id}/split", dependencies=client, status_code=201)
     def split(book_id: str, body: SplitInput, user: manage):
         with database.connect(scoped=False) as db:
             first = book_record(db, book_id, user)
+        remote = first["storage_backend"] == "gdrive"
         source_id = first["id"]
         root = Path(first["managed_root"])
         published, retired = [], []
@@ -235,7 +260,9 @@ def router(database, settings, auth):
                             tags_json,?,?,NULL,overrides_json,locked_fields_json,?,? FROM books WHERE id=?""",
                         (new_id, new_id, new_ebook, not new_ebook, stamp, stamp, source_id),
                     )
-                    move_carrier(db, root, source_id, new_id, body.carrier, published, retired)
+                    move_carrier(
+                        db, root, source_id, new_id, body.carrier, published, retired, remote=remote
+                    )
                     if first["cover_path"] and (
                         cover := read_asset(root, Path(first["cover_path"]), 8 * 1024 * 1024)
                     ):
@@ -257,8 +284,9 @@ def router(database, settings, auth):
             for path in retired:
                 with suppress(OSError):
                     path.unlink()
-            export_books(database, root, first["library_id"], source_id)
-            export_books(database, root, first["library_id"], new_id)
+            if not remote:
+                export_books(database, root, first["library_id"], source_id)
+                export_books(database, root, first["library_id"], new_id)
         return {"id": new_id, "original_id": source_id}
 
     return router

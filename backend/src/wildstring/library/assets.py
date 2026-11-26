@@ -235,6 +235,14 @@ class TrackAssets:
         return None
 
     def local_cover(self, track_id: str, size: int = 320) -> tuple[bytes, str] | None:
+        record = self.repository.source(track_id)
+        if record is not None and record["storage_backend"] == "gdrive":
+            with suppress(OSError):
+                if data := self.thumbnail(
+                    (self.cache / f"remote-{track_id}.jpg").read_bytes(), size
+                ):
+                    return data, "embedded"
+            return None
         relative, audio = self.source(track_id)
         embedded = []
         if isinstance(audio, FLAC):
@@ -273,7 +281,9 @@ class TrackAssets:
         current = self.repository.for_track(track_id)
         if current.root != self.repository.root:
             return TrackAssets(current).lyrics(track_id, include_override=include_override)
-        relative, audio = self.source(track_id)
+        record = self.repository.source(track_id)
+        remote = record is not None and record["storage_backend"] == "gdrive"
+        relative, audio = (Path(record["path"]), None) if remote else self.source(track_id)
         if include_override:
             with self.repository.database.connect() as connection:
                 row = connection.execute(
@@ -311,6 +321,12 @@ class TrackAssets:
                     )
                     if sidecar_lyrics is not None:
                         return sidecar_lyrics
+        if remote:
+            with self.repository.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT remote_text FROM track_lyrics WHERE track_id=?", (track_id,)
+                ).fetchone()
+            return parse_lyrics(row[0], "embedded") if row and row[0] else no_lyrics()
         for path in self.candidates(relative, [relative.stem], (".lrc", ".lryc")):
             data = self.read_sidecar(path, MAX_TEXT_BYTES)
             text = decode_text(data) if data is not None else None

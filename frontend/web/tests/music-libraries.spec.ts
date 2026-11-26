@@ -27,7 +27,7 @@ async function manage(page: Page) {
     await page.getByLabel('浏览方式', { exact: true }).selectOption('manage');
   } else await page.getByRole('button', { name: '管理中心', exact: true }).click();
   await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
-  await manageTab(page, '音乐库');
+  await manageTab(page, '存储与曲库');
   return page.getByRole('region', { name: '音乐库配置', exact: true });
 }
 
@@ -192,7 +192,7 @@ test('所有者创建多来源库、分配权限、停用时保留配置', async
   expect(
     (await (await page.request.get(`/api/v1/libraries/access/${user.id}`)).json()).library_ids,
   ).toEqual([saved.id]);
-  await manageTab(page, '音乐库');
+  await manageTab(page, '存储与曲库');
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
       localStorage.setItem('wildstring-theme', value);

@@ -40,6 +40,7 @@ from wildstring.providers import Providers
 from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
 from wildstring.server_settings import ConnectionSecurity, ServerSettings
 from wildstring.site_access import HostAllowlist, SiteAccess
+from wildstring.storage.service import RemoteStorage
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     server_settings = ServerSettings(database, current)
     transcoding = Transcoding(repository)
     providers = Providers(repository)
+    remote_storage = RemoteStorage(database, current, providers)
+    catalog.remote_storage = management.remote_storage = transcoding.remote_storage = remote_storage
     diagnostics = Diagnostics(current.data_dir)
     diagnostics.database = database
     diagnostics.repository = repository
@@ -167,6 +170,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.users_router())
     app.include_router(access.router(auth))
     app.include_router(server_settings.router(auth))
+    app.state.remote_storage = remote_storage
+    app.include_router(remote_storage.router(auth))
     app.state.transcoding = transcoding
     app.state.library_catalog = catalog
     app.state.podcasts = podcasts

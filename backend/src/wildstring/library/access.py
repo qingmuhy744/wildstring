@@ -28,6 +28,7 @@ EXEMPT_PREFIXES = (
     "manage/users",
     "podcasts",
     "libraries",
+    "remote-storage",
     "site-access",
     "manage/access",
     "settings",
