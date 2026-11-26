@@ -82,10 +82,10 @@ repos:
         files: ^frontend/web/.*\.(tsx?|json)$
         pass_filenames: false
       - id: i18n-keys
-        name: i18n key parity
+        name: i18n keys and references
         entry: python3 scripts/check_i18n_keys.py
         language: system
-        files: ^(frontend/web/src/locales/.*\.json|frontend/android/app/src/main/res/values(-zh)?/strings\.xml|frontend/(ios/WildString|macos/WildStringMac)/Localizable\.xcstrings|scripts/check_i18n_keys\.py)$
+        files: ^(frontend/web/src/.*\.(tsx?|json)|frontend/android/app/src/main/res/values(-zh)?/strings\.xml|frontend/(ios/WildString|macos/WildStringMac)/Localizable\.xcstrings|scripts/(check_i18n_keys\.py|web_i18n_references\.cjs))$
         pass_filenames: false
       - id: stale-web-tests
         name: Web stale test assertions

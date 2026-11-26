@@ -64,7 +64,7 @@ test('真实后端：纯规则巡检完成、任务回读和关闭的计划可�
   const panel = page.getByRole('region', { name: '曲库检查', exact: true });
   await panel.getByLabel('检查歌曲上限', { exact: true }).fill('1');
   await panel.getByRole('button', { name: '开始检查', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('检查已提交');
+  await expect(panel.getByRole('status').filter({ hasText: '检查已提交' })).toBeVisible();
   const detail = page.getByRole('article', { name: '检查任务详情' });
   await expect(detail).toContainText('已检查 1 / 1 首', { timeout: 15000 });
   const total = (await (await page.request.get('/api/v1/tracks')).json()).total;

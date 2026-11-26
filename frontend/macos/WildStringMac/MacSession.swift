@@ -321,6 +321,10 @@ final class MacSession {
             try? FileManager.default.removeItem(at: cacheDir)
             try? await queueStore.scoped(to: space).clear()
         }
+        let libraryPrefix = "mac.library.\(server.address)|"
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(libraryPrefix) {
+            defaults.removeObject(forKey: key)
+        }
         MacServers.remove(address: server.address, defaults: defaults)
         servers = MacServers.load(defaults: defaults)
         isBusy = false
@@ -439,7 +443,6 @@ final class MacSession {
 
     private func activate(client: WildstringClient, address: ServerAddress, username: String, routeProfile: ServerRoutes? = nil) async {
         let previousPage = page
-        let previousLibrary = selectedLibraryID
         let resume = routeProfile === routes && playback?.wantsPlayback == true
         let queueSnapshot = playback?.queue
         let positionSnapshot = playback?.currentTime ?? 0
@@ -483,11 +486,20 @@ final class MacSession {
             defaults: defaults
         )
         let libraryKey = "mac.library.\(primary.description)|\(username)"
-        if let library = defaults.string(forKey: libraryKey), !library.isEmpty {
-            client.selectLibrary(library)
-            selectedLibraryID = library
-        } else {
-            selectedLibraryID = nil
+        let savedLibrary = defaults.string(forKey: libraryKey)
+        client.selectLibrary(nil)
+        selectedLibraryID = nil
+        if let savedLibrary, !savedLibrary.isEmpty {
+            let available = try? await client.libraries()
+            guard self.client === client else { return }
+            if let available {
+                if available.contains(where: { $0.id == savedLibrary && $0.enabled }) {
+                    client.selectLibrary(savedLibrary)
+                    selectedLibraryID = savedLibrary
+                } else {
+                    defaults.removeObject(forKey: libraryKey)
+                }
+            }
         }
         playback.musicContinuationScope = { [weak client] in "\(username)|\(client?.selectedLibrary() ?? "")" }
         playback.loadCachedRecommendations = { [weak client] in
@@ -570,7 +582,7 @@ final class MacSession {
             await self.activate(client: candidate, address: address, username: username, routeProfile: controller)
         }
         phase = .connected(server: primary.description, username: username)
-        if sameServer { page = previousPage; selectLibrary(previousLibrary) }
+        if sameServer { page = previousPage }
         if resume { playback.resume() }
         if !sameServer { controller.start() }
     }

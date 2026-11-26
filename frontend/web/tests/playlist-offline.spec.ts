@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login, section } from './helpers';
+import { expect } from '@playwright/test';
+import { login, section, test } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
 
 test('歌单右击和更多菜单可编辑删除，自动下载受网络设置控制并保留默认音质', async ({
@@ -46,8 +46,91 @@ test('歌单右击和更多菜单可编辑删除，自动下载受网络设置�
     await panel.getByLabel('自动离线改名', { exact: true }).check();
     await expect(panel).toContainText('已选 1 个歌单');
     expect(requests).toHaveLength(0);
-    await panel.getByLabel('允许在移动数据或未知网络自动下载').check();
+    await page.evaluate(
+      async ({ track, error }) => {
+        await new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open('wildstring-offline-v1', 1);
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const db = open.result;
+            const transaction = db.transaction('tracks', 'readwrite');
+            transaction.objectStore('tracks').put({
+              key: `admin:${track.id}`,
+              userId: 'admin',
+              track,
+              state: 'paused',
+              bytes: 0,
+              total: 0,
+              blob: new Blob(),
+              updated: Date.now(),
+              automatic: true,
+              bitrate: 192,
+              error,
+            });
+            transaction.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            transaction.onerror = () => {
+              db.close();
+              reject(transaction.error);
+            };
+          };
+        });
+        window.dispatchEvent(new Event('wildstring:offline-updated'));
+      },
+      { track, error: 'Waiting for an allowed download network.' },
+    );
     await view('offline', '离线音乐');
+    const networkMessage = page.getByText('等待允许的下载网络。', { exact: true });
+    await expect(networkMessage).toBeVisible();
+    await page.getByRole('button', { name: '下载设置' }).click();
+
+    let releaseResponse = () => {};
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await page.route('**/api/v1/tracks/*/stream?*', async (route) => {
+      if (route.request().method() === 'GET') await responseGate;
+      await route.continue();
+    });
+    const started = page.waitForRequest(
+      (request) => request.method() === 'GET' && request.url().includes('bitrate_kbps=192'),
+    );
+    try {
+      await panel.getByLabel('允许在移动数据或未知网络自动下载').check();
+      await started;
+      await page.evaluate(() =>
+        Object.defineProperty(navigator, 'onLine', { value: false, configurable: true }),
+      );
+    } finally {
+      releaseResponse();
+    }
+    await view('offline', '离线音乐');
+    await expect(networkMessage).toBeVisible();
+    const storedError = await page.evaluate(async (id) => {
+      return await new Promise<string>((resolve, reject) => {
+        const open = indexedDB.open('wildstring-offline-v1', 1);
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('tracks').objectStore('tracks').get(`admin:${id}`);
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result.error);
+          };
+          request.onerror = () => {
+            db.close();
+            reject(request.error);
+          };
+        };
+      });
+    }, track.id);
+    expect(storedError).toBe('waiting_for_network');
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
+      window.dispatchEvent(new Event('online'));
+    });
     await expect(page.getByRole('region', { name: '离线音乐', exact: true })).toContainText(
       '已离线保存',
     );

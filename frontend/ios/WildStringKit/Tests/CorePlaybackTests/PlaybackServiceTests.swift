@@ -396,7 +396,7 @@ struct PlaybackServiceTests {
             )
         }
         service.adopt(items: items, startingAt: 1, position: 12.5, mode: "repeat_one")
-        var snapshot = service.playbackSnapshot()
+        var snapshot = try #require(service.playbackSnapshot())
         #expect(snapshot.trackIDs == ["t0", "t1"])
         #expect(snapshot.index == 1)
         #expect(snapshot.positionMs == 12_500)
@@ -404,12 +404,26 @@ struct PlaybackServiceTests {
         #expect(snapshot.playbackState == "paused")
 
         service.cycleRepeatMode()
-        snapshot = service.playbackSnapshot()
+        snapshot = try #require(service.playbackSnapshot())
         #expect(snapshot.mode == "sequential")
 
         service.toggleShuffle()
-        snapshot = service.playbackSnapshot()
+        snapshot = try #require(service.playbackSnapshot())
         #expect(snapshot.mode == "shuffle")
+    }
+
+    @Test func musicSnapshotSkipsPodcastQueueAndRemapsMusicIndex() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let items = ["t0", "podcast_ep_first", "t1"].map { id in
+            PlaybackService.Item(trackID: id, title: id, artist: "X", streamPath: "fixture/\(id)")
+        }
+        service.adopt(items: items, startingAt: 2, position: 5, mode: "sequential")
+        let snapshot = try #require(service.playbackSnapshot())
+        #expect(snapshot.trackIDs == ["t0", "t1"])
+        #expect(snapshot.index == 1)
+        service.adopt(items: items, startingAt: 1, position: 5, mode: "sequential")
+        #expect(service.playbackSnapshot() == nil)
     }
 
     @Test func playSetsQueueAndCurrentItem() async throws {

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 from xml.etree import ElementTree  # nosec B405
@@ -61,10 +62,26 @@ def compare(
     return problems
 
 
+def check_web_references(source: Path, keys: set[str]) -> list[str]:
+    parsed = subprocess.run(  # nosec B603 B607
+        ["node", str(ROOT / "scripts/web_i18n_references.cjs"), str(source)],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    return [
+        f"web: {Path(path).relative_to(source)}:{line}: '{key}' is missing from locales"
+        for path, line, key in json.loads(parsed.stdout)
+        if key not in keys and f"{key}_other" not in keys
+    ]
+
+
 def check_web() -> list[str]:
     en = flatten(json.loads((WEB / "en.json").read_text(encoding="utf-8")))
     zh = flatten(json.loads((WEB / "zh-CN.json").read_text(encoding="utf-8")))
-    return compare("web", "en.json", en, "zh-CN.json", zh, WEB_PLACEHOLDER)
+    return compare("web", "en.json", en, "zh-CN.json", zh, WEB_PLACEHOLDER) + check_web_references(
+        WEB.parent, en.keys() & zh.keys()
+    )
 
 
 def android_strings(path: Path) -> dict[str, str]:

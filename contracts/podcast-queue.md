@@ -141,13 +141,13 @@
 2026-11-07 首批（后端）：
 
 - schema 49 迁移完成，新增 `podcast_inbox`、`podcast_queue_state`、`podcast_queue_prefs`、`podcast_inbox_baseline`；老数据升级会为既有关注补写基线，避免首次刷新灌入历史单集。
-- 独立端点 `GET/PUT /podcasts/queue`、`/inbox`、`/queue/preferences` 与版本冲突 409 已实现；关注时写基线，RSS 刷新时按「服务端首次见到 guid」分发新集，自动入队上限溢出移入稍后听。
+- 独立端点 `GET/PUT /podcasts/queue`和 `/queue/preferences` 与版本冲突 409 已实现；关注时写基线，RSS 刷新时按「服务端首次见到 guid」分发新集，自动入队上限溢出移入稍后听。
 - `backend/tests/test_podcast_queue.py` 9 项通过；`test_podcast_follows.py`、`test_podcasts.py`、`test_podcast_progress.py`、`test_combined_feature_migrations.py` 共 28 项回归通过；改动文件 Ruff 检查通过。
 
 2026-11-07 第二批（四端客户端）：
 
 - Web 已撤销自动尾部写入队列。点播插到云端队首，加入待播、移除和自然播完会同步队列；自动续播只预览。稍后听、新集处理和冲突后的两个选择已有界面。`podcast-continuation.spec.ts` 与 `podcast-player.spec.ts` 在 desktop 与 mobile 共 30 项通过。冲突按钮、稍后听边界态、422 和权限不足没有单独截图验收。
-- Android 已接 inbox、queue 与 preferences。`PodcastQueueTest` 24 项通过，后端队列测试 10 项通过。待播拖拽把 rule 转为 manual、播放器里的只读自动续播预览，以及窄屏和主题截图未做。
+- Android 已接 queue 与 preferences。`PodcastQueueTest` 24 项通过，后端队列测试 10 项通过。待播拖拽把 rule 转为 manual、播放器里的只读自动续播预览，以及窄屏和主题截图未做。
 - macOS 与 iOS 共用 WildStringKit 的队列 API。`PodcastContinuation` 10 项、`PodcastQueue` 8 项通过。macOS 与 iOS 应用目标已能编译。macOS 全屏播放器有上一集、下一集和只读预览。iOS 正在播放页和 macOS 底栏没有上一集、下一集。没有截图。
 - 账号级偏好现在返回并保存 `auto_continue`，避免后续 PUT 把全局开关重置为 true。
 

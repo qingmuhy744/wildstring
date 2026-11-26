@@ -7,11 +7,13 @@ public struct AudioRangeFetcher: Sendable {
         public var data: Data
         public var totalLength: Int64?
         public var contentType: String?
+        public var etag: String? = nil
     }
 
     public struct Probe: Sendable {
         public var totalLength: Int64?
         public var contentType: String?
+        public var etag: String? = nil
     }
 
     private let server: ServerAddress
@@ -33,33 +35,61 @@ public struct AudioRangeFetcher: Sendable {
             let (_, response) = try await send(path: path, method: "HEAD", range: nil)
             return Probe(
                 totalLength: Self.contentLength(of: response) ?? Self.totalLength(of: response),
-                contentType: response.value(forHTTPHeaderField: "Content-Type")
+                contentType: response.value(forHTTPHeaderField: "Content-Type"),
+                etag: response.value(forHTTPHeaderField: "ETag")
             )
         } catch let error as APIError where error.statusCode == 405 {
             let chunk = try await fetch(path: path, offset: 0, length: 1)
             return Probe(
                 totalLength: chunk.totalLength,
-                contentType: chunk.contentType
+                contentType: chunk.contentType,
+                etag: chunk.etag
             )
         }
     }
 
     public func fetch(path: String, offset: Int64, length: Int64) async throws -> Chunk {
+        guard offset >= 0 else { throw URLError(.badServerResponse) }
         let range: String
         if length <= 0 || length == Int64.max {
             range = "bytes=\(offset)-"
         } else {
-            range = "bytes=\(offset)-\(offset + length - 1)"
+            let (end, overflow) = offset.addingReportingOverflow(length - 1)
+            guard !overflow else { throw URLError(.badServerResponse) }
+            range = "bytes=\(offset)-\(end)"
         }
         let (data, response) = try await send(path: path, method: "GET", range: range)
+        let totalLength: Int64?
+        switch response.statusCode {
+        case 206:
+            let header = response.value(forHTTPHeaderField: "Content-Range") ?? ""
+            let fields = header.dropFirst(6).split(separator: "/", omittingEmptySubsequences: false)
+            guard header.hasPrefix("bytes "), fields.count == 2 else {
+                throw URLError(.badServerResponse)
+            }
+            let bounds = fields[0].split(separator: "-", omittingEmptySubsequences: false)
+            guard bounds.count == 2, Int64(bounds[0]) == offset, let end = Int64(bounds[1]),
+                !data.isEmpty, end >= offset, end - offset == Int64(data.count) - 1
+            else { throw URLError(.badServerResponse) }
+            totalLength = Int64(fields[1])
+            guard (totalLength.map { $0 > end } ?? (fields[1] == "*")) else {
+                throw URLError(.badServerResponse)
+            }
+        case 200 where offset == 0:
+            totalLength = Int64(data.count)
+        default:
+            // A full response starts at byte zero even if the request asked for a later range.
+            throw URLError(.badServerResponse)
+        }
         var body = data
         if length > 0, length != Int64.max, Int64(body.count) > length {
             body = body.prefix(Int(length))
         }
         return Chunk(
             data: body,
-            totalLength: Self.totalLength(of: response),
-            contentType: response.value(forHTTPHeaderField: "Content-Type")
+            totalLength: totalLength,
+            contentType: response.value(forHTTPHeaderField: "Content-Type"),
+            etag: response.value(forHTTPHeaderField: "ETag")
         )
     }
 
@@ -67,7 +97,8 @@ public struct AudioRangeFetcher: Sendable {
         path: String,
         method: String,
         range: String?
-    ) async throws -> (Data, HTTPURLResponse) {        var request = URLRequest(url: server.appending(path: path))
+    ) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: server.appending(path: path))
         request.httpMethod = method
         request.timeoutInterval = 60
         request.setValue("*/*", forHTTPHeaderField: "Accept")

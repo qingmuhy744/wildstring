@@ -22,6 +22,23 @@ final class PlaybackSharingTests: XCTestCase {
         XCTAssertFalse(playback.wantsPlayback)
     }
 
+    func testFailedMusicPublishKeepsErrorVisibleToPresentation() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "wildstring.handoff.\(UUID().uuidString)"))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HandoffProtocol.self]
+        let server = try ServerAddress(input: "handoff.example.invalid")
+        let client = WildstringClient(server: server, store: InMemorySessionStore(), configuration: configuration)
+        let playback = PlaybackService(server: server, store: InMemoryQueueStore(), cookieHeader: { nil })
+        defer { playback.shutdown() }
+        let item = PlaybackService.Item(trackID: "t1", title: "Track", artist: "X", streamPath: "fixture/t1")
+        playback.adopt(items: [item], startingAt: 0, position: 5, mode: "sequential")
+        let sharing = PlaybackSharingModel(client: client, playback: playback, defaults: defaults)
+        await sharing.publishCurrent()
+        XCTAssertNotNil(sharing.message)
+        sharing.dismissMessage()
+        XCTAssertNil(sharing.message)
+    }
+
     func testLongSharedQueueOffersAndAdoptsSelectedWindow() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "wildstring.handoff.\(UUID().uuidString)"))
         let configuration = URLSessionConfiguration.ephemeral
@@ -50,17 +67,23 @@ private final class HandoffProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let url = request.url!
         let body: Data
-        if url.path == "/api/v1/playback/state" {
+        let status: Int
+        if request.httpMethod == "PUT" {
+            status = 503
+            body = Data(#"{"detail":"unavailable"}"#.utf8)
+        } else if url.path == "/api/v1/playback/state" {
+            status = 200
             body = try! JSONSerialization.data(withJSONObject: [
                 "version": 5, "device_id": "remote", "track_ids": (0..<450).map { "t\($0)" },
                 "index": 300, "position_ms": 42500, "mode": "sequential", "playback_state": "paused",
                 "paused_at": "2026-11-19T00:00:00Z", "handoff_eligible": true
             ])
         } else {
+            status = 200
             let id = url.lastPathComponent
             body = Data(#"{"id":"\#(id)","title":"\#(id)","artists":[],"album":null,"duration_ms":1000,"has_cover":false}"#.utf8)
         }
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)

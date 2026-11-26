@@ -1256,7 +1256,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   </div>
                 )}
               </div>
-              <PodcastDeliverySelect showId={selectedPodcast.id} />
+              <PodcastDeliverySelect key={selectedPodcast.id} showId={selectedPodcast.id} />
             </div>
           </div>
 

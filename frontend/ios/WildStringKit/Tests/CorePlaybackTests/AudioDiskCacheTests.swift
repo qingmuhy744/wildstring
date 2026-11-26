@@ -121,6 +121,48 @@ struct AudioDiskCacheTests {
         #expect(trimmed == nil)
     }
 
+    @Test(arguments: [true, false])
+    func changedRepresentationEvictsEveryRangeAfterReopening(changeETag: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio-cache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AudioDiskCache(directory: directory, limitBytes: 1000)
+        for offset in [Int64(0), 50] {
+            try await cache.store(
+                key: "t1", offset: offset, data: Data(repeating: 1, count: 10),
+                totalLength: 100, contentType: "audio/mpeg", etag: "\"old\""
+            )
+        }
+        let reopened = AudioDiskCache(directory: directory, limitBytes: 1000)
+        let same = AudioRangeFetcher.Probe(totalLength: 100, contentType: nil, etag: "\"old\"")
+        let valid = await reopened.cachedChunk(key: "t1", offset: 0, length: 10, matching: same)
+        #expect(valid != nil)
+        let changed = AudioRangeFetcher.Probe(
+            totalLength: changeETag ? 100 : 120, contentType: nil,
+            etag: changeETag ? "\"new\"" : "\"old\""
+        )
+        let invalid = await reopened.cachedChunk(key: "t1", offset: 0, length: 10, matching: changed)
+        let oldTail = await reopened.cachedChunk(key: "t1", offset: 50, length: 10)
+        let stats = await reopened.stats()
+        #expect(invalid == nil)
+        #expect(oldTail == nil)
+        #expect(stats.trackCount == 0)
+    }
+
+    @Test func storeCannotCombineRangesFromDifferentRevisions() async throws {
+        let cache = try makeCache()
+        try await cache.store(
+            key: "t1", offset: 0, data: Data([1]), totalLength: 100, contentType: nil, etag: "old"
+        )
+        try await cache.store(
+            key: "t1", offset: 1, data: Data([2]), totalLength: 100, contentType: nil, etag: "new"
+        )
+        let combined = await cache.cachedChunk(key: "t1", offset: 0, length: 2)
+        #expect(combined == nil)
+        let fresh = await cache.cachedChunk(key: "t1", offset: 1, length: 1)
+        #expect(fresh?.data == Data([2]))
+    }
+
     @Test func clearRemovesEverything() async throws {
         let cache = try makeCache()
         try await cache.store(

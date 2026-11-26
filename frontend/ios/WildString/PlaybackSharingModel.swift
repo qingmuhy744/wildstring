@@ -23,8 +23,8 @@ final class PlaybackSharingModel {
     let deviceId: String
 
     private var lastSeenVersion: Int
-    private var lastPublishedAt = Date.distantPast
     private var lastSnapshot: PlaybackSnapshot?
+    private var publishRevision = 0
     private var dismissedVersion: Int?
     private var task: Task<Void, Never>?
     private var isWorking = false
@@ -90,49 +90,49 @@ final class PlaybackSharingModel {
     /// issues `handoff_eligible`; this client only records playing / paused /
     /// ended so other devices can retract stale offers.
     func publishCurrent() async {
-        guard mode != "off", !playback.items.isEmpty else { return }
-        let snapshot = playback.playbackSnapshot()
-        if let last = lastSnapshot, last == snapshot {
+        guard mode != "off", let snapshot = playback.playbackSnapshot(),
+            lastSnapshot != snapshot
+        else { return }
+        publishRevision += 1
+        let revision = publishRevision
+        do {
+            let savedVersion: Int
+            do {
+                savedVersion = try await save(snapshot: snapshot, version: lastSeenVersion)
+            } catch let error as APIError where error.statusCode == 409 {
+                let latest = try await client.playbackState()
+                guard revision == publishRevision else { return }
+                savedVersion = try await save(snapshot: snapshot, version: latest.version)
+            }
+            guard revision == publishRevision else { return }
+            recordVersion(savedVersion)
+            lastSnapshot = snapshot
+            message = nil
+        } catch is CancellationError {
             return
-        }
-        if await save(snapshot: snapshot, version: lastSeenVersion) {
-            finishPublish(snapshot)
-            return
-        }
-        guard let latest = try? await client.playbackState() else { return }
-        recordVersion(latest.version)
-        if await save(snapshot: snapshot, version: latest.version) {
-            finishPublish(snapshot)
+        } catch {
+            guard revision == publishRevision else { return }
+            message = L10n("playbackShare.saveFailed")
         }
     }
 
-    private func finishPublish(_ snapshot: PlaybackSnapshot) {
-        lastPublishedAt = Date()
-        lastSnapshot = snapshot
+    func dismissMessage() {
         message = nil
     }
 
-    private func save(snapshot: PlaybackSnapshot, version: Int) async -> Bool {
-        do {
-            let saved = try await client.savePlaybackState(
-                RemotePlaybackState(
-                    version: version,
-                    deviceId: deviceId,
-                    trackIds: snapshot.trackIDs,
-                    index: snapshot.index,
-                    positionMs: snapshot.positionMs,
-                    mode: snapshot.mode,
-                    playbackState: snapshot.playbackState
-                )
+    private func save(snapshot: PlaybackSnapshot, version: Int) async throws -> Int {
+        let saved = try await client.savePlaybackState(
+            RemotePlaybackState(
+                version: version,
+                deviceId: deviceId,
+                trackIds: snapshot.trackIDs,
+                index: snapshot.index,
+                positionMs: snapshot.positionMs,
+                mode: snapshot.mode,
+                playbackState: snapshot.playbackState
             )
-            recordVersion(saved.version)
-            return true
-        } catch let error as APIError where error.statusCode == 409 {
-            return false
-        } catch {
-            message = L10n("playbackShare.saveFailed")
-            return true
-        }
+        )
+        return saved.version
     }
 
     private func recordVersion(_ version: Int) {

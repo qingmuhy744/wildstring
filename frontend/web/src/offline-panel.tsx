@@ -13,6 +13,7 @@ import {
 import { Cover } from './cover';
 import {
   offlineLimit,
+  offlineErrorMessage,
   offlineTracks,
   pauseDownload,
   removeDownload,
@@ -168,7 +169,7 @@ export function OfflinePanel({
                   ? `AAC ${record.bitrate} kbps`
                   : t('offlinePanel.originalQuality')}
               </p>
-              {record.error && <p className="error">{record.error}</p>}
+              {record.error && <p className="error">{offlineErrorMessage(record.error)}</p>}
               {record.total > 0 && record.state !== 'complete' && (
                 <progress
                   aria-label={t('offlinePanel.trackProgressAria', { title: record.track.title })}

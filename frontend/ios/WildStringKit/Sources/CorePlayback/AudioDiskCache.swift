@@ -30,6 +30,7 @@ public actor AudioDiskCache {
         var lastAccess: Date
         var totalLength: Int64?
         var contentType: String?
+        var etag: String?
     }
 
     struct Index: Codable {
@@ -52,10 +53,32 @@ public actor AudioDiskCache {
         self.limitBytes = max(0, limitBytes)
     }
 
-    public func cachedChunk(key: String, offset: Int64, length: Int64) -> CachedChunk? {
-        guard length > 0, length <= Self.maximumChunkBytes else { return nil }
+    func contains(_ key: String) -> Bool { load().tracks[key] != nil }
+
+    func validate(_ key: String, matching probe: AudioRangeFetcher.Probe) {
+        var index = load()
+        if let track = index.tracks[key], !Self.matches(track, probe: probe) {
+            try? evict(key, track: track, index: &index)
+        }
+    }
+
+    private static func matches(_ track: Track, probe: AudioRangeFetcher.Probe) -> Bool {
+        probe.etag != nil && probe.totalLength != nil
+            && track.etag == probe.etag && track.totalLength == probe.totalLength
+    }
+
+    public func cachedChunk(
+        key: String, offset: Int64, length: Int64, matching probe: AudioRangeFetcher.Probe? = nil
+    ) -> CachedChunk? {
+        guard offset >= 0, length > 0, length <= Self.maximumChunkBytes,
+            offset <= Int64.max - length
+        else { return nil }
         var index = load()
         guard var track = index.tracks[key] else { return nil }
+        if let probe, !Self.matches(track, probe: probe) {
+            try? evict(key, track: track, index: &index)
+            return nil
+        }
         let covered = Self.coverage(in: track.ranges, offset: offset, length: length)
         guard covered >= length else { return nil }
         let fileURL = filesDirectory.appendingPathComponent(track.file)
@@ -82,11 +105,18 @@ public actor AudioDiskCache {
         offset: Int64,
         data: Data,
         totalLength: Int64?,
-        contentType: String?
+        contentType: String?,
+        etag: String? = nil
     ) throws {
-        guard limitBytes > 0 else { return }
-        guard !data.isEmpty, Int64(data.count) <= Self.maximumChunkBytes else { return }
+        guard limitBytes > 0, offset >= 0, !data.isEmpty,
+            Int64(data.count) <= Self.maximumChunkBytes,
+            offset <= Int64.max - Int64(data.count),
+            totalLength.map({ offset + Int64(data.count) <= $0 }) ?? true
+        else { return }
         var index = load()
+        if let old = index.tracks[key], old.etag != etag || old.totalLength != totalLength {
+            try evict(key, track: old, index: &index)
+        }
         var track =
             index.tracks[key]
             ?? Track(
@@ -94,8 +124,9 @@ public actor AudioDiskCache {
                 ranges: [],
                 size: 0,
                 lastAccess: Date(),
-                totalLength: nil,
-                contentType: nil
+                totalLength: totalLength,
+                contentType: nil,
+                etag: etag
             )
         let covered = Self.coverage(in: track.ranges, offset: offset, length: Int64(data.count))
         let added = Int64(data.count) - covered
@@ -117,7 +148,6 @@ public actor AudioDiskCache {
             track.ranges + [Range(start: offset, length: Int64(data.count))]
         )
         track.size += added
-        if let totalLength { track.totalLength = totalLength }
         if let contentType { track.contentType = contentType }
         track.lastAccess = Date()
         index.tracks[key] = track
@@ -161,6 +191,16 @@ public actor AudioDiskCache {
         }
         index = loaded
         return loaded
+    }
+
+    private func evict(_ key: String, track: Track, index: inout Index) throws {
+        let file = filesDirectory.appendingPathComponent(track.file)
+        if FileManager.default.fileExists(atPath: file.path) {
+            try FileManager.default.removeItem(at: file)
+        }
+        index.tracks.removeValue(forKey: key)
+        self.index = index
+        try save(index)
     }
 
     private func save(_ index: Index) throws {

@@ -620,18 +620,6 @@
     "home": "野弦首页",
     "name": "野弦"
   },
-  "catalogGapCard": {
-    "coveragePercent": "{{percent}}% 收录",
-    "emptyMatched": "本地曲库尚未收录该歌手的歌曲",
-    "emptyMissing": "🎉 完美！该歌手榜单代表作已全数收录！",
-    "playButton": "▶ 播放",
-    "playTrackTitle": "播放此歌曲",
-    "statusMissing": "暂缺",
-    "subtitle": "全网权威代表作比对",
-    "tabMatched": "已收录 ({{count}})",
-    "tabMissing": "待补齐 ({{count}})",
-    "title": "{{artist}} · 全网榜单曲库查漏补缺"
-  },
   "catalogSort": {
     "added_at": "入库时间",
     "ariaLabel": "列表排序",
@@ -666,6 +654,7 @@
     "tracks": "歌曲"
   },
   "common": {
+    "loading": "正在加载…",
     "discardUnsavedChanges": "放弃未保存的更改？",
     "actionError": "操作未完成，请重试。",
     "actions": "{{label}}的操作",
@@ -3082,6 +3071,7 @@
     "unfollowedNotice": "已取消关注，自动下载暂停。重新关注后恢复此设置。"
   },
   "podcastDownloads": {
+    "retrySingle": "重试",
     "activeCountSummary": "{{active}} 集正在下载 · {{queued}} 集等待中",
     "clearCompletedNotice": "已清除完成记录，下载的音频仍保留",
     "clearRecords": "清除记录",
@@ -3911,7 +3901,6 @@
     "emptyHint": "从歌曲操作中加入队列，或直接播放曲库。",
     "moveDownIndex": "下移队列第 {{index}} 首",
     "moveUpIndex": "上移队列第 {{index}} 首",
-    "nextEpisode": "下一集",
     "noMoreEpisodes": "当前节目没有更多可自动续播的单集。",
     "orderAdjusted": "已调整播放顺序",
     "orderAria": "播客续播顺序",
@@ -4046,12 +4035,6 @@
       "model": "模型步骤未完成，可查看连接状态后重试。",
       "other": "本次来源查询未完成，已保留其他可用结果。"
     }
-  },
-  "roles": {
-    "editor": "资料编辑员",
-    "librarian": "曲库管理员",
-    "listener": "听众",
-    "owner": "所有者"
   },
   "serverSettings": {
     "description": "给音乐库所在的服务器起一个名字。页面保存的设置优先于环境配置，重启后仍然保留。",

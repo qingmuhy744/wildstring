@@ -12,7 +12,7 @@ import {
   saveShowDelivery,
   type NewEpisodeAction,
   type QueuePreferences,
-  type RemoteQueue,
+  type QueueWriteResult,
 } from './podcast-remote';
 
 const ACTION_KEYS: { value: NewEpisodeAction; key: string }[] = [
@@ -68,6 +68,7 @@ export function PodcastDeliverySelect({ showId }: { showId: string }) {
   const [limit, setLimit] = useState(3);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadKey, setReloadKey] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -88,31 +89,42 @@ export function PodcastDeliverySelect({ showId }: { showId: string }) {
 
   async function save(nextAction: NewEpisodeAction, nextLimit: number) {
     const bounded = Math.max(1, Math.min(100, Number.isFinite(nextLimit) ? nextLimit : 3));
+    if (saving) return;
+    setSaving(true);
     setAction(nextAction);
     setLimit(bounded);
     try {
       await saveShowDelivery(showId, nextAction, bounded);
       setStatus('ready');
     } catch {
+      setAction(action);
+      setLimit(limit);
       setStatus('error');
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <div className="podcast-delivery" aria-busy={status === 'loading'}>
+    <div className="podcast-delivery" aria-busy={status === 'loading' || saving}>
       {status === 'loading' ? (
         <p role="status">{t('podcastInbox.readingDelivery')}</p>
       ) : (
         <ActionSelect
           label={t('podcastInbox.deliveryLabel')}
           value={action}
+          disabled={saving}
           onChange={(value) => void save(value, limit)}
         />
       )}
       {status === 'error' && (
         <p className="podcast-settings-error" role="alert">
           {t('podcastInbox.saveDeliveryFailed')}
-          <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => setReloadKey((value) => value + 1)}
+          >
             {t('podcastInbox.retry')}
           </button>
         </p>
@@ -217,13 +229,14 @@ export function PodcastInboxDialog({
   const [showLimits, setShowLimits] = useState<Record<string, number>>({});
   const [selectedShows, setSelectedShows] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [savingShow, setSavingShow] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [problem, setProblem] = useState('');
   const [queueFull, setQueueFull] = useState(false);
   const pointerDrag = useRef<number | null>(null);
   const loadGeneration = useRef(0);
 
-  async function load(savedQueue?: RemoteQueue) {
+  async function load(savedQueue?: QueueWriteResult) {
     const generation = ++loadGeneration.current;
     if (!savedQueue) setStatus('loading');
     setProblem('');
@@ -313,7 +326,7 @@ export function PodcastInboxDialog({
 
   useEffect(() => {
     const synced = (event: Event) => {
-      void load((event as CustomEvent<RemoteQueue>).detail);
+      void load((event as CustomEvent<QueueWriteResult>).detail);
     };
     window.addEventListener('wildstring:podcast-queue-saved', synced);
     return () => window.removeEventListener('wildstring:podcast-queue-saved', synced);
@@ -362,7 +375,7 @@ export function PodcastInboxDialog({
     const previous = rows;
     const next = [...rows];
     const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+    next.splice(to, 0, { ...moved, origin: 'manual' });
     setRows(next);
     setProblem('');
     try {
@@ -370,13 +383,12 @@ export function PodcastInboxDialog({
         queueVersion,
         next.map((item) => ({
           episode_id: item.episode_id,
-          origin: 'manual' as const,
+          origin: item.origin,
           added_at: item.addedAt,
         })),
       );
       setQueueVersion(saved.version);
       window.dispatchEvent(new CustomEvent('wildstring:podcast-queue-updated', { detail: saved }));
-      setRows(next.map((item) => ({ ...item, origin: 'manual' as const })));
     } catch {
       setRows(previous);
       setProblem(t('podcastInbox.reorderFailed'));
@@ -409,18 +421,25 @@ export function PodcastInboxDialog({
   }
 
   async function updateShowDelivery(showId: string, nextAction: NewEpisodeAction) {
+    if (savingShow || bulkBusy) return;
     const limit = showLimits[showId] ?? defaultLimit;
+    const previous = showActions[showId] ?? defaultAction;
+    setSavingShow(true);
+    setProblem('');
     setShowActions((current) => ({ ...current, [showId]: nextAction }));
     try {
       await saveShowDelivery(showId, nextAction, limit);
     } catch {
+      setShowActions((current) => ({ ...current, [showId]: previous }));
       setProblem(t('podcastInbox.saveShowDeliveryFailed'));
+    } finally {
+      setSavingShow(false);
     }
   }
 
   /** Applies one action to every selected show at once; rows that fail roll back individually. */
   async function updateSelectedDelivery(nextAction: NewEpisodeAction) {
-    if (!selectedShows.length || bulkBusy) return;
+    if (!selectedShows.length || bulkBusy || savingShow) return;
     const targets = [...selectedShows];
     const previous = { ...showActions };
     setBulkBusy(true);
@@ -466,7 +485,7 @@ export function PodcastInboxDialog({
   return (
     <div className="podcasts-modal-backdrop" onClick={onClose}>
       <div
-        className="podcasts-modal podcast-search-modal podcast-inbox"
+        className="podcasts-modal podcast-inbox"
         role="dialog"
         aria-modal="true"
         aria-labelledby="podcast-inbox-title"
@@ -668,14 +687,14 @@ export function PodcastInboxDialog({
                       </span>
                       <button
                         type="button"
-                        disabled={bulkBusy}
+                        disabled={bulkBusy || savingShow}
                         onClick={() => void updateSelectedDelivery('queue_last')}
                       >
                         {t('podcastInbox.actionQueueLast')}
                       </button>
                       <button
                         type="button"
-                        disabled={bulkBusy}
+                        disabled={bulkBusy || savingShow}
                         onClick={() => void updateSelectedDelivery('ignore')}
                       >
                         {t('podcastInbox.actionIgnore')}
@@ -683,7 +702,7 @@ export function PodcastInboxDialog({
                       <button
                         type="button"
                         className="podcast-inbox-bulk-clear"
-                        disabled={bulkBusy}
+                        disabled={bulkBusy || savingShow}
                         onClick={() => setSelectedShows([])}
                       >
                         {t('podcastInbox.clearSelection')}
@@ -715,7 +734,7 @@ export function PodcastInboxDialog({
                             label={t('podcastInbox.deliveryLabel')}
                             ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
                             hideLabel
-                            disabled={selected}
+                            disabled={selected || bulkBusy || savingShow}
                             value={currentAction}
                             onChange={(value) => void updateShowDelivery(show.id, value)}
                           />

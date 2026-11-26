@@ -204,7 +204,8 @@ public final class WildstringClient: Sendable {
             attempt.clientHeader = preferredClient.withLock { $0 }
         }
         while true {
-            let (data, response) = try await send(attempt)
+            let library = selectedLibrary()
+            let (data, response) = try await send(attempt, library: library)
             if (200..<300).contains(response.statusCode) {
                 try await cookies.storeCookies(from: response, url: response.url ?? server.url)
                 return data
@@ -222,14 +223,18 @@ public final class WildstringClient: Sendable {
             if response.statusCode == 401, attempt.clearsSessionOnUnauthorized {
                 try? await cookies.clear()
             }
-            if code == "library_access_required" {
-                librarySelection.withLock { $0 = nil }
+            if code == "library_access_required"
+                || (response.statusCode == 404 && code == "library_not_found")
+            {
+                librarySelection.withLock {
+                    if $0 == library { $0 = nil }
+                }
             }
             throw APIError(statusCode: response.statusCode, code: code, body: data)
         }
     }
 
-    private func send(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+    private func send(_ request: Request, library: String?) async throws -> (Data, HTTPURLResponse) {
         var url = server.appending(path: request.path)
         if !request.queryItems.isEmpty,
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -246,7 +251,7 @@ public final class WildstringClient: Sendable {
             urlRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         urlRequest.setValue(request.clientHeader, forHTTPHeaderField: "X-Wildstring-Client")
-        if let library = librarySelection.withLock({ $0 }), !library.isEmpty {
+        if let library, !library.isEmpty {
             urlRequest.setValue(library, forHTTPHeaderField: "X-Wildstring-Library")
         }
         if let cookieHeader = try await cookies.headerValue(url: url) {

@@ -12,10 +12,14 @@ export interface RemoteQueueItem {
   added_at?: string;
 }
 
-export interface RemoteQueue {
+export interface QueueWriteResult {
   version: number;
-  device_id: string;
   items: RemoteQueueItem[];
+  notice: string;
+}
+
+export interface RemoteQueue extends Omit<QueueWriteResult, 'notice'> {
+  device_id: string;
   updated_at: string | null;
   /** `queue_full` when an automatic batch was refused because the queue is at the cap. */
   notice?: string;
@@ -92,7 +96,7 @@ export async function putPodcastQueue(version: number, items: RemoteQueueItem[])
       : { episode_id: item.episode_id, origin: item.origin },
   );
   try {
-    return await api<RemoteQueue>('/podcasts/queue', {
+    return await api<QueueWriteResult>('/podcasts/queue', {
       method: 'PUT',
       body: JSON.stringify({ version, device_id: podcastDeviceId(), items: normalized }),
     });
@@ -103,7 +107,7 @@ export async function putPodcastQueue(version: number, items: RemoteQueueItem[])
       normalized.some((item) => 'added_at' in item)
     ) {
       const legacy = normalized.map(({ episode_id, origin }) => ({ episode_id, origin }));
-      return api<RemoteQueue>('/podcasts/queue', {
+      return api<QueueWriteResult>('/podcasts/queue', {
         method: 'PUT',
         body: JSON.stringify({ version, device_id: podcastDeviceId(), items: legacy }),
       });

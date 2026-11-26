@@ -3980,6 +3980,8 @@
   justify-content: space-between;
 }
 .podcast-inbox {
+  max-height: 86dvh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4056,10 +4058,17 @@
   align-items: center;
   gap: 8px 12px;
 }
-.podcast-queue-sync p,
-.podcast-inbox-problem {
+.podcast-queue-sync p {
   margin: 0;
   flex: 1 1 200px;
+}
+
+.podcast-inbox-problem {
+  margin: 0;
+}
+
+.podcast-inbox-problem[role='alert'] {
+  color: var(--danger);
 }
 
 .episode-row-actions {

@@ -21,6 +21,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     nonisolated(unsafe) private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     nonisolated(unsafe) private var gates: [ObjectIdentifier: RequestGate] = [:]
     nonisolated(unsafe) private var prefetchTask: Task<Void, Never>?
+    private var validatedCache: (path: String, probe: AudioRangeFetcher.Probe)?
 
     /// Requests larger than this are streamed incrementally instead of being
     /// buffered in full before the first byte reaches the player.
@@ -187,8 +188,8 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
             case .transcode:
                 try await serveTranscode(boxed, path: path, gate: gate)
             case .bytes(let offset, let length):
-                if let cached = await cache?.cachedChunk(key: path, offset: offset, length: length)
-                {
+                let cached = try await cachedChunk(path: path, offset: offset, length: length)
+                if let cached {
                     let payload = cached.data
                     let totalLength = cached.totalLength
                     let contentType = cached.contentType
@@ -228,27 +229,10 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                         contentType: contentType
                     )
                 }
-                try? await cache?.store(
-                    key: path,
-                    offset: offset,
-                    data: chunk.data,
-                    totalLength: chunk.totalLength,
-                    contentType: chunk.contentType
-                )
+                try await storeChunk(chunk, path: path, offset: offset)
             case .infoOnly:
-                // A warmed prefetch already knows the content type and length;
-                // only fall back to a network HEAD on a cold cache.
-                let probe: AudioRangeFetcher.Probe
-                if let cached = await cache?.cachedChunk(key: path, offset: 0, length: 1),
-                    let total = cached.totalLength, total > 0
-                {
-                    probe = AudioRangeFetcher.Probe(
-                        totalLength: total,
-                        contentType: cached.contentType
-                    )
-                } else {
-                    probe = try await fetcher.probe(path: path)
-                }
+                let probe = try await probeCache(path: path)
+                await cache?.validate(path, matching: probe)
                 let totalLength = probe.totalLength
                 let contentType = probe.contentType
                 await onLoaderQueue(boxed, gate: gate) { request in
@@ -316,6 +300,43 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         loadingRequest.finishLoading()
     }
 
+    private func probeCache(path: String) async throws -> AudioRangeFetcher.Probe {
+        if let existing = lock.withLock({ validatedCache }), existing.path == path {
+            return existing.probe
+        }
+        var probe = try await fetcher.probe(path: path)
+        if probe.etag?.hasPrefix("W/") == true { probe.etag = nil }
+        try Task.checkCancellation()
+        lock.withLock { validatedCache = (path, probe) }
+        return probe
+    }
+
+    private func cachedChunk(path: String, offset: Int64, length: Int64) async throws
+        -> AudioDiskCache.CachedChunk?
+    {
+        guard let cache, await cache.contains(path) else { return nil }
+        let probe = try await probeCache(path: path)
+        return await cache.cachedChunk(key: path, offset: offset, length: length, matching: probe)
+    }
+
+    private func storeChunk(_ chunk: AudioRangeFetcher.Chunk, path: String, offset: Int64?) async throws {
+        guard let cache else { return }
+        try Task.checkCancellation()
+        let etag = chunk.etag.flatMap { $0.hasPrefix("W/") ? nil : $0 }
+        let probe = AudioRangeFetcher.Probe(
+            totalLength: chunk.totalLength, contentType: chunk.contentType, etag: etag
+        )
+        lock.withLock { validatedCache = (path, probe) }
+        if let offset, let etag, let totalLength = chunk.totalLength {
+            try? await cache.store(
+                key: path, offset: offset, data: chunk.data,
+                totalLength: totalLength, contentType: chunk.contentType, etag: etag
+            )
+        } else {
+            await cache.validate(path, matching: probe)
+        }
+    }
+
     /// Warms the connection and caches the leading bytes before the player asks,
     /// cutting the startup round trips (sniff, first range) to cache hits.
     public func prefetch(path: String, bytes: Int64 = 512 * 1024) {
@@ -326,18 +347,10 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         }
         previous?.cancel()
         let fetcher = self.fetcher
-        let cache = self.cache
-        let task = Task {
-            guard let chunk = try? await fetcher.fetch(path: path, offset: 0, length: bytes),
-                !Task.isCancelled
+        let task = Task { [weak self] in
+            guard let chunk = try? await fetcher.fetch(path: path, offset: 0, length: bytes)
             else { return }
-            try? await cache?.store(
-                key: path,
-                offset: 0,
-                data: chunk.data,
-                totalLength: chunk.totalLength,
-                contentType: chunk.contentType
-            )
+            try? await self?.storeChunk(chunk, path: path, offset: 0)
         }
         lock.withLock {
             prefetchTask = task
@@ -350,6 +363,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         let (prefetch, activeGates, activeTasks) = lock.withLock {
             let currentPrefetch = prefetchTask
             prefetchTask = nil
+            validatedCache = nil
             let gatesCopy = Array(gates.values)
             let tasksCopy = Array(tasks.values)
             gates.removeAll()
@@ -402,6 +416,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
             }
             let size = min(window, remaining)
             let chunk = try await fetcher.fetch(path: path, offset: start + sent, length: size)
+            try await storeChunk(chunk, path: path, offset: nil)
             if !deliveredInfo {
                 deliveredInfo = true
                 let totalLength = chunk.totalLength

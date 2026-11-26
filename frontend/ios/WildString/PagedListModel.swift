@@ -28,6 +28,7 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
 
     func loadInitial() async {
         revision += 1
+        isLoading = false
         items = []
         total = 0
         nextOffset = 0
@@ -40,10 +41,14 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
     func loadMore() async {
         guard !isLoading else { return }
         if didLoadOnce, !canLoadMore { return }
+        let loadingRevision = revision
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if loadingRevision == revision { isLoading = false }
+        }
         do {
             let page = try await fetchPage(pageSize, nextOffset)
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             var seen = Set(items.map(\.id))
             for item in page.items where seen.insert(item.id).inserted {
                 items.append(item)
@@ -53,6 +58,7 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
             didLoadOnce = true
             errorMessage = nil
         } catch {
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             errorMessage = ErrorText.message(for: error)
             didLoadOnce = true
         }
@@ -62,11 +68,15 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
     func jump(toOffset offset: Int) async {
         guard !isLoading else { return }
         revision += 1
+        let loadingRevision = revision
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if loadingRevision == revision { isLoading = false }
+        }
         do {
             let start = max(0, offset)
             let page = try await fetchPage(pageSize, start)
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             items = page.items
             windowOffset = start
             nextOffset = start + page.items.count
@@ -74,6 +84,7 @@ final class PagedListModel<Element: Decodable & Identifiable & Sendable> {
             didLoadOnce = true
             errorMessage = nil
         } catch {
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             errorMessage = ErrorText.message(for: error)
             didLoadOnce = true
         }

@@ -19,6 +19,48 @@ export interface OfflineTrack {
   sourceEtag?: string;
   automatic?: boolean;
 }
+const offlineErrorKeys = {
+  waiting_for_network: 'offlineStore.waitingForNetwork',
+  verify_source_failed: 'offlineStore.verifySourceFailed',
+  source_changed: 'offlineStore.sourceChanged',
+  auth_revoked: 'offlineStore.authRevoked',
+  connection_failed: 'offlineStore.downloadConnectionFailed',
+  audio_version_changed: 'offlineStore.audioVersionChanged',
+  resume_mismatch: 'offlineStore.resumeMismatch',
+  no_audio_size: 'offlineStore.noAudioSize',
+  storage_limit_reached: 'offlineStore.storageLimitReached',
+  quota_exceeded: 'offlineStore.quotaExceeded',
+  audio_size_invalid: 'offlineStore.audioSizeInvalid',
+  download_incomplete: 'offlineStore.downloadIncomplete',
+  download_failed: 'offlineStore.downloadFailed',
+} as const;
+type OfflineErrorCode = keyof typeof offlineErrorKeys;
+class OfflineDownloadError extends Error {
+  constructor(readonly code: OfflineErrorCode) {
+    super(code);
+  }
+}
+
+function offlineErrorCode(error: string): string {
+  if (Object.hasOwn(offlineErrorKeys, error)) return error;
+  // Earlier releases stored the UI text in the language active at download time.
+  for (const [code, translation] of Object.entries(offlineErrorKeys)) {
+    if (
+      error === i18n.getResource('en', 'translation', translation) ||
+      error === i18n.getResource('zh', 'translation', translation)
+    )
+      return code;
+  }
+  return error;
+}
+
+export function offlineErrorMessage(error: string): string {
+  const code = offlineErrorCode(error);
+  return Object.hasOwn(offlineErrorKeys, code)
+    ? i18n.t(offlineErrorKeys[code as OfflineErrorCode])
+    : error;
+}
+
 const DB = 'wildstring-offline-v1';
 const STORE = 'tracks';
 const SESSION = 'wildstring:offline-account';
@@ -280,7 +322,8 @@ async function queueDownloads(tracks: Track[], automatic: boolean) {
       automatic &&
       previous?.automatic &&
       previous.state === 'paused' &&
-      previous.error === i18n.t('offlineStore.waitingForNetwork')
+      previous.error &&
+      offlineErrorCode(previous.error) === 'waiting_for_network'
     )
       await write({ ...previous, state: 'queued', error: undefined }, epoch);
     if (!before.some((r) => r.track.id === track.id))
@@ -355,10 +398,10 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         credentials: 'same-origin',
         signal: controller.signal,
       });
-      if (!source.ok) throw new Error(i18n.t('offlineStore.verifySourceFailed'));
+      if (!source.ok) throw new OfflineDownloadError('verify_source_failed');
       const sourceEtag = source.headers.get('etag') || undefined;
       if (record.sourceEtag && record.sourceEtag !== sourceEtag)
-        throw new Error(i18n.t('offlineStore.sourceChanged'));
+        throw new OfflineDownloadError('source_changed');
       next.sourceEtag = sourceEtag;
       target.searchParams.set('format', 'aac');
       target.searchParams.set('bitrate_kbps', String(record.bitrate));
@@ -380,25 +423,24 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     if (response.status === 401 || response.status === 403) {
       await clearOfflineAccount();
       window.dispatchEvent(new Event('wildstring:unauthorized'));
-      throw new Error(i18n.t('offlineStore.authRevoked'));
+      throw new OfflineDownloadError('auth_revoked');
     }
-    if (!response.ok || !response.body)
-      throw new Error(i18n.t('offlineStore.downloadConnectionFailed'));
+    if (!response.ok || !response.body) throw new OfflineDownloadError('connection_failed');
     const resumed = response.status === 206 && record.bytes > 0 && !!record.etag;
     if (resumed && response.headers.get('etag') !== record.etag)
-      throw new Error(i18n.t('offlineStore.audioVersionChanged'));
+      throw new OfflineDownloadError('audio_version_changed');
     if (resumed && !response.headers.get('content-range')?.startsWith(`bytes ${record.bytes}-`))
-      throw new Error(i18n.t('offlineStore.resumeMismatch'));
+      throw new OfflineDownloadError('resume_mismatch');
     const streamingAac =
       !!record.bitrate && response.headers.get('x-wildstring-playback') === 'transcode';
     const total = Number(response.headers.get('content-length')) + (resumed ? record.bytes : 0);
     if (!Number.isFinite(total) || (total <= 0 && !streamingAac))
-      throw new Error(i18n.t('offlineStore.noAudioSize'));
+      throw new OfflineDownloadError('no_audio_size');
     if (used - record.bytes + total > offlineLimit())
-      throw new Error(i18n.t('offlineStore.storageLimitReached'));
+      throw new OfflineDownloadError('storage_limit_reached');
     const estimate = await navigator.storage?.estimate();
     if (estimate?.quota && (estimate.usage || 0) + total - record.bytes > estimate.quota * 0.9)
-      throw new Error(i18n.t('offlineStore.quotaExceeded'));
+      throw new OfflineDownloadError('quota_exceeded');
     next = {
       ...next,
       total,
@@ -416,7 +458,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         if (part.done) break;
         next.bytes += part.value.byteLength;
         if ((total > 0 && next.bytes > total) || used - record.bytes + next.bytes > offlineLimit())
-          throw new Error(i18n.t('offlineStore.audioSizeInvalid'));
+          throw new OfflineDownloadError('audio_size_invalid');
         pieces.push(part.value.slice().buffer);
         if (next.bytes - checkpoint >= 4 * 1024 * 1024) {
           next.blob = new Blob(pieces, {
@@ -433,7 +475,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     guard();
     next.blob = new Blob(pieces, { type: response.headers.get('content-type') || 'audio/mpeg' });
     if (!next.bytes || (total > 0 && next.bytes !== total))
-      throw new Error(i18n.t('offlineStore.downloadIncomplete'));
+      throw new OfflineDownloadError('download_incomplete');
     next.total = next.bytes;
     try {
       const cover = await fetch(`/api/v1/tracks/${record.track.id}/cover?size=320`, {
@@ -449,21 +491,21 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     await write({ ...next, state: 'complete', updated: Date.now() }, currentGeneration);
   } catch (reason) {
     if (generation !== currentGeneration || !account) return;
+    const waiting = record.automatic && !automaticDownloadNetworkAllowed();
     // Only checkpointed bytes are persisted; resuming starts exactly at this boundary.
     const bytes = next.blob.size;
     await write(
       {
         ...next,
         bytes,
-        state: controller.signal.aborted ? 'paused' : 'failed',
-        error:
-          record.automatic && !automaticDownloadNetworkAllowed()
-            ? i18n.t('offlineStore.waitingForNetwork')
-            : controller.signal.aborted
-              ? undefined
-              : reason instanceof Error
-                ? reason.message
-                : i18n.t('offlineStore.downloadFailed'),
+        state: waiting || controller.signal.aborted ? 'paused' : 'failed',
+        error: waiting
+          ? 'waiting_for_network'
+          : controller.signal.aborted
+            ? undefined
+            : reason instanceof OfflineDownloadError
+              ? reason.code
+              : 'download_failed',
       },
       currentGeneration,
     );

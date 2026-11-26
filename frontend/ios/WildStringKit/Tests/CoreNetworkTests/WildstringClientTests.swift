@@ -76,6 +76,24 @@ struct StubbedHTTPTests {
             #expect(user.language == "en")
         }
 
+        @Test func missingSelectedLibraryClearsTheNextRequestHeader() async throws {
+            let client = try makeClient(store: InMemorySessionStore())
+            client.selectLibrary("gone")
+            StubURLProtocol.respond { request in
+                #expect(request.value(forHTTPHeaderField: "X-Wildstring-Library") == "gone")
+                return .json(status: 404, body: #"{"detail":"library_not_found"}"#)
+            }
+            await #expect(throws: APIError.self) {
+                try await client.track(id: "t1")
+            }
+            #expect(client.selectedLibrary() == nil)
+            StubURLProtocol.respond { request in
+                #expect(request.value(forHTTPHeaderField: "X-Wildstring-Library") == nil)
+                return .json(status: 200, body: "[]")
+            }
+            #expect(try await client.libraries().isEmpty)
+        }
+
         @Test func loginFailureSurfacesStableServerCode() async throws {
             let store = InMemorySessionStore()
             StubURLProtocol.respond { _ in

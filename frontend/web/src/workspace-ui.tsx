@@ -23,7 +23,13 @@ export function useWorkspaceResource<T>(path: string | null, pollMs = 0) {
   const unsupportedRef = useRef(false);
   const request = useRef<AbortController | null>(null);
   const reload = useCallback(async () => {
-    if (!path || document.hidden || !navigator.onLine) return;
+    if (!path || document.hidden || !navigator.onLine) {
+      request.current?.abort();
+      ++sequence.current;
+      setLoading(false);
+      if (path && !navigator.onLine) setError(i18n.t('connection.unreachable'));
+      return;
+    }
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -53,11 +59,9 @@ export function useWorkspaceResource<T>(path: string | null, pollMs = 0) {
     unsupportedRef.current = false;
     setError('');
     void reload();
-    const foreground = () => {
-      if (!document.hidden) void reload();
-      else request.current?.abort();
-    };
+    const foreground = () => void reload();
     window.addEventListener('online', foreground);
+    window.addEventListener('offline', foreground);
     document.addEventListener('visibilitychange', foreground);
     const timer = pollMs
       ? setInterval(() => {
@@ -69,6 +73,7 @@ export function useWorkspaceResource<T>(path: string | null, pollMs = 0) {
       request.current?.abort();
       clearInterval(timer);
       window.removeEventListener('online', foreground);
+      window.removeEventListener('offline', foreground);
       document.removeEventListener('visibilitychange', foreground);
     };
   }, [reload, pollMs]);
