@@ -104,15 +104,33 @@ export function Bookshelf({
   const [checkedSources, setCheckedSources] = useState<string[]>(['itunes', 'openlibrary']);
   const readerDialog = useRef<HTMLDialogElement>(null);
   const readerRequest = useRef<AbortController | null>(null);
+  const detailRequest = useRef<AbortController | null>(null);
   const openReaderBook = useRef<string | null>(null);
   const returnFocusBook = useRef<string | null>(null);
+  const returnFocusDetail = useRef(false);
   const loadedRevision = useRef(-1);
   const shelfRef = useRef<HTMLElement>(null);
+  const readActionRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const attachEbookInputRef = useRef<HTMLInputElement>(null);
   const loadMoreController = useRef<AbortController | null>(null);
+
+  function refreshDetail(bookId: string) {
+    detailRequest.current?.abort();
+    const request = new AbortController();
+    detailRequest.current = request;
+    void api<Book>(`/books/${bookId}`, { signal: request.signal })
+      .then((value) => {
+        if (!request.signal.aborted) {
+          setSelected((current) => (current?.id === value.id ? value : current));
+        }
+      })
+      .catch(() => {
+        // The list already includes the book and its progress summaries.
+      });
+  }
 
   useEffect(() => {
     if (!filter) {
@@ -123,7 +141,13 @@ export function Bookshelf({
     return () => window.clearTimeout(timer);
   }, [filter]);
 
-  useEffect(() => () => loadMoreController.current?.abort(), []);
+  useEffect(
+    () => () => {
+      loadMoreController.current?.abort();
+      detailRequest.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     setTitleDraft(selected?.title || '');
@@ -240,6 +264,11 @@ export function Bookshelf({
   }, [libraryId, debouncedFilter, format, status, revision]);
 
   useEffect(() => {
+    if (returnFocusDetail.current && !reading && selected) {
+      returnFocusDetail.current = false;
+      readActionRef.current?.focus();
+      return;
+    }
     const bookId = returnFocusBook.current;
     if (!bookId || reading || selected || loading || loadedRevision.current !== revision) return;
     returnFocusBook.current = null;
@@ -301,14 +330,15 @@ export function Bookshelf({
   }
 
   function leaveReading() {
-    if (!openReaderBook.current) return;
-    returnFocusBook.current = openReaderBook.current;
+    const bookId = openReaderBook.current;
+    if (!bookId) return;
     openReaderBook.current = null;
+    returnFocusDetail.current = true;
     readerDialog.current?.close();
     setReading(false);
     setInitialSpine(null);
-    setSelected(null);
     setListening(false);
+    refreshDetail(bookId);
     refresh((value) => value + 1);
   }
 
@@ -354,8 +384,10 @@ export function Bookshelf({
 
   function enterReading(book: Book, spineIndex: number | null = null) {
     readerRequest.current?.abort();
+    detailRequest.current?.abort();
     openReaderBook.current = book.id;
     returnFocusBook.current = null;
+    returnFocusDetail.current = false;
     setInitialSpine(spineIndex);
     setReading(true);
     if (readingBookId() !== book.id) {
@@ -388,8 +420,10 @@ export function Bookshelf({
 
   function changeBook(book: Book | null) {
     readerRequest.current?.abort();
+    detailRequest.current?.abort();
     openReaderBook.current = null;
-    returnFocusBook.current = null;
+    returnFocusDetail.current = false;
+    returnFocusBook.current = book ? null : (selected?.id ?? null);
     if (readingBookId()) window.history.replaceState(null, '', '/');
     setReading(false);
     setInitialSpine(null);
@@ -402,17 +436,7 @@ export function Bookshelf({
       refresh((value) => value + 1);
       return;
     }
-    const request = new AbortController();
-    readerRequest.current = request;
-    void api<Book>(`/books/${book.id}`, { signal: request.signal })
-      .then((value) => {
-        if (!request.signal.aborted) {
-          setSelected((current) => (current?.id === value.id ? value : current));
-        }
-      })
-      .catch(() => {
-        // The list already includes the book and its progress summaries.
-      });
+    refreshDetail(book.id);
   }
 
   async function uploadEbookFile(file: File, attach?: Book) {
@@ -470,6 +494,7 @@ export function Bookshelf({
           book={selected}
           initialSpine={initialSpine}
           onClose={closeReader}
+          onProgressSaved={() => refreshDetail(selected.id)}
           listening={listening}
           onToggleListen={() => {
             if (!listening) audioSession.open(selected);
@@ -658,6 +683,7 @@ export function Bookshelf({
               <nav className="book-detail-actions" aria-label={t('bookshelf.title')}>
                 {selected.has_ebook && (
                   <button
+                    ref={readActionRef}
                     type="button"
                     className="primary"
                     aria-pressed={reading}

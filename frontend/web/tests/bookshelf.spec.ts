@@ -41,7 +41,7 @@ async function selectReaderText(page: Page, text: string) {
   });
 }
 
-test('从详情点阅读后返回书架，迟到详情响应不会重开阅读器', async ({ page, isMobile }, info) => {
+test('从详情点阅读后返回书籍，迟到详情响应不会重开阅读器', async ({ page, isMobile }, info) => {
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   const title = `短篇返回 ${info.project.name} ${Date.now()}`;
@@ -68,11 +68,12 @@ test('从详情点阅读后返回书架，迟到详情响应不会重开阅读�
     await page.getByRole('button', { name: '阅读', exact: true }).click();
     const reader = page.getByRole('dialog', { name: title });
     await expect(reader.getByRole('article')).toContainText('晨间正文。');
-    await reader.getByRole('button', { name: '返回书架' }).click();
+    await reader.getByRole('button', { name: '返回书籍' }).click();
     release();
     await aborted;
     await expect(reader).toHaveCount(0);
-    await expect(card).toBeFocused();
+    await expect(page.getByRole('heading', { name: title })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^(继续)?阅读$/ })).toBeFocused();
     await expect(page).toHaveURL(/\/$/);
     await expect
       .poll(async () => {
@@ -80,6 +81,8 @@ test('从详情点阅读后返回书架，迟到详情响应不会重开阅读�
         return (await response.json()).progress_status;
       })
       .toBe('in_progress');
+    await page.getByRole('button', { name: '返回书架', exact: true }).click();
+    await expect(card).toBeFocused();
   } finally {
     release();
     await page.unrouteAll({ behavior: 'wait' });
@@ -205,8 +208,7 @@ test('双载体摘要、对齐与暖纸自定义高亮', async ({ page, isMobile
     await hint.getByRole('button', { name: '忽略' }).click();
     await expect(hint).toHaveCount(0);
     expect((await (await page.request.get(prefix + '/reading-progress')).json()).version).toBe(1);
-    await reader.getByRole('button', { name: '返回书架' }).click();
-    await card.click();
+    await reader.getByRole('button', { name: '返回书籍' }).click();
     await read.click();
     await hint.getByRole('button', { name: '跳到对应位置' }).click();
     await expect(reader.getByRole('article')).toContainText('午后正文。');
@@ -247,8 +249,7 @@ test('双载体摘要、对齐与暖纸自定义高亮', async ({ page, isMobile
           (await (await page.request.get(prefix + '/reading-progress')).json()).spine_index,
       )
       .toBe(2);
-    await reader.getByRole('button', { name: '返回书架' }).click();
-    await card.click();
+    await reader.getByRole('button', { name: '返回书籍' }).click();
     const audioHint = page.locator('.book-align-notice');
     await expect(audioHint).toContainText('电子书已读到「第三章」');
     for (const theme of ['light', 'dark'] as const) {
@@ -509,6 +510,8 @@ test('Esc 先关闭阅读面板，退出聚焦原书并丢弃迟到的路由请�
   await page.keyboard.press('Escape');
   await expect(reader).not.toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('button', { name: /^(继续)?阅读$/ })).toBeFocused();
+  await page.getByRole('button', { name: '返回书架', exact: true }).click();
   await expect(card).toBeFocused();
 
   const details = `/api/v1/books/${id}`;
@@ -931,6 +934,7 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
     await reader.getByRole('button', { name: '删除 这是一段' }).click();
     await expect(mark).toHaveCount(0);
     await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '返回书架', exact: true }).click();
 
     // Start audiobook and switch away to Tracks -> persistent dock remains visible.
     const audioBook = (
