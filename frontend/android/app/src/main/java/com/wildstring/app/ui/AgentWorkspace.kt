@@ -90,7 +90,7 @@ private fun JsonObject.showTrace(): Boolean {
 }
 @Composable private fun AgentTrace(value: JsonObject) {
     if (!value.showTrace()) return
-    value.text("trace_id").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(stringResource(R.string.agent_ws_diagnostic_id, it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+    value.text("trace_id").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(stringResource(R.string.agent_ws_diagnostic_id, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
 @Composable private fun AgentEmpty(text: String) { Text(text, Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 @Composable private fun AgentCard(content: @Composable ColumnScope.() -> Unit) {
@@ -229,7 +229,7 @@ internal fun SimpleNotificationsSheet(
         if (action.busy && drafts.isEmpty()) item { AgentSkeleton(Modifier.height(420.dp)) }
         if (!action.busy && visible.isEmpty() && action.message == null) item { AgentEmpty(when (filter) { "pending" -> stringResource(R.string.agent_ws_empty_drafts_pending); "history" -> stringResource(R.string.agent_ws_empty_drafts_history); else -> stringResource(R.string.agent_ws_empty_drafts_all) }) }
         items(visible, key = { it.text("id") }) { draft ->
-            AgentCard { Text(draft.text("title"), fontWeight = FontWeight.SemiBold); Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary); AgentTrace(draft)
+            AgentCard { Text(draft.text("title"), fontWeight = FontWeight.SemiBold); Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.tertiary); AgentTrace(draft)
                 TextButton({ selected = draft }, Modifier.testTag("draft-open-${draft.text("id")}")) { Text(stringResource(R.string.agent_ws_view_diff_and_evidence)) } }
         }
     }
@@ -262,7 +262,7 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
     }
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(draft.text("title")) }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary)
+            Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.tertiary)
             if (draft.objectOrNull("result")?.text("application_mode") == "automatic") Text(stringResource(R.string.agent_ws_applied_by_auto_policy), style = MaterialTheme.typography.bodySmall)
             if (draft.text("kind") == "metadata") Text(stringResource(R.string.agent_ws_track_label, tracks[payload.text("track_id")] ?: payload.text("track_id")))
             if (draft.text("kind") == "intake") Text(stringResource(R.string.agent_ws_intake_source_hint, before.text("source_path")))
@@ -301,7 +301,7 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
         confirmButton = { TextButton({ scope.launch { action.run {
             draft = vm.agent.request("drafts/${draft.text("id")}/reject", "POST", jsonBody("version" to draft.number("version")))
             updated(draft); confirm = null; vm.agent.refreshInbox()
-        } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-reject")) { Text(stringResource(R.string.agent_ws_confirm_reject)) } },
+        } } }, enabled = !action.busy, destructive = true, modifier = Modifier.testTag("draft-confirm-reject")) { Text(stringResource(R.string.agent_ws_confirm_reject)) } },
         dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } })
 }
 
@@ -714,7 +714,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                             val isLatestAssistant = isAssistant && message.text("id") == lastAssistantId
                             if (isAssistant) {
                                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    if (message.flag("partial")) Text(stringResource(R.string.agent_ws_generating_partial), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (message.flag("partial")) Text(stringResource(R.string.agent_ws_generating_partial), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     SelectionContainer { AssistantMarkdown(message.text("content")) }
                                     message.objects("sources").forEach { source ->
                                         source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
@@ -725,7 +725,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                                             ) {
                                                 Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                                     Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                                                    Text(stringResource(R.string.agent_ws_source_label, source.text("title").ifBlank { url }), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(stringResource(R.string.agent_ws_source_label, source.text("title").ifBlank { url }), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                             }
                                         }
@@ -737,7 +737,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                                                 suggestions.forEach { (label, prompt) ->
                                                     SuggestionChip(
                                                         onClick = { sendMessage(prompt) },
-                                                        label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                                                        label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
                                                         shape = RoundedCornerShape(12.dp),
                                                         colors = SuggestionChipDefaults.suggestionChipColors(
                                                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -846,7 +846,7 @@ internal fun summarizeConversationTitle(userText: String): String {
         vm.agent.request("conversations/${item.text("id")}", "DELETE")
         if (conversation?.text("id") == item.text("id")) selectConversation(null)
         conversations = conversations.filterNot { it.text("id") == item.text("id") }; deleting = null
-    } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
+    } } }, enabled = !action.busy, destructive = true) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
 }
 
 /** Every AI entry point uses the same permission-filtered connection list. */
@@ -888,7 +888,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(6.dp)) {}
                         Text(
                             text = "${chosen?.text("name")} · ${chosen?.text("model")}",
-                            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             maxLines = 1,
@@ -919,7 +919,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                             text = {
                                 Column {
                                     Text("${item.text("name")} · ${item.text("model")}")
-                                    Text(connectionBudget(item), style = MaterialTheme.typography.labelSmall)
+                                    Text(connectionBudget(item), style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"))
                                 }
                             },
                             onClick = {
@@ -1058,7 +1058,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         if (schedule.flag("enabled")) Text(stringResource(R.string.agent_ws_next_run_at, localAgentTime(schedule.text("next_run_at"))), style = MaterialTheme.typography.bodySmall)
         TextButton({ deleting = true }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete_schedule)) }; ActionStatus(action)
     }
-    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.agent_ws_delete_schedule_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_schedule_confirm, schedule.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("schedules/${schedule.text("id")}", "DELETE"); deleting = false; refresh() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = false }) { Text(stringResource(R.string.agent_ws_cancel)) } })
+    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.agent_ws_delete_schedule_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_schedule_confirm, schedule.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("schedules/${schedule.text("id")}", "DELETE"); deleting = false; refresh() } } }, enabled = !action.busy, destructive = true) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = false }) { Text(stringResource(R.string.agent_ws_cancel)) } })
 }
 
 @Composable internal fun AgentConnections(vm: MusicViewModel) {
@@ -1079,7 +1079,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") stringResource(R.string.agent_ws_scope_instance) else stringResource(R.string.agent_ws_scope_personal)}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.agent_ws_connection_status_budget, if (connection.flag("enabled")) stringResource(R.string.agent_ws_enabled) else stringResource(R.string.agent_ws_disabled), connection.number("daily_call_budget")), style = MaterialTheme.typography.bodySmall)
-            connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text(stringResource(R.string.agent_ws_field_key_value, fieldName(name), displayValue(value)), style = MaterialTheme.typography.labelSmall) } }
+            connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text(stringResource(R.string.agent_ws_field_key_value, fieldName(name), displayValue(value)), style = MaterialTheme.typography.bodySmall) } }
             Row {
                 TextButton({ scope.launch { action.run {
                     val result = vm.agent.request("connections/${connection.text("id")}/test", "POST")
@@ -1088,13 +1088,13 @@ internal fun connectionBudget(connection: JsonObject): String {
                 if (!connection.flag("read_only")) {
                     TextButton({ editing = connection }) { Text(stringResource(R.string.agent_ws_edit)) }
                     TextButton({ deleting = connection }) { Text(stringResource(R.string.agent_ws_delete)) }
-                } else Text(stringResource(R.string.agent_ws_readonly), Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall)
+                } else Text(stringResource(R.string.agent_ws_readonly), Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
             }
         } }
         if (connections.isEmpty() && !action.busy && action.message == null) item { AgentEmpty(stringResource(R.string.agent_ws_empty_connections)) }
     }
     if (creating || editing != null) AgentConnectionForm(vm, editing, { creating = false; editing = null }) { scope.launch { action.run { load() } } }
-    deleting?.let { connection -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.agent_ws_delete_connection_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_connection_confirm, connection.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("connections/${connection.text("id")}", "DELETE"); deleting = null; load() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
+    deleting?.let { connection -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.agent_ws_delete_connection_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_connection_confirm, connection.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("connections/${connection.text("id")}", "DELETE"); deleting = null; load() } } }, enabled = !action.busy, destructive = true) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
 }
 
 @Composable private fun AgentConnectionForm(vm: MusicViewModel, original: JsonObject?, dismiss: () -> Unit, saved: () -> Unit) {
@@ -1196,7 +1196,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         Text(stringResource(R.string.agent_ws_verify_target_desc, target.text("name")))
         OutlinedTextField(code, { code = it }, label = { Text(stringResource(R.string.agent_ws_verify_code_label)) }, singleLine = true); ActionStatus(action)
     } }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("telegram-targets/${target.text("id")}/verify", "POST", jsonBody("code" to code.trim())); code = ""; verify = null; load() } } }, enabled = !action.busy && code.isNotBlank()) { Text(stringResource(R.string.agent_ws_verify_and_enable)) } }, dismissButton = { TextButton({ verify = null; code = "" }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
-    deleting?.let { target -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.agent_ws_delete_target_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_target_confirm, target.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("telegram-targets/${target.text("id")}", "DELETE"); deleting = null; load() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
+    deleting?.let { target -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.agent_ws_delete_target_title)) }, text = { Text(stringResource(R.string.agent_ws_delete_target_confirm, target.text("name"))) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("telegram-targets/${target.text("id")}", "DELETE"); deleting = null; load() } } }, enabled = !action.busy, destructive = true) { Text(stringResource(R.string.agent_ws_delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
     retry?.let { delivery -> AlertDialog(onDismissRequest = { retry = null }, title = { Text(stringResource(R.string.agent_ws_resend_delivery_title)) }, text = { Text(if (delivery.text("status") == "unknown") stringResource(R.string.agent_ws_resend_delivery_unknown) else stringResource(R.string.agent_ws_resend_delivery_confirm)) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("deliveries/${delivery.text("id")}/retry", "POST", jsonBody("acknowledge_unknown" to (delivery.text("status") == "unknown"))); retry = null; load() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_confirm_retry)) } }, dismissButton = { TextButton({ retry = null }) { Text(stringResource(R.string.agent_ws_cancel)) } }) }
 }
 

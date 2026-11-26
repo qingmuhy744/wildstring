@@ -100,6 +100,8 @@ class PodcastPlayerLayoutTest {
                     val suffix = if (theme) "dark" else "light"
                     compose.onNodeWithTag("podcast-cover-tab").performClick()
                     compose.onNodeWithTag("podcast-controls-full").assertIsDisplayed()
+                    compose.onNodeWithTag("podcast-rewind").assertContentDescriptionEquals(uiString(R.string.pod_player_rewind_15))
+                    compose.onNodeWithTag("podcast-forward").assertContentDescriptionEquals(uiString(R.string.pod_player_forward_30))
                     capture("podcast-cover-$suffix")
                     compose.onNodeWithTag("podcast-article-tab").performClick()
                     compose.onNodeWithTag("podcast-controls-compact").assertIsDisplayed()

@@ -200,7 +200,7 @@ button.import-folder-entry > span {
   padding-top: 12px;
 }
 .import-folder-result > strong {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 18px;
 }
 .import-folder-dialog footer {

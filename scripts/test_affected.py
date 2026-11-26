@@ -39,6 +39,7 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
     "podcast-continuation.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-player.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-presentation.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
+    "ui-design-standards.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-episode.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-progress.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "personal-settings.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
@@ -54,6 +55,10 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
 
 # Mapping from Web source file stems to primary Playwright specs
 WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
+    "style": ["ui-design-standards.spec.ts", "player-focus.spec.ts"],
+    "browse": ["ui-design-standards.spec.ts"],
+    "settings": ["ui-design-standards.spec.ts"],
+    "player": ["bookshelf.spec.ts", "player-focus.spec.ts", "ui-design-standards.spec.ts"],
     "playback-glyph": [
         "podcast-presentation.spec.ts",
         "podcast-player.spec.ts",
@@ -92,9 +97,10 @@ WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
     "notifications": ["agent-platform.spec.ts", "workbenches.spec.ts"],
     "playback-sync": ["playback-sync.spec.ts", "podcast-continuation.spec.ts"],
     "system-diagnostics": ["provider-diagnostics.spec.ts", "management.spec.ts"],
-    "podcasts": ["podcast-presentation.spec.ts"],
+    "podcasts": ["podcast-presentation.spec.ts", "ui-design-standards.spec.ts"],
+    "podcast-player": ["podcast-player.spec.ts", "ui-design-standards.spec.ts"],
     "bookshelf": ["bookshelf.spec.ts"],
-    "book-libraries-admin": ["bookshelf.spec.ts"],
+    "book-libraries-admin": ["bookshelf.spec.ts", "player-focus.spec.ts"],
     "settings-layout": ["settings-navigation.spec.ts", "personal-settings.spec.ts"],
     "workspace-ui": ["collections.spec.ts", "settings-navigation.spec.ts"],
     "locales": ["i18n.spec.ts"],

@@ -50,7 +50,7 @@ private fun AnnotatedString.Builder.inline(node: Node, linkColor: Color) {
 }
 
 @Composable private fun MarkdownBlock(node: Node) {
-    val color = MaterialTheme.colorScheme.primary
+    val color = MaterialTheme.colorScheme.tertiary
     when (node) {
         is MarkdownParagraph, is Heading -> {
             val text = buildAnnotatedString { children(node).forEach { inline(it, color) } }

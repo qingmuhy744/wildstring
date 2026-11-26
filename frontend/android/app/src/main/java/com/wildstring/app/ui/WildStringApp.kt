@@ -307,7 +307,7 @@ fun WildStringApp(model: MusicViewModel) {
                                         Text(stringResource(R.string.handoff_available), style = MaterialTheme.typography.labelLarge)
                                         Text(
                                             stringResource(R.string.handoff_position, saved.index + 1, saved.trackIds.size, formatTime(saved.positionMs)),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -1279,7 +1279,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
     if (crashReportOpen) CrashReportsDialog { crashReportOpen = false }
-    deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text(stringResource(R.string.playlist_delete_title)) }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text(stringResource(R.string.cancel)) } }) }
+    deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text(stringResource(R.string.playlist_delete_title)) }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy, destructive = true) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text(stringResource(R.string.cancel)) } }) }
     actions?.let { track -> ModalBottomSheet(
         onDismissRequest = { actions = null },
         modifier = Modifier.testTag("song-actions-sheet"),
@@ -2052,7 +2052,7 @@ internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long, inline: Boo
     val buffered by vm.buffered.collectAsStateWithLifecycle()
     val slider = @Composable { modifier: Modifier ->
         PlaybackSlider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it }, bufferedValue = buffered.toFloat(), modifier = modifier,
-            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0)
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(0).toFloat(), enabled = duration > 0)
     }
     if (inline) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         timeStyle(elapsed); slider(Modifier.weight(1f)); timeStyle(total)

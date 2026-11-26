@@ -87,7 +87,7 @@
   padding: 2px 7px;
   border: 1px solid var(--border);
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--muted);
 }
@@ -206,7 +206,7 @@
   text-align: center;
 }
 .ranking-track:first-child .ranking-position {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .ranking-stat {
   font-size: 13px;
@@ -339,11 +339,11 @@
   text-decoration: none;
 }
 .external-source-link:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .external-suggestion-actions button[aria-pressed='true'] {
   background: var(--workspace-selected);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 @media (max-width: 1000px) {
   .external-suggestion-grid {
@@ -491,7 +491,7 @@
   white-space: nowrap;
 }
 .daily-track.is-current .track-title strong {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 @media (hover: hover) {
   .daily-track:hover {

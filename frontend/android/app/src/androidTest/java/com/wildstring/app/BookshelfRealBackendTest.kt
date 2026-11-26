@@ -3,9 +3,13 @@ package com.wildstring.app
 import android.content.ComponentName
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -14,6 +18,8 @@ import com.google.gson.JsonObject
 import com.wildstring.app.data.RequestOwner
 import com.wildstring.app.playback.BookPlaybackService
 import com.wildstring.app.ui.MusicViewModel
+import com.wildstring.app.ui.classicDarkColors
+import com.wildstring.app.ui.classicLightColors
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -26,13 +32,24 @@ import org.junit.Test
 class BookshelfRealBackendTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private fun capture(name: String) {
+    private fun capture(name: String, frameReady: (Bitmap) -> Boolean = { true }) {
         compose.waitForIdle()
         val run = InstrumentationRegistry.getInstrumentation()
         val output = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
             ?: run.targetContext.getExternalFilesDir(null)!!
         output.mkdirs()
-        val image = run.uiAutomation.takeScreenshot()!!
+        var frame: Bitmap? = null
+        compose.waitUntil(5_000) {
+            val image = checkNotNull(run.uiAutomation.takeScreenshot())
+            if (frameReady(image)) {
+                frame = image
+                true
+            } else {
+                image.recycle()
+                false
+            }
+        }
+        val image = checkNotNull(frame)
         File(output, name).outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
@@ -99,7 +116,7 @@ class BookshelfRealBackendTest {
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("books-source-chip-itunes").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("books-source-chip-openlibrary").assertIsDisplayed()
+        compose.onNodeWithTag("books-source-chip-openlibrary").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("books-source-chip-google_books").assertDoesNotExist()
         capture("book-detail-edit-light.png")
         compose.runOnIdle { vm.settings.appearance("dark") }
@@ -107,17 +124,24 @@ class BookshelfRealBackendTest {
         capture("book-detail-edit-dark.png")
         compose.runOnIdle { vm.settings.appearance("light") }
         compose.waitForIdle()
-        compose.onNodeWithTag("books-edit-toggle").performClick()
+        compose.onNodeWithTag("books-edit-toggle").performScrollTo().performClick()
         if (compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty()) {
             compose.onNodeWithTag("nav-assistant").performClick()
-            compose.waitUntil(15_000) {
-                compose.onAllNodesWithTag("assistant-back").fetchSemanticsNodes().isNotEmpty()
+            for (theme in listOf("light", "dark")) {
+                val input = compose.onNodeWithTag("agent-chat-input")
+                compose.runOnIdle { vm.settings.appearance(theme) }
+                compose.waitUntil(15_000) {
+                    input.isDisplayed() &&
+                        compose.onNodeWithTag("appearance-$theme").isDisplayed() &&
+                        compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isEmpty()
+                }
+                // The compositor can still return a bookshelf frame after semantics has switched.
+                val bounds = input.fetchSemanticsNode().boundsInRoot
+                val x = (bounds.left + bounds.width * 0.7f).toInt()
+                val y = bounds.center.y.toInt()
+                val background = (if (theme == "dark") classicDarkColors else classicLightColors).surfaceContainerLow.toArgb()
+                capture("assistant-phone-$theme.png") { image -> image.getPixel(x, y) == background }
             }
-            compose.onNodeWithTag("bottom-navigation").assertDoesNotExist()
-            capture("assistant-phone-light.png")
-            compose.runOnIdle { vm.settings.appearance("dark") }
-            compose.waitForIdle()
-            capture("assistant-phone-dark.png")
             compose.runOnIdle { vm.settings.appearance("light") }
             compose.waitForIdle()
             compose.onNodeWithTag("assistant-back").performClick()
@@ -167,8 +191,16 @@ class BookshelfRealBackendTest {
         first.performSemanticsAction(SemanticsActions.SetSelection) { select -> assertTrue(select(0, 7, false)) }
         compose.onNodeWithText(uiString(R.string.books_annotate)).performClick()
         compose.onNodeWithTag("book-annotation-note-input").performTextReplacement("窗边批注")
+        compose.activityRule.scenario.onActivity { activity ->
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+        }
+        compose.waitUntil(5_000) {
+            compose.runOnIdle {
+                ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
+            }
+        }
         compose.onNodeWithText(uiString(R.string.books_amber)).performClick()
-        compose.onNodeWithTag("book-annotation-save").performClick()
+        compose.onNodeWithTag("book-annotation-save").assertIsDisplayed().performClick()
         compose.waitUntil(10_000) {
             runBlocking { vm.repository.api().bookAnnotations(bookId).items }.any {
                 it.startBlock == 0 && it.startOffset == 0 && it.endOffset == 7 && it.color == "amber" && it.note == "窗边批注"
@@ -268,11 +300,21 @@ class BookshelfRealBackendTest {
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("book-audio-player").fetchSemanticsNodes().isNotEmpty()
             }
+            compose.onNodeWithContentDescription(uiString(R.string.pod_player_rewind_15)).assertHasClickAction()
+            compose.onNodeWithContentDescription(uiString(R.string.pod_player_forward_30)).assertHasClickAction()
             capture("book-audio-player-light.png")
             compose.runOnIdle { vm.settings.appearance("dark") }
             compose.waitForIdle()
             capture("book-audio-player-dark.png")
             compose.runOnIdle { vm.settings.appearance("light") }
+            compose.runOnIdle { controller.pause() }
+            compose.waitUntil(10_000) { compose.runOnIdle { !controller.isPlaying } }
+            val progress = compose.onNodeWithContentDescription(uiString(R.string.playback_progress_label))
+            progress.seekPlaybackTo(4500L)
+            compose.waitUntil(10_000) { compose.runOnIdle { controller.currentPosition == 4500L } }
+            progress.assertPlaybackProgress(4500L, compose.runOnIdle { controller.duration })
+            compose.runOnIdle { controller.play() }
+            compose.waitUntil(10_000) { compose.runOnIdle { controller.isPlaying } }
             compose.onNodeWithTag("book-audio-collapse").performClick()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("book-audio-player").fetchSemanticsNodes().isEmpty()
@@ -311,6 +353,8 @@ class BookshelfRealBackendTest {
                         compose.runOnIdle { controller.isPlaying }
                 }
                 assertTrue(compose.onNodeWithTag("book-reader-stage").getBoundsInRoot() == stage)
+                compose.onNodeWithContentDescription(uiString(R.string.pod_player_rewind_15)).assertHasClickAction()
+                compose.onNodeWithContentDescription(uiString(R.string.pod_player_forward_30)).assertHasClickAction()
                 capture("reader-companion-audio-light.png")
                 if (compose.onAllNodesWithTag("book-reader-pager").fetchSemanticsNodes().isEmpty()) {
                     compose.onNodeWithContentDescription(uiString(R.string.books_tools)).performClick()

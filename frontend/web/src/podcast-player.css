@@ -32,7 +32,7 @@
 }
 .podcast-transport > .icon-button:hover:not(:disabled),
 .podcast-transport > .play-button:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   transform: translateY(-1px);
@@ -75,7 +75,7 @@
   z-index: 1;
   padding-top: 1px;
   font:
-    750 9px/1 'SFMono-Regular',
+    750 11px/1 'SFMono-Regular',
     Consolas,
     monospace;
   letter-spacing: -0.06em;
@@ -86,15 +86,12 @@
   padding: 7px 4px;
 }
 .retro-keys .retro-skip .podcast-skip-glyph {
-  width: 25px;
-  height: 25px;
+  width: 28px;
+  height: 28px;
 }
 .retro-keys .retro-skip .podcast-skip-glyph svg {
-  width: 25px;
-  height: 25px;
-}
-.retro-keys .retro-skip .podcast-skip-glyph b {
-  font-size: 8px;
+  width: 28px;
+  height: 28px;
 }
 .retro-keys .retro-skip:hover:not(:disabled) {
   color: #fff0c6;
@@ -133,7 +130,7 @@
   --paper: #f4eddf;
   --paper-ink: #393b30;
   --paper-body: #535448;
-  --paper-muted: #6b6b5b;
+  --paper-muted: #626457;
   --paper-line: #c9c5b3;
   --device-shadow: 62 42 24;
   --accent: #a94e32;
@@ -364,7 +361,7 @@
   align-items: center;
   gap: 7px;
   color: var(--device-muted);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.16em;
 }
 .retro-on-air i {
@@ -396,7 +393,7 @@
   white-space: nowrap;
 }
 .retro-time small {
-  font-size: 10px;
+  font-size: 11px;
   color: #b1a58e;
 }
 .retro-radio[data-live='true'] .retro-screen-copy strong {
@@ -447,13 +444,17 @@
 }
 .retro-tuner-label {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 8px;
+  gap: 3px 8px;
   font-family: 'SFMono-Regular', Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.04em;
   color: #b89c6e;
+}
+.retro-tuner-label > span {
+  white-space: nowrap;
 }
 .retro-radio[data-live='true'] .retro-tuner-label {
   color: #f6dca4;
@@ -466,11 +467,12 @@
 .retro-tuner-label small {
   font-size: 9px;
 }
-.retro-tuner-hint {
+.retro-tuner-label .retro-tuner-hint {
   display: none;
+  font-size: 12px;
 }
 @media (hover: none) {
-  .retro-tuner-hint {
+  .retro-tuner-label .retro-tuner-hint {
     display: inline;
   }
 }
@@ -527,7 +529,7 @@
   display: block;
   color: var(--device-muted);
   font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.16em;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -822,7 +824,7 @@
 .print-kicker {
   display: block;
   color: var(--paper-muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.17em;
 }
 .programme-heading h2 {
@@ -837,12 +839,12 @@
     11px 'SFMono-Regular',
     monospace;
   margin-left: 5px;
-  color: var(--paper-muted);
+  color: var(--paper-body);
 }
 .programme-status {
   flex: none;
-  font-size: 11px;
-  color: var(--paper-muted);
+  font-size: 12px;
+  color: var(--paper-ink);
 }
 .programme-settings {
   display: flex;
@@ -861,7 +863,7 @@
   background: var(--desk);
   color: var(--paper-body);
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 30px;
 }
 .programme-settings select:focus-visible {
@@ -872,8 +874,8 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--paper-muted);
-  font-size: 11px;
+  color: var(--paper-body);
+  font-size: 12px;
   white-space: nowrap;
 }
 .programme-unplayed input {
@@ -911,7 +913,7 @@
 .programme-number {
   align-self: start;
   padding-top: 4px;
-  color: color-mix(in srgb, var(--paper-muted) 75%, transparent);
+  color: var(--paper-body);
   font:
     11px 'SFMono-Regular',
     monospace;
@@ -939,9 +941,9 @@
 .programme-track > span {
   display: block;
   padding-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
-  color: var(--paper-muted);
+  color: var(--paper-body);
   font-variant-numeric: tabular-nums;
 }
 .fullscreen-player[data-player-kind='podcast'] .programme-remove {
@@ -973,7 +975,7 @@
 .programme-empty {
   font-size: 12px;
   line-height: 1.7;
-  color: var(--paper-muted);
+  color: var(--paper-body);
 }
 .programme-list ol {
   list-style: none;
@@ -988,10 +990,10 @@
 .programme-list section h3,
 .programme-list section p {
   margin: 8px 8px 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--paper-muted);
+  color: var(--paper-body);
 }
 .programme-sync {
   display: flex;
@@ -1001,7 +1003,7 @@
   padding: 0 3px 8px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--paper-muted);
+  color: var(--paper-body);
 }
 .programme-sync p {
   margin: 0;
@@ -1084,7 +1086,7 @@
   padding: 10px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--paper-line) 70%, transparent);
   color: var(--paper-muted);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   line-height: 1.5;
 }
@@ -1127,8 +1129,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--accent);
-  font-size: 10px;
+  color: var(--accent-text);
   letter-spacing: 0.2em;
 }
 .newspaper-article-header .print-kicker::before {
@@ -1141,7 +1142,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 20px;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--paper-muted);
   padding-bottom: 20px;
@@ -1166,7 +1167,7 @@
 }
 .newspaper-body a,
 .newspaper-body .podcast-timecode {
-  color: var(--accent);
+  color: var(--accent-text);
   text-underline-offset: 3px;
 }
 .newspaper-body .podcast-timecode {
@@ -1199,13 +1200,14 @@
 }
 .newspaper-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 10px;
   padding-top: 12px;
   margin-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--paper-line) 70%, transparent);
-  font-size: 10px;
-  color: color-mix(in srgb, var(--paper-muted) 80%, transparent);
+  font-size: 12px;
+  color: var(--paper-muted);
   letter-spacing: 0.14em;
 }
 .fullscreen-player[data-player-kind='podcast'] .fullscreen-controls {
@@ -1252,7 +1254,7 @@
   .fullscreen-options
   .playback-rate-control
   select:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent) 42%, transparent);
 }
@@ -1272,7 +1274,7 @@
 .fullscreen-player[data-player-kind='podcast']
   .podcast-transport
   > .icon-button:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: color-mix(in srgb, var(--accent) 48%, transparent);
 }
@@ -1396,6 +1398,7 @@
   }
   .podcast-stage {
     display: flex;
+    grid-column: 1 / -1;
     flex-direction: column;
     width: 100%;
     padding: 29px 20px 20px;
@@ -1443,10 +1446,6 @@
   .programme-track strong {
     font-size: 13px;
   }
-  .programme-settings select,
-  .programme-unplayed {
-    font-size: 11px;
-  }
   .radio-newspaper {
     flex: none;
     min-height: 380px;
@@ -1465,6 +1464,7 @@
     font-size: 15px;
   }
   .fullscreen-player[data-player-kind='podcast'] .fullscreen-controls {
+    grid-column: 1 / -1;
     padding: 10px 18px 12px;
     background: var(--desk);
     border-top: 1px solid var(--paper-line);
@@ -1485,6 +1485,9 @@
   }
 }
 @media (max-width: 380px) {
+  .retro-tuner-label {
+    column-gap: 4px;
+  }
   .retro-deck {
     grid-template-columns: 1.3fr 1fr 48px;
     gap: 8px;

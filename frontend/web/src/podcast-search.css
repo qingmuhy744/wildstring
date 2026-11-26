@@ -86,8 +86,8 @@
 
 .podcast-search-filters > button[aria-pressed='true'] {
   border-color: var(--accent);
-  background: var(--podcast-accent-soft);
-  color: var(--accent);
+  background: var(--accent-container);
+  color: var(--on-accent-container);
 }
 
 .podcast-search-filters label {
@@ -266,12 +266,13 @@
 }
 
 .podcast-search-state {
-  color: var(--accent, #10b981);
+  color: var(--accent-text);
   border-color: color-mix(in srgb, var(--accent, #10b981) 50%, transparent);
 }
 
 .podcast-search-state.followed {
-  background: color-mix(in srgb, var(--accent, #10b981) 16%, transparent);
+  background: var(--accent-container);
+  color: var(--on-accent-container);
 }
 
 .podcast-search-explicit {
@@ -296,7 +297,7 @@
   display: inline-block;
   border: none;
   background: transparent;
-  color: var(--accent, #10b981);
+  color: var(--accent-text);
   padding: 0.25rem 0;
   margin-bottom: 0.5rem;
   cursor: pointer;

@@ -8,10 +8,14 @@
   color: var(--text);
   --bg: #181614;
   background: var(--bg);
+  scroll-padding-block-start: 8px;
+  scroll-padding-block-end: calc(var(--player-bar-height, 0px) + 8px);
   font-synthesis: none;
   color-scheme: dark;
   --accent: #e98a6d;
   --accent-text: #e98a6d;
+  --accent-container: #43302a;
+  --on-accent-container: #ffdbcc;
   --muted: #aaa59a;
   --faint: #9a948a;
   --border: #3a352f;
@@ -122,7 +126,7 @@ a {
   height: 44px;
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 2px;
   color: var(--muted);
   font-weight: 500;
@@ -176,7 +180,7 @@ a {
 }
 .active,
 .selected {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .sr-only {
   position: absolute;
@@ -379,14 +383,13 @@ a {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   font-weight: 500;
   min-width: 16px;
   text-align: right;
-  opacity: 0.7;
 }
 .nav-current small {
-  color: #f0dcc6;
-  opacity: 0.9;
+  color: inherit;
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -396,7 +399,7 @@ a {
   flex-direction: column;
   gap: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .sidebar-bottom-actions {
   display: flex;
@@ -413,7 +416,7 @@ a {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   cursor: pointer;
   transition: all 0.15s;
@@ -432,9 +435,8 @@ a {
 .sidebar-bottom .logout-link {
   padding: 2px 6px;
   text-align: right;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
-  opacity: 0.75;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -443,7 +445,6 @@ a {
     color 0.15s;
 }
 .sidebar-bottom .logout-link:hover {
-  opacity: 1;
   color: var(--fg);
 }
 .sidebar-bottom p {
@@ -594,7 +595,7 @@ a {
 .track-header {
   height: 44px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 .track-row {
   min-height: 74px;
@@ -615,13 +616,13 @@ a {
 .track-number {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #8f877e;
+  color: var(--muted);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 .current .track-number,
 .current .track-title strong {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .track-identity {
   display: flex;
@@ -729,7 +730,7 @@ a {
   text-overflow: ellipsis;
 }
 .track-title small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   white-space: nowrap;
@@ -737,7 +738,7 @@ a {
 }
 .track-artist-row {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   white-space: nowrap;
@@ -753,7 +754,7 @@ a {
 }
 .track-artist-link:hover,
 .track-artist-link:focus-visible {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 .album-column {
@@ -776,7 +777,7 @@ a {
   min-height: 32px;
 }
 .album-link:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   background: transparent;
 }
 .album-link:hover > span {
@@ -804,14 +805,16 @@ a {
 .format {
   border: 1px solid #4d443c;
   padding: 3px 5px;
-  font-size: 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.4px;
   border-radius: 3px;
   color: #b6c49c;
 }
 .track-row time {
   font-family: var(--font-mono);
-  color: #a4aa96;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
@@ -827,11 +830,11 @@ a {
   justify-content: space-between;
   gap: 15px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   padding: 22px 0;
 }
 .pagination button {
-  font-size: 11px;
+  font-size: 12px;
   padding: 7px 10px;
   margin-left: 6px;
 }
@@ -976,11 +979,14 @@ a {
   text-overflow: ellipsis;
 }
 .now-playing small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.now-playing .format {
+  font-size: 12px;
 }
 .now-playing-credits,
 .now-playing-artists,
@@ -1066,7 +1072,7 @@ a {
   align-items: center;
   gap: 10px;
   margin-top: 12px;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1085,14 +1091,15 @@ a {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .volume input {
   width: 72px;
 }
 .player-options small {
-  font-size: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .player-error {
   position: absolute;
@@ -1222,7 +1229,7 @@ a {
     letter-spacing: -1px;
   }
   .collection-heading .muted {
-    font-size: 11px;
+    font-size: 12px;
   }
   .subtle {
     display: none;
@@ -1256,9 +1263,6 @@ a {
   .track-identity {
     gap: 10px;
   }
-  .track-title small {
-    font-size: 10px;
-  }
   .app-shell {
     padding-bottom: 152px;
   }
@@ -1280,9 +1284,6 @@ a {
   }
   .now-playing strong {
     font-size: 12px;
-  }
-  .now-playing small {
-    font-size: 10px;
   }
   .now-playing-credits {
     flex-direction: column;
@@ -1333,7 +1334,6 @@ a {
   .player-error {
     left: 0;
     padding: 10px 14px;
-    font-size: 11px;
   }
   .toast {
     bottom: 174px;
@@ -1364,12 +1364,6 @@ a {
     height: 150px;
     right: 0;
     bottom: 0;
-  }
-  .pagination {
-    font-size: 9px;
-  }
-  .pagination button {
-    font-size: 10px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1578,7 +1572,7 @@ a {
 .source-breadcrumbs button {
   border: 0;
   padding: 0;
-  color: var(--accent);
+  color: var(--accent-text);
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -1611,7 +1605,7 @@ a {
   overflow-wrap: anywhere;
 }
 .source-pending {
-  color: var(--accent) !important;
+  color: var(--accent-text) !important;
 }
 .source-actions {
   display: flex;
@@ -1656,7 +1650,7 @@ a {
   color: var(--muted);
 }
 .album-card small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .album-card-main:hover .cover,
@@ -1674,7 +1668,7 @@ a {
 }
 .album-artist-link:hover,
 .album-artist-link:focus-visible {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 .album-heading h1 {
@@ -1726,15 +1720,14 @@ a {
   }
   .library-toolbar > .text-button {
     flex-shrink: 0;
-    font-size: 10px;
     padding: 10px 0;
   }
   .view-switch button {
-    font-size: 11px;
     padding: 9px 10px;
+    white-space: nowrap;
   }
   .library-toolbar .primary {
-    font-size: 11px;
+    font-size: 12px;
     padding: 10px 12px;
   }
   .album-grid {
@@ -1744,9 +1737,6 @@ a {
   }
   .album-card strong {
     font-size: 13px;
-  }
-  .album-card > span:not(.cover) {
-    font-size: 10px;
   }
   .album-heading {
     gap: 13px;
@@ -1871,7 +1861,6 @@ a {
 }
 .fullscreen-header .eyebrow {
   color: inherit;
-  font-size: 10px;
   letter-spacing: 3px;
 }
 .fullscreen-header .eyebrow > span {
@@ -1879,7 +1868,7 @@ a {
   opacity: 0.4;
 }
 .fullscreen-mode {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 2px;
 }
 .fullscreen-content {
@@ -1991,7 +1980,7 @@ a {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 12px;
   color: #eee4d77d;
   padding: 0 4px 12px;
 }
@@ -1999,7 +1988,7 @@ a {
   flex: 1;
 }
 .lyrics-toolbar button {
-  font-size: 10px;
+  font-size: 12px;
   padding: 7px 4px;
 }
 .lyrics-size-control {
@@ -2176,7 +2165,6 @@ a {
   display: none;
 }
 .fullscreen-controls .timeline {
-  font-size: 10px;
   margin-top: 22px;
   gap: 14px;
   color: #eee4d77d;
@@ -2196,11 +2184,11 @@ a {
   align-items: center;
   gap: 12px;
   color: #eee4d799;
-  font-size: 11px;
+  font-size: 12px;
 }
 .fullscreen-quality small {
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   margin-top: 6px;
   color: #eee4d74d;
 }
@@ -2250,7 +2238,6 @@ a {
     display: none;
   }
   .fullscreen-header .eyebrow {
-    font-size: 9px;
     letter-spacing: 2px;
   }
   .fullscreen-content {
@@ -2281,18 +2268,13 @@ a {
     margin-bottom: 2px;
     justify-content: center;
   }
-  .fullscreen-metadata > span {
-    font-size: 10px;
-  }
   .fullscreen-lyrics {
     padding: 0;
   }
   .lyrics-toolbar {
-    font-size: 9px;
     padding-bottom: 0;
   }
   .lyrics-toolbar button {
-    font-size: 9px;
     padding: 9px 3px;
   }
   .lyric-line {
@@ -2470,7 +2452,7 @@ textarea {
 }
 .artist-card small,
 .playlist-card > span:last-child {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
 }
@@ -2520,14 +2502,14 @@ textarea {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .bulk-playlist select {
   max-width: 210px;
 }
 .bulk-playlist button {
-  font-size: 11px;
+  font-size: 12px;
 }
 .listening-summary {
   display: grid;
@@ -2550,7 +2532,7 @@ textarea {
 }
 .listening-summary span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .track-header,
 .track-row {
@@ -2662,8 +2644,7 @@ textarea {
   color: var(--danger);
 }
 .track-stat {
-  font-size: 9px !important;
-  color: #c6ad8d !important;
+  color: var(--muted);
 }
 .player {
   grid-template-columns: minmax(170px, 1fr) minmax(240px, 1.35fr) minmax(220px, 1fr);
@@ -2726,7 +2707,7 @@ textarea {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
 }
 .queue-panel .track-title {
   min-width: 0;
@@ -2904,10 +2885,6 @@ textarea {
   .artist-card strong,
   .playlist-card strong {
     font-size: 13px;
-  }
-  .artist-card small,
-  .playlist-card > span:last-child {
-    font-size: 10px;
   }
   .track-header,
   .track-row {
@@ -3105,11 +3082,11 @@ textarea {
 }
 .library-locations small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .availability {
   color: var(--success);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
 }
 .availability::before {
@@ -3162,7 +3139,7 @@ textarea {
 }
 .folder-metadata-summary .has-warning strong,
 .folder-metadata-summary .has-warning span {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .folder-metadata-layout {
   display: grid;
@@ -3206,7 +3183,7 @@ textarea {
 }
 .folder-metadata-toolbar button.active {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .folder-metadata-list-heading,
 .folder-metadata-editor-heading {
@@ -3363,11 +3340,11 @@ textarea {
 }
 .management-job summary small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .job-status {
   color: #c8d0ad;
-  font-size: 11px;
+  font-size: 12px;
   padding: 7px 10px;
   border-radius: 6px;
   background: #3c3329;
@@ -3493,7 +3470,7 @@ textarea {
   font-size: 13px;
 }
 .metadata-source {
-  font-size: 10px;
+  font-size: 12px;
   color: #b1bd97;
 }
 .metadata-field input,
@@ -3512,7 +3489,7 @@ textarea {
   line-height: 1.6;
 }
 .metadata-origin {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   overflow-wrap: anywhere;
   line-height: 1.7;
@@ -3528,9 +3505,8 @@ textarea {
 }
 .metadata-field .text-button {
   text-align: left;
-  font-size: 11px;
   padding: 0;
-  color: #e2ad8b;
+  color: var(--accent-text);
 }
 .metadata-diff {
   margin: 28px 0;
@@ -3668,7 +3644,7 @@ textarea {
   height: 18px;
 }
 .fullscreen-panel-switches span {
-  font-size: 10px;
+  font-size: 12px;
 }
 .fullscreen-content.is-cover-only {
   grid-template-columns: minmax(0, 1fr);
@@ -4178,7 +4154,7 @@ textarea {
   line-height: 1.7;
 }
 .lyric-select small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   flex-shrink: 0;
 }
@@ -4290,6 +4266,8 @@ textarea {
   --border: #deded2;
   --accent: #bc5438;
   --accent-text: #9f422b;
+  --accent-container: #f5ddd4;
+  --on-accent-container: #3a160b;
   --text: #2a2b25;
   --surface: #faf9f4;
   --surface-subtle: #eeeee5;
@@ -4350,7 +4328,7 @@ textarea {
 [data-theme='light']
   :is(
     .nav-current,
-    .view-switch button.active,
+    .view-switch button[aria-pressed='true'],
     .track-row.current,
     .management-tabs button[aria-pressed='true'],
     .timing-current
@@ -4489,9 +4467,6 @@ textarea {
     transition: none;
   }
 }
-[data-theme='light'] .track-row :is(.album-column, time, .track-number) {
-  color: #656b58;
-}
 @media (min-width: 901px) and (max-height: 1000px) {
   .sidebar-bottom p {
     display: none;
@@ -4599,13 +4574,12 @@ textarea {
 }
 .quality-passthrough-hint {
   display: inline-block;
-  font-size: 0.68rem;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--tag-bg, rgba(255, 255, 255, 0.08));
   color: var(--muted);
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
-  opacity: 0.85;
   user-select: none;
 }
 .fullscreen-options .quality-passthrough-hint {
@@ -4900,9 +4874,9 @@ textarea {
   border-color: var(--accent);
 }
 .provider-recommended {
-  color: var(--accent);
+  color: var(--accent-text);
   margin-right: 8px;
-  font-size: 10px;
+  font-size: 12px;
 }
 :root[data-theme='light'] .metadata-refresh-dialog {
   background: #f7f7f2;
@@ -4942,8 +4916,9 @@ textarea {
   padding: 2px 5px;
   border-radius: 10px;
   background: var(--accent);
-  color: #fff;
-  font-size: 10px;
+  color: var(--on-accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .user-avatar {
   width: 40px;
@@ -6171,7 +6146,7 @@ dialog.scroll-dialog[open] {
 }
 .track-unavailable-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   margin-left: 8px;
   font-weight: 400;
 }

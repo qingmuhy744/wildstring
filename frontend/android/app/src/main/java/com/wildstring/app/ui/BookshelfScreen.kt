@@ -637,8 +637,8 @@ internal fun BookshelfScreen(
                                         if (meta.isNotEmpty()) {
                                             Text(
                                                 meta,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isActiveAudio || item.progressStatus == "in_progress") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isActiveAudio || item.progressStatus == "in_progress") MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
@@ -826,7 +826,7 @@ private fun BookDetailScreen(
                             Text(
                                 carrierLine,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (book.progressStatus == "in_progress") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (book.progressStatus == "in_progress") MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1026,6 +1026,9 @@ private fun BookDetailScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     }
 
+                    val numberStyle = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontFeatureSettings = "tnum")
+                    val largestIndex = if (showAudio) displayedAudioChapters?.lastOrNull()?.index else ebookChapters?.lastOrNull()?.index
+                    val numberWidth = chapterNumberWidth((largestIndex ?: 0) + 1, numberStyle)
                     if (showAudio) {
                         val list = displayedAudioChapters
                         if (list == null) {
@@ -1048,9 +1051,11 @@ private fun BookDetailScreen(
                                 ) {
                                     Text(
                                         if (active && bookPlaybackState.playing) "▶" else "%02d".format(chapter.index + 1),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontFeatureSettings = "tnum"),
-                                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.width(28.dp),
+                                        style = numberStyle,
+                                        color = if (active) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.width(numberWidth),
+                                        maxLines = 1,
+                                        softWrap = false,
                                     )
                                     Text(
                                         chapter.title,
@@ -1101,9 +1106,11 @@ private fun BookDetailScreen(
                                 ) {
                                     Text(
                                         "%02d".format(chapter.index + 1),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontFeatureSettings = "tnum"),
+                                        style = numberStyle,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.width(28.dp),
+                                        modifier = Modifier.width(numberWidth),
+                                        maxLines = 1,
+                                        softWrap = false,
                                     )
                                     Text(
                                         chapter.title,
@@ -1963,12 +1970,14 @@ private fun BookReading(
                                 val height = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
                                 if (paged) {
                                     val gap = with(density) { 8.dp.roundToPx() }
-                                    val companionTextHeightDp = with(density) {
-                                        (MaterialTheme.typography.labelLarge.lineHeight.toPx() +
-                                            MaterialTheme.typography.labelSmall.lineHeight.toPx()).toDp()
+                                    val typography = MaterialTheme.typography
+                                    val footerSpacePx = with(density) {
+                                        // Compose measures the two text lines and their padding separately.
+                                        val textHeight = kotlin.math.ceil(typography.labelLarge.lineHeight.toPx()).toInt() +
+                                            kotlin.math.ceil(typography.bodySmall.lineHeight.toPx()).toInt() +
+                                            2 * 4.dp.roundToPx() + 1.dp.roundToPx()
+                                        2.dp.roundToPx() + 2 * 6.dp.roundToPx() + maxOf(48.dp.roundToPx(), textHeight) + 8.dp.roundToPx()
                                     }
-                                    val footerSpaceDp = 2.dp + 12.dp + maxOf(44.dp, companionTextHeightDp + 9.dp) + 8.dp
-                                    val footerSpacePx = with(density) { footerSpaceDp.roundToPx() }
                                     val pageHeight = (height - footerSpacePx).coerceAtLeast(1)
                                     val pages = remember(chapter, size, serif, width, pageHeight, gap, measurer, imageSizes, density.density) {
                                         measurePages(chapter, measurer, size, width, pageHeight, gap, serif, imageSizes, density.density)
@@ -2075,7 +2084,7 @@ private fun BookReading(
                                             }
                                         }
                                         Box(
-                                            Modifier.fillMaxWidth().height(footerSpaceDp),
+                                            Modifier.fillMaxWidth().height(with(density) { footerSpacePx.toDp() }),
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             val hideForAudio = audioBarOpen && !immersive
@@ -2085,7 +2094,7 @@ private fun BookReading(
                                                     .graphicsLayer { alpha = if (hideForAudio) 0f else 1f }
                                                     .testTag("book-reader-page-indicator"),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                                                color = ink.copy(alpha = 0.58f),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                     }
@@ -2264,7 +2273,7 @@ private fun BookReading(
                             TextButton(onClick = { dark = !dark }) {
                                 Text(
                                     stringResource(R.string.books_dark),
-                                    color = if (dark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (dark) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = if (dark) FontWeight.SemiBold else FontWeight.Medium,
                                 )
                             }
@@ -3071,22 +3080,20 @@ private fun BookCompanionAudioBar(
                 )
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontFeatureSettings = "tnum"),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                     color = if (active?.error != null) MaterialTheme.colorScheme.error else subtitleColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(
+            PlaybackSkipButton(
+                rewind = true,
                 onClick = { vm.bookPlayback.seekBy(-15_000L) },
                 enabled = active?.activeChapter != null && !loading,
-                modifier = Modifier.size(44.dp).focusProperties { canFocus = false },
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(22.dp), tint = ink)
-                    Text("15", fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = ink, modifier = Modifier.padding(top = 2.dp))
-                }
-            }
+                modifier = Modifier.focusProperties { canFocus = false },
+                arrowSize = 16.dp,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = ink),
+            )
             FilledIconButton(
                 onClick = {
                     if (isThisBookAudio) vm.bookPlayback.togglePlay()
@@ -3115,13 +3122,14 @@ private fun BookCompanionAudioBar(
                     )
                 }
             }
-            IconButton(
+            PlaybackSkipButton(
+                rewind = false,
                 onClick = { vm.bookPlayback.seekBy(30_000L) },
                 enabled = active?.activeChapter != null && !loading,
-                modifier = Modifier.size(44.dp).focusProperties { canFocus = false },
-            ) {
-                Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(22.dp), tint = ink)
-            }
+                modifier = Modifier.focusProperties { canFocus = false },
+                arrowSize = 16.dp,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = ink),
+            )
             IconButton(
                 onClick = onHide,
                 modifier = Modifier.size(40.dp).focusProperties { canFocus = false }.testTag("book-reader-audio-hide"),

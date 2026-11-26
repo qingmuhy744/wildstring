@@ -133,7 +133,7 @@
 }
 
 .episode-dialog-description a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -212,8 +212,8 @@
 
 .episode-dialog-files > .episode-favorite-btn.active {
   border-color: var(--accent);
-  color: var(--accent);
-  background: var(--podcast-accent-soft, rgba(188, 84, 56, 0.12));
+  color: var(--on-accent-container);
+  background: var(--accent-container);
 }
 
 @media (max-width: 600px) {

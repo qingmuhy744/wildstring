@@ -12,11 +12,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import com.wildstring.app.R
+import com.wildstring.app.data.formatTime
 
 /**
  * Seek bar per DESIGN.md §5.3: 5px `--border` inactive track, `--accent` @ 28% buffered range,
  * `--accent-text` played range, 14px paper thumb with 2px `--accent` stroke.
+ * Values and range are in milliseconds.
  */
 @Composable internal fun PlaybackSlider(
     value: Float,
@@ -33,18 +44,22 @@ import androidx.compose.ui.unit.dp
     val buffer = accent.copy(alpha = 0.28f)
     val thumbFill = MaterialTheme.colorScheme.onPrimary.copy(alpha = if (enabled) 1f else 0.6f)
     val thumbStroke = if (enabled) accent else MaterialTheme.colorScheme.onSurfaceVariant
+    val currentValue = value.coerceIn(valueRange)
     val span = (valueRange.endInclusive - valueRange.start).coerceAtLeast(1e-6f)
-    val fraction = ((value - valueRange.start) / span).coerceIn(0f, 1f)
+    val fraction = (currentValue - valueRange.start) / span
     val bufferedFraction = ((bufferedValue - valueRange.start) / span).coerceIn(0f, 1f)
+    val label = stringResource(R.string.playback_progress_label)
+    val time = stringResource(R.string.playback_progress_time, formatTime(currentValue.toLong()), formatTime(valueRange.endInclusive.toLong()))
     fun valueAt(x: Float, width: Float): Float =
         valueRange.start + (x / width).coerceIn(0f, 1f) * span
+    fun commitValue(target: Float) {
+        onValueChange(target)
+        onValueChangeFinished()
+    }
     val gestureModifier = if (!enabled) Modifier
     else Modifier
         .pointerInput(valueRange, span) {
-            detectTapGestures { offset ->
-                onValueChange(valueAt(offset.x, size.width.toFloat()))
-                onValueChangeFinished()
-            }
+            detectTapGestures { offset -> commitValue(valueAt(offset.x, size.width.toFloat())) }
         }
         .pointerInput(valueRange, span) {
             detectHorizontalDragGestures(
@@ -56,7 +71,23 @@ import androidx.compose.ui.unit.dp
                 onValueChange(valueAt(change.position.x, size.width.toFloat()))
             }
         }
-    Box(modifier.height(48.dp).fillMaxWidth().then(gestureModifier)) {
+    Box(modifier.height(48.dp).fillMaxWidth().semantics {
+        contentDescription = label
+        stateDescription = time
+        progressBarRangeInfo = ProgressBarRangeInfo(currentValue, valueRange)
+        if (enabled) {
+            setProgress { requested ->
+                val target = requested.coerceIn(valueRange)
+                if (target == currentValue) false
+                else {
+                    commitValue(target)
+                    true
+                }
+            }
+        } else {
+            disabled()
+        }
+    }.then(gestureModifier)) {
         Canvas(Modifier.fillMaxWidth().height(48.dp)) {
             val trackHeight = 5.dp.toPx()
             val thumbRadius = 7.dp.toPx()

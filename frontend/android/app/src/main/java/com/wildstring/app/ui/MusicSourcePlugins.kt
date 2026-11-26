@@ -83,7 +83,7 @@ private fun candidateQualitySummary(candidate: JsonObject): CandidateQualitySumm
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
     }

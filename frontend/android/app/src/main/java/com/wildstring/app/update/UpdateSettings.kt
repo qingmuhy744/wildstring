@@ -25,6 +25,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.BuildConfig
 import com.wildstring.app.ui.AssistantMarkdown
+import com.wildstring.app.ui.TextButton
 import java.io.File
 import kotlinx.coroutines.launch
 

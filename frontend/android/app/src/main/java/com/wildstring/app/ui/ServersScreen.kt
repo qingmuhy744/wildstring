@@ -76,7 +76,7 @@ import kotlinx.coroutines.launch
     if (showRoutes) ServerRoutesDialog(vm) { showRoutes = false }
     if (adding || editing != null) ServerEditor(vm, editing, { adding = false; editing = null })
     deleting?.let { server -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.server_delete_title)) }, text = { Text(stringResource(R.string.server_delete_message, server.label)) },
-        confirmButton = { TextButton({ vm.deleteServer(server.id); deleting = null }) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } }) }
+        confirmButton = { TextButton({ vm.deleteServer(server.id); deleting = null }, destructive = true) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } }) }
 }
 
 @Composable private fun ServerEditor(vm: MusicViewModel, server: ServerConfiguration?, dismiss: () -> Unit) {

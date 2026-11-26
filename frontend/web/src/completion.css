@@ -334,7 +334,7 @@
   margin-bottom: 0;
 }
 .network-error strong {
-  color: var(--accent);
+  color: var(--danger);
 }
 .provider-reasons {
   margin: 8px 0;

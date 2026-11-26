@@ -187,7 +187,7 @@
 .workspace-badge.state-error,
 .workspace-badge.state-unknown,
 .workspace-badge.state-stale {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .workspace-badge.state-applied,
 .workspace-badge.state-succeeded,
@@ -585,7 +585,7 @@
   background: var(--workspace-selected);
 }
 .row-action-menu .destructive {
-  color: var(--accent);
+  color: var(--danger);
 }
 @media (hover: hover) {
   .workspace-session-entry .row-menu-trigger {
@@ -774,9 +774,8 @@
 .sidebar .nav-button {
   min-height: 43px;
 }
-.sidebar .notification-count {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
+.sidebar .nav-button:not(.nav-current) .notification-count {
+  color: var(--accent-text);
 }
 .workspace-card label > textarea,
 .workspace-form textarea {
@@ -804,7 +803,7 @@
     font-size: 28px;
   }
   .workspace-heading .eyebrow {
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 1.6px;
   }
   .assistant-composer {
@@ -979,7 +978,7 @@
 }
 .diagnostic-stack summary {
   cursor: pointer;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .diagnostic-stack ol {
   padding-inline-start: 24px;

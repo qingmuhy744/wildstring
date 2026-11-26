@@ -210,7 +210,7 @@ import kotlinx.coroutines.launch
                                                     Text(
                                                         text = stringResource(R.string.pod_exp_rss_previewing),
                                                         style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.primary,
+                                                        color = MaterialTheme.colorScheme.tertiary,
                                                     )
                                                 }
                                             }

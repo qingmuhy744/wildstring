@@ -410,6 +410,8 @@
     <string name="alphabet_rail_idle">字母索引空闲</string>
     <string name="disc_summary">Disc %1$d，%2$d 首</string>
     <string name="playback_buffering">缓冲中</string>
+    <string name="playback_progress_label">播放进度</string>
+    <string name="playback_progress_time">已播 %1$s，共 %2$s</string>
     <string name="playback_playing">正在播放</string>
     <string name="playback_paused">已暂停</string>
     <string name="current_song">当前歌曲</string>

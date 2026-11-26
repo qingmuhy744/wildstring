@@ -1,8 +1,261 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { login, manageTab } from './helpers';
+import { login, manageTab, section } from './helpers';
+
+const bookClientHeaders = { 'X-Wildstring-Client': 'web' };
+
+async function uploadReaderFixture(page: Page, title: string) {
+  const library = await page.request.post('/api/v1/book-libraries', {
+    headers: bookClientHeaders,
+    data: { name: title },
+  });
+  expect(library.status()).toBe(201);
+  const { id: libraryId } = await library.json();
+  const created = await page.request.post('/api/v1/books/upload', {
+    headers: bookClientHeaders,
+    multipart: {
+      library_id: libraryId,
+      file: {
+        name: `${title}.txt`,
+        mimeType: 'text/plain',
+        buffer: Buffer.from('第一章\n晨间正文。\n\n第二章\n午后正文。\n\n第三章\n夜间正文。'),
+      },
+    },
+  });
+  expect(created.status()).toBe(201);
+  const { id } = await created.json();
+  return { id, libraryId };
+}
+
+test('正文、目录和初次阅读进度读取失败各自原位重试', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `阅读重试 ${info.project.name} ${Date.now()}`;
+  const { id } = await uploadReaderFixture(page, title);
+  const prefix = `/api/v1/books/${id}`;
+  const seeded = await page.request.put(`${prefix}/reading-progress`, {
+    headers: bookClientHeaders,
+    data: {
+      session_id: 'reader-retry-fixture',
+      device_id: 'reader-retry-other-device',
+      base_version: 0,
+      sequence: 1,
+      spine_index: 1,
+      block_index: 0,
+      char_offset: 0,
+    },
+  });
+  expect(seeded.status()).toBe(200);
+  for (const path of ['/ebook/manifest', '/ebook/chapters/0', '/reading-progress']) {
+    await page.route(
+      `**${prefix}${path}`,
+      (route) => route.fulfill({ status: 503, json: { detail: 'fixture_unavailable' } }),
+      { times: 1 },
+    );
+  }
+  await page.goto(`/books/${id}/read`);
+  const reader = page.getByRole('dialog', { name: title });
+  const retry = (message: string) =>
+    reader.locator('.book-reader-alert').filter({ hasText: message });
+  const chapter = retry('无法加载本章正文。');
+  const contents = retry('无法加载目录。');
+  const progress = retry('无法读取阅读进度。');
+  await expect(chapter.getByRole('alert')).toBeVisible();
+  await expect(contents.getByRole('alert')).toBeVisible();
+  await expect(progress.getByRole('alert')).toBeVisible();
+  await page.screenshot({ scale: 'css', path: info.outputPath('reader-load-errors-light.png') });
+  const appearance = reader.getByRole('button', { name: '排版', exact: true });
+  await appearance.click();
+  await reader.getByRole('button', { name: '深色纸张' }).click();
+  await appearance.click();
+  await page.screenshot({ scale: 'css', path: info.outputPath('reader-load-errors-dark.png') });
+
+  await chapter.getByRole('button', { name: '重试' }).click();
+  await expect(reader.getByRole('article')).toContainText('晨间正文。');
+  await expect(progress.getByRole('alert')).toBeVisible();
+  await contents.getByRole('button', { name: '重试' }).click();
+  await expect(reader.getByRole('button', { name: '下一章' })).toBeEnabled();
+  await expect(reader.getByRole('article')).toContainText('晨间正文。');
+
+  await progress.getByRole('button', { name: '重试' }).click();
+  await expect(reader.getByRole('article')).toContainText('午后正文。');
+  await expect(reader.getByRole('alert')).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/books/${id}/read$`));
+});
+
+test('阅读进度冲突保持正文，显式读取最新位置后恢复保存', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `阅读冲突 ${info.project.name} ${Date.now()}`;
+  const { id } = await uploadReaderFixture(page, title);
+  const path = `/api/v1/books/${id}/reading-progress`;
+  let reads = 0;
+  let writes = 0;
+  await page.route(`**${path}`, async (route) => {
+    if (route.request().method() === 'GET') reads++;
+    else if (route.request().method() === 'PUT') writes++;
+    await route.continue();
+  });
+  const initialRead = page.waitForResponse((response) => response.url().endsWith(path));
+  await page.goto(`/books/${id}/read`);
+  expect((await initialRead).ok()).toBe(true);
+  const reader = page.getByRole('dialog', { name: title });
+  await expect(reader.getByRole('article')).toContainText('晨间正文。');
+  const otherDevice = await page.request.put(path, {
+    headers: bookClientHeaders,
+    data: {
+      session_id: 'reader-conflict-fixture',
+      device_id: 'reader-conflict-other-device',
+      base_version: 0,
+      sequence: 1,
+      spine_index: 2,
+      block_index: 0,
+      char_offset: 0,
+    },
+  });
+  expect(otherDevice.status()).toBe(200);
+  const serverProgress = await otherDevice.json();
+  const conflict = page.waitForResponse(
+    (response) => response.url().endsWith(path) && response.request().method() === 'PUT',
+  );
+  await reader.getByRole('button', { name: '下一章' }).click();
+  expect((await conflict).status()).toBe(409);
+  await expect(reader.getByRole('article')).toContainText('午后正文。');
+  await expect(reader.getByRole('alert')).toContainText('另一台设备更新了阅读进度');
+  await reader.getByRole('button', { name: '分页', exact: true }).click();
+  expect(reads).toBe(1);
+  expect(writes).toBe(1);
+  await page.screenshot({
+    scale: 'css',
+    path: info.outputPath('reader-progress-conflict-light.png'),
+  });
+  const appearance = reader.getByRole('button', { name: '排版', exact: true });
+  await appearance.click();
+  await reader.getByRole('button', { name: '深色纸张' }).click();
+  await appearance.click();
+  await page.screenshot({
+    scale: 'css',
+    path: info.outputPath('reader-progress-conflict-dark.png'),
+  });
+
+  await reader.getByRole('button', { name: '重新读取服务器进度' }).click();
+  await expect(reader.getByRole('alert')).toHaveCount(0);
+  await expect(reader.getByRole('article')).toContainText('夜间正文。');
+  await expect(reader.getByRole('button', { name: '滚动', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(reads).toBe(2);
+  expect(writes).toBe(1);
+
+  const resumed = page.waitForResponse(
+    (response) => response.url().endsWith(path) && response.request().method() === 'PUT',
+  );
+  await reader.getByRole('button', { name: '上一章' }).click();
+  const response = await resumed;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toMatchObject({
+    base_version: serverProgress.version,
+    intent: 'resume',
+    sequence: 1,
+  });
+  await expect(reader.getByRole('article')).toContainText('午后正文。');
+  expect(await response.json()).toMatchObject({ spine_index: 1, reading_mode: 'scroll' });
+});
+
+test('下一次自动保存成功后清除临时保存错误', async ({ page }, info) => {
+  await login(page);
+  const title = `阅读保存恢复 ${info.project.name} ${Date.now()}`;
+  const { id } = await uploadReaderFixture(page, title);
+  const path = `/api/v1/books/${id}/reading-progress`;
+  let failFirstSave = true;
+  await page.route(`**${path}`, async (route) => {
+    if (route.request().method() === 'PUT' && failFirstSave) {
+      failFirstSave = false;
+      await route.fulfill({ status: 503, json: { detail: 'fixture_unavailable' } });
+    } else {
+      await route.continue();
+    }
+  });
+  const initialRead = page.waitForResponse((response) => response.url().endsWith(path));
+  await page.goto(`/books/${id}/read`);
+  expect((await initialRead).ok()).toBe(true);
+  const reader = page.getByRole('dialog', { name: title });
+  await expect(reader.getByRole('article')).toContainText('晨间正文。');
+  const nextChapter = reader.getByRole('button', { name: '下一章', exact: true });
+  await nextChapter.click();
+  await expect(reader.getByRole('alert')).toBeVisible();
+  await expect(reader.getByRole('article')).toContainText('午后正文。');
+
+  const nextSave = page.waitForResponse(
+    (response) => response.url().endsWith(path) && response.request().method() === 'PUT',
+  );
+  await nextChapter.click();
+  const response = await nextSave;
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({ spine_index: 2 });
+  await expect(reader.getByRole('article')).toContainText('夜间正文。');
+  await expect(reader.getByRole('alert')).toHaveCount(0);
+});
+
+test('Esc 先关闭阅读面板，退出聚焦原书并丢弃迟到的路由请求', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `退出阅读 ${info.project.name} ${Date.now()}`;
+  const { id, libraryId } = await uploadReaderFixture(page, title);
+  await section(page, '书架');
+  await page.getByRole('combobox', { name: '书库', exact: true }).selectOption(libraryId);
+  const card = page.locator('.bookshelf-grid').getByRole('button', { name: new RegExp(title) });
+  await card.click();
+  await page.getByRole('button', { name: '阅读', exact: true }).click();
+  const reader = page.getByRole('dialog', { name: title });
+  await expect(reader.getByRole('article')).toContainText('晨间正文。');
+  const search = reader.getByRole('button', { name: '搜索', exact: true });
+  await search.click();
+  await expect(reader.getByRole('searchbox', { name: '搜索本书' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(reader).toBeVisible();
+  await expect(search).toHaveAttribute('aria-expanded', 'false');
+  await expect(search).toBeFocused();
+
+  const appearance = reader.getByRole('button', { name: '排版', exact: true });
+  await appearance.click();
+  const tools = reader.getByRole('group', { name: '排版' });
+  await page.screenshot({ scale: 'css', path: info.outputPath('reader-appearance-light.png') });
+  await tools.getByRole('button', { name: '深色纸张' }).click();
+  await page.screenshot({ scale: 'css', path: info.outputPath('reader-appearance-dark.png') });
+  await tools.getByRole('button', { name: '关闭' }).click();
+  await expect(appearance).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(reader).not.toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(card).toBeFocused();
+
+  const details = `/api/v1/books/${id}`;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**${details}`, async (route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  try {
+    const requested = page.waitForRequest((request) => request.url().endsWith(details));
+    await page.evaluate(() => history.forward());
+    const oldRequest = await requested;
+    const canceled = page.waitForEvent('requestfailed', (request) => request === oldRequest);
+    await page.evaluate(() => history.back());
+    await expect(page).toHaveURL(/\/$/);
+    release();
+    expect((await canceled).failure()?.errorText).toContain('ERR_ABORTED');
+    await expect(reader).not.toBeVisible();
+    await expect(card).toBeFocused();
+  } finally {
+    release();
+  }
+});
 
 test('书架进入全屏阅读，分页保留正文与书签，深链接可刷新', async ({ page }, info) => {
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
@@ -54,6 +307,12 @@ test('书架进入全屏阅读，分页保留正文与书签，深链接可刷�
   await status.selectOption('all');
   const resume = page.getByRole('button', { name: `继续阅读《${title}》`, exact: true });
   await expect(resume).toBeVisible();
+  await expect(
+    page
+      .locator('.bookshelf-grid')
+      .getByRole('button', { name: new RegExp(title) })
+      .locator('small'),
+  ).toHaveCSS('font-size', '12px');
   await page.screenshot({ scale: 'css', path: info.outputPath('bookshelf-light.png') });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.screenshot({ scale: 'css', path: info.outputPath('bookshelf-dark.png') });
@@ -459,6 +718,8 @@ test('批注高亮渲染与删除、切页续听有声书以及受限书库成�
 });
 
 test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: 'light' });
   await login(page);
   const headers = { 'X-Wildstring-Client': 'web' };
   const title = `续听竞态 ${info.project.name} ${Date.now()}`;
@@ -485,6 +746,20 @@ test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page 
       await (await page.request.get(`/api/v1/books?library_id=${lib.id}`)).json()
     ).items;
     expect(audioBook.has_audiobook).toBe(true);
+    expect(audioBook.has_ebook).toBe(false);
+
+    const chapterTitles = [
+      '录音档案里尚未寄出的长信｜暮色降临前我们沿着海岸慢慢散步，街灯亮起来后再回去听唱片',
+      'An exceptionally long title for the recording from the archive that follows every streetlight and the last train heading home',
+    ];
+    await page.route(`**/api/v1/books/${audioBook.id}/audiobook`, async (route) => {
+      const response = await route.fetch();
+      const manifest: { chapters: { title: string }[] } = await response.json();
+      for (const [index, chapter] of manifest.chapters.entries()) {
+        chapter.title = chapterTitles[index];
+      }
+      await route.fulfill({ response, json: manifest });
+    });
 
     const progressPath = `/api/v1/books/${audioBook.id}/listening-progress`;
     const seeded = await page.request.put(progressPath, {
@@ -515,6 +790,13 @@ test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page 
       .locator('.bookshelf-grid')
       .getByRole('button', { name: audioBook.title, exact: false })
       .click();
+    for (const title of chapterTitles)
+      await expect(page.getByText(title, { exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBe(0);
 
     await page.getByRole('button', { name: '收听', exact: true }).click();
     const audioEl = page.locator(`audio[src*="/api/v1/books/${audioBook.id}/audiobook/files/"]`);
@@ -525,6 +807,56 @@ test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page 
     await expect.poll(() => audioEl.evaluate((node: HTMLAudioElement) => node.paused)).toBe(false);
 
     const playerBar = page.getByRole('region', { name: '音乐播放器', exact: true });
+    const slider = playerBar.getByRole('slider', { name: '播放进度' });
+    await expect(slider).toHaveAttribute('aria-valuetext', /已播 \d+:\d+，总时长 \d+:\d+/);
+    if (info.project.name === 'mobile') {
+      const more = playerBar.getByRole('button', { name: '更多听书控制' });
+      const controls = playerBar.getByRole('group', { name: '更多听书控制' });
+      await more.tap();
+      await expect(controls).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(controls).toBeHidden();
+      await more.focus();
+      await page.keyboard.press('Enter');
+      const rate = controls.getByRole('combobox', { name: '播放倍速' });
+      const timer = controls.getByRole('combobox', { name: '睡眠定时' });
+      await expect(rate).toBeFocused();
+      await rate.selectOption('1.5');
+      await page.keyboard.press('Tab');
+      await expect(timer).toBeFocused();
+      await timer.selectOption('15');
+      await expect
+        .poll(() => audioEl.evaluate((node: HTMLAudioElement) => node.playbackRate))
+        .toBe(1.5);
+      await page.screenshot({
+        scale: 'css',
+        path: info.outputPath('audiobook-controls-light.png'),
+      });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await page.screenshot({ scale: 'css', path: info.outputPath('audiobook-controls-dark.png') });
+      await page.keyboard.press('Escape');
+      await expect(controls).not.toBeVisible();
+      await expect(more).toBeFocused();
+      await more.tap();
+      await expect(timer).toHaveValue('15');
+      await timer.selectOption('0');
+      await more.tap();
+      await expect(controls).not.toBeVisible();
+    } else {
+      await playerBar.getByRole('combobox', { name: '播放倍速' }).selectOption('1.5');
+      await playerBar.getByRole('button', { name: '睡眠定时设置' }).click();
+      const timer = playerBar.getByRole('combobox', { name: '睡眠定时' });
+      await expect(timer).toBeVisible();
+      await page.screenshot({
+        scale: 'css',
+        path: info.outputPath('audiobook-controls-light.png'),
+      });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await page.screenshot({ scale: 'css', path: info.outputPath('audiobook-controls-dark.png') });
+      await timer.selectOption('15');
+    }
     const [saveResponse] = await Promise.all([
       page.waitForResponse(
         (res) => res.url().endsWith(progressPath) && res.request().method() === 'PUT',
@@ -534,7 +866,7 @@ test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page 
     expect(saveResponse.status()).toBe(200);
     const saved = await (await page.request.get(progressPath)).json();
     expect(saved.chapter_index).toBe(1);
-    expect(saved.playback_rate).toBe(1.25);
+    expect(saved.playback_rate).toBe(1.5);
   } finally {
     await rm(source, { recursive: true, force: true });
   }

@@ -211,7 +211,7 @@ private fun OfflinePanel(vm: MusicViewModel) {
         LazyColumn(Modifier.weight(1f)) { items(items, key = { it.track.id }) { item ->
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                 Text(item.track.title)
-                Text(if (item.audioFormat == "m4a" && item.bitrate > 0) downloadQualityLabel(item.bitrate) else stringResource(R.string.download_original_format, item.track.format.uppercase()), style = MaterialTheme.typography.labelSmall)
+                Text(if (item.audioFormat == "m4a" && item.bitrate > 0) downloadQualityLabel(item.bitrate) else stringResource(R.string.download_original_format, item.track.format.uppercase()), style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"))
                 Text(when(item.state) { "complete" -> stringResource(R.string.completed); "paused" -> stringResource(R.string.playback_paused); "failed" -> stringResource(R.string.download_failed); "downloading" -> stringResource(R.string.favorite_saving); else -> stringResource(R.string.download_waiting) } + " · ${item.bytes / 1024 / 1024} MiB", style = MaterialTheme.typography.bodySmall)
                 item.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (item.state == "downloading" && item.total > 0) LinearProgressIndicator(progress = { (item.bytes.toFloat() / item.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
@@ -225,7 +225,7 @@ private fun OfflinePanel(vm: MusicViewModel) {
         } }
         if (items.isEmpty()) Text(stringResource(R.string.offline_empty_hint), Modifier.padding(vertical = 24.dp))
     }
-    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text(stringResource(R.string.offline_delete_title)) }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.changeOfflineQueue { remove(item.track.id, it) }; confirm = null }) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } }) }
+    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text(stringResource(R.string.offline_delete_title)) }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.changeOfflineQueue { remove(item.track.id, it) }; confirm = null }, destructive = true) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } }) }
 }
 
 @Composable
