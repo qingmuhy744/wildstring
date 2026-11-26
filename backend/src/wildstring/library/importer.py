@@ -155,7 +155,8 @@ class MusicImporter:
                 # Identical source recordings reuse an existing managed copy, even under another name.
                 with self.database.connect() as connection:
                     duplicate = connection.execute(
-                        "SELECT target_path FROM imported_files WHERE target_root=? AND sha256=? LIMIT 1",
+                        "SELECT target_path FROM imported_files WHERE target_root=? AND sha256=? "
+                        "AND link_mode != 'managed_only' LIMIT 1",
                         (str(self.root), sha256),
                     ).fetchone()
                 if duplicate is not None and allow_global_duplicate:

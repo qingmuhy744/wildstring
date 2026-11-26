@@ -154,10 +154,16 @@ def link_exclusive(
     *,
     source_root: Path | None = None,
     source_relative: Path | None = None,
+    verified: tuple[os.stat_result, str] | None = None,
 ) -> str:
     """Publish a verified regular source inode without overwriting a target."""
     before = fingerprint(os.fstat(source.fileno()))
-    value = digest(source)
+    if verified is None:
+        value = digest(source)
+    else:
+        verified_stat, value = verified
+        if fingerprint(verified_stat) != before:
+            raise SourceChangedError
     if fingerprint(os.fstat(source.fileno())) != before or (
         expected is not None and expected != value
     ):

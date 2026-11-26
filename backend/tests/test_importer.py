@@ -305,12 +305,12 @@ def test_relink_retry_finishes_partial_job_without_counting_files_twice(
     original_publish = storage.replace_managed_file
     calls = 0
 
-    def fail_second(*args):
+    def fail_second(*args, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("test migration interruption")
-        return original_publish(*args)
+        return original_publish(*args, **kwargs)
 
     def wait_job(client, path, identity):
         for _ in range(120):

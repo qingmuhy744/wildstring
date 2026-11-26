@@ -2190,6 +2190,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           track={viewingFileTrack}
           canManage={canManage}
           onClose={() => setViewingFileTrack(null)}
+          onRebound={() => setRevision((v) => v + 1)}
           onReorganized={() => {
             setRevision((v) => v + 1);
             setNotice(t('library.filesReorganized'));

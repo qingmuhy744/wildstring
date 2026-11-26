@@ -9,6 +9,11 @@ TIMESTAMP = re.compile(r"\[(\d{1,4}):([0-5]\d)(?:[.:](\d{1,3}))?\]")
 META = re.compile(r"^\[[a-zA-Z][a-zA-Z0-9_]*:.*\]$")
 OFFSET = re.compile(r"\[offset:([+-]?\d{1,8})\]", re.IGNORECASE)
 WORD_TIME = re.compile(r"<\d{1,4}:[0-5]\d(?:[.:]\d{1,3})?>")
+FLAC_LYRIC_TAGS = ("syncedlyrics", "lyrics", "unsyncedlyrics", "unsynced lyrics")
+
+
+def flac_lyric_texts(tags):
+    return [value for key in FLAC_LYRIC_TAGS for value in tags.get(key, ())]
 
 
 def no_lyrics() -> dict:

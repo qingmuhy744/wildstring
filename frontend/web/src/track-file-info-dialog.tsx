@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, artist, type Track } from './api';
 import { DialogCloseButton } from './dialog-close';
+import { TrackSourceRebind } from './music-rebind';
 
 interface TrackFileInfo {
   track_id: string;
@@ -39,11 +40,13 @@ export function TrackFileInfoDialog({
   canManage = false,
   onClose,
   onReorganized,
+  onRebound,
 }: {
   track: Track;
   canManage?: boolean;
   onClose: () => void;
   onReorganized?: () => void;
+  onRebound?: () => void;
 }) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -55,8 +58,8 @@ export function TrackFileInfoDialog({
   const [actionStatus, setActionStatus] = useState<'success' | 'error' | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  async function load() {
-    setLoading(true);
+  async function load(silent = false) {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const data = await api<TrackFileInfo>(`/tracks/${encodeURIComponent(track.id)}/file-info`);
@@ -146,7 +149,7 @@ export function TrackFileInfoDialog({
         ) : error ? (
           <div className="file-info-error" role="alert">
             <p>{error}</p>
-            <button type="button" className="text-button" onClick={load}>
+            <button type="button" className="text-button" onClick={() => void load()}>
               {t('trackFileInfoDialog.retry')}
             </button>
           </div>
@@ -286,6 +289,20 @@ export function TrackFileInfoDialog({
                 )}
               </div>
             )}
+
+            {info.absolute_path &&
+              info.file_exists &&
+              track.library_id &&
+              ['flac', 'mp3', 'm4a'].includes(info.format) && (
+                <TrackSourceRebind
+                  trackId={track.id}
+                  libraryId={track.library_id}
+                  onApplied={() => {
+                    void load(true);
+                    onRebound?.();
+                  }}
+                />
+              )}
 
             {actionMessage && (
               <p
