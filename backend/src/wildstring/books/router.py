@@ -72,20 +72,19 @@ class BookLibraryGrant(BaseModel):
     granted: bool = Field(strict=True)
 
 
-def _normalize_paused_roots(raw_paused: list[str] | None, sources: list[Path]) -> set[str]:
+def _normalize_paused_roots(
+    raw_paused: list[str] | None, source_roots: list[str], sources: list[Path]
+) -> set[str]:
     if raw_paused is None:
         return set()
-    paused: set[str] = set()
+    known = {Path(value): str(source) for value, source in zip(source_roots, sources, strict=True)}
+    known.update({source: str(source) for source in sources})
+    paused = set()
     for value in raw_paused:
-        if not Path(value).is_absolute():
+        source = known.get(Path(value))
+        if source is None:
             raise HTTPException(422, "library_source_invalid")
-        try:
-            paused.add(str(Path(value).resolve()))
-        except (OSError, RuntimeError, ValueError):
-            raise HTTPException(422, "library_source_invalid") from None
-    allowed = {str(source) for source in sources}
-    if not paused <= allowed:
-        raise HTTPException(422, "library_source_invalid")
+        paused.add(source)
     return paused
 
 
@@ -159,9 +158,11 @@ def router(
     def create_library(body: BookLibraryInput):
         identity = uuid4().hex
         sources = normalize_source_roots(body.source_roots)
-        paused = _normalize_paused_roots(body.paused_source_roots, sources)
+        paused = _normalize_paused_roots(body.paused_source_roots, body.source_roots, sources)
         default_root = catalog.settings.data_dir / "books" / identity
-        target = storage.destination(body.managed_root or default_root, sources, collection="books")
+        target = storage.destination(
+            body.managed_root or default_root, sources, collection="books"
+        ).path
         if body.storage_mode == "hardlink":
             try:
                 validate_hardlink_capability(sources, target, BOOK_MEDIA_SUFFIXES)
@@ -218,12 +219,12 @@ def router(
         if body.managed_root is not None:
             if not Path(body.managed_root).is_absolute():
                 raise HTTPException(422, "library_target_invalid")
-            if Path(body.managed_root).resolve() != old_root:
+            if Path(body.managed_root) != old_root:
                 raise HTTPException(409, "library_migration_required")
         if body.storage_mode is not None and body.storage_mode != old["storage_mode"]:
             raise HTTPException(409, "library_migration_required")
         sources = normalize_source_roots(body.source_roots)
-        paused = _normalize_paused_roots(body.paused_source_roots, sources)
+        paused = _normalize_paused_roots(body.paused_source_roots, body.source_roots, sources)
         if old["storage_mode"] == "hardlink":
             try:
                 validate_hardlink_capability(sources, old_root, BOOK_MEDIA_SUFFIXES)

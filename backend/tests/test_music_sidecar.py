@@ -333,8 +333,6 @@ def test_incremental_scan_detects_external_sidecar_changes_and_preserves_locks(
 def test_tracks_sha256_cache_avoids_rehashing_until_audio_changes(
     settings, authenticated_client, monkeypatch
 ):
-    import wildstring.library.sidecar as sidecar_mod
-
     path = music(settings, "Unsorted/track.flac", ["Solo Artist"], ["Solo Artist"], album="Debut")
     scan_library(settings)
     database = Database(settings.data_dir)
@@ -353,8 +351,7 @@ def test_tracks_sha256_cache_avoids_rehashing_until_audio_changes(
     with authenticated_client(settings) as client:
         # Ensure metadata update + file reorganize reuse cached tracks.sha256 with zero digest() calls.
         monkeypatch.setattr(
-            sidecar_mod,
-            "digest",
+            "wildstring.library.sidecar.digest",
             lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("unexpected audio re-hash")),
         )
         meta = client.get(f"/api/v1/manage/tracks/{track_id}/metadata").json()

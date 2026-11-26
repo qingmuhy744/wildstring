@@ -254,6 +254,7 @@ test('Esc 先关闭阅读面板，退出聚焦原书并丢弃迟到的路由请�
     await expect(card).toBeFocused();
   } finally {
     release();
+    await page.unrouteAll({ behavior: 'wait' });
   }
 });
 

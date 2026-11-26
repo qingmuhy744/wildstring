@@ -219,15 +219,12 @@ def read_identity(root, path, *, audio_hint=False, verified=None):
 
 
 class MusicRebind:
-    def __init__(self, database, library_id, root, target):
+    def __init__(self, database, library_id, root, target, device):
         self.database = database
         self.library_id = library_id
         self.root = root
         self.target = target
-        parent = target
-        while not parent.exists():
-            parent = parent.parent
-        self.device = parent.stat().st_dev
+        self.device = device
         with database.connect(scoped=False) as db:
             self.sources = {
                 row["id"]: Path(row["root"])
@@ -281,7 +278,7 @@ class MusicRebind:
                 if managed_hash != source_hash:
                     source_stream.seek(0)
                     new_meta = read_metadata(source_stream, relative)
-                if source_stat.st_dev != self.device or os.open not in os.supports_dir_fd:
+                if source_stat.st_dev != self.device:
                     reason = "differentVolume"
                 elif relative.suffix.lower() != path.suffix.lower():
                     reason = "differentFormat"
