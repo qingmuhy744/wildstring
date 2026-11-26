@@ -14,7 +14,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from wildstring.podcast_access import require_programme
+from wildstring.podcast_access import catalog_manager, require_programme
 
 ACTION_PATTERN = "^(queue_last|queue_next|ignore)$"
 ORDER_PATTERN = "^(follow|asc|desc|off)$"
@@ -27,18 +27,31 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _episode_podcast(connection, user_id: str, episode_id: str) -> str | None:
-    """Return the episode's show when the user may access it, else None."""
-    row = connection.execute(
-        "SELECT podcast_id FROM podcast_episodes WHERE id=?", (episode_id,)
-    ).fetchone()
-    if row is None:
-        return None
-    try:
-        require_programme(connection, user_id, row["podcast_id"])
-    except HTTPException:
-        return None
-    return row["podcast_id"]
+def _visible_episodes(connection, user_id: str, episode_ids) -> set[str]:
+    if not episode_ids:
+        return set()
+    return {
+        row[0]
+        for row in connection.execute(
+            """SELECT e.id FROM json_each(?) requested
+               JOIN podcast_episodes e ON e.id=requested.value
+               JOIN podcasts p ON p.id=e.podcast_id
+               WHERE ? OR EXISTS (
+                   SELECT 1 FROM podcast_user_catalog c WHERE c.user_id=? AND c.podcast_id=p.id
+               )""",
+            (json.dumps(episode_ids), catalog_manager(connection, user_id), user_id),
+        )
+    }
+
+
+def _visible_queue_items(connection, user_id, items):
+    entries = [item for item in items if isinstance(item, dict)]
+    visible = _visible_episodes(connection, user_id, [entry.get("episode_id") for entry in entries])
+    return [
+        entry
+        for entry in entries
+        if isinstance(episode := entry.get("episode_id"), str) and episode in visible
+    ]
 
 
 def _published_stamp(raw: str) -> float:
@@ -118,6 +131,48 @@ def _save_queue(connection, user_id, items, device_id, version, notice="") -> No
              notice=excluded.notice""",
         (user_id, json.dumps(items, separators=(",", ":")), version, device_id, _now(), notice),
     )
+
+
+def rewrite_queue_episodes(connection, replacements: dict[str, str | None]) -> None:
+    """Update every affected queue in the same transaction as a show deletion or merge."""
+    if not replacements:
+        return
+    for row in connection.execute("SELECT user_id FROM podcast_queue_state").fetchall():
+        user_id = row["user_id"]
+        items, version, device, _, notice = _queue_rows(connection, user_id)
+        if not any(
+            isinstance(item, dict)
+            and isinstance(eid := item.get("episode_id"), str)
+            and eid in replacements
+            for item in items
+        ):
+            continue
+        seen = set()
+        rewritten = []
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(eid := item.get("episode_id"), str):
+                continue
+            target = replacements.get(eid, eid)
+            if target is not None and target not in seen:
+                seen.add(target)
+                rewritten.append({**item, "episode_id": target})
+        _save_queue(connection, user_id, rewritten, device, version + 1, notice)
+
+
+def _queue_view(connection, user_id, *, repair=False):
+    items, version, device, updated_at, notice = _queue_rows(connection, user_id)
+    visible = _visible_queue_items(connection, user_id, items)
+    needs_repair = visible != items
+    if repair and needs_repair:
+        _save_queue(connection, user_id, visible, device, version + 1, notice)
+        _, version, _, updated_at, _ = _queue_rows(connection, user_id)
+    return {
+        "version": version,
+        "device_id": device,
+        "items": visible,
+        "updated_at": updated_at,
+        "notice": notice,
+    }, needs_repair
 
 
 def _set_notice(connection, user_id, notice: str) -> None:
@@ -339,14 +394,12 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
     @router.get("/queue")
     def get_queue(user: Annotated[dict, Depends(session)]):
         with database.connect() as connection:
-            items, version, device_id, updated_at, notice = _queue_rows(connection, user["id"])
-        return {
-            "version": version,
-            "device_id": device_id,
-            "items": items,
-            "updated_at": updated_at,
-            "notice": notice,
-        }
+            snapshot, needs_repair = _queue_view(connection, user["id"])
+        if needs_repair:
+            with database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                snapshot, _ = _queue_view(connection, user["id"], repair=True)
+        return snapshot
 
     @router.put("/queue", dependencies=[Depends(auth.require_client)])
     def put_queue(body: QueueUpdate, user: Annotated[dict, Depends(session)]):
@@ -358,7 +411,22 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
                     409,
                     {
                         "code": "podcast_queue_conflict",
-                        "current": {"version": version, "items": items},
+                        "current": {
+                            "version": version,
+                            "items": _visible_queue_items(connection, user["id"], items),
+                        },
+                    },
+                )
+            requested = list(dict.fromkeys(item.episode_id for item in body.items))
+            visible = _visible_episodes(connection, user["id"], requested)
+            dropped = [episode_id for episode_id in requested if episode_id not in visible]
+            if dropped:
+                raise HTTPException(
+                    422,
+                    {
+                        "code": "episode_unavailable",
+                        "episode_id": dropped[0],
+                        "dropped_episode_ids": dropped,
                     },
                 )
             previous = {
@@ -373,8 +441,6 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
             for item in body.items:
                 if item.episode_id in seen_episodes:
                     continue
-                if _episode_podcast(connection, user["id"], item.episode_id) is None:
-                    raise HTTPException(422, "episode_unavailable")
                 seen_episodes.add(item.episode_id)
                 clean.append(
                     {

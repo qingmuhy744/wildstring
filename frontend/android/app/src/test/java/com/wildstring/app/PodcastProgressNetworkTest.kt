@@ -41,6 +41,60 @@ import org.robolectric.shadows.ShadowSystemClock
     shadows = [PodcastProgressNetworkTest.MemorySessionKey::class])
 @LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 class PodcastProgressNetworkTest {
+    @Test fun unavailableSecondQueueEntryNeverTriggersSingleItemWrite() = ProgressFixture().use { fixture ->
+        val writes = CopyOnWriteArrayList<String>()
+        fixture.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.path != "/api/v1/podcasts/queue") return MockResponse().setResponseCode(404)
+                val body = request.body.readUtf8()
+                writes.add(body)
+                val items = JsonParser.parseString(body).asJsonObject.getAsJsonArray("items")
+                return if (items.size() == 2) json("""{"detail":{"code":"episode_unavailable","episode_id":"deleted","dropped_episode_ids":["deleted"]}}""", 422)
+                else json("""{"version":5,"items":[{"episode_id":"keep","origin":"manual"}]}""")
+            }
+        }
+        runBlocking {
+            val failure = runCatching {
+                fixture.repository.replacePodcastQueue(4, "device", listOf(
+                    PodcastQueueItem("keep", "manual", "2026-01-01T00:00:00Z"),
+                    PodcastQueueItem("deleted", "manual"),
+                ))
+            }.exceptionOrNull()
+            assertEquals(422, (failure as retrofit2.HttpException).code())
+            assertEquals(listOf(true, false), writes.map { body ->
+                val items = JsonParser.parseString(body).asJsonObject.getAsJsonArray("items")
+                assertEquals(listOf("keep", "deleted"), items.map { it.asJsonObject["episode_id"].asString })
+                items.first().asJsonObject.has("added_at")
+            })
+        }
+    }
+
+    @Test fun switchingAndLoggingOutClearPodcastAccountCaches() = ProgressFixture().use { fixture ->
+        fixture.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path?.startsWith("/api/v1/podcasts/discover") == true ->
+                    json("""{"results":[],"regions":[],"sources":[],"total":0,"has_more":false}""")
+                request.path == "/api/v1/podcasts/favorites/ids" -> json("""{"ids":["private-episode"]}""")
+                else -> MockResponse().setResponseCode(200)
+            }
+        }
+        runBlocking {
+            val repository = fixture.repository
+            repository.podcastDirectory("", "")
+            assertNotNull(repository.cachedPodcastDirectory())
+            assertEquals(setOf("private-episode"), repository.getPodcastFavoriteIds())
+            assertTrue(repository.acceptAccount(Account("second", "second", "listener")))
+            assertNull(repository.cachedPodcastDirectory())
+            assertTrue(repository.podcastFavoriteIds.value.isEmpty())
+
+            repository.podcastDirectory("", "")
+            repository.getPodcastFavoriteIds()
+            repository.logout()
+            assertNull(repository.cachedPodcastDirectory())
+            assertTrue(repository.podcastFavoriteIds.value.isEmpty())
+        }
+    }
+
     @Test fun restartFollowsOurPendingWriteWithoutReportingAnotherDevice() = verifyRestartDuringOwnWrite(false)
 
     @Test fun restartFollowsOurAcknowledgementWhenTheReadSnapshotIsOlder() = verifyRestartDuringOwnWrite(true)

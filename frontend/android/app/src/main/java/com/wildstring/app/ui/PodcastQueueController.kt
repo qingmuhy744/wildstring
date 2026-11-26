@@ -13,6 +13,39 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+
+internal class PodcastQueueWork(
+    private val scope: CoroutineScope,
+    private val owner: () -> String?,
+) {
+    private class Ticket(val ownerId: String?, val generation: Job) : AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<Ticket>
+    }
+
+    private var generation = SupervisorJob(scope.coroutineContext[Job])
+
+    fun launch(block: suspend CoroutineScope.() -> Unit): Job =
+        scope.launch(generation + Ticket(owner(), generation)) {
+            check()
+            block()
+        }
+
+    suspend fun check() {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val ticket = context[Ticket]
+        if (ticket?.ownerId == null || ticket.ownerId != owner() || ticket.generation !== generation) {
+            throw CancellationException("Podcast account changed")
+        }
+    }
+
+    fun reset() {
+        generation.cancel()
+        generation = SupervisorJob(scope.coroutineContext[Job])
+    }
+}
 
 data class PodcastQueueRow(
     val episodeId: String,
@@ -77,6 +110,7 @@ class PodcastQueueController(
     private val beforeAutomatic: (episodeId: String) -> Unit = {},
 ) {
     private val mutex = Mutex()
+    private val work = PodcastQueueWork(scope, repository.session::cacheScope)
     private var playRequest: Job? = null
     private val mutable = MutableStateFlow(PodcastCloudState())
     val state: StateFlow<PodcastCloudState> = mutable.asStateFlow()
@@ -91,12 +125,13 @@ class PodcastQueueController(
     private var lastFinishedAt = 0L
     private var playbackContext: PodcastPlaybackContext? = null
 
-    fun refresh() = scope.launch { refreshNow() }
+    fun refresh() = work.launch { refreshNow() }
 
-    fun refreshPreferences() = scope.launch {
+    fun refreshPreferences() = work.launch {
         val stamp = preferenceWrite
         try {
             val saved = repository.podcastQueuePreferences()
+            work.check()
             mutex.withLock { if (stamp == preferenceWrite) applyPreferences(saved) }
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) {
@@ -112,7 +147,7 @@ class PodcastQueueController(
     /** A later selection supersedes any pending show/queue preparation. */
     private fun requestPlayback(block: suspend () -> Unit): Job {
         playRequest?.cancel()
-        return scope.launch {
+        return work.launch {
             try { block() }
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
@@ -125,21 +160,21 @@ class PodcastQueueController(
     fun followsQueue(): Boolean = playbackContext?.let { it == PodcastPlaybackContext.QUEUE }
         ?: (player()?.currentMediaItem?.mediaMetadata?.extras?.getBoolean("podcast_queue_context") == true)
 
-    fun enqueue(episode: PodcastEpisode, next: Boolean) = scope.launch {
+    fun enqueue(episode: PodcastEpisode, next: Boolean) = work.launch {
         try { enqueueNow(episode.id, next) }
         catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutable.update { it.copy(queueError = podcastListFailure(friendlyError(error))) } }
     }
 
     /** Dragging rewrites the list and marks every moved row manual, including a former rule row. */
-    fun reorderPending(rows: List<PodcastQueueRow>) = scope.launch {
+    fun reorderPending(rows: List<PodcastQueueRow>) = work.launch {
         val items = rows.map { PodcastQueueItem(episodeId = it.episodeId, origin = "manual", addedAt = it.addedAt) }
         mutable.update { it.copy(queue = items, queueRows = rows.map { row -> row.copy(origin = "manual") }) }
         val saved = mutex.withLock { pushOrKeep(items) }
         if (saved && followsQueue()) syncQueuePlayer(items)
     }
 
-    fun removeQueued(episodeId: String) = scope.launch {
+    fun removeQueued(episodeId: String) = work.launch {
         if (episodeId == playingEpisodeId()) return@launch
         val items = mutex.withLock {
             val next = podcastQueueRemoveEpisode(snapshot.items, episodeId)
@@ -151,7 +186,7 @@ class PodcastQueueController(
         if (followsQueue()) syncQueuePlayer(items)
     }
 
-    fun restoreQueued(row: PodcastQueueRow, index: Int) = scope.launch {
+    fun restoreQueued(row: PodcastQueueRow, index: Int) = work.launch {
         val items = mutex.withLock {
             if (snapshot.items.any { it.episodeId == row.episodeId }) snapshot.items
             else {
@@ -177,7 +212,7 @@ class PodcastQueueController(
         if (followsQueue()) syncQueuePlayer(items)
     }
 
-    fun updateShow(podcastId: String, action: String, autoLimit: Int = 3) = scope.launch {
+    fun updateShow(podcastId: String, action: String, autoLimit: Int = 3) = work.launch {
         val normalized = normalizeDeliveryAction(action)
         if (normalized !in SHOW_ACTIONS || autoLimit !in 0..100) return@launch
         preferenceWrite += 1
@@ -185,7 +220,7 @@ class PodcastQueueController(
         updateShowNow(podcastId, normalized, autoLimit)
     }
 
-    fun updateAutoContinue(enabled: Boolean) = scope.launch {
+    fun updateAutoContinue(enabled: Boolean) = work.launch {
         settings.podcastContinuePreference(settings.podcastContinuePreference().copy(autoContinue = enabled))
         preferenceWrite += 1
         mutex.withLock {
@@ -196,13 +231,13 @@ class PodcastQueueController(
         updateAutoContinueNow(enabled)
     }
 
-    fun retry() = scope.launch {
+    fun retry() = work.launch {
         val action = retry
         if (action != null) action()
         else if (mutable.value.conflict != null) refreshNow()
     }
 
-    fun resolveConflict(choice: PodcastQueueConflictChoice) = scope.launch {
+    fun resolveConflict(choice: PodcastQueueConflictChoice) = work.launch {
         val conflict = mutable.value.conflict ?: return@launch
         val decision = resolvePodcastQueueConflict(conflict.localItems, conflict.serverVersion, conflict.serverItems, choice)
         if (!decision.upload) {
@@ -230,7 +265,7 @@ class PodcastQueueController(
         if (lastFinishedEpisode == episodeId && now - lastFinishedAt < 1500) return
         lastFinishedEpisode = episodeId
         lastFinishedAt = now
-        scope.launch {
+        work.launch {
             try { finishNow(episodeId, advanceLocally) }
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { /* Playback already moved on; the queue banner keeps the sync error. */ }
@@ -246,6 +281,7 @@ class PodcastQueueController(
     fun clearNotice() { mutable.update { it.copy(notice = null) } }
 
     fun reset() {
+        work.reset()
         playRequest?.cancel(); playRequest = null
         snapshot = PodcastQueueSnapshot()
         loaded = false
@@ -254,6 +290,9 @@ class PodcastQueueController(
         preferencesLoaded = false
         playbackContext = null
         retry = null
+        preferenceWrite = 0
+        lastFinishedEpisode = null
+        lastFinishedAt = 0L
         mutable.value = PodcastCloudState()
     }
 
@@ -266,7 +305,9 @@ class PodcastQueueController(
             )
         }
         val queueResult = runCatching { repository.podcastQueue() }
+        work.check()
         val prefResult = runCatching { repository.podcastQueuePreferences() }
+        work.check()
         val queueItems = mutex.withLock {
             queueResult.onSuccess { remote ->
                 mutable.update { it.copy(queueFull = remote.notice == "queue_full") }
@@ -294,6 +335,7 @@ class PodcastQueueController(
     }
 
     private suspend fun play(tracks: List<Track>, index: Int, positionMs: Long?, autoplay: Boolean) {
+        work.check()
         val owner = repository.session.cacheScope()
         val items = withContext(Dispatchers.Default) { tracks.mediaItems(repository) }
         requireOwner(owner)
@@ -391,6 +433,7 @@ class PodcastQueueController(
     }
 
     private suspend fun finishNow(episodeId: String, advanceLocally: Boolean) {
+        work.check()
         val owner = repository.session.cacheScope()
         val wasQueued = mutex.withLock { snapshot.items.any { it.episodeId == episodeId } }
         if (!advanceLocally && followsQueue()) removePlayedMediaItem(episodeId)
@@ -403,11 +446,13 @@ class PodcastQueueController(
         if (!advanceLocally || followsQueue()) return
         if (!preferencesLoaded) {
             runCatching { repository.podcastQueuePreferences() }.onSuccess {
+                work.check()
                 mutex.withLock { applyPreferences(it) }
             }
         }
         val episode = repository.cachedPodcastEpisode(episodeId) ?: runCatching { repository.podcastEpisode(episodeId) }.getOrNull() ?: return
         val detail = repository.cachedPodcastDetail(episode.podcastId) ?: runCatching { repository.podcastDetail(episode.podcastId) }.getOrNull() ?: return
+        work.check()
         requireOwner(owner)
         val plan = podcastEndPlan(false, episode, detail, positions(), preferenceFor(episode.podcastId))
         if (plan.action != PodcastEndAction.CONTINUE) return
@@ -421,6 +466,7 @@ class PodcastQueueController(
     private suspend fun updateShowNow(podcastId: String, action: String, autoLimit: Int) {
         try {
             val saved = mutex.withLock {
+                work.check()
                 val current = repository.podcastQueuePreferences()
                 val existing = current.shows.orEmpty()[podcastId]
                 val base = existing ?: PodcastShowQueuePreference(
@@ -429,8 +475,10 @@ class PodcastQueueController(
                     autoContinue = current.autoContinue,
                 )
                 val next = podcastPreferencesUpdatingShow(current, podcastId, base.copy(action = action, autoLimit = autoLimit))
+                work.check()
                 repository.savePodcastQueuePreferences(next)
             }
+            work.check()
             mutex.withLock { applyPreferences(saved) }
             mutable.update { it.copy(preferencesError = null, notice = context.getString(R.string.podcast_show_pref_saved)) }
         } catch (error: CancellationException) { throw error }
@@ -442,9 +490,12 @@ class PodcastQueueController(
     private suspend fun updateAutoContinueNow(enabled: Boolean) {
         try {
             val saved = mutex.withLock {
+                work.check()
                 val current = repository.podcastQueuePreferences()
+                work.check()
                 repository.savePodcastQueuePreferences(podcastPreferencesUpdatingAutoContinue(current, enabled))
             }
+            work.check()
             mutex.withLock { applyPreferences(saved) }
             settings.podcastContinuePreference(settings.podcastContinuePreference().copy(autoContinue = saved.autoContinue))
             mutable.update { it.copy(preferencesError = null) }
@@ -463,6 +514,7 @@ class PodcastQueueController(
     )
 
     private suspend fun placeEnqueue(episodeId: String, next: Boolean, after: String?, currentEpisodeId: String?): Placed {
+        work.check()
         if (diverged) {
             val placement = podcastQueueEnqueue(snapshot.items, episodeId, next, after, currentEpisodeId)
             val changed = placement.items != snapshot.items
@@ -474,6 +526,7 @@ class PodcastQueueController(
         }
         return try {
             val remote = repository.podcastQueue()
+            work.check()
             snapshot = remote
             loaded = true
             mutable.update { it.copy(queue = remote.items, queueFull = remote.notice == "queue_full") }
@@ -492,12 +545,14 @@ class PodcastQueueController(
 
     /** Caller already holds [mutex]. A 409 keeps [items] and opens the conflict choice. */
     private suspend fun pushOrKeep(items: List<PodcastQueueItem>): Boolean {
+        work.check()
         if (!loaded) {
             val remote = try { repository.podcastQueue() } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 failSync(error, items)
                 return false
             }
+            work.check()
             snapshot = remote
             loaded = true
         }
@@ -511,6 +566,7 @@ class PodcastQueueController(
         }
         return try {
             val saved = repository.replacePodcastQueue(snapshot.version, deviceId(), items)
+            work.check()
             snapshot = saved.copy(deviceId = saved.deviceId.ifBlank { deviceId() })
             loaded = true
             diverged = false
@@ -518,6 +574,7 @@ class PodcastQueueController(
             publishQueueRows(snapshot.items)
             true
         } catch (error: PodcastQueueConflictException) {
+            work.check()
             diverged = true
             snapshot = snapshot.copy(items = items)
             mutable.update {
@@ -556,11 +613,13 @@ class PodcastQueueController(
             row.copy(origin = if (origin == "rule") "rule" else "manual")
         }
         val preview = computeAutoPreview()
+        work.check()
         mutable.update { it.copy(queueRows = rows, queueLoading = false, autoPreview = preview) }
     }
 
-    fun refreshAutoPreview() = scope.launch {
+    fun refreshAutoPreview() = work.launch {
         val preview = computeAutoPreview()
+        work.check()
         mutable.update { it.copy(autoPreview = preview) }
     }
 

@@ -1,6 +1,7 @@
 """Intake policy, immutable source snapshots, recovery and exact CUE conversion."""
 
 import hashlib
+import json
 import shutil
 import struct
 import subprocess
@@ -114,6 +115,8 @@ def test_review_snapshot_approval_and_rescan_preserve_identity(settings):
         "album_artists": ["AC/DC"],
         "track_number": 3,
         "disc_number": 1,
+        "release_date": "2024-05-18",
+        "genres": ["独立摇滚"],
     }
     intake.approve(item["id"], IntakeApproval(version=item["version"], overrides=overrides))
     report = import_music(settings, automatic=True)
@@ -122,6 +125,9 @@ def test_review_snapshot_approval_and_rescan_preserve_identity(settings):
     track = intake.repository.tracks()["items"][0]
     assert track["path"] == "AC_DC/新专辑/CD01/03 - 新歌.flac"
     assert track["title"] == "新歌" and track["artists"] == ["AC/DC"]
+    with intake.database.connect() as db:
+        saved = db.execute("SELECT overrides FROM track_metadata WHERE track_id=?", (track["id"],))
+        assert json.loads(saved.fetchone()[0]) == overrides
     scan_library(settings, full=True)
     assert intake.repository.tracks()["items"][0]["id"] == track["id"]
     assert intake.repository.tracks()["items"][0]["title"] == "新歌"
@@ -388,8 +394,6 @@ def test_bad_neighbor_does_not_block_review_and_snapshot_tampering_is_rejected(
 
 
 def test_clearing_import_override_is_not_undone_by_next_import(settings):
-    import json
-
     from wildstring.library.edits import MetadataEditor, MetadataUpdate
 
     intake = setup(settings)

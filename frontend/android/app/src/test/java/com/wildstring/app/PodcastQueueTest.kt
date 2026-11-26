@@ -1,11 +1,46 @@
 package com.wildstring.app
 
 import com.wildstring.app.data.*
+import com.wildstring.app.ui.PodcastQueueWork
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
 /** Local queue / auto-continue behavior from contracts/podcast-queue.md §2 and §5. */
 class PodcastQueueTest {
+    @Test fun queuedWorkIsCanceledAcrossAccountAndGenerationChanges() = runBlocking<Unit> {
+        var owner = "old"
+        var writes = 0
+        val work = PodcastQueueWork(this) { owner }
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        val old = work.launch {
+            entered.complete(Unit)
+            resume.await()
+            work.check()
+            writes += 1
+        }
+        entered.await()
+        owner = "new"
+        resume.complete(Unit)
+        old.join()
+        assertTrue(old.isCancelled)
+        assertEquals(0, writes)
+
+        val waiting = CompletableDeferred<Unit>()
+        val sameOwner = work.launch { waiting.complete(Unit); CompletableDeferred<Unit>().await() }
+        waiting.await()
+        work.reset()
+        sameOwner.join()
+        assertTrue(sameOwner.isCancelled)
+        work.launch { writes += 1 }.join()
+        assertEquals(1, writes)
+        work.reset()
+        // Reset leaves an idle child scope for the controller; end the test's parent separately.
+        coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
+    }
+
     private fun episode(id: String, podcastId: String = "show", pubDate: String = "", completed: Boolean = false) =
         PodcastEpisode(id = id, podcastId = podcastId, guid = id, title = "Episode $id",
             audioUrl = "https://example.test/$id.mp3", pubDate = pubDate, completed = completed)

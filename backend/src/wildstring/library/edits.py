@@ -283,7 +283,9 @@ class MetadataEditor:
             self.save_in_transaction(connection, track_id, body, user_id=user_id, source=source)
         return self.read(track_id)
 
-    def save_in_transaction(self, connection, track_id, body, *, user_id="admin", source="manual"):
+    def save_in_transaction(
+        self, connection, track_id, body, *, user_id="admin", source="manual", merge=False
+    ):
         """Validate and write under a caller-owned transaction (e.g. proposal application)."""
         row = connection.execute(
             """SELECT m.version,m.overrides FROM track_metadata m JOIN tracks t
@@ -294,6 +296,10 @@ class MetadataEditor:
             raise HTTPException(404, "track_not_found")
         if row["version"] != body.version:
             raise HTTPException(409, "metadata_version_conflict")
+        before = json.loads(row["overrides"])
+        after = body.overrides.model_dump(exclude_unset=True)
+        if merge:
+            after = before | after
         connection.execute(
             "INSERT INTO metadata_history(id,track_id,user_id,before_values,after_version,created_at) VALUES (?,?,?,?,?,datetime('now'))",
             (uuid4().hex, track_id, user_id, row["overrides"], body.version + 1),
@@ -301,12 +307,10 @@ class MetadataEditor:
         connection.execute(
             "UPDATE track_metadata SET overrides=?, version=version+1 WHERE track_id=?",
             (
-                json.dumps(body.overrides.model_dump(exclude_unset=True), ensure_ascii=False),
+                json.dumps(after, ensure_ascii=False),
                 track_id,
             ),
         )
-        before = json.loads(row["overrides"])
-        after = body.overrides.model_dump(exclude_unset=True)
         for key in set(before) | set(after):
             if key not in after:
                 connection.execute(

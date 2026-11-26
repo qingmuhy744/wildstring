@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.library.conversion import convert
 from wildstring.library.cue import parse_cue
 from wildstring.library.download_policy import DownloadPolicy, album_directory, partial, pending
-from wildstring.library.edits import FIELDS, Overrides, apply_effective
+from wildstring.library.edits import BASE_FIELDS, FIELDS, Overrides, apply_effective
 from wildstring.library.import_files import (
     HardlinkError,
     copy_exclusive,
@@ -676,13 +676,11 @@ class Intake:
             if pending(self.settings.music_dir, relative, policy)[1]:
                 importer.counts["waiting"] += 1
                 return
+            naming_metadata = replace(
+                metadata, **{key: value for key, value in overrides.items() if key in BASE_FIELDS}
+            )
             if not image and relative.suffix.lower() != ".wav" and item["state"] != "approved":
-                planned = organized_path(
-                    replace(
-                        metadata,
-                        **{key: value for key, value in overrides.items() if key in FIELDS},
-                    )
-                )
+                planned = organized_path(naming_metadata)
                 existing_hash = target_digest(self.settings.library_dir, planned)
                 if existing_hash is not None:
                     with open_source(self.settings.music_dir, relative) as stream:
@@ -793,10 +791,7 @@ class Intake:
                 )
                 target = prepared.import_track(
                     relative if prepared is importer else staged,
-                    metadata=replace(
-                        metadata,
-                        **{key: value for key, value in overrides.items() if key in FIELDS},
-                    ),
+                    metadata=naming_metadata,
                 )
                 if prepared is not importer:
                     importer.targets.update(prepared.targets)
@@ -824,10 +819,7 @@ class Intake:
                     self.check_space((self.settings.music_dir / relative).stat().st_size)
                 target = importer.import_track(
                     relative,
-                    metadata=replace(
-                        metadata,
-                        **{key: value for key, value in overrides.items() if key in FIELDS},
-                    ),
+                    metadata=naming_metadata,
                 )
                 if target is not None:
                     self.update(

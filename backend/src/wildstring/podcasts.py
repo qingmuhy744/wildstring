@@ -2507,7 +2507,10 @@ class PodcastManager:
             }
 
     def delete_podcast(self, podcast_id: str) -> bool:
-        with self.database.connect() as conn:
+        from wildstring.podcast_queue import rewrite_queue_episodes
+
+        with self.database.connect(write=True) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             p = conn.execute("SELECT id FROM podcasts WHERE id = ?", (podcast_id,)).fetchone()
             if not p:
                 return False
@@ -2522,16 +2525,16 @@ class PodcastManager:
                 ).fetchall()
             ]
 
+            rewrite_queue_episodes(conn, {row["id"]: None for row in episode_rows})
+            conn.execute("DELETE FROM podcast_queue_prefs WHERE podcast_id = ?", (podcast_id,))
+            conn.execute("DELETE FROM podcast_inbox_baseline WHERE podcast_id = ?", (podcast_id,))
+            deleted = conn.execute("DELETE FROM podcasts WHERE id = ?", (podcast_id,)).rowcount
+
         with self._queue_lock:
             for row in episode_rows:
                 self._cancelled_downloads.add(row["id"])
                 self._queued_episodes.pop(row["id"], None)
                 self._failed_downloads.pop(row["id"], None)
-
-        with self.database.connect(write=True) as conn:
-            conn.execute("DELETE FROM podcast_queue_prefs WHERE podcast_id = ?", (podcast_id,))
-            conn.execute("DELETE FROM podcast_inbox_baseline WHERE podcast_id = ?", (podcast_id,))
-            deleted = conn.execute("DELETE FROM podcasts WHERE id = ?", (podcast_id,)).rowcount
 
         self._delete_local_paths(
             [row["local_path"] for row in episode_rows], protected=protected_paths

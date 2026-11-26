@@ -10,7 +10,6 @@ A few minutes after start-up the server runs the job once on its own (see
 it uncovers appear in the duplicate report for a library admin to confirm. It never merges.
 """
 
-import json
 import logging
 import shutil
 import threading
@@ -26,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.repository import now
 from wildstring.podcast_identity import feed_keys, normalize_feed_url
+from wildstring.podcast_queue import rewrite_queue_episodes
 from wildstring.podcast_search import MANAGE_SCOPE, SearchRateLimited
 
 logger = logging.getLogger(__name__)
@@ -598,41 +598,7 @@ class IdentityBackfill:
                     stats["follows_moved"] = changed
             db.execute("DELETE FROM podcast_inbox_baseline WHERE podcast_id=?", (merge_id,))
             db.execute("DELETE FROM podcast_queue_prefs WHERE podcast_id=?", (merge_id,))
-            if episode_map:
-                for qrow in db.execute(
-                    "SELECT user_id, items_json FROM podcast_queue_state"
-                ).fetchall():
-                    try:
-                        qitems = json.loads(qrow["items_json"])
-                    except (TypeError, ValueError):
-                        continue
-                    if not isinstance(qitems, list):
-                        continue
-                    seen_eids: set[str] = set()
-                    rewritten: list[dict[str, Any]] = []
-                    mutated = False
-                    for entry in qitems:
-                        if not isinstance(entry, dict):
-                            continue
-                        eid = entry.get("episode_id")
-                        if not isinstance(eid, str):
-                            continue
-                        mapped = episode_map.get(eid, eid)
-                        if mapped != eid:
-                            mutated = True
-                        if mapped in seen_eids:
-                            mutated = True
-                            continue
-                        seen_eids.add(mapped)
-                        rewritten.append(
-                            {**entry, "episode_id": mapped} if mapped != eid else entry
-                        )
-                    if mutated:
-                        db.execute(
-                            "UPDATE podcast_queue_state SET items_json=?, version=version+1 "
-                            "WHERE user_id=?",
-                            (json.dumps(rewritten, separators=(",", ":")), qrow["user_id"]),
-                        )
+            rewrite_queue_episodes(db, episode_map)
             db.execute(
                 "UPDATE podcasts SET publisher_id=COALESCE(publisher_id, ?) WHERE id=?",
                 (shows[merge_id]["publisher_id"], keep_id),
