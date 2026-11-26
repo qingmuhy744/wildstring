@@ -22,7 +22,7 @@ for delay in 0 30 60; do
   if (( status == 0 )); then
     exit "${statuses[1]}"
   fi
-  if ! grep -Fq 'Received status code 429 from server' "$log"; then
+  if ! grep -Fq -e 'Received status code 429 from server' -e 'could not resolve plugin artifact' "$log"; then
     exit "$status"
   fi
 done

@@ -245,4 +245,40 @@ extension MacAssistantTests {
         #expect(session.client == nil)
         #expect(try store.loadSession(origin: ServerAddress(input: servers[1].address).origin) == nil)
     }
+
+    @Test func restoreClearsUnavailableSavedLibrary() async throws {
+        let suite = "wildstring.server-tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = InMemorySessionStore()
+        let address = try ServerAddress(input: "library.example.invalid")
+        try store.saveSession(StoredSession(cookies: [
+            StoredCookie(name: "session", value: "test-fixture", domain: "library.example.invalid", path: "/", isSecure: true)
+        ]), origin: address.origin)
+        MacServers.upsert(MacSavedServer(address: address.description, username: "listener",
+            lastUsedAt: .now, allowInsecureHTTP: false), defaults: defaults)
+        let libraryKey = "mac.library.\(address.description)|listener"
+        defaults.set("stale-library", forKey: libraryKey)
+        let user = #"{"id":"u1","username":"listener","profile":"listener","version":1,"enabled":true}"#
+        StubURLProtocol.respond { request in
+            switch request.url!.path {
+            case "/api/v1/auth/status":
+                return .json(body: "{\"configured\":true,\"authenticated\":true,\"user\":\(user)}")
+            case "/api/v1/libraries":
+                return .json(body: #"[{"id":"active-library","name":"Active","enabled":true,"is_default":true}]"#)
+            case "/api/v1/favorites/ids":
+                return .json(body: #"{"ids":[]}"#)
+            default:
+                return .empty(status: 404)
+            }
+        }
+        defer { StubURLProtocol.reset() }
+        let session = MacSession(store: store, queueStore: try SwiftDataQueueStore.inMemory(),
+            defaults: defaults, configuration: StubURLProtocol.configuration())
+        await session.restore()
+        #expect(session.selectedLibraryID == nil)
+        #expect(session.client?.selectedLibrary() == nil)
+        #expect(defaults.string(forKey: libraryKey) == nil)
+        await session.logout()
+    }
 }

@@ -225,7 +225,8 @@ def test_supported_connection_policy_environment(monkeypatch, policy):
 
 
 @pytest.mark.parametrize("overlap", ["music", "library", "web", "."])
-def test_podcast_storage_rejects_overlapping_roots(tmp_path, overlap):
+def test_podcast_storage_rejects_overlapping_roots(monkeypatch, tmp_path, overlap):
+    monkeypatch.delenv("WILDSTRING_PODCASTS_DIR", raising=False)
     roots = {f"{name}_dir": tmp_path / name for name in ("music", "library", "web")}
     with pytest.raises(ValidationError, match="Podcast storage must be separate"):
         Settings(
