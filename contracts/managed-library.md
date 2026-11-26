@@ -34,3 +34,11 @@ SQLite v4 保存导入运行、计数、最多 100 条错误，以及源根目�
 源离线不影响已导入副本播放。导入源被修改不会自动替换托管数据。Make、管理页与自动发现共用导入逻辑；已支持单曲数据库覆盖编辑与待整理补充，单曲托管文件可显式重组织并保留 ID；可配置命名模板与音频标签写回仍未实现。详见 [管理接口](library-management.md) 与 [自动导入](automatic-import.md)。
 
 音乐和书库共享[存储目录边界](storage-and-podcast-resources.md)。硬链接与[便携侧车](wildstring-sidecar.md)按实施方案接入导入管线。
+
+## 重新绑定音乐来源
+
+所有者可以在单曲文件信息中选择同库已注册来源内的 FLAC、MP3 或 M4A 文件，也可在存储迁移中按库预览并应用选中的结果，包括已有硬链接库中的独立副本。重绑更新源文件关联，保留曲目 ID。
+
+`POST /api/v1/libraries/{id}/rebind/preview` 接收库版本与可选单曲 `choice {track_id,source_id,source_path}`。批量迁移传 `target_storage_mode:"hardlink"` 和可选 `managed_root`。响应包含曲目、来源相对路径、判定、待保留的字段差异和核对令牌。`POST /api/v1/libraries/{id}/rebind` 接收相同库版本与目标，以及 `selections [{track_id,source_id,source_path,token,bind_only?}]`，返回可在库迁移记录中跟踪、重试的任务。
+
+字节一致的同格式、同卷文件可以直接重链。FLAC 还可在采样参数与完整解码音频均一致时重链，允许标准 ReplayGain 差异。已有应用歌词优先，符合校验的单段内嵌歌词可随重链转存，歌词编辑后需要重新确认预览。仅绑定时，托管文件保持独立，来源摘要和托管摘要各自记录。音频无法验证、来源不唯一或内嵌资料无法完整转存时，可按预览保留独立副本。原地重链按曲提交并按专辑刷新侧车，恢复时识别已发布的文件并补写未完成的侧车。迁往新目录时按批准的目标摘要验证每首曲目，保留旧目录。

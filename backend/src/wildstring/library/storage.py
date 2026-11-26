@@ -1,11 +1,13 @@
 """Durable copy-and-verify storage migration; old managed files are retained."""
 
 import hashlib
+import json
 import os
 import re
 import shutil
 import stat
 import time
+from collections import defaultdict
 from contextlib import suppress
 from pathlib import Path
 from typing import Literal
@@ -15,6 +17,7 @@ from fastapi import HTTPException
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field
 
+from wildstring.library.fs import SourceChangedError, fingerprint, open_source
 from wildstring.library.import_files import (
     HardlinkError,
     copy_exclusive,
@@ -23,8 +26,16 @@ from wildstring.library.import_files import (
     target_directory,
     validate_hardlink_capability,
 )
-from wildstring.library.scanner import SourceChangedError, open_source
-from wildstring.library.sidecar import export_books, export_music
+from wildstring.library.rebind import (
+    ApprovedBinding,
+    MusicRebind,
+    SourceChoice,
+    check_lyric_version,
+    read_identity,
+    save_binding,
+    stage_metadata,
+)
+from wildstring.library.sidecar import album_folder, export_books, export_music
 
 
 class MigrationInput(BaseModel):
@@ -32,6 +43,14 @@ class MigrationInput(BaseModel):
     version: int = Field(ge=1, strict=True)
     managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
     target_storage_mode: Literal["copy", "hardlink"] | None = None
+
+
+class RebindPreview(MigrationInput):
+    choice: SourceChoice | None = None
+
+
+class RebindInput(MigrationInput):
+    selections: list[ApprovedBinding]
 
 
 def overlapping(first, second):
@@ -144,7 +163,13 @@ class LibraryStorage:
                 f"SELECT * FROM {self.jobs} WHERE library_id=? ORDER BY created_at DESC LIMIT 20",  # nosec B608
                 (library_id,),
             )
-            return {"items": [dict(row) for row in rows]}
+            items = []
+            for row in rows:
+                item = dict(row)
+                if item.pop("rebind_plan", None):
+                    item["rebind"] = True
+                items.append(item)
+            return {"items": items}
 
     def check_busy(self, db, library_id):
         if db.execute(
@@ -178,7 +203,37 @@ class LibraryStorage:
             )
         ]
 
-    def submit(self, library_id, body, user):
+    def rebind_review(self, library_id, body):
+        with self.database.connect(scoped=False) as db:
+            row = self.record(db, library_id)
+            self.check_busy(db, library_id)
+        if row["version"] != body.version:
+            raise HTTPException(409, "library_version_conflict")
+        if body.target_storage_mode == "copy" or (
+            body.target_storage_mode is None and body.managed_root
+        ):
+            raise HTTPException(422, "library_target_invalid")
+        root = Path(row["storage_root"])
+        target = (
+            self.destination(body.managed_root)
+            if body.managed_root and Path(body.managed_root).resolve() != root
+            else root
+        )
+        return MusicRebind(self.database, library_id, root, target)
+
+    def submit_rebind(self, library_id, body, user):
+        if body.target_storage_mode is None and len(body.selections) != 1:
+            raise HTTPException(422, "rebind_selection_required")
+        review = self.rebind_review(library_id, body)
+        items = review.approve(body.selections)
+        return self.submit(
+            library_id,
+            body,
+            user,
+            rebind_plan={"items": items, "single": body.target_storage_mode is None},
+        )
+
+    def submit(self, library_id, body, user, *, rebind_plan=None):
         with self.database.connect() as db:
             record = self.record(db, library_id)
             roots = self.sources(db, library_id)
@@ -188,21 +243,21 @@ class LibraryStorage:
         if not body.managed_root or Path(body.managed_root).resolve() == source:
             if body.managed_root and not Path(body.managed_root).is_absolute():
                 raise HTTPException(422, "library_target_invalid")
-            if mode == current_mode:
+            if mode == current_mode and rebind_plan is None:
                 raise HTTPException(422, "library_target_invalid")
             target = source
         else:
             target = self.destination(
                 body.managed_root, collection="books" if self.book else "libraries"
             )
-        if mode == "hardlink":
+        if mode == "hardlink" and not (rebind_plan and rebind_plan["single"]):
             try:
                 validate_hardlink_capability(roots, target, self.media_suffixes)
             except HardlinkError as error:
                 raise HTTPException(422, error.code) from error
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
-        elif mode == "copy" and current_mode == "hardlink":
+        elif mode == "copy" and current_mode == "hardlink" and rebind_plan is None:
             needed = 0
             for directory, _, files in os.walk(source, followlinks=False):
                 for name in files:
@@ -248,6 +303,11 @@ class LibraryStorage:
                     stamp,
                 ),
             )
+            if rebind_plan is not None:
+                if target == source:
+                    for name, item in rebind_plan.pop("items").items():
+                        self.persist_rebind_item(db, identity, name, item)
+                self.persist_rebind(db, identity, rebind_plan)
         return next(row for row in self.listing(library_id)["items"] if row["id"] == identity)
 
     def retry(self, library_id, identity, user):
@@ -259,9 +319,17 @@ class LibraryStorage:
                 (identity, library_id),
             ).fetchone()
             library = self.record(db, library_id)
-            if not row or library["storage_root"] != row["source_root"]:
+            plan = json.loads(row["rebind_plan"] or "null") if row and not self.book else None
+            expected_root = (
+                row["target_root"]
+                if plan and plan.get("applied")
+                else row["source_root"]
+                if row
+                else None
+            )
+            if not row or library["storage_root"] != expected_root:
                 raise HTTPException(409, "library_migration_not_retryable")
-            if row["target_root"] != row["source_root"]:
+            if row["target_root"] != row["source_root"] and not (plan and plan.get("applied")):
                 self.available(db, Path(row["target_root"]), ignore=identity)
             db.execute(
                 f"UPDATE {self.libraries} SET version=version+1 WHERE id=?",  # nosec B608
@@ -486,10 +554,217 @@ class LibraryStorage:
                     hints.append((root, Path(row[1])))
         return hints
 
+    def persist_rebind(self, db, job_id, operation):
+        db.execute(
+            "UPDATE library_migrations SET rebind_plan=? WHERE id=?",
+            (json.dumps(operation, ensure_ascii=False), job_id),
+        )
+
+    def persist_rebind_item(self, db, job_id, name, item):
+        db.execute(
+            """INSERT INTO library_rebind_items(migration_id,path,state) VALUES (?,?,?)
+               ON CONFLICT(migration_id,path) DO UPDATE SET state=excluded.state""",
+            (job_id, name, json.dumps(item, ensure_ascii=False)),
+        )
+
+    def rebind_source(self, job, item):
+        with self.database.connect(scoped=False) as db:
+            source = db.execute(
+                "SELECT root FROM library_sources WHERE id=? AND library_id=?",
+                (item["source_id"], job["library_id"]),
+            ).fetchone()
+        if not source or source[0] != item["source_root"]:
+            raise ValueError("rebind_preview_changed")
+        root, path = Path(source[0]), Path(item["source_path"])
+        info, value = read_identity(root, path)
+        if value != item["source_sha"]:
+            raise ValueError("rebind_preview_changed")
+        return root, path, info
+
+    def refresh_rebind_sidecars(self, job, items, target, *, operation=None):
+        pending = {
+            name: item
+            for name, item in items.items()
+            if item.get("done") and not item.get("exported")
+        }
+        if not pending:
+            return
+        affected = {
+            name: (item["managed_sha"], item.get("previous_sha"))
+            for name, item in pending.items()
+            if item["action"] != "bind" or item.get("previous_sha") != item["managed_sha"]
+        }
+        written = 0
+        if affected:
+            written = export_music(
+                self.database,
+                target,
+                job["library_id"],
+                {album_folder(Path(name)) for name in affected},
+                previous_hashes=affected,
+            )
+        with self.database.connect(write=True) as db:
+            for name, item in pending.items():
+                item.pop("managed_sha", None)
+                item.pop("previous_sha", None)
+                item["exported"] = True
+                if operation is None:
+                    self.persist_rebind_item(db, job["id"], name, item)
+            if operation is not None:
+                self.persist_rebind(db, job["id"], operation)
+            db.execute(
+                "UPDATE library_migrations SET sidecars_written=sidecars_written+? WHERE id=?",
+                (written, job["id"]),
+            )
+
+    def rebind_in_place(self, job, operation, root, mode):
+        with self.database.connect(write=True) as db:
+            legacy_items = operation.pop("items", None)
+            if legacy_items is not None:
+                for name, item in legacy_items.items():
+                    self.persist_rebind_item(db, job["id"], name, item)
+                self.persist_rebind(db, job["id"], operation)
+            items = {
+                row["path"]: json.loads(row["state"])
+                for row in db.execute(
+                    "SELECT path,state FROM library_rebind_items WHERE migration_id=? ORDER BY path",
+                    (job["id"],),
+                )
+            }
+        self.refresh_rebind_sidecars(job, items, root)
+        albums = defaultdict(dict)
+        for name, item in items.items():
+            albums[album_folder(Path(name))][name] = item
+        for album_items in albums.values():
+            for item in album_items.values():
+                if item.get("done"):
+                    continue
+                self.rebind_track(job, root, item)
+            self.refresh_rebind_sidecars(job, album_items, root)
+        self.refresh_rebind_sidecars(job, items, root)
+
+        items = items.values()
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute(
+                "UPDATE libraries SET storage_mode=?,version=version+1 WHERE id=? AND root=? AND version=?",
+                (mode, job["library_id"], str(root), job["library_version"]),
+            ).rowcount:
+                raise ValueError("library_version_conflict")
+            standalone = sum(item["action"] == "bind" for item in items)
+            if not operation["single"]:
+                standalone = db.execute(
+                    """SELECT count(*) FROM tracks t WHERE t.library_id=? AND t.status='available'
+                       AND NOT EXISTS (SELECT 1 FROM imported_files i WHERE i.target_root=?
+                         AND i.target_path=t.path AND i.link_mode='hardlink')""",
+                    (job["library_id"], str(root)),
+                ).fetchone()[0]
+            db.execute(
+                """UPDATE library_migrations SET status='completed',error=NULL,updated_at=?,total_files=?,
+                       relinked_files=?,reclaimed_bytes=?,kept_standalone_files=? WHERE id=?""",
+                (
+                    time.time(),
+                    len(items),
+                    sum(item["action"] in {"exact", "equivalent"} for item in items),
+                    sum(item["reclaimed"] for item in items),
+                    standalone,
+                    job["id"],
+                ),
+            )
+            db.execute("DELETE FROM library_rebind_items WHERE migration_id=?", (job["id"],))
+
+    def rebind_track(self, job, root, item):
+        self.authorize(job)
+        name = item["path"]
+        relative = Path(name)
+        source_root, source_path, source_info = self.rebind_source(job, item)
+        source_identity = (source_info, item["source_sha"])
+        managed_info, managed_hash = read_identity(root, relative, verified=source_identity)
+        linked = os.path.samestat(managed_info, source_info)
+        bind = item["action"] == "bind"
+        if managed_hash != item["managed_sha"] and not (
+            item.get("staged") and linked and managed_hash == item["source_sha"] and not bind
+        ):
+            raise ValueError("rebind_preview_changed")
+        if not item.get("staged"):
+            item["staged"] = True
+            item["reclaimed"] = (
+                managed_info.st_size
+                if item["action"] in {"exact", "equivalent"} and managed_info.st_nlink == 1
+                else 0
+            )
+            with self.database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                stage_metadata(db, job["library_id"], item)
+                self.persist_rebind_item(db, job["id"], name, item)
+        expected_info, value = (managed_info, managed_hash) if bind else source_identity
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not bind and not linked:
+                check_lyric_version(db, item)
+                with (
+                    open_source(root, relative) as managed,
+                    open_source(source_root, source_path) as stream,
+                ):
+                    if fingerprint(os.fstat(managed.fileno())) != fingerprint(managed_info):
+                        raise ValueError("rebind_preview_changed")
+                    replace_managed_file(
+                        link_exclusive,
+                        stream,
+                        root,
+                        relative,
+                        item["source_sha"],
+                        source_root=source_root,
+                        source_relative=source_path,
+                        verified=source_identity,
+                    )
+            with (
+                open_source(source_root, source_path) as source,
+                open_source(root, relative) as managed,
+            ):
+                info = os.fstat(managed.fileno())
+                if fingerprint(info) != fingerprint(expected_info) or fingerprint(
+                    os.fstat(source.fileno())
+                ) != fingerprint(source_info):
+                    raise ValueError("rebind_preview_changed")
+            save_binding(
+                db,
+                job["library_id"],
+                root,
+                item,
+                (value, info.st_size, info.st_mtime_ns),
+                verified_source=source_identity,
+                linked=os.path.samestat(info, source_info),
+            )
+            self.mark_rebind_done(item)
+            self.persist_rebind_item(db, job["id"], name, item)
+
+    @staticmethod
+    def mark_rebind_done(item):
+        state = {
+            key: item[key]
+            for key in ("action", "managed_sha", "previous_sha", "reclaimed")
+            if key in item
+        }
+        item.clear()
+        item.update(state, done=True)
+
+    def finish_moved_rebind(self, job, operation, target):
+        self.refresh_rebind_sidecars(job, operation["items"], target, operation=operation)
+        with self.database.connect(write=True) as db:
+            db.execute(
+                "UPDATE library_migrations SET status='completed',error=NULL,updated_at=? WHERE id=?",
+                (time.time(), job["id"]),
+            )
+
     def copy(self, job):
         self.authorize(job)
         source, target = Path(job["source_root"]), Path(job["target_root"])
         in_place = target == source
+        operation = json.loads(job.get("rebind_plan") or "null") if not self.book else None
+        if operation and operation.get("applied"):
+            self.finish_moved_rebind(job, operation, target)
+            return
         if source.is_symlink() or not source.is_dir() or target.is_symlink():
             raise ValueError("library_migration_source_unavailable")
         with self.database.connect() as db:
@@ -500,6 +775,9 @@ class LibraryStorage:
             hints = self._source_hints(db, job["library_id"], roots) if mode == "hardlink" else []
             if not in_place:
                 self.available(db, target, ignore=job["id"])
+        if operation and in_place:
+            self.rebind_in_place(job, operation, source, mode)
+            return
         if mode == "hardlink":
             validate_hardlink_capability(roots, target, self.media_suffixes)
         if mode == "hardlink" and not job["sidecars_written"]:
@@ -526,8 +804,14 @@ class LibraryStorage:
         hashes = {item[0] for item in before.values()}
         sizes = {item[1] for item in before.values()}
         originals = (
-            self.originals(roots, hashes, sizes=sizes, hints=hints) if mode == "hardlink" else {}
+            self.originals(roots, hashes, sizes=sizes, hints=hints)
+            if mode == "hardlink" and operation is None
+            else {}
         )
+        selections = operation["items"] if operation else {}
+        expected = {name: item[:2] for name, item in before.items()}
+        if selections.keys() - before.keys():
+            raise ValueError("rebind_preview_changed")
         copied = copied_bytes = relinked = reclaimed = standalone = 0
         modes = {}
         linked_sources = {}
@@ -537,17 +821,30 @@ class LibraryStorage:
             destination = target / relative
             existed = destination.exists()
             prior = original_modes.get(name, "copy")
+            item = selections.get(name)
             original = (
                 originals.get(value)
                 if prior not in {"generated", "managed_only"}
                 and ".wildstring" not in relative.parts
                 else None
             )
+            link_value = value
+            if item is not None:
+                if item["managed_sha"] != value:
+                    raise ValueError("rebind_preview_changed")
+                selected_source = self.rebind_source(job, item)
+                if item["action"] != "bind":
+                    original = selected_source
+                    link_value = item["source_sha"]
+                    expected[name] = (link_value, item["size"])
             already_linked = False
             if existed:
                 with open_source(target, relative) as stream:
                     current = os.fstat(stream.fileno())
-                    if not in_place and hashlib.file_digest(stream, "sha256").hexdigest() != value:
+                    if (
+                        not in_place
+                        and hashlib.file_digest(stream, "sha256").hexdigest() != link_value
+                    ):
                         raise ValueError("library_target_conflict")
                 if original is not None and os.path.samestat(current, original[2]):
                     already_linked = True
@@ -555,10 +852,16 @@ class LibraryStorage:
                 original_root, original_relative, expected_inode = original
                 if not existed or not os.path.samestat(current, expected_inode):
                     with open_source(original_root, original_relative) as stream:
+                        location = {
+                            "source_root": original_root,
+                            "source_relative": original_relative,
+                        }
                         if existed:
-                            replace_managed_file(link_exclusive, stream, target, relative, value)
+                            replace_managed_file(
+                                link_exclusive, stream, target, relative, link_value, **location
+                            )
                         else:
-                            link_exclusive(stream, target, relative, value)
+                            link_exclusive(stream, target, relative, link_value, **location)
                 modes[name] = "hardlink"
                 linked_sources[name] = (original_root, original_relative, expected_inode, value)
                 if library["storage_mode"] == "copy" or not already_linked:
@@ -613,9 +916,9 @@ class LibraryStorage:
                     ),
                 )
         received = self.tree(target)
-        if {name: item[:2] for name, item in received.items()} != {
-            name: item[:2] for name, item in before.items()
-        } or (not in_place and self.tree(source) != before):
+        if {name: item[:2] for name, item in received.items()} != expected or (
+            not in_place and self.tree(source) != before
+        ):
             raise ValueError("library_migration_source_changed")
         self.authorize(job)
         with self.database.connect(write=True) as db:
@@ -682,7 +985,17 @@ class LibraryStorage:
                         "UPDATE imported_files SET target_root=? WHERE target_root=?",
                         (str(target), str(source)),
                     )
-            db.execute(
-                f"UPDATE {self.jobs} SET status='completed',error=NULL,updated_at=? WHERE id=?",  # nosec B608
-                (time.time(), job["id"]),
-            )
+            if operation:
+                for name, item in selections.items():
+                    stage_metadata(db, job["library_id"], item)
+                    save_binding(db, job["library_id"], target, item, received[name])
+                    self.mark_rebind_done(item)
+                operation["applied"] = True
+                self.persist_rebind(db, job["id"], operation)
+            else:
+                db.execute(
+                    f"UPDATE {self.jobs} SET status='completed',error=NULL,updated_at=? WHERE id=?",  # nosec B608
+                    (time.time(), job["id"]),
+                )
+        if operation:
+            self.finish_moved_rebind(job, operation, target)

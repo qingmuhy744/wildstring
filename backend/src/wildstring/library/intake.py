@@ -689,7 +689,8 @@ class Intake:
                         source_hash = digest(stream)
                     with self.database.connect() as connection:
                         known = connection.execute(
-                            "SELECT 1 FROM imported_files WHERE target_root=? AND sha256=? LIMIT 1",
+                            "SELECT 1 FROM imported_files WHERE target_root=? AND sha256=? "
+                            "AND link_mode != 'managed_only' LIMIT 1",
                             (str(self.settings.library_dir), source_hash),
                         ).fetchone()
                     if existing_hash != source_hash and not known:

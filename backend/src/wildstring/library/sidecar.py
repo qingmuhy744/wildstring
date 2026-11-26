@@ -479,12 +479,18 @@ def _export_track_cover(
     row,
     media_hash: str,
     fallback_folders: list[Path] = (),
+    previous_hashes: tuple[str | None, ...] = (),
 ) -> tuple[bytes | None, bool, str | None]:
     choice = row["cover_choice"]
     if isinstance(choice, str) and _SHA256_RE.fullmatch(choice):
         cleanup_key = choice if row["cover_source"] in {"upload", "wildstring-sidecar"} else None
+        filenames = [
+            f"covers/{value}.jpg"
+            for value in dict.fromkeys((media_hash, row["sha256"], *previous_hashes))
+            if value
+        ]
         for search_folder in (folder, *fallback_folders):
-            for rel_name in (f"covers/{media_hash}.jpg", "cover.jpg"):
+            for rel_name in (*filenames, "cover.jpg"):
                 reused = verified_cover_bytes(root, search_folder, rel_name, choice, reencode=False)
                 if reused is not None:
                     return reused, True, cleanup_key
@@ -502,7 +508,7 @@ def _export_track_cover(
     return (local[0], False, None) if local else (None, False, None)
 
 
-def export_music(database, root, library_id, folders=None):
+def export_music(database, root, library_id, folders=None, *, previous_hashes=None):
     with database.connect(scoped=False) as db:
         rows = db.execute(
             """SELECT t.id,t.path,t.size_bytes,t.mtime_ns,t.sha256,
@@ -602,7 +608,14 @@ def export_music(database, root, library_id, folders=None):
                     keep_lyrics.add(bundle_rel.as_posix())
 
             cover_bytes, is_custom, cleanup_key = _export_track_cover(
-                database, root, assets, folder, row, media_hash, empty_folders
+                database,
+                root,
+                assets,
+                folder,
+                row,
+                media_hash,
+                empty_folders,
+                (previous_hashes or {}).get(row["path"], ()),
             )
             track_covers.append((entry, media_hash, cover_bytes, is_custom, cleanup_key))
             values.append(entry)

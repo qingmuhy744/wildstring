@@ -230,9 +230,10 @@ class LibraryRepository:
                     WHERE i.target_root = l.root
                       AND i.target_path = ?
                       AND i.source_size = ?
-                      AND i.link_mode != 'generated'
+                      AND i.source_mtime = ?
+                      AND i.link_mode IN ('copy', 'hardlink')
                     LIMIT 1""",
-                    (fields["library_id"], path, size),
+                    (fields["library_id"], path, size, mtime),
                 ).fetchone()
                 resolved_sha = imported[0] if imported else None
             fields["sha256"] = resolved_sha

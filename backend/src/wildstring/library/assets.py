@@ -19,6 +19,7 @@ from wildstring.library.fs import fingerprint, open_source
 from wildstring.library.lyrics import (
     MAX_TEXT_BYTES,
     decode_text,
+    flac_lyric_texts,
     no_lyrics,
     parse_lyrics,
     synced_lines,
@@ -320,11 +321,7 @@ class TrackAssets:
         tags = getattr(audio, "tags", None) or {}
         texts = []
         if isinstance(audio, FLAC):
-            texts = [
-                value
-                for key in ("syncedlyrics", "lyrics", "unsyncedlyrics", "unsynced lyrics")
-                for value in tags.get(key, [])
-            ]
+            texts = flac_lyric_texts(tags)
         elif isinstance(audio, MP3) and audio.tags:
             for frame in sorted(audio.tags.getall("SYLT"), key=lambda item: item.type != 1):
                 if frame.format == 2 and frame.text:

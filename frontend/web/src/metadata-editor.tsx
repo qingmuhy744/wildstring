@@ -531,6 +531,7 @@ export function MetadataEditor({
           canManage={true}
           onClose={() => setShowFileInfo(false)}
           onReorganized={load}
+          onRebound={load}
         />
       )}
     </dialog>

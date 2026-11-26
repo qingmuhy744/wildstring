@@ -1,8 +1,9 @@
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api } from './api';
+import { api, errorCodeMessage } from './api';
 import { FolderPicker } from './folder-picker';
 import type { MusicLibrary } from './music-libraries';
+import { approvedBinding, RebindReview, type RebindItem } from './music-rebind';
 
 type IntakePolicy = {
   version: number;
@@ -24,6 +25,7 @@ type Migration = {
   reclaimed_bytes?: number;
   kept_standalone_files?: number;
   sidecars_written?: number;
+  rebind?: boolean;
 };
 const statusKeys: Record<string, string> = {
   queued: 'libraryStorage.statusQueued',
@@ -48,7 +50,10 @@ export function LibraryStorage({
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [review, setReview] = useState<{ version: number; items: RebindItem[] } | null>(null);
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const endpoint = `/libraries/${encodeURIComponent(library.id)}/migrations`;
+  const rebind = `/libraries/${encodeURIComponent(library.id)}/rebind`;
   const intake = `/manage/intake/settings?library_id=${encodeURIComponent(library.id)}`;
   useEffect(() => {
     let active = true;
@@ -57,6 +62,7 @@ export function LibraryStorage({
     setTarget('');
     setMode(library.storage_mode || 'copy');
     setMessage('');
+    setReview(null);
     void Promise.all([api<IntakePolicy>(intake), api<{ items: Migration[] }>(endpoint)])
       .then(([value, jobs]) => {
         if (active) {
@@ -72,16 +78,18 @@ export function LibraryStorage({
     };
   }, [intake, endpoint, library.storage_mode]);
   const moving = job?.status === 'queued' || job?.status === 'running';
+  const jobId = job?.id;
   useEffect(() => {
-    if (!moving) return;
+    if (!moving || !jobId) return;
     let active = true;
     const timer = window.setInterval(() => {
       void api<{ items: Migration[] }>(endpoint)
         .then(async (value) => {
           if (!active) return;
-          const latest = value.items[0];
-          setJob(latest || null);
-          if (latest && !['queued', 'running'].includes(latest.status)) await onChanged();
+          const latest = value.items.find((item) => item.id === jobId);
+          if (!latest) return;
+          setJob(latest);
+          if (!['queued', 'running'].includes(latest.status)) await onChanged();
         })
         .catch((error: Error) => {
           if (active) setMessage(error.message);
@@ -91,7 +99,7 @@ export function LibraryStorage({
       active = false;
       window.clearInterval(timer);
     };
-  }, [moving, endpoint, onChanged]);
+  }, [moving, jobId, endpoint, onChanged]);
   async function configure() {
     setBusy(true);
     setMessage('');
@@ -135,27 +143,63 @@ export function LibraryStorage({
   async function migrate(retry = false) {
     setBusy(true);
     setMessage('');
+    if (!retry) setJob(null);
     try {
       setJob(
-        await api<Migration>(retry ? `${endpoint}/${job?.id}/retry` : endpoint, {
+        await api<Migration>(retry ? `${endpoint}/${job?.id}/retry` : review ? rebind : endpoint, {
           method: 'POST',
           ...(retry
             ? {}
             : {
                 body: JSON.stringify({
-                  version: library.version,
+                  version: review?.version ?? library.version,
                   ...(target.trim() ? { managed_root: target.trim() } : {}),
                   target_storage_mode: mode,
+                  ...(review
+                    ? {
+                        selections: review.items
+                          .filter(
+                            (item) =>
+                              item.token && item.action !== 'linked' && !skipped.has(item.track_id),
+                          )
+                          .map((item) => approvedBinding(item)),
+                      }
+                    : {}),
                 }),
+                timeoutMs: review ? 0 : undefined,
               }),
         }),
       );
-      if (!retry) setTarget('');
+      if (!retry) {
+        setTarget('');
+        setReview(null);
+      }
       await onChanged();
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : t('libraryStorage.migrationSubmitFailed'),
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function previewRebind() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api<{ items: RebindItem[] }>(`${rebind}/preview`, {
+        method: 'POST',
+        timeoutMs: 0,
+        body: JSON.stringify({
+          version: library.version,
+          ...(target.trim() ? { managed_root: target.trim() } : {}),
+          target_storage_mode: 'hardlink',
+        }),
+      });
+      setSkipped(new Set());
+      setReview({ version: library.version, items: result.items });
+    } catch (cause) {
+      setMessage((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -250,7 +294,8 @@ export function LibraryStorage({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          void migrate();
+          if (mode === 'hardlink' && !review) void previewRebind();
+          else void migrate();
         }}
       >
         <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
@@ -258,7 +303,10 @@ export function LibraryStorage({
           id={`${id}-mode`}
           value={mode}
           disabled={busy || moving}
-          onChange={(event) => setMode(event.target.value as 'copy' | 'hardlink')}
+          onChange={(event) => {
+            setMode(event.target.value as 'copy' | 'hardlink');
+            setReview(null);
+          }}
         >
           <option value="copy">{t('bookshelf.copy')}</option>
           <option value="hardlink">{t('bookshelf.hardlink')}</option>
@@ -267,20 +315,58 @@ export function LibraryStorage({
         <input
           id={`${id}-target`}
           value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          required={mode === (library.storage_mode || 'copy')}
+          onChange={(e) => {
+            setTarget(e.target.value);
+            setReview(null);
+          }}
+          required={mode === 'copy' && mode === (library.storage_mode || 'copy')}
           disabled={busy || moving}
           placeholder={t('libraryStorage.newManagedDirPlaceholder')}
         />
         <button type="button" disabled={busy || moving} onClick={() => setPicking(true)}>
           {t('libraryStorage.browseMigrationTarget')}
         </button>
-        <button
-          type="submit"
-          disabled={busy || moving || (!target.trim() && mode === (library.storage_mode || 'copy'))}
-        >
-          {t('libraryStorage.migrateBtn')}
-        </button>
+        {review && (
+          <RebindReview
+            items={review.items}
+            skipped={skipped}
+            onSkip={(track, skip) =>
+              setSkipped((current) => {
+                const next = new Set(current);
+                if (skip) next.add(track);
+                else next.delete(track);
+                return next;
+              })
+            }
+            busy={busy || moving}
+          />
+        )}
+        <div className="rebind-actions">
+          <button
+            type="submit"
+            className={review ? 'primary' : undefined}
+            disabled={
+              busy ||
+              moving ||
+              (mode === 'copy' && !target.trim() && mode === (library.storage_mode || 'copy'))
+            }
+          >
+            {t(
+              mode === 'hardlink'
+                ? review
+                  ? 'musicRebind.applyReview'
+                  : busy
+                    ? 'musicRebind.checking'
+                    : 'musicRebind.preview'
+                : 'libraryStorage.migrateBtn',
+            )}
+          </button>
+          {review && (
+            <button type="button" disabled={busy || moving} onClick={() => setReview(null)}>
+              {t('musicRebind.cancelReview')}
+            </button>
+          )}
+        </div>
       </form>
       {picking && (
         <FolderPicker
@@ -288,13 +374,20 @@ export function LibraryStorage({
           onClose={() => setPicking(false)}
           onSelect={(path) => {
             setTarget(path);
+            setReview(null);
             setPicking(false);
           }}
         />
       )}
-      {job && (
+      {job && !review && (
         <div role="status" className="library-migration-status">
-          <strong>{statusKeys[job.status] ? t(statusKeys[job.status]) : job.status}</strong>
+          <strong>
+            {job.rebind && job.status === 'completed'
+              ? t('musicRebind.completed')
+              : statusKeys[job.status]
+                ? t(statusKeys[job.status])
+                : job.status}
+          </strong>
           <p className="storage-path">{job.target_root}</p>
           {moving && (
             <>
@@ -321,6 +414,7 @@ export function LibraryStorage({
           )}
           {job.status === 'failed' && (
             <>
+              {job.error && <p className="error">{errorCodeMessage(job.error)}</p>}
               <p>{t('libraryStorage.retryHint')}</p>
               <button type="button" disabled={busy} onClick={() => void migrate(true)}>
                 {t('libraryStorage.retryMigration')}

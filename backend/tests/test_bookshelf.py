@@ -1,6 +1,7 @@
 """Book libraries share the server's storage boundary and use separate grants."""
 
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -39,6 +40,41 @@ def test_book_library_sources_have_one_row_per_directory(settings, authenticated
             (created["id"],),
         ).fetchone()[:] == ("copy", "restricted")
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_book_hardlink_migration_uses_shared_storage(settings, authenticated_client, tmp_path):
+    source = tmp_path / "book-source"
+    source.mkdir()
+    original = source / "Story.txt"
+    original.write_text("第一章\n用于迁移的正文", encoding="utf-8")
+    target = tmp_path / "book-target"
+    with authenticated_client(settings) as owner:
+        library = create_library(owner, "Move books", source_roots=[str(source)])
+        endpoint = f"/api/v1/book-libraries/{library['id']}"
+        scan = owner.post(f"{endpoint}/scan", headers=HEADERS)
+        assert scan.status_code == 200, scan.text
+        (book,) = owner.get("/api/v1/books").json()["items"]
+        applied = owner.post(
+            f"{endpoint}/migrations",
+            headers=HEADERS,
+            json={
+                "version": library["version"],
+                "target_storage_mode": "hardlink",
+                "managed_root": str(target),
+            },
+        )
+        assert applied.status_code == 202, applied.text
+        for _ in range(120):
+            (job,) = owner.get(f"{endpoint}/migrations").json()["items"]
+            if job["status"] in {"failed", "completed"}:
+                break
+            time.sleep(0.05)
+        assert job["status"] == "completed", job
+        assert "rebind" not in job
+        (published,) = target.rglob("*.txt")
+        assert published.samefile(original)
+        assert list(Path(library["managed_root"]).rglob("*.txt"))
+        assert owner.get(f"/api/v1/books/{book['id']}").status_code == 200
 
 
 def test_restricted_books_require_a_book_grant_and_hide_paths(settings, authenticated_client):

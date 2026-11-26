@@ -11,7 +11,14 @@ from wildstring.library.folders import FolderCreate, browse_folders, create_fold
 from wildstring.library.import_files import HardlinkError, validate_hardlink_capability
 from wildstring.library.metadata import SUPPORTED_SUFFIXES
 from wildstring.library.scope import allowed_ids, library_for_root
-from wildstring.library.storage import LibraryStorage, MigrationInput, busy, overlapping
+from wildstring.library.storage import (
+    LibraryStorage,
+    MigrationInput,
+    RebindInput,
+    RebindPreview,
+    busy,
+    overlapping,
+)
 
 
 def normalize_source_roots(values):
@@ -312,6 +319,26 @@ class LibraryCatalog:
         )
         def update(identity: str, body: LibraryUpdate):
             return self.save(body, identity)
+
+        @router.post(
+            "/{identity}/rebind/preview",
+            dependencies=[Depends(auth.require_owner), Depends(auth.require_client)],
+        )
+        def preview_rebind(identity: str, body: RebindPreview):
+            review = storage.rebind_review(identity, body)
+            return {
+                "items": [review.public(review.inspect(body.choice))]
+                if body.choice
+                else list(review.batch())
+            }
+
+        @router.post(
+            "/{identity}/rebind", dependencies=[Depends(auth.require_client)], status_code=202
+        )
+        def rebind(
+            identity: str, body: RebindInput, user: Annotated[dict, Depends(auth.require_owner)]
+        ):
+            return storage.submit_rebind(identity, body, user)
 
         @router.get("/{identity}/migrations", dependencies=[Depends(auth.require_owner)])
         def migrations(identity: str):

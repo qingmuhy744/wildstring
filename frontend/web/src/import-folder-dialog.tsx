@@ -26,11 +26,13 @@ export function ImportFolderDialog({
   sources,
   initial,
   onSelect,
+  file,
   onClose,
 }: {
   sources: ImportSource[];
   initial: ImportSelection;
-  onSelect: (selection: ImportSelection, preview: ImportPreview | null) => void;
+  onSelect?: (selection: ImportSelection, preview: ImportPreview | null) => void;
+  file?: { libraryId: string; onSelect: (selection: ImportSelection) => void };
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -57,7 +59,11 @@ export function ImportFolderDialog({
       setPath(folder);
       try {
         const current = await api<SourceListing>(
-          `/manage/library/folders?source_id=${encodeURIComponent(source)}&path=${encodeURIComponent(folder)}`,
+          `/manage/library/folders?${new URLSearchParams({
+            source_id: source,
+            path: folder,
+            ...(file ? { library_id: file.libraryId } : {}),
+          })}`,
           { signal: controller.signal },
         );
         if (!controller.signal.aborted) {
@@ -73,7 +79,7 @@ export function ImportFolderDialog({
         if (!controller.signal.aborted) setBusy(false);
       }
     },
-    [t],
+    [t, file?.libraryId],
   );
   useEffect(() => {
     dialog.current?.showModal();
@@ -105,26 +111,31 @@ export function ImportFolderDialog({
   const source = sources.find((item) => item.id === sourceId);
   const parts = listing?.path === '.' ? [] : (listing?.path || '').split('/');
   const visible =
-    listing?.items.filter((item) =>
-      item.name.toLocaleLowerCase().includes(filter.toLocaleLowerCase()),
+    listing?.items.filter(
+      (item) =>
+        (!file ||
+          item.kind === 'folder' ||
+          (item.importable && /\.(flac|mp3|m4a)$/i.test(item.name))) &&
+        item.name.toLocaleLowerCase().includes(filter.toLocaleLowerCase()),
     ) || [];
   const folders = listing?.items.filter((item) => item.kind === 'folder').length || 0;
   const audio = listing?.items.filter((item) => item.importable).length || 0;
   return (
     <dialog
       ref={dialog}
-      className="import-folder-dialog"
-      aria-label={t('importFolderDialog.dialogAria')}
+      className={file ? 'import-folder-dialog source-file-choice' : 'import-folder-dialog'}
+      aria-label={t(file ? 'musicRebind.choose' : 'importFolderDialog.dialogAria')}
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }}
     >
       <header className="import-folder-heading">
         <div>
-          <span className="eyebrow">{t('importFolderDialog.eyebrow')}</span>
-          <h2>{t('importFolderDialog.title')}</h2>
-          <p>{t('importFolderDialog.description')}</p>
+          {!file && <span className="eyebrow">{t('importFolderDialog.eyebrow')}</span>}
+          <h2>{t(file ? 'musicRebind.choose' : 'importFolderDialog.title')}</h2>
+          {!file && <p>{t('importFolderDialog.description')}</p>}
         </div>
         <DialogCloseButton aria-label={t('importFolderDialog.closeAria')} onClick={onClose} />
       </header>
@@ -229,6 +240,18 @@ export function ImportFolderDialog({
                     <span>{t('importFolderDialog.folderTag')}</span>
                     <Icon name="chevron" />
                   </button>
+                ) : file ? (
+                  <button
+                    type="button"
+                    className="import-folder-entry"
+                    key={item.path}
+                    disabled={busy}
+                    onClick={() => file.onSelect({ source_id: sourceId, path: item.path })}
+                  >
+                    <Icon name="music" />
+                    <strong>{item.name}</strong>
+                    <Icon name="chevron" />
+                  </button>
                 ) : (
                   <div className="import-folder-entry" key={item.path}>
                     <Icon name="music" />
@@ -254,40 +277,42 @@ export function ImportFolderDialog({
             {!busy && !listing && <p className="muted">{t('importFolderDialog.readFailedHint')}</p>}
           </div>
         </section>
-        <aside className="import-folder-summary" aria-label={t('importFolderDialog.summaryAria')}>
-          <Icon name="folder" />
-          <h3>{t('importFolderDialog.currentFolderTitle')}</h3>
-          <strong>
-            {listing ? parts.at(-1) || source?.name : t('importFolderDialog.notLoaded')}
-          </strong>
-          <code>
-            {source?.path}
-            {listing && listing.path !== '.' ? `/${listing.path}` : ''}
-          </code>
-          <p>{t('importFolderDialog.scopeHint')}</p>
-          {listing && (
-            <small>{t('importFolderDialog.currentLevelCount', { folders, audio })}</small>
-          )}
-          <button type="button" disabled={busy || !listing} onClick={() => void inspect()}>
-            {busy && listing
-              ? t('importFolderDialog.previewing')
-              : t('importFolderDialog.previewButton')}
-          </button>
-          {preview && (
-            <div className="import-folder-result" role="status">
-              <strong>{t('importFolderDialog.audioFilesCount', { count: preview.count })}</strong>
-              <span>{t('importFolderDialog.previewNote')}</span>
-              {preview.pending_markers.length > 0 && (
-                <small className="source-pending">
-                  {t('importFolderDialog.pendingMarkersCount', {
-                    count: preview.pending_markers.length,
-                  })}
-                </small>
-              )}
-            </div>
-          )}
-          <small>{t('importFolderDialog.sourceReadOnlyNotice')}</small>
-        </aside>
+        {!file && (
+          <aside className="import-folder-summary" aria-label={t('importFolderDialog.summaryAria')}>
+            <Icon name="folder" />
+            <h3>{t('importFolderDialog.currentFolderTitle')}</h3>
+            <strong>
+              {listing ? parts.at(-1) || source?.name : t('importFolderDialog.notLoaded')}
+            </strong>
+            <code>
+              {source?.path}
+              {listing && listing.path !== '.' ? `/${listing.path}` : ''}
+            </code>
+            <p>{t('importFolderDialog.scopeHint')}</p>
+            {listing && (
+              <small>{t('importFolderDialog.currentLevelCount', { folders, audio })}</small>
+            )}
+            <button type="button" disabled={busy || !listing} onClick={() => void inspect()}>
+              {busy && listing
+                ? t('importFolderDialog.previewing')
+                : t('importFolderDialog.previewButton')}
+            </button>
+            {preview && (
+              <div className="import-folder-result" role="status">
+                <strong>{t('importFolderDialog.audioFilesCount', { count: preview.count })}</strong>
+                <span>{t('importFolderDialog.previewNote')}</span>
+                {preview.pending_markers.length > 0 && (
+                  <small className="source-pending">
+                    {t('importFolderDialog.pendingMarkersCount', {
+                      count: preview.pending_markers.length,
+                    })}
+                  </small>
+                )}
+              </div>
+            )}
+            <small>{t('importFolderDialog.sourceReadOnlyNotice')}</small>
+          </aside>
+        )}
       </div>
       {error && (
         <p className="error import-folder-error" role="alert">
@@ -306,16 +331,18 @@ export function ImportFolderDialog({
           <button type="button" onClick={onClose}>
             {t('importFolderDialog.cancel')}
           </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || !listing}
-            onClick={() =>
-              listing && onSelect({ source_id: sourceId, path: listing.path }, preview)
-            }
-          >
-            {t('importFolderDialog.selectFolder')}
-          </button>
+          {!file && (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !listing}
+              onClick={() =>
+                listing && onSelect?.({ source_id: sourceId, path: listing.path }, preview)
+              }
+            >
+              {t('importFolderDialog.selectFolder')}
+            </button>
+          )}
         </div>
       </footer>
     </dialog>

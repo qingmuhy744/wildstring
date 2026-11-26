@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 58
+SCHEMA_VERSION = 60
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -757,6 +757,34 @@ class Database:
                 from wildstring.library.music_sidecar_schema import migrate as migrate_music_sidecar
 
                 migrate_music_sidecar(connection)
+            if current < 59:
+                connection.execute("BEGIN IMMEDIATE")
+                if connection.execute("PRAGMA user_version").fetchone()[0] < 59:
+                    if not any(
+                        row[1] == "rebind_plan"
+                        for row in connection.execute("PRAGMA table_info(library_migrations)")
+                    ):
+                        connection.execute(
+                            "ALTER TABLE library_migrations ADD COLUMN rebind_plan TEXT"
+                        )
+                    connection.execute(
+                        "CREATE TABLE IF NOT EXISTS audio_identities "
+                        "(sha256 TEXT PRIMARY KEY, pcm_sha256 TEXT NOT NULL)"
+                    )
+                    connection.execute("PRAGMA user_version = 59")
+                connection.commit()
+            if current < 60:
+                connection.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS library_rebind_items (
+                        migration_id TEXT NOT NULL REFERENCES library_migrations(id) ON DELETE CASCADE,
+                        path TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        PRIMARY KEY (migration_id, path)
+                    );
+                    PRAGMA user_version = 60;
+                    COMMIT;
+                """)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
             )
