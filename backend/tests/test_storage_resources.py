@@ -537,6 +537,15 @@ def test_storage_resolves_aliases_before_rejecting_reserved_roots(
             )
             assert response.status_code == 422, response.text
             assert not (root / "unexpected-copy").exists()
+        loop = tmp_path / "directory-loop"
+        loop.symlink_to(loop, target_is_directory=True)
+        response = client.post(
+            f"/api/v1/libraries/{library['id']}/migrations",
+            headers=HEADERS,
+            json={"version": library["version"], "managed_root": str(loop / "copy")},
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "library_target_invalid"
 
 
 @pytest.mark.parametrize("profile,enabled", [("librarian", 1), ("owner", 0)])
