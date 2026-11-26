@@ -56,11 +56,21 @@
   background: var(--nav-active);
 }
 .bookshelf-filter-bar {
-  margin-block-end: 1rem;
+  margin-block-end: 1.15rem;
 }
 .bookshelf-filter-bar input[type='search'] {
-  flex: 1 1 13rem;
+  flex: 1 1 12rem;
+  max-inline-size: 20rem;
   padding-block: 0.45rem;
+}
+.bookshelf-resume-btn {
+  flex: none;
+  max-inline-size: min(100%, 20rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding-inline: 1.05rem;
 }
 .bookshelf-heading-actions {
   display: flex;
@@ -100,13 +110,6 @@
 .bookshelf-range output {
   min-inline-size: 2.75rem;
   font-variant-numeric: tabular-nums;
-}
-.bookshelf-resume {
-  margin-block: 0.75rem 1.25rem;
-}
-.bookshelf-resume .primary {
-  border-radius: 999px;
-  padding-inline: 1.15rem;
 }
 .bookshelf-note-list {
   display: grid;
@@ -1263,6 +1266,10 @@
 }
 
 @media (max-width: 760px) {
+  .bookshelf-filter-bar input[type='search'] {
+    flex: 1 1 100%;
+    max-inline-size: none;
+  }
   .bookshelf input:not([type='range']):not([type='checkbox']),
   .book-reader input:not([type='range']):not([type='checkbox']) {
     font-size: 16px;

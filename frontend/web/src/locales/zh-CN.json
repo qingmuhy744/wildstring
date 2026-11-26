@@ -2476,6 +2476,7 @@
     "listen": "收听",
     "continueReading": "继续阅读",
     "continueListening": "继续收听",
+    "pauseListening": "暂停收听",
     "readAgain": "重新阅读",
     "listenAgain": "重新收听",
     "readingSummary": "已读 · {{chapter}}（{{percent}}%）",

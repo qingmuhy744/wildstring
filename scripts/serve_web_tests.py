@@ -195,7 +195,12 @@ def main() -> None:
                     connection.execute(
                         "INSERT INTO podcasts(id,title,author,feed_url,auto_update,download_policy,created_at) "
                         "VALUES (?,?,?,?,0,'none','2026-10-25')",
-                        (identifier, title, author, f"https://example.invalid/{identifier}.xml"),
+                        (
+                            identifier,
+                            title,
+                            author,
+                            f"https://example.invalid/{identifier}.xml",
+                        ),
                     )
         uvicorn.run(
             create_app(settings),
@@ -309,8 +314,80 @@ def _minimal_epub_bytes(title: str, author: str, cover: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _paired_guide_epub_bytes(title: str, author: str, cover: bytes) -> bytes:
+    from zipfile import ZipFile
+
+    chapters = (
+        (
+            "ch1.xhtml",
+            "第一章：阅读与听书同行",
+            "欢迎体验野弦自托管书架。这段正文包含重点与批注示例，支持滚动、分页切换、句内划词高亮以及自定义颜色。",
+            "在同一本书下可以随时切换电子书阅读与有声书收听；切换歌曲或播客后，底部停靠栏会保持清晰的进度与控制。"
+            * 6,
+        ),
+        (
+            "ch2.xhtml",
+            "第二章：跨页排版与批注",
+            "自托管书架的设计初衷，是让个人收藏的文字与声音回到同一个安静的容器里。",
+            "无论是单手握持的手机，还是桌面宽屏与平板电脑，双载体书籍都可以分别保存阅读和听书进度，并在另一端进度更新时提供温和的一键对齐提示。"
+            * 6,
+        ),
+        (
+            "ch3.xhtml",
+            "第三章：暖纸与声音",
+            "合上书页时，最近读到的段落与听到的章节都会保留在书架详情中。",
+            "继续阅读与继续收听各自保持精确锚点，不会因为章节结构差异而互相静默覆盖。" * 6,
+        ),
+    )
+    buf = io.BytesIO()
+    with ZipFile(buf, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>',
+        )
+        archive.writestr("OEBPS/images/cover.png", cover)
+        nav_items = []
+        manifest_items = []
+        spine_items = []
+        for idx, (filename, heading, lead, body) in enumerate(chapters, start=1):
+            archive.writestr(
+                f"OEBPS/{filename}",
+                '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+                f"<h1>{heading}</h1>"
+                f"<p>{lead}</p>"
+                f"<p>{body}</p>"
+                "</body></html>",
+            )
+            nav_items.append(f'<li><a href="{filename}">{heading}</a></li>')
+            manifest_items.append(
+                f'<item id="c{idx}" href="{filename}" media-type="application/xhtml+xml"/>'
+            )
+            spine_items.append(f'<itemref idref="c{idx}"/>')
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+            f'<body><nav epub:type="toc"><ol>{"".join(nav_items)}</ol></nav></body></html>',
+        )
+        archive.writestr(
+            "OEBPS/book.opf",
+            "<package><metadata>"
+            f"<title>{title}</title>"
+            f"<creator>{author}</creator>"
+            '<meta name="cover" content="cover-img"/>'
+            "</metadata>"
+            "<manifest>"
+            '<item id="cover-img" href="images/cover.png" media-type="image/png" properties="cover-image"/>'
+            '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+            f"{''.join(manifest_items)}"
+            "</manifest>"
+            f"<spine>{''.join(spine_items)}</spine></package>",
+        )
+    return buf.getvalue()
+
+
 def seed_bookshelf(settings: Settings, root: Path, picture: bytes) -> None:
-    """Seed an accessible ebook and multi-chapter audiobook for native bookshelf tests."""
+    """Seed ebook-only, audiobook-only, and paired dual-carrier books for bookshelf tests."""
     import time
     from uuid import uuid4
 
@@ -335,6 +412,24 @@ def seed_bookshelf(settings: Settings, root: Path, picture: bytes) -> None:
         tags["TALB"] = TALB(encoding=3, text=["雨夜电台故事集"])
         tags["TPE1"] = TPE1(encoding=3, text=["深夜电台"])
         tags["TPE2"] = TPE2(encoding=3, text=["深夜电台"])
+        tags["TRCK"] = TRCK(encoding=3, text=[str(chapter_no)])
+        tags.save()
+    paired_dir = book_src / "wildstring-guide"
+    paired_dir.mkdir(parents=True, exist_ok=True)
+    (paired_dir / "cover.png").write_bytes(picture)
+    (paired_dir / "wildstring-guide.epub").write_bytes(
+        _paired_guide_epub_bytes("野弦漫游指南", "野弦编辑部", picture)
+    )
+    for chapter_no, ch_title in enumerate(
+        ("第一章：阅读与听书同行", "第二章：跨页排版与批注"), start=1
+    ):
+        audio = paired_dir / f"0{chapter_no}.mp3"
+        shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", audio)
+        tags = MP3(audio)
+        tags["TIT2"] = TIT2(encoding=3, text=[ch_title])
+        tags["TALB"] = TALB(encoding=3, text=["野弦漫游指南"])
+        tags["TPE1"] = TPE1(encoding=3, text=["野弦编辑部"])
+        tags["TPE2"] = TPE2(encoding=3, text=["野弦编辑部"])
         tags["TRCK"] = TRCK(encoding=3, text=[str(chapter_no)])
         tags.save()
 
