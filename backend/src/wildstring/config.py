@@ -22,10 +22,8 @@ class Settings(BaseSettings):
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
-    # Validate only the effective fallback: a DB override must also win over a
-    # malformed or obsolete environment value on a later restart.
     server_name: str | None = None
-    connection_policy: str | None = None
+    connection_policy: Literal["mixed", "https_only", "legacy"] | None = None
     trusted_proxies: str = ""
     # Opt-in for hosts whose DNS runs Clash/mihomo fake-ip mode (198.18.0.0/15 answers).
     podcast_allow_fake_ip: bool = False
@@ -65,4 +63,10 @@ class Settings(BaseSettings):
             candidate = Path("frontend/web/dist").resolve()
             if candidate.is_dir() and (candidate / "index.html").is_file():
                 self.web_dir = candidate
+        if self.data_dir.is_relative_to(self.podcasts_dir) or any(
+            self.podcasts_dir.is_relative_to(other) or other.is_relative_to(self.podcasts_dir)
+            for other in (self.music_dir, self.library_dir, self.web_dir)
+            if other is not None
+        ):
+            raise ValueError("Podcast storage must be separate from music, managed library and Web")
         return self

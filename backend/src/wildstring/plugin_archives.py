@@ -95,6 +95,7 @@ def inspect_package(data):
                 or "\\" in entry.filename
                 or ":" in entry.filename
                 or not path.parts
+                or path.parts[0].casefold() == "package.zip"
                 or str(path) != entry.filename.rstrip("/")
                 or "\x00" in entry.filename
                 or any(ord(c) < 32 for c in entry.filename)
@@ -391,12 +392,13 @@ def execute_serial(plugin, context, method, value, cache_key):
                     except subprocess.TimeoutExpired:
                         continue
             finally:
-                if os.name == "posix":
-                    with suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                elif process.poll() is None:
-                    process.kill()
-                process.wait()
+                if process.poll() is None:
+                    if os.name == "posix":
+                        with suppress(ProcessLookupError):
+                            os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             raise PluginError("source_plugin_timeout") from None
         if process.returncode or output.tell() > 2 * 1024 * 1024:

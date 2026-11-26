@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 61
+SCHEMA_VERSION = 62
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -800,6 +800,14 @@ class Database:
                     connection.execute("DROP TABLE book_annotations_old")
                     connection.execute(ANNOTATION_INDEX)
                     connection.execute("PRAGMA user_version = 61")
+                connection.commit()
+            if current < 62:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS sessions_by_expiry ON sessions(expires_at)"
+                )
+                connection.execute("DROP TABLE IF EXISTS login_guard")
+                connection.execute("PRAGMA user_version = 62")
                 connection.commit()
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"

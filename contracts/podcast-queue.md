@@ -97,7 +97,7 @@
 
 `PUT /podcasts/queue` 请求 `{version, device_id, items:[{episode_id, origin, added_at?}]}`，整份 CAS 替换。已存在的 `added_at` 保留，新条目由服务端补写，`added_at: null` 与缺省同等。成功响应带 `notice: ""`。版本落后返回 409 `{"detail":{"code":"podcast_queue_conflict","current":{...}}}`。含失效或不可访问单集时整份请求返回 422，`detail` 提供 `code: "episode_unavailable"`、首个 `episode_id` 和完整 `dropped_episode_ids`，原队列和版本保持不变。冲突后客户端保留本机队列并给出三个动作：用服务器版本、用本机覆盖、仅保留本机且暂不覆盖。不静默覆盖。
 
-`GET /podcasts/queue/preferences` 与 `PUT /podcasts/queue/preferences` 读写 `{default_action, auto_limit, auto_continue, shows:{[podcast_id]:{action, auto_limit, order, skip_completed, auto_continue}}}`，标量后写覆盖，`shows` 按提交映射同步。客户端读取续播偏好的优先级统一为：**节目单独设置 → 账号默认值 → 网络不可用时使用对应账号的本地缓存**。
+`GET /podcasts/queue/preferences` 与 `PUT /podcasts/queue/preferences` 读写 `{default_action, auto_limit, auto_continue, shows:{[podcast_id]:{action, auto_limit, order, skip_completed, auto_continue}}}`，标量后写覆盖，`shows` 按提交映射同步。失权或已删除的节目会被过滤，有过滤时响应附带 `dropped_podcast_ids`，账号默认值和其余节目仍可保存。客户端读取续播偏好的优先级统一为：**节目单独设置 → 账号默认值 → 网络不可用时使用对应账号的本地缓存**。
 
 `PUT /podcasts/episodes/{episode_id}/favorite` 请求 `{favorite: bool}` 或 `{loved: bool}`（缺省默认为 true），返回 `{episode_id, favorite: bool, loved: bool}`。单集不存在返回 404。收藏后冻结底层音频零引用计时；取消收藏且无其他引用时恢复零引用计时。
 

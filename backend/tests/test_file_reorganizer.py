@@ -3,10 +3,58 @@ from fastapi.testclient import TestClient
 from test_personal_library import music
 from test_providers import HEADERS
 
+from wildstring import album_release_locks
 from wildstring.database import Database
+from wildstring.library.albums import album_key
 from wildstring.library.file_reorganizer import get_track_file_info
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
+
+
+def test_reorganization_updates_folder_album_identity_and_release_lock(
+    settings, authenticated_client
+):
+    music(settings, "源目录歌曲.flac", ["单曲艺人"], [], album="文件夹专辑")
+    scan_library(settings)
+    database = Database(settings.data_dir)
+    with authenticated_client(settings) as client:
+        track_id = client.get("/api/v1/tracks").json()["items"][0]["id"]
+        metadata = f"/api/v1/manage/tracks/{track_id}/metadata"
+        version = client.get(metadata).json()["version"]
+        assert (
+            client.put(
+                metadata,
+                headers=HEADERS,
+                json={
+                    "version": version,
+                    "overrides": {"album_artists": []},
+                },
+            ).status_code
+            == 200
+        )
+        with database.connect(write=True) as db:
+            track = db.execute(
+                "SELECT album_id,library_id,path,album FROM tracks WHERE id=?", (track_id,)
+            ).fetchone()
+            album_release_locks.save(
+                db,
+                track["library_id"],
+                track["album_id"],
+                album_release_locks.ReleaseLockInput(provider="fixture", release_id="release"),
+            )
+        response = client.post(f"/api/v1/manage/tracks/{track_id}/reorganize-file", headers=HEADERS)
+        assert response.status_code == 200 and response.json()["changed"]
+        new_id = album_key(track["library_id"], response.json()["new_path"], track["album"], [])
+        assert new_id != track["album_id"]
+        with database.connect() as db:
+            assert (
+                db.execute("SELECT album_id FROM tracks WHERE id=?", (track_id,)).fetchone()[0]
+                == new_id
+            )
+            assert (
+                album_release_locks.read(db, track["library_id"], new_id)["release_id"] == "release"
+            )
+            assert album_release_locks.read(db, track["library_id"], track["album_id"]) is None
 
 
 def test_file_info_and_reorganize(settings, authenticated_client):

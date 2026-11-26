@@ -50,11 +50,13 @@ const idle = {
   counts: { unchecked: 4 },
 };
 
-test('所有者回填 Apple 编号，只合并已核实的重复节目', async ({ page }) => {
+test('所有者回填 Apple 编号，只合并已核实的重复节目', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   let status: Record<string, unknown> = idle;
   let duplicates: unknown[] = [{ ...possible }];
   let merged: unknown = null;
   let polls = 0;
+  let mergeBusy = true;
   await page.route('**/api/v1/podcasts/identity/backfill', async (route) => {
     if (route.request().method() === 'POST') {
       expect(route.request().postDataJSON()).toEqual({ limit: 200, retry_unmatched: false });
@@ -81,6 +83,10 @@ test('所有者回填 Apple 编号，只合并已核实的重复节目', async (
     route.fulfill({ json: { duplicates, verified: 0, possible: 0 } }),
   );
   await page.route('**/api/v1/podcasts/identity/merge', async (route) => {
+    if (mergeBusy) {
+      mergeBusy = false;
+      return route.fulfill({ status: 409, json: { detail: 'podcast_merge_busy' } });
+    }
     merged = route.request().postDataJSON();
     duplicates = [possible];
     return route.fulfill({
@@ -127,7 +133,21 @@ test('所有者回填 Apple 编号，只合并已核实的重复节目', async (
   ).not.toContainText('将保留');
 
   await pair.getByRole('button', { name: '合并…' }).click();
-  await pair.getByRole('button', { name: '确认合并' }).click();
+  const confirm = pair.getByRole('button', { name: '确认合并' });
+  await confirm.click();
+  const busy = card.getByText('这些节目还有单集正在下载、播放或传输，请稍后再合并。');
+  await expect(busy).toBeVisible();
+  await expect(list.getByRole('listitem')).toHaveCount(2);
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await card.screenshot({
+      animations: 'disabled',
+      scale: 'css',
+      path: info.outputPath(`merge-busy-${theme}.png`),
+    });
+  }
+  await confirm.click();
   await expect(card.getByText('已合并：移入 1 集，对齐 2 集')).toBeVisible();
   expect(merged).toEqual({ podcast_ids: ['etw', 'fireside'] });
   await expect(list.getByRole('listitem')).toHaveCount(1);

@@ -1024,7 +1024,7 @@
     "podcast_feed_too_large": "播客 RSS 源文件过大。",
     "podcast_follow_required": "请先关注此节目，再开启自动下载。",
     "podcast_identity_backfill_running": "回填正在进行，请等它完成。",
-    "podcast_merge_busy": "这两个节目还有单集在下载，请等下载结束后再合并。",
+    "podcast_merge_busy": "这些节目还有单集正在下载、播放或传输，请稍后再合并。",
     "podcast_merge_same": "不能把节目和它自己合并。",
     "podcast_merge_unverified": "这两个节目没有核实为同一个 Apple 节目，不能合并。",
     "podcast_not_found": "节目不存在或当前账号无权访问。",
@@ -2404,7 +2404,7 @@
   "musicUploader": {
     "clearList": "清空列表",
     "description": "支持拖拽整个文件夹或音频文件，自动解析标签、排他去重并按规范整理入库。若无曲序标签将智能根据文件名提取。",
-    "dropzoneFormats": "支持 FLAC、MP3、M4A、WAV 及伴随歌词 (.lrc)",
+    "dropzoneFormats": "直传支持 FLAC、MP3、M4A 和伴随歌词。WAV 请通过来源目录导入。",
     "dropzonePrompt": "拖拽文件夹或音频文件到此处",
     "eyebrow": "上传音乐",
     "overrideAlbumLabel": "强制/默认专辑：",

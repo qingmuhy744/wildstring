@@ -5345,6 +5345,9 @@ textarea {
   align-items: center;
   gap: 8px;
 }
+.dropzone-formats {
+  color: var(--text);
+}
 .dropzone-icon {
   font-size: 32px;
   margin-bottom: 4px;

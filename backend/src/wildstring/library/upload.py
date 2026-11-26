@@ -17,9 +17,8 @@ from wildstring.library.import_files import (
     replace_managed_file,
     target_digest,
 )
-from wildstring.library.intake import INPUT_SUFFIXES
 from wildstring.library.lyrics import MAX_TEXT_BYTES
-from wildstring.library.metadata import read_metadata
+from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.metadata_inference import enrich_metadata
 from wildstring.library.scanner import ScanBusyError, scan_library
 
@@ -79,7 +78,7 @@ def find_matching_audio_target(
             ).fetchall()
             for row in rows:
                 target = Path(row["target_path"])
-                if (library_dir / target).exists() and target.suffix.lower() in INPUT_SUFFIXES:
+                if (library_dir / target).exists() and target.suffix.lower() in SUPPORTED_SUFFIXES:
                     return target
 
         # 1b. Direct stem match fallback (e.g. Song.lrc uploaded without parent path)
@@ -89,7 +88,7 @@ def find_matching_audio_target(
         ).fetchall()
         for row in rows:
             target = Path(row["target_path"])
-            if (library_dir / target).exists() and target.suffix.lower() in INPUT_SUFFIXES:
+            if (library_dir / target).exists() and target.suffix.lower() in SUPPORTED_SUFFIXES:
                 return target
 
         # 2. Directory-level companion (e.g. cover.jpg / folder.png in album folder)
@@ -100,7 +99,7 @@ def find_matching_audio_target(
             ).fetchall()
             for row in rows:
                 target = Path(row["target_path"])
-                if (library_dir / target).exists() and target.suffix.lower() in INPUT_SUFFIXES:
+                if (library_dir / target).exists() and target.suffix.lower() in SUPPORTED_SUFFIXES:
                     return target
     return None
 
@@ -190,7 +189,7 @@ def handle_upload(
             temp_path.unlink(missing_ok=True)
 
     # 2. Audio upload
-    if suffix not in INPUT_SUFFIXES:
+    if suffix not in SUPPORTED_SUFFIXES:
         raise HTTPException(400, f"unsupported_audio_format: {suffix}")
 
     temp_path, sha256, size = save_upload_to_temp(file, temp_dir, MAX_AUDIO_BYTES)

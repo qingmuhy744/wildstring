@@ -1024,7 +1024,7 @@
     "podcast_feed_too_large": "The podcast RSS feed is too large.",
     "podcast_follow_required": "Follow this show before turning on auto-download.",
     "podcast_identity_backfill_running": "Identity backfill is already running. Wait for it to finish.",
-    "podcast_merge_busy": "Episodes from these shows are still downloading. Wait before merging.",
+    "podcast_merge_busy": "Some episodes are still downloading, playing, or transferring. Try merging again later.",
     "podcast_merge_same": "A show cannot be merged with itself.",
     "podcast_merge_unverified": "These shows have not been verified as the same Apple podcast and cannot be merged.",
     "podcast_not_found": "This show doesn't exist or this account can't access it.",
@@ -2404,7 +2404,7 @@
   "musicUploader": {
     "clearList": "Clear list",
     "description": "Drag and drop entire folders or audio files; tags are parsed automatically, deduplicated, and organized into the library according to conventions. Track numbers are intelligently inferred from filenames if missing.",
-    "dropzoneFormats": "Supports FLAC, MP3, M4A, WAV and companion lyrics (.lrc)",
+    "dropzoneFormats": "Upload FLAC, MP3, M4A and companion lyrics. Import WAV from a source folder.",
     "dropzonePrompt": "Drag and drop folders or audio files here",
     "eyebrow": "UPLOAD WORKSPACE",
     "overrideAlbumLabel": "Override/default album:",

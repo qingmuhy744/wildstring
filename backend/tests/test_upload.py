@@ -1,6 +1,8 @@
 """Tests for file and folder uploading, metadata enrichment, duplicate detection and sidecars."""
 
+import io
 import shutil
+import wave
 from pathlib import Path
 
 from mutagen.flac import FLAC
@@ -174,3 +176,22 @@ def test_upload_unsupported_format(settings, authenticated_client):
         )
         assert response.status_code == 400
         assert "unsupported_audio_format" in response.json()["detail"]
+
+
+def test_valid_wav_direct_upload_is_rejected_without_creating_an_unindexed_file(
+    settings, authenticated_client
+):
+    output = io.BytesIO()
+    with wave.open(output, "wb") as stream:
+        stream.setparams((1, 2, 8_000, 0, "NONE", "not compressed"))
+        stream.writeframes(b"\0\0" * 8_000)
+    with authenticated_client(settings) as client:
+        response = client.post(
+            "/api/v1/manage/library/upload",
+            headers=HEADERS,
+            files={"file": ("sample.WAV", output.getvalue(), "audio/wav")},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "unsupported_audio_format: .wav"
+        assert not list(settings.library_dir.rglob("*.wav"))
+        assert client.get("/api/v1/tracks").json()["items"] == []

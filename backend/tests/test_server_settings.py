@@ -1,9 +1,11 @@
 """Real database/API tests for explicit overrides and transport-bound sessions."""
 
+import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from wildstring.auth import COOKIE, HTTP_COOKIE, HTTPS_COOKIE
+from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.main import create_app
 
@@ -194,7 +196,7 @@ def test_environment_https_only_invalidates_http_sessions_on_restart(settings):
         assert client.get("/api/v1/tracks").status_code == 401
 
 
-def test_malformed_environment_does_not_override_explicit_database(settings):
+def test_valid_environment_keeps_database_override_and_invalid_policy_fails(settings, monkeypatch):
     settings.admin_password = SecretStr(PASSWORD)
     with TestClient(create_app(settings), base_url="https://testserver") as client:
         assert login(client).status_code == 200
@@ -207,7 +209,31 @@ def test_malformed_environment_does_not_override_explicit_database(settings):
             == 200
         )
     settings.server_name = "x" * 500
-    settings.connection_policy = "obsolete-setting"
+    settings.connection_policy = "https_only"
     with TestClient(create_app(settings)) as client:
         assert client.get("/api/v1/server").json()["name"] == "页面名称"
         assert client.get("/api/v1/server").json()["connection_policy"] == "mixed"
+    monkeypatch.setenv("WILDSTRING_CONNECTION_POLICY", "obsolete-setting")
+    with pytest.raises(ValidationError, match="connection_policy"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("policy", ["mixed", "https_only", "legacy", ""])
+def test_supported_connection_policy_environment(monkeypatch, policy):
+    monkeypatch.setenv("WILDSTRING_CONNECTION_POLICY", policy)
+    assert Settings(_env_file=None).connection_policy == (policy or None)
+
+
+@pytest.mark.parametrize("overlap", ["music", "library", "web", "."])
+def test_podcast_storage_rejects_overlapping_roots(tmp_path, overlap):
+    roots = {f"{name}_dir": tmp_path / name for name in ("music", "library", "web")}
+    with pytest.raises(ValidationError, match="Podcast storage must be separate"):
+        Settings(
+            _env_file=None,
+            data_dir=tmp_path / "runtime",
+            podcasts_dir=tmp_path / overlap,
+            **roots,
+        )
+    assert Settings(_env_file=None, data_dir=tmp_path / "runtime", **roots).podcasts_dir == (
+        tmp_path / "runtime" / "podcasts"
+    )

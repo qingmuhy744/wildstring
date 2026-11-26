@@ -51,7 +51,15 @@ def package(extra=None, manifest=None):
 
 
 @pytest.mark.parametrize(
-    "path", ["../escape.py", "/absolute.py", "sub/../../escape.py", "back\\escape.py"]
+    "path",
+    [
+        "../escape.py",
+        "/absolute.py",
+        "sub/../../escape.py",
+        "back\\escape.py",
+        "package.zip",
+        "PACKAGE.ZIP/adapter.py",
+    ],
 )
 def test_unsafe_zip_is_rejected_before_import(path):
     with pytest.raises(HTTPException, match="source_plugin_invalid_zip"):
@@ -179,6 +187,15 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
     music(settings, "摇滚.flac", ["合成乐队"], ["合成乐队"])
     scan_library(settings)
     source_zip = package()
+    signaled_groups = []
+    if os.name == "posix":
+        killpg = os.killpg
+
+        def observe_killpg(pid, signal):
+            signaled_groups.append(pid)
+            killpg(pid, signal)
+
+        monkeypatch.setattr(os, "killpg", observe_killpg)
     with authenticated_client(settings) as client:
         assert client.get(BASE).json()["items"] == []
         assert client.post(BASE + "/import", content=source_zip).status_code == 403
@@ -204,6 +221,7 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
             "ok": True,
             "count": 1,
         }
+        assert signaled_groups == []
         providers = client.app.state.providers
         track = client.get("/api/v1/tracks").json()["items"][0]
         values, warnings = providers.sources.suggestions(track)

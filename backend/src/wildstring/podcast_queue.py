@@ -368,11 +368,17 @@ def _read_prefs(connection, user_id):
         (user_id, GLOBAL_SHOW),
     ).fetchone()
     shows = {}
+    dropped = []
     for row in connection.execute(
         """SELECT podcast_id, action, auto_limit, episode_order, skip_completed, auto_continue
            FROM podcast_queue_prefs WHERE user_id=? AND podcast_id<>?""",
         (user_id, GLOBAL_SHOW),
     ):
+        try:
+            require_programme(connection, user_id, row["podcast_id"])
+        except HTTPException:
+            dropped.append(row["podcast_id"])
+            continue
         shows[row["podcast_id"]] = {
             "action": row["action"],
             "auto_limit": row["auto_limit"],
@@ -380,12 +386,15 @@ def _read_prefs(connection, user_id):
             "skip_completed": bool(row["skip_completed"]),
             "auto_continue": bool(row["auto_continue"]),
         }
-    return {
+    result = {
         "default_action": global_row["action"] if global_row else "queue_last",
         "auto_limit": global_row["auto_limit"] if global_row else 3,
         "auto_continue": bool(global_row["auto_continue"]) if global_row else True,
         "shows": shows,
     }
+    if dropped:
+        result["dropped_podcast_ids"] = dropped
+    return result
 
 
 def routes(router: APIRouter, auth: Any, database: Any) -> None:
@@ -462,13 +471,15 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
         with database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             valid_shows: list[tuple[str, ShowPreference]] = []
+            dropped = []
             for podcast_id, preference in body.shows.items():
                 if not podcast_id:
                     continue
                 try:
                     require_programme(connection, user["id"], podcast_id)
-                except HTTPException as error:
-                    raise HTTPException(422, "podcast_unavailable") from error
+                except HTTPException:
+                    dropped.append(podcast_id)
+                    continue
                 valid_shows.append((podcast_id, preference))
             connection.execute(
                 "DELETE FROM podcast_queue_prefs WHERE user_id=? AND podcast_id<>?",
@@ -486,4 +497,7 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
             )
             for podcast_id, preference in valid_shows:
                 _write_pref(connection, user["id"], podcast_id, preference)
-            return _read_prefs(connection, user["id"])
+            result = _read_prefs(connection, user["id"])
+            if dropped:
+                result["dropped_podcast_ids"] = dropped
+            return result
