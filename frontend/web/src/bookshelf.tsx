@@ -1037,7 +1037,6 @@ export function Bookshelf({
                       type="button"
                       role="tab"
                       aria-selected={chapterTab === 'audio'}
-                      aria-pressed={chapterTab === 'audio'}
                       onClick={() => setChapterTab('audio')}
                     >
                       {t('bookshelf.audioChapters', {
@@ -1048,7 +1047,6 @@ export function Bookshelf({
                       type="button"
                       role="tab"
                       aria-selected={chapterTab === 'ebook'}
-                      aria-pressed={chapterTab === 'ebook'}
                       onClick={() => setChapterTab('ebook')}
                     >
                       {t('bookshelf.ebookContents', { count: ebookChapters?.length ?? 0 })}

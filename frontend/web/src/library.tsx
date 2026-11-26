@@ -256,6 +256,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setAccountOpen(true);
     setManageOpen(false);
     setQueueOpen(false);
+    setNotificationsOpen(false);
     window.scrollTo(0, 0);
   }
   function openModelConnections() {
@@ -268,6 +269,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setManageOpen(true);
     setManagementTab(tab);
     setQueueOpen(false);
+    setNotificationsOpen(false);
     window.scrollTo(0, 0);
   }
   const [view, setView] = useState<View>(() => {
@@ -275,7 +277,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     try {
       const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
-        return saved === 'devices' || saved === 'assistant-settings' ? 'tracks' : (saved as View);
+        return ['devices', 'assistant-settings', 'notifications'].includes(saved)
+          ? 'tracks'
+          : (saved as View);
       }
     } catch {
       // 忽略
@@ -296,6 +300,28 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   ].includes(view);
   const organizing = view === 'drafts' || view === 'tasks';
   const inbox = useNotifications(currentUser.id);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationWrapRef = useRef<HTMLDivElement>(null);
+  const notificationTriggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (notificationWrapRef.current?.contains(event.target as Node)) return;
+      setNotificationsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setNotificationsOpen(false);
+      notificationTriggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [notificationsOpen]);
   const [selectedAgentItem, setSelectedAgentItem] = useState<{
     kind: 'drafts' | 'tasks';
     id: string;
@@ -309,6 +335,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     switchView(kind);
   }
   function openNotificationAction(action: NotificationAction) {
+    setNotificationsOpen(false);
     const id = action.params?.id;
     if (action.target === 'draft' && id) return openAgentItem('drafts', id);
     if (action.target === 'task' && id) return openAgentItem('tasks', id);
@@ -399,6 +426,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [localError, setError] = useState('');
   const [queueOpen, setQueueOpen] = useState(false),
     [lyricsOpen, setLyricsOpen] = useState(false);
+  useEffect(() => {
+    if (lyricsOpen) setNotificationsOpen(false);
+  }, [lyricsOpen]);
   const [notice, setNotice] = useState('');
   const [navigation, setNavigation] = useState<CatalogLocation[]>([]);
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
@@ -756,6 +786,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setError('');
   }
   function switchView(target: View, resetHistory = true) {
+    if (target === 'notifications') {
+      setNotificationsOpen(true);
+      return;
+    }
+    setNotificationsOpen(false);
     if (target === 'assistant-settings') return openPersonalSettings('assistant');
     if (target === 'devices') return openPersonalSettings('downloads');
     if (!Object.hasOwn(labels, target)) return;
@@ -1289,7 +1324,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               }
             >
               {(Object.keys(labels) as View[])
-                .filter((target) => !['devices', 'assistant-settings', 'tasks'].includes(target))
+                .filter(
+                  (target) =>
+                    !['devices', 'assistant-settings', 'tasks', 'notifications'].includes(target),
+                )
                 .map((target) => (
                   <option key={target} value={target}>
                     {target === 'drafts' ? t('nav.organize') : t(`views.${target}`)}
@@ -1330,21 +1368,39 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   </button>
                 </form>
               )}
-              <button
-                className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
-                aria-label={t('views.notifications')}
-                data-help={
-                  inbox.unread ? t('nav.unread', { count: inbox.unread }) : t('views.notifications')
-                }
-                onClick={() => switchView('notifications')}
-              >
-                <Icon name="bell" />
-                {inbox.unread > 0 && (
-                  <span aria-hidden="true" className="notification-corner-count">
-                    {inbox.unread > 99 ? '99+' : inbox.unread}
-                  </span>
+              <div className="notification-popover-wrap" ref={notificationWrapRef}>
+                <button
+                  ref={notificationTriggerRef}
+                  type="button"
+                  className={`notification-entry icon-button ${notificationsOpen ? 'selected' : ''}`}
+                  aria-label={t('views.notifications')}
+                  aria-expanded={notificationsOpen}
+                  aria-controls={notificationsOpen ? 'notification-popover' : undefined}
+                  data-help={
+                    inbox.unread
+                      ? t('nav.unread', { count: inbox.unread })
+                      : t('views.notifications')
+                  }
+                  onClick={() => setNotificationsOpen((open) => !open)}
+                >
+                  <Icon name="bell" />
+                  {inbox.unread > 0 && (
+                    <span aria-hidden="true" className="notification-corner-count">
+                      {inbox.unread > 99 ? '99+' : inbox.unread}
+                    </span>
+                  )}
+                </button>
+                {notificationsOpen && (
+                  <Notifications
+                    inbox={inbox}
+                    onOpen={openNotificationAction}
+                    onClose={() => {
+                      setNotificationsOpen(false);
+                      notificationTriggerRef.current?.focus();
+                    }}
+                  />
                 )}
-              </button>
+              </div>
             </div>
           </header>
           <BookAudioElement session={bookAudio} />
@@ -1467,9 +1523,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   />
                 )}
               </div>
-            )}
-            {view === 'notifications' && (
-              <Notifications inbox={inbox} onOpen={openNotificationAction} />
             )}
           </Suspense>
           <div hidden={specialView}>

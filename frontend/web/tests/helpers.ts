@@ -31,7 +31,10 @@ export async function section(page: Page, name: string) {
   }
   await leaveSettings(page);
   if (name === '通知中心') {
-    await page.getByRole('button', { name, exact: true }).click();
+    const trigger = page.getByRole('button', { name, exact: true });
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+      await trigger.click();
+    }
     return;
   }
   const workbench = name === '待确认' || name === '曲库检查';
