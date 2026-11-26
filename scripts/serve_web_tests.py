@@ -4,6 +4,7 @@ import io
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -202,12 +203,52 @@ def main() -> None:
                             f"https://example.invalid/{identifier}.xml",
                         ),
                     )
-        uvicorn.run(
-            create_app(settings),
-            host=os.environ.get("WILDSTRING_WEB_TEST_BIND", "127.0.0.1"),
-            port=int(os.environ.get("WILDSTRING_WEB_TEST_PORT", "18782")),
-            access_log=False,
+        fixture = (
+            google_drive(root, picture.getvalue())
+            if os.environ.get("WILDSTRING_TEST_GDRIVE") == "1"
+            else nullcontext()
         )
+        with fixture as drive:
+            app = create_app(settings)
+            if drive is not None:
+                accounts = app.state.remote_storage.accounts
+                accounts.drive_base = accounts.oauth_base = drive.base
+            uvicorn.run(
+                app,
+                host=os.environ.get("WILDSTRING_WEB_TEST_BIND", "127.0.0.1"),
+                port=int(os.environ.get("WILDSTRING_WEB_TEST_PORT", "18782")),
+                access_log=False,
+            )
+
+
+@contextmanager
+def google_drive(root, picture):
+    import sys
+
+    sys.path.insert(0, str(ROOT / "backend/tests"))
+    from gdrive_test_fixture import drive_fixture
+
+    with drive_fixture() as drive:
+        track = root / "cloud-track.mp3"
+        shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", track)
+        tags = MP3(track)
+        tags["TIT2"] = TIT2(encoding=3, text=["云端测试曲"])
+        tags["TALB"] = TALB(encoding=3, text=["云端测试专辑"])
+        tags.save()
+        drive.folder("cloud-music", "Drive Music")
+        drive.file("cloud-track", "雾中旅途.mp3", "cloud-music", track.read_bytes())
+        drive.folder("cloud-books", "Drive Books")
+        drive.file(
+            "cloud-ebook",
+            "cloud.epub",
+            "cloud-books",
+            _minimal_epub_bytes("云端读本", "WildString Press", picture),
+        )
+        tags["TIT2"] = TIT2(encoding=3, text=["云端听书"])
+        tags["TALB"] = TALB(encoding=3, text=["云端听书"])
+        tags.save()
+        drive.file("cloud-audiobook", "story.mp3", "cloud-books", track.read_bytes())
+        yield drive
 
 
 def seed_podcast(settings: Settings, picture: bytes) -> None:

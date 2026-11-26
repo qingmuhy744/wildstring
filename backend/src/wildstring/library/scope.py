@@ -240,10 +240,16 @@ def scoped_settings(settings, database, source_id=None):
         return settings.model_copy(update={"library_dir": Path(row["root"])}) if row else settings
     with database.connect() as db:
         row = db.execute(
-            "SELECT root FROM libraries WHERE id=? AND enabled=1", (context.library_id,)
+            "SELECT root,storage_backend FROM libraries WHERE id=? AND enabled=1",
+            (context.library_id,),
         ).fetchone()
         if row is None:
             raise HTTPException(404, "library_not_found")
+        if row["storage_backend"] == "gdrive":
+            managed = Path(row["root"])
+            return settings.model_copy(
+                update={"library_dir": managed, "music_dir": managed / ".no-local-source"}
+            )
         sources = db.execute(
             "SELECT id,root FROM library_sources WHERE library_id=? ORDER BY id",
             (context.library_id,),

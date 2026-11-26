@@ -33,7 +33,7 @@ export interface Track {
   disc_number: number | null;
   album: string | null;
   duration_ms: number;
-  format: 'mp3' | 'flac' | 'm4a';
+  format: 'mp3' | 'flac' | 'm4a' | 'ogg' | 'opus';
   has_cover?: boolean;
   sample_rate: number | null;
   status: 'available' | 'missing' | 'unreadable';

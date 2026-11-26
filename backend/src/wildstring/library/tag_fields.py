@@ -6,6 +6,8 @@ from datetime import date
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
+from mutagen.oggopus import OggOpus
+from mutagen.oggvorbis import OggVorbis
 from mutagen.wave import WAVE
 
 DETAIL_DEFAULTS = {
@@ -69,7 +71,7 @@ class TagReader:
         if self.id3:
             frame = self.tags.get(id3) if id3 else None
             values = getattr(frame, "text", [])
-        elif isinstance(self.audio, FLAC):
+        elif isinstance(self.audio, FLAC | OggOpus | OggVorbis):
             values = self.tags.get(vorbis, [])
         elif isinstance(self.audio, MP4) and mp4:
             values = self.tags.get(mp4, [])

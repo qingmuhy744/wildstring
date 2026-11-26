@@ -86,7 +86,10 @@ class AudioResponse(Response):
             **self.output_headers,
         }
         requested = self.request.headers.get("range") if self.request.method == "GET" else None
-        if self.request.headers.get("if-range", etag) not in {etag, modified}:
+        if self.request.headers.get("if-range", headers["ETag"]) not in {
+            headers["ETag"],
+            headers["Last-Modified"],
+        }:
             requested = None
         try:
             selected = byte_range(requested, info.st_size)

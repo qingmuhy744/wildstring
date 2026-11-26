@@ -128,6 +128,7 @@ class Management:
         self.next_recommendation = 0
         self.discovery_due = {}
         self.book_watch_snapshots: dict[str, tuple] = {}
+        self.remote_storage = None
         self._recommendation_lock = Lock()
         self.recommendation_thread: Thread | None = None
         self.recommendation_inflight: set[tuple[str, str]] = set()
@@ -199,6 +200,16 @@ class Management:
         if (followup or body.source_id == "import") and context and context.source_id != "import":
             body = body.model_copy(update={"source_id": context.source_id})
         library_id = self.repository.library_id(create=True)
+        remote = self.remote_storage and self.remote_storage.binding("music", library_id)
+        if remote is not None:
+            if body.kind != "scan":
+                raise HTTPException(409, "remote_storage_local_operation")
+            with self.database.connect(scoped=False) as db:
+                user = db.execute(
+                    "SELECT profile FROM users WHERE id=?", (self.request_user(),)
+                ).fetchone()
+            if user is None or user["profile"] != "owner":
+                raise HTTPException(403, "owner_required")
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             if busy(connection, library_id):
@@ -598,6 +609,9 @@ class Management:
                     write_asset(library_root, rel_dir / "cover.jpg", jpeg_bytes)
 
     def source_roots(self):
+        library_id = self.repository.library_id()
+        if self.remote_storage and self.remote_storage.binding("music", library_id):
+            return []
         with self.database.connect() as db:
             sources = db.execute(
                 "SELECT id,root FROM library_sources WHERE library_id=? ORDER BY id",
@@ -623,7 +637,7 @@ class Management:
     def source_root(self, source_id):
         sources = self.source_roots()
         source = next((item for item in sources if item["id"] == source_id), None)
-        if source is None and source_id == "import":
+        if source is None and source_id == "import" and sources:
             source = sources[0]
         if source is None:
             raise HTTPException(404, "source_not_found")
@@ -854,6 +868,11 @@ class Management:
                 user = db.execute("SELECT * FROM users WHERE id=?", (job["created_by"],)).fetchone()
                 if user is None or job["library_id"] not in allowed_ids(db, job["created_by"]):
                     raise HTTPException(403, "library_access_required")
+                remote = self.remote_storage and self.remote_storage.binding(
+                    "music", job["library_id"]
+                )
+                if remote is not None and user["profile"] != "owner":
+                    raise HTTPException(403, "owner_required")
                 require_scope(
                     dict(user), "library:import" if job["kind"] == "import" else "library:manage"
                 )
@@ -880,7 +899,14 @@ class Management:
             def on_scan(run_id):
                 self.link(job["id"], scan_id=run_id)
 
-            if job["kind"] == "import":
+            remote = self.remote_storage and self.remote_storage.binding("music", job["library_id"])
+            if remote is not None:
+                if job["kind"] != "scan":
+                    raise HTTPException(409, "remote_storage_local_operation")
+                result = self.remote_storage.synchronize(
+                    "music", job["library_id"], full=bool(job["full"]), on_start=on_scan
+                )
+            elif job["kind"] == "import":
                 from wildstring.library.scope import library_context
 
                 sources = (
@@ -1176,7 +1202,12 @@ class Management:
         if (info.st_dev, info.st_ino) != self.storage_identity:
             raise OSError("Runtime directory changed; restore it or restart the service")
 
-    def overview(self):
+    def overview(self, *, owner=False):
+        settings = self.settings
+        remote = self.remote_storage and self.remote_storage.binding(
+            "music", self.repository.library_id()
+        )
+
         def directory(path):
             try:
                 with os.scandir(path) as entries:
@@ -1214,15 +1245,17 @@ class Management:
             "counts": dict(counts),
             "albums": self.repository.albums(limit=1)["total"],
             "artists": self.repository.artists(limit=1)["total"],
-            "source": directory(self.settings.music_dir),
-            "library": directory(self.settings.library_dir),
-            "data": directory(self.settings.data_dir),
+            "storage_backend": "gdrive" if remote else "local",
+            **({"remote": self.remote_storage.binding_public(remote)} if remote and owner else {}),
+            "source": directory(settings.music_dir),
+            "library": directory(settings.library_dir),
+            "data": directory(settings.data_dir),
             "last_scan": next(iter(self.repository.scans(1)), None),
             "deployment": {
-                "host": self.settings.host,
-                "port": self.settings.port,
-                "cookie_secure": self.settings.cookie_secure,
-                "connection_policy": ServerSettings(self.database, self.settings).read()[
+                "host": settings.host,
+                "port": settings.port,
+                "cookie_secure": settings.cookie_secure,
+                "connection_policy": ServerSettings(self.database, settings).read()[
                     "connection_policy"
                 ],
                 "source_readonly": True,
@@ -1320,7 +1353,7 @@ def management_router(service, auth):
 
     @router.get("/overview")
     def overview(request: Request):
-        result = service.overview()
+        result = service.overview(owner=auth.require_session(request)["profile"] == "owner")
         address = request.scope.get("server")
         if address:
             result["deployment"].update(host=address[0], port=address[1])
@@ -1395,13 +1428,35 @@ def management_router(service, auth):
         ],
     )
     def library_upload(
+        request: Request,
         file: Annotated[UploadFile, File()],
         relative_path: Annotated[str, Form()] = "",
         auto_scan: Annotated[bool, Form()] = False,
         override_artist: Annotated[str, Form()] = "",
         override_album: Annotated[str, Form()] = "",
     ):
-        from wildstring.library.upload import handle_upload
+        from wildstring.library.upload import handle_upload, sanitize_relative_path
+
+        library_id = service.repository.library_id()
+        storage = service.remote_storage
+        binding = storage.binding("music", library_id) if storage else None
+        if binding is not None:
+            auth.require_owner(request)
+            with service.database.connect(scoped=False) as db:
+                library = db.execute("SELECT * FROM libraries WHERE id=?", (library_id,)).fetchone()
+            account = binding["account_id"]
+            return storage.operate(
+                account,
+                lambda: storage.sync.upload_music(
+                    storage.accounts.drive(account),
+                    binding,
+                    library,
+                    file,
+                    sanitize_relative_path(relative_path, file.filename),
+                    artist=override_artist or None,
+                    album=override_album or None,
+                ),
+            )
 
         target_settings = service.settings.model_copy(
             update={"library_dir": service.repository.root}
@@ -1423,9 +1478,13 @@ def management_router(service, auth):
             Depends(auth.require_permission("library:import")),
         ],
     )
-    def library_scan():
+    def library_scan(request: Request):
         from wildstring.library.scanner import ScanBusyError, scan_library
 
+        library_id = service.repository.library_id()
+        if service.remote_storage and service.remote_storage.binding("music", library_id):
+            auth.require_owner(request)
+            return service.remote_storage.synchronize("music", library_id)
         target_settings = service.settings.model_copy(
             update={"library_dir": service.repository.root}
         )

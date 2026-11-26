@@ -16,6 +16,28 @@
 
 音乐库与书库支持选择独立副本或硬链接模式。配置和迁移基础链路、[便携侧车](wildstring-sidecar.md)与剩余验收范围见[实施方案](../docs/plans/self-hosted-bookshelf.md)。硬链接启用时先检查设备，再使用现存源文件探测真实权限，探针只在托管根目录建立临时目录项。跨挂载返回 `hardlink_cross_device`，其余受支持条件不足返回 `hardlink_not_supported`。显式迁移使用原有版本校验和持久任务约束，原地重链按文件恢复，并以已成功重链的旧副本逻辑字节数统计预计节省空间。
 
+## Google Drive 音乐库与书库（schema 64）
+
+每个库的 `storage_backend` 为 `local` 或 `gdrive`。服务端通过独立绑定记录保存账号、Drive 根目录、变更游标和缓存配额。本地库继续按 `storage_mode` 使用 `copy` 或 `hardlink`。Google Drive 库的本地目录服务于派生资产，绑定与本地目录迁移分别管理。
+
+在「管理中心 → 音乐库与导入 → 存储与曲库」添加自建 Google Cloud Web OAuth 客户端，启用 Drive API，并登记界面显示的回调地址 `/api/v1/remote-storage/callback`。推荐 `drive.file` 托管上传，留空目录 ID 可创建专用目录，填已有 ID 时需要该 OAuth 客户端已有权限。已有文件目录使用 `drive.readonly`，填入文件夹 ID，并将 OAuth 同意屏幕发布到 In Production 以避免 Testing 模式下的短期刷新令牌。权限类别见 [Google Drive OAuth scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)。
+
+账号配置、授权、测试、解除绑定、建库、同步及缓存维护由所有者操作。写请求使用客户端标头。所有 Google 请求使用固定官方 HTTPS 地址和服务端出站代理策略。回调落地页在同源提交一次性授权结果，服务端验证发起授权的所有者会话、有效期、随机 state 和由服务端计算的回调地址。OAuth Client Secret、访问令牌及刷新令牌存放在 `storage-secrets/` 下权限为 `0600` 的文件内，SQLite 只保存文件引用。备份和恢复时应配套保留数据库及该目录的权限。
+
+管理 API 前缀为 `/api/v1/remote-storage`：
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /accounts`、`POST /accounts` | 列出或创建账号。创建提交 `{name,client_id,client_secret,scope_mode}`，返回公开账号状态与邮箱。 |
+| `POST /authorize`、`POST /test`、`POST /revoke` | 提交 `{account_id}`，分别发起绑定、测试连接、解除授权。重新授权须连接原先绑定的 Google 账号。 |
+| `POST /libraries` | 提交 `{collection,name,account_id,folder_id?,cache_max_mb?,default_access?,auto_pair?}`，创建 `music` 或 `books` 云端库。 |
+| `POST /sync`、`POST /cache/clear` | 提交 `{collection,library_id}`，触发同步或清理本机热缓存。 |
+| `POST /cache` | 提交 `{collection,library_id,cache_max_mb}`，调整本机热缓存上限。 |
+
+首次同步分页读取根目录树，后续同步使用 Drive `changes.list`，游标失效后重新校对目录。音乐文件移出目录或删除后保留曲目 ID 与个人信息并标记缺失。音频标签通过分块 Range 读取，曲目、封面、歌词、书目与电子书章节保存在服务端。托管上传用 Drive Resumable Upload 写入目标文件夹。与源媒体有关的文件写入仅限 `drive.file` 的托管上传。
+
+客户端访问现有同源播放、歌词、封面、阅读和下载端点，绕过 Drive 只需索引的数据全部从服务端读取。原媒体每库默认使用 2048 MB 热缓存，可设为 0 直接转发。顺序完整读取可回填缓存，同一文件的并发回填复用下载，缓存按版本和校验值匹配，按最近访问次序淘汰。转 AAC 使用临时或缓存输入文件，并由既有转码缓存控制输出。播放经由服务端中转，使用服务端下行及上行流量。上游授权失效返回 503 `remote_storage_auth_required`，限流返回 503 `remote_storage_rate_limited` 和 `Retry-After`。播客音频继续使用本地共享资源策略。
+
 ## 播客保存、单集收藏与复用
 
 播客音频目录不得与导入源、音乐托管目录或 Web 目录相互包含，也不得包含整个运行数据目录。音频占用总量按规范化后的文件路径去重。

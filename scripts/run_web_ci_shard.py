@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess  # nosec B404 - invokes fixed make targets without shell
 from pathlib import Path
 
@@ -30,7 +31,7 @@ SHARDS: dict[int, tuple[tuple[str, str, str | None], ...]] = {
         ("test-podcast-web", "podcast-1", "1/2"),
         ("test-libraries-web", "libraries", None),
     ),
-    4: (("test-podcast-web", "podcast-2", "2/2"),),
+    4: (("test-podcast-web", "podcast-2", "2/2"), ("test-web", "gdrive", None)),
 }
 SHARD_COUNT = len(SHARDS)
 
@@ -53,10 +54,15 @@ def run_shard(shard_index: int) -> None:
 
     for target, slug, part in SHARDS[shard_index]:
         web_args = build_web_test_args(slug, part)
+        env = os.environ.copy()
+        if slug == "gdrive":
+            web_args += " gdrive-storage.spec.ts"
+            env["WILDSTRING_TEST_GDRIVE"] = "1"
         print(f"[web-shard {shard_index}] Running {target} ({web_args})", flush=True)
         subprocess.run(  # nosec B603 B607 - fixed make command, no shell
             ["make", target, "SKIP_WEB_BUILD=1", f"WEB_TEST_ARGS={web_args}"],
             cwd=ROOT,
+            env=env,
             check=True,
         )
 

@@ -45,6 +45,7 @@ import { PlaybackSync } from './playback-sync';
 import { PodcastProgressDialog } from './podcast-progress-dialog';
 import { QueuePanel } from './queue-panel';
 import { Management, type ManagementTab } from './management';
+import { hasDriveCallback } from './remote-storage';
 import { PersonalSettings, type PersonalSection } from './personal-settings';
 import type { AssistantSettingsTab } from './assistant-settings';
 import { MetadataEditor } from './metadata-editor';
@@ -365,8 +366,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     },
     [],
   );
-  const [manageOpen, setManageOpen] = useState(false);
-  const [managementTab, setManagementTab] = useState<ManagementTab>('home');
+  const [manageOpen, setManageOpen] = useState(
+    () => user.profile === 'owner' && hasDriveCallback(),
+  );
+  const [managementTab, setManagementTab] = useState<ManagementTab>(() =>
+    hasDriveCallback() ? 'libraries' : 'home',
+  );
   const [focusPodcastId, setFocusPodcastId] = useState<string | null>(null);
   const [focusedAudioBook, setFocusedAudioBook] = useState<Book | null>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);

@@ -21,7 +21,9 @@ from wildstring.library.import_files import HardlinkError, validate_hardlink_cap
 from wildstring.library.storage import LibraryStorage, MigrationInput, overlapping
 from wildstring.permissions import dependency
 
-LIBRARY_FIELDS = "l.id, l.name, l.storage_mode, l.default_access, l.auto_pair, l.version"
+LIBRARY_FIELDS = (
+    "l.id, l.name, l.storage_mode, l.storage_backend, l.default_access, l.auto_pair, l.version"
+)
 BOOK_FIELDS = (
     "b.id, b.library_id, b.title, b.subtitle, b.authors_json, "
     "b.cover_path, b.has_ebook, b.has_audiobook"
@@ -107,8 +109,17 @@ def _check_book_source_overlaps(
             raise HTTPException(422, "library_sources_overlap")
 
 
-def _serialize_library(db, row, *, owner: bool) -> dict:
+def _serialize_library(db, row, *, owner: bool, remote_storage=None) -> dict:
     item = dict(row, auto_pair=bool(row["auto_pair"]))
+    if item["storage_backend"] == "gdrive" and remote_storage is not None:
+        binding = remote_storage.lookup(db, "books", item["id"]) if owner else None
+        item["ebook_upload_enabled"] = bool(
+            binding
+            and binding["scope_mode"] == "drive_file"
+            and binding["account_status"] == "connected"
+        )
+        if binding:
+            item["remote"] = remote_storage.binding_public(binding)
     if owner:
         item["sources"] = [
             dict(src)
@@ -146,7 +157,14 @@ def router(
                 " ORDER BY l.name,l.id",
                 (user["profile"], user["id"]),
             ).fetchall()
-            return {"items": [_serialize_library(db, row, owner=is_owner) for row in rows]}
+            return {
+                "items": [
+                    _serialize_library(
+                        db, row, owner=is_owner, remote_storage=catalog.remote_storage
+                    )
+                    for row in rows
+                ]
+            }
 
     @router.post(
         "/book-libraries",
@@ -202,7 +220,7 @@ def router(
                 f"SELECT {LIBRARY_FIELDS}, l.managed_root FROM book_libraries l WHERE l.id=?",  # nosec B608
                 (identity,),
             ).fetchone()
-            return _serialize_library(db, row, owner=True)
+            return _serialize_library(db, row, owner=True, remote_storage=catalog.remote_storage)
 
     @router.put(
         "/book-libraries/{library_id}",
@@ -213,6 +231,10 @@ def router(
             old = db.execute("SELECT * FROM book_libraries WHERE id=?", (library_id,)).fetchone()
         if old is None:
             raise HTTPException(404, "book_library_not_found")
+        if old["storage_backend"] == "gdrive" and (
+            body.source_roots or body.managed_root or body.storage_mode == "hardlink"
+        ):
+            raise HTTPException(409, "remote_storage_local_operation")
         old_root = Path(old["managed_root"]).resolve()
         if body.managed_root is not None:
             if not Path(body.managed_root).is_absolute():
@@ -279,7 +301,7 @@ def router(
                 f"SELECT {LIBRARY_FIELDS}, l.managed_root FROM book_libraries l WHERE l.id=?",  # nosec B608
                 (library_id,),
             ).fetchone()
-            return _serialize_library(db, row, owner=True)
+            return _serialize_library(db, row, owner=True, remote_storage=catalog.remote_storage)
 
     @router.get(
         "/book-libraries/{library_id}/access",
@@ -450,7 +472,9 @@ def router(
             raise HTTPException(404, "book_not_found")
         return public_book(row)
 
-    router.include_router(content_router(database, catalog.settings, auth, transcoding))
+    router.include_router(
+        content_router(database, catalog.settings, auth, transcoding, catalog.remote_storage)
+    )
     router.include_router(progress_router(database, auth, catalog.settings))
     router.include_router(
         metadata_router(

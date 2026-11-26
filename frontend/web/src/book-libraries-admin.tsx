@@ -2,6 +2,14 @@ import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { FolderPicker } from './folder-picker';
+import {
+  createDriveLibrary,
+  defaultDriveDraft,
+  DriveFields,
+  DriveLibraryControls,
+  StorageBackendField,
+  type DriveBinding,
+} from './remote-storage';
 import './music-libraries.css';
 
 interface BookLibrarySource {
@@ -14,6 +22,8 @@ interface BookLibrary {
   id: string;
   name: string;
   storage_mode: 'copy' | 'hardlink';
+  storage_backend?: 'local' | 'gdrive';
+  remote?: DriveBinding;
   default_access: 'restricted' | 'all';
   auto_pair: boolean;
   version: number;
@@ -61,6 +71,8 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   const [folders, setFolders] = useState('');
   const [paused, setPaused] = useState<string[]>([]);
   const [managedRoot, setManagedRoot] = useState('');
+  const [backend, setBackend] = useState<'local' | 'gdrive'>('local');
+  const [drive, setDrive] = useState(defaultDriveDraft);
   const [storageMode, setStorageMode] = useState<'copy' | 'hardlink'>('copy');
   const [migrateMode, setMigrateMode] = useState<'copy' | 'hardlink'>('hardlink');
   const [migrateRoot, setMigrateRoot] = useState('');
@@ -79,6 +91,8 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
 
   const populateForm = useCallback((library: BookLibrary | null) => {
     setSelectedId(library?.id ?? null);
+    setBackend(library?.storage_backend || 'local');
+    setDrive(defaultDriveDraft);
     setName(library?.name || '');
     setDefaultAccess(library?.default_access || 'restricted');
     setAutoPair(library?.auto_pair ?? true);
@@ -144,13 +158,15 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
         setGrantedIds(new Set(grants.user_ids));
       })
       .catch(() => undefined);
-    loadMigrations();
-    const timer = window.setInterval(loadMigrations, 2500);
+    setJobs([]);
+    if (selected?.storage_backend !== 'gdrive') loadMigrations();
+    const timer =
+      selected?.storage_backend === 'gdrive' ? undefined : window.setInterval(loadMigrations, 2500);
     return () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [canOwner, selectedId]);
+  }, [canOwner, selectedId, selected?.storage_backend]);
 
   const parsedSources = folders
     .split('\n')
@@ -164,18 +180,21 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
     setError('');
     setNotice('');
     try {
-      const saved = await api<BookLibrary>(`/book-libraries${selected ? `/${selected.id}` : ''}`, {
-        method: selected ? 'PUT' : 'POST',
-        body: JSON.stringify({
-          name,
-          default_access: defaultAccess,
-          auto_pair: autoPair,
-          source_roots: parsedSources,
-          paused_source_roots: paused.filter((root) => parsedSources.includes(root)),
-          ...(!selected && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
-          ...(selected ? { version: selected.version } : { storage_mode: storageMode }),
-        }),
-      });
+      const saved =
+        !selected && backend === 'gdrive'
+          ? await createDriveLibrary(drive, name, 'books', defaultAccess === 'all', autoPair)
+          : await api<BookLibrary>(`/book-libraries${selected ? `/${selected.id}` : ''}`, {
+              method: selected ? 'PUT' : 'POST',
+              body: JSON.stringify({
+                name,
+                default_access: defaultAccess,
+                auto_pair: autoPair,
+                source_roots: parsedSources,
+                paused_source_roots: paused.filter((root) => parsedSources.includes(root)),
+                ...(!selected && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
+                ...(selected ? { version: selected.version } : { storage_mode: storageMode }),
+              }),
+            });
       await loadLibraries(saved.id);
       setNotice(t('bookshelf.savedNotice'));
     } catch (cause) {
@@ -314,13 +333,17 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
           >
             <strong>{item.name}</strong>
             <span>
-              {t('bookshelf.librarySummary', {
-                count: item.sources?.length ?? 0,
-                mode: t(item.storage_mode === 'hardlink' ? 'bookshelf.hardlink' : 'bookshelf.copy'),
-                access: t(
-                  item.default_access === 'all' ? 'bookshelf.shared' : 'bookshelf.restricted',
-                ),
-              })}
+              {item.storage_backend === 'gdrive'
+                ? 'Google Drive'
+                : t('bookshelf.librarySummary', {
+                    count: item.sources?.length ?? 0,
+                    mode: t(
+                      item.storage_mode === 'hardlink' ? 'bookshelf.hardlink' : 'bookshelf.copy',
+                    ),
+                    access: t(
+                      item.default_access === 'all' ? 'bookshelf.shared' : 'bookshelf.restricted',
+                    ),
+                  })}
             </span>
           </button>
         ))}
@@ -371,65 +394,75 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
             />
             <span>{t('bookshelf.autoPairCheckbox')}</span>
           </label>
-          <div className="library-folder-heading">
-            <label htmlFor={`${id}-sources`}>{t('bookshelf.sources')}</label>
-            <button type="button" disabled={busy} onClick={() => setPicker('source')}>
-              {t('musicLibraries.browseSourceFolders')}
-            </button>
-          </div>
-          <textarea
-            id={`${id}-sources`}
-            value={folders}
-            onChange={(event) => setFolders(event.target.value)}
-            rows={3}
-            disabled={busy}
-          />
-          {parsedSources.length > 0 && (
-            <fieldset disabled={busy}>
-              <legend>{t('musicLibraries.watchFoldersLegend')}</legend>
-              {parsedSources.map((root, index) => (
-                <label className="music-library-grant-option" key={`${root}:${index}`}>
-                  <input
-                    type="checkbox"
-                    checked={!paused.includes(root)}
-                    onChange={(event) =>
-                      setPaused(
-                        event.target.checked
-                          ? paused.filter((item) => item !== root)
-                          : [...paused, root],
-                      )
-                    }
-                  />
-                  <span className="storage-path">{root}</span>
-                </label>
-              ))}
-              <p className="muted">{t('bookshelf.watchFoldersHint')}</p>
-            </fieldset>
-          )}
           {!selected && (
+            <StorageBackendField value={backend} onChange={setBackend} disabled={busy} />
+          )}
+          {!selected && backend === 'gdrive' && (
+            <DriveFields draft={drive} onChange={setDrive} disabled={busy} />
+          )}
+          {backend === 'local' && (
             <>
-              <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
-              <select
-                id={`${id}-mode`}
-                value={storageMode}
-                disabled={busy}
-                onChange={(event) => setStorageMode(event.target.value as 'copy' | 'hardlink')}
-              >
-                <option value="copy">{t('bookshelf.copy')}</option>
-                <option value="hardlink">{t('bookshelf.hardlink')}</option>
-              </select>
-              <label htmlFor={`${id}-managed`}>{t('bookshelf.managedRoot')}</label>
-              <input
-                id={`${id}-managed`}
-                value={managedRoot}
-                onChange={(event) => setManagedRoot(event.target.value)}
-                placeholder={t('musicLibraries.managedDirPlaceholder')}
+              <div className="library-folder-heading">
+                <label htmlFor={`${id}-sources`}>{t('bookshelf.sources')}</label>
+                <button type="button" disabled={busy} onClick={() => setPicker('source')}>
+                  {t('musicLibraries.browseSourceFolders')}
+                </button>
+              </div>
+              <textarea
+                id={`${id}-sources`}
+                value={folders}
+                onChange={(event) => setFolders(event.target.value)}
+                rows={3}
                 disabled={busy}
               />
-              <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
-                {t('musicLibraries.browseManagedDir')}
-              </button>
-              <p className="muted">{t('bookshelf.managedDirHint')}</p>
+              {parsedSources.length > 0 && (
+                <fieldset disabled={busy}>
+                  <legend>{t('musicLibraries.watchFoldersLegend')}</legend>
+                  {parsedSources.map((root, index) => (
+                    <label className="music-library-grant-option" key={`${root}:${index}`}>
+                      <input
+                        type="checkbox"
+                        checked={!paused.includes(root)}
+                        onChange={(event) =>
+                          setPaused(
+                            event.target.checked
+                              ? paused.filter((item) => item !== root)
+                              : [...paused, root],
+                          )
+                        }
+                      />
+                      <span className="storage-path">{root}</span>
+                    </label>
+                  ))}
+                  <p className="muted">{t('bookshelf.watchFoldersHint')}</p>
+                </fieldset>
+              )}
+              {!selected && (
+                <>
+                  <label htmlFor={`${id}-mode`}>{t('bookshelf.storage')}</label>
+                  <select
+                    id={`${id}-mode`}
+                    value={storageMode}
+                    disabled={busy}
+                    onChange={(event) => setStorageMode(event.target.value as 'copy' | 'hardlink')}
+                  >
+                    <option value="copy">{t('bookshelf.copy')}</option>
+                    <option value="hardlink">{t('bookshelf.hardlink')}</option>
+                  </select>
+                  <label htmlFor={`${id}-managed`}>{t('bookshelf.managedRoot')}</label>
+                  <input
+                    id={`${id}-managed`}
+                    value={managedRoot}
+                    onChange={(event) => setManagedRoot(event.target.value)}
+                    placeholder={t('musicLibraries.managedDirPlaceholder')}
+                    disabled={busy}
+                  />
+                  <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
+                    {t('musicLibraries.browseManagedDir')}
+                  </button>
+                  <p className="muted">{t('bookshelf.managedDirHint')}</p>
+                </>
+              )}
             </>
           )}
           <div className="music-library-actions">
@@ -446,24 +479,40 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
       )}
 
       {selected && (
-        <div className="library-storage">
-          <h3>{t('bookshelf.maintenanceTitle')}</h3>
-          <div className="music-library-actions">
-            <button type="button" disabled={busy || !!activeJob} onClick={() => void runScan()}>
-              {t('bookshelf.scan')}
-            </button>
-            <button
-              type="button"
-              disabled={busy || !!activeJob}
-              onClick={() => void exportSidecars()}
-            >
-              {t('bookshelf.export')}
-            </button>
-            {exported !== null && (
-              <span role="status">{t('bookshelf.exported', { count: exported })}</span>
-            )}
-          </div>
-
+        <div className={selected.remote ? undefined : 'library-storage'}>
+          {selected.remote && canOwner && (
+            <DriveLibraryControls
+              key={selected.id}
+              binding={selected.remote}
+              refresh={async () => {
+                const result = await api<{ items: BookLibrary[] }>('/book-libraries');
+                setLibraries(result.items);
+              }}
+            />
+          )}
+          {!canOwner && selected.storage_backend === 'gdrive' && (
+            <p className="muted">{t('drive.ownerMaintenance')}</p>
+          )}
+          {selected.storage_backend !== 'gdrive' && (
+            <>
+              <h3>{t('bookshelf.maintenanceTitle')}</h3>
+              <div className="music-library-actions">
+                <button type="button" disabled={busy || !!activeJob} onClick={() => void runScan()}>
+                  {t('bookshelf.scan')}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !!activeJob}
+                  onClick={() => void exportSidecars()}
+                >
+                  {t('bookshelf.export')}
+                </button>
+                {exported !== null && (
+                  <span role="status">{t('bookshelf.exported', { count: exported })}</span>
+                )}
+              </div>
+            </>
+          )}
           {canOwner && (
             <>
               <h3>{t('bookshelf.memberAccess')}</h3>
@@ -496,69 +545,75 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
                 <p className="muted">{t('bookshelf.noMembers')}</p>
               )}
 
-              <h3>{t('bookshelf.migrate')}</h3>
-              {selected.managed_root && <p className="storage-path">{selected.managed_root}</p>}
-              <form onSubmit={(event) => void startMigration(event)}>
-                <label htmlFor={`${id}-migrate-mode`}>{t('bookshelf.storage')}</label>
-                <select
-                  id={`${id}-migrate-mode`}
-                  value={migrateMode}
-                  disabled={busy || !!activeJob}
-                  onChange={(event) => setMigrateMode(event.target.value as 'copy' | 'hardlink')}
-                >
-                  <option value="copy">{t('bookshelf.copy')}</option>
-                  <option value="hardlink">{t('bookshelf.hardlink')}</option>
-                </select>
-                <label htmlFor={`${id}-migrate-root`}>{t('bookshelf.managedRoot')}</label>
-                <input
-                  id={`${id}-migrate-root`}
-                  value={migrateRoot}
-                  onChange={(event) => setMigrateRoot(event.target.value)}
-                  placeholder={t('libraryStorage.newManagedDirPlaceholder')}
-                  disabled={busy || !!activeJob}
-                />
-                <button
-                  type="button"
-                  disabled={busy || !!activeJob}
-                  onClick={() => setPicker('migrate')}
-                >
-                  {t('libraryStorage.browseMigrationTarget')}
-                </button>
-                {migrationError && (
-                  <p role="alert" className="error">
-                    {migrationError}
-                  </p>
-                )}
-                <button type="submit" disabled={busy || !!activeJob}>
-                  {t('bookshelf.migrate')}
-                </button>
-              </form>
-
-              {jobs.map((job) => (
-                <div key={job.id} className="library-migration-status" role="status">
-                  <strong>{t(`bookshelf.job.${job.status}`)}</strong>
-                  <p className="storage-path">{job.target_root}</p>
-                  {(job.status === 'queued' || job.status === 'running') && (
-                    <progress max={Math.max(job.total_bytes, 1)} value={job.copied_bytes} />
-                  )}
-                  <p>
-                    {t('bookshelf.relinked', { count: job.relinked_files })} ·{' '}
-                    {t('bookshelf.estimate', { bytes: job.reclaimed_bytes.toLocaleString() })} ·{' '}
-                    {t('bookshelf.retained', { count: job.kept_standalone_files })} ·{' '}
-                    {t('bookshelf.exported', { count: job.sidecars_written })}
-                  </p>
-                  {job.error && <p>{t(`errors.${job.error}`, { defaultValue: job.error })}</p>}
-                  {job.status === 'failed' && (
+              {selected.storage_backend !== 'gdrive' && (
+                <>
+                  <h3>{t('bookshelf.migrate')}</h3>
+                  {selected.managed_root && <p className="storage-path">{selected.managed_root}</p>}
+                  <form onSubmit={(event) => void startMigration(event)}>
+                    <label htmlFor={`${id}-migrate-mode`}>{t('bookshelf.storage')}</label>
+                    <select
+                      id={`${id}-migrate-mode`}
+                      value={migrateMode}
+                      disabled={busy || !!activeJob}
+                      onChange={(event) =>
+                        setMigrateMode(event.target.value as 'copy' | 'hardlink')
+                      }
+                    >
+                      <option value="copy">{t('bookshelf.copy')}</option>
+                      <option value="hardlink">{t('bookshelf.hardlink')}</option>
+                    </select>
+                    <label htmlFor={`${id}-migrate-root`}>{t('bookshelf.managedRoot')}</label>
+                    <input
+                      id={`${id}-migrate-root`}
+                      value={migrateRoot}
+                      onChange={(event) => setMigrateRoot(event.target.value)}
+                      placeholder={t('libraryStorage.newManagedDirPlaceholder')}
+                      disabled={busy || !!activeJob}
+                    />
                     <button
                       type="button"
-                      disabled={busy}
-                      onClick={() => void retryMigration(job.id)}
+                      disabled={busy || !!activeJob}
+                      onClick={() => setPicker('migrate')}
                     >
-                      {t('bookshelf.retry')}
+                      {t('libraryStorage.browseMigrationTarget')}
                     </button>
-                  )}
-                </div>
-              ))}
+                    {migrationError && (
+                      <p role="alert" className="error">
+                        {migrationError}
+                      </p>
+                    )}
+                    <button type="submit" disabled={busy || !!activeJob}>
+                      {t('bookshelf.migrate')}
+                    </button>
+                  </form>
+
+                  {jobs.map((job) => (
+                    <div key={job.id} className="library-migration-status" role="status">
+                      <strong>{t(`bookshelf.job.${job.status}`)}</strong>
+                      <p className="storage-path">{job.target_root}</p>
+                      {(job.status === 'queued' || job.status === 'running') && (
+                        <progress max={Math.max(job.total_bytes, 1)} value={job.copied_bytes} />
+                      )}
+                      <p>
+                        {t('bookshelf.relinked', { count: job.relinked_files })} ·{' '}
+                        {t('bookshelf.estimate', { bytes: job.reclaimed_bytes.toLocaleString() })} ·{' '}
+                        {t('bookshelf.retained', { count: job.kept_standalone_files })} ·{' '}
+                        {t('bookshelf.exported', { count: job.sidecars_written })}
+                      </p>
+                      {job.error && <p>{t(`errors.${job.error}`, { defaultValue: job.error })}</p>}
+                      {job.status === 'failed' && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void retryMigration(job.id)}
+                        >
+                          {t('bookshelf.retry')}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
             </>
           )}
         </div>

@@ -1,3 +1,5 @@
+import { DriveAccounts, type DriveBinding } from './remote-storage';
+import { MusicUploader } from './music-uploader';
 import { SettingsLayout, type SettingsCategory } from './settings-layout';
 import { PodcastResourceManager } from './podcast-resources';
 import { PodcastDownloadManager } from './podcast-downloads';
@@ -60,6 +62,8 @@ interface Overview {
   active_job: string | null;
   version: string;
   schema_version: number;
+  storage_backend?: 'local' | 'gdrive';
+  remote?: DriveBinding;
   preferences: { name: string; version: number };
   counts: { tracks: number; size_bytes: number; unavailable: number };
   albums: number;
@@ -532,7 +536,21 @@ export function Management({
           overview && (
             <>
               {tab === 'diagnostics' && <SystemDiagnostics />}
-              {tab === 'intake' && (
+              {tab === 'intake' &&
+                overview.storage_backend === 'gdrive' &&
+                (overview.remote?.scope_mode === 'drive_file' &&
+                overview.remote.account_status === 'connected' ? (
+                  <MusicUploader canImport={canOwner} cloud onUploaded={onChanged} />
+                ) : (
+                  <p className="muted">
+                    {t(
+                      overview.remote?.scope_mode === 'drive_readonly'
+                        ? 'drive.readonlyLibrary'
+                        : 'drive.authRequired',
+                    )}
+                  </p>
+                ))}
+              {tab === 'intake' && overview.storage_backend !== 'gdrive' && (
                 <>
                   <LibrarySources
                     canImport={canImport}
@@ -579,45 +597,64 @@ export function Management({
                         </button>
                       </>
                     )}
-                    <div className="library-locations">
-                      {(
-                        [
-                          [t('management.importSource'), overview.source],
-                          [t('management.managedLibrary'), overview.library],
-                        ] as const
-                      ).map(([label, item]) => (
-                        <div key={label}>
-                          <strong>
-                            {label}
-                            <span className={`availability ${item.available ? '' : 'unavailable'}`}>
-                              {item.available
-                                ? t('management.available')
-                                : t('management.unavailable')}
-                            </span>
-                          </strong>
-                          <code>{item.path}</code>
-                          <small>
-                            {t('management.freeSpace')} {t(bytes(item.free_bytes))}
-                          </small>
-                        </div>
-                      ))}
-                    </div>
-                    {canImport && (
+                    {overview.storage_backend === 'gdrive' ? (
+                      <p className="muted">
+                        Google Drive
+                        {overview.remote ? ` · ${overview.remote.root_folder_name}` : ''}
+                      </p>
+                    ) : (
+                      <div className="library-locations">
+                        {(
+                          [
+                            [t('management.importSource'), overview.source],
+                            [t('management.managedLibrary'), overview.library],
+                          ] as const
+                        ).map(([label, item]) => (
+                          <div key={label}>
+                            <strong>
+                              {label}
+                              <span
+                                className={`availability ${item.available ? '' : 'unavailable'}`}
+                              >
+                                {item.available
+                                  ? t('management.available')
+                                  : t('management.unavailable')}
+                              </span>
+                            </strong>
+                            <code>{item.path}</code>
+                            <small>
+                              {t('management.freeSpace')} {t(bytes(item.free_bytes))}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(overview.storage_backend === 'gdrive' ? canOwner : canImport) && (
                       <div className="management-task-actions">
+                        {overview.storage_backend !== 'gdrive' && (
+                          <div>
+                            <h3>{t('management.importNewMusic')}</h3>
+                            <p className="muted">{t('management.importDescription')}</p>
+                            <button
+                              className="primary"
+                              disabled={busy || active || !overview.source.available}
+                              onClick={() => void start('import')}
+                            >
+                              {t('management.importMusic')}
+                            </button>
+                          </div>
+                        )}
                         <div>
-                          <h3>{t('management.importNewMusic')}</h3>
-                          <p className="muted">{t('management.importDescription')}</p>
-                          <button
-                            className="primary"
-                            disabled={busy || active || !overview.source.available}
-                            onClick={() => void start('import')}
-                          >
-                            {t('management.importMusic')}
-                          </button>
-                        </div>
-                        <div>
-                          <h3>{t('management.scanLibraryTitle')}</h3>
-                          <p className="muted">{t('management.scanDescription')}</p>
+                          <h3>
+                            {t(
+                              overview.storage_backend === 'gdrive'
+                                ? 'drive.sync'
+                                : 'management.scanLibraryTitle',
+                            )}
+                          </h3>
+                          {overview.storage_backend !== 'gdrive' && (
+                            <p className="muted">{t('management.scanDescription')}</p>
+                          )}
                           <label className="management-checkbox">
                             <input
                               type="checkbox"
@@ -630,7 +667,11 @@ export function Management({
                             disabled={busy || active || !overview.library.available}
                             onClick={() => void start('scan')}
                           >
-                            {t('management.scanLibrary')}
+                            {t(
+                              overview.storage_backend === 'gdrive'
+                                ? 'drive.sync'
+                                : 'management.scanLibrary',
+                            )}
                           </button>
                         </div>
                       </div>
@@ -791,7 +832,12 @@ export function Management({
                   )}
                 </section>
               )}
-              {tab === 'libraries' && canOwner && <MusicLibraryManager />}
+              {tab === 'libraries' && canOwner && (
+                <>
+                  <DriveAccounts />
+                  <MusicLibraryManager />
+                </>
+              )}
               {tab === 'programmes' && canPodcastAdmin && (
                 <PodcastProgrammesAdmin canCleanResources={canOwner} onView={onViewPodcast} />
               )}

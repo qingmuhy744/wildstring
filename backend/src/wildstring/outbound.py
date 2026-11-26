@@ -9,7 +9,7 @@ import json
 import socket
 import ssl
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -94,24 +94,18 @@ def network_error(error):
     return "network_unavailable"
 
 
-def request_bytes(
+@contextmanager
+def open_response(
     request,
     *,
     proxy_mode="environment",
     proxy_url=None,
     timeout=30,
-    limit=2 * 1024 * 1024,
     redirect=None,
     opener_factory=None,
     service="external",
-    consume=None,
 ):
-    """Return (status, headers, bytes); HTTPError stays available to API parsers.
-
-    Proxy bypass is shared for explicit and environment proxies, matching urllib.
-    A redirect policy must be explicitly supplied for public image hosts; model
-    and Telegram credentials are never forwarded to another endpoint.
-    """
+    """Open an outbound response with shared proxy, redirect and diagnostic policy."""
     parts = urlsplit(request.full_url)
     if parts.scheme not in {"http", "https"} or not parts.hostname:
         raise OutboundError("invalid_endpoint")
@@ -123,10 +117,7 @@ def request_bytes(
         opener = (opener_factory or build_opener)(ProxyHandler(proxies), redirect or NoRedirect())
         with opener.open(request, timeout=timeout) as response:  # nosec B310 -- validated schemes and explicit redirect policies
             status = response.status
-            raw = consume(response, limit) if consume is not None else response.read(limit + 1)
-            if consume is None and len(raw) > limit:
-                raise OutboundError("response_too_large", status)
-            return status, getattr(response, "headers", {}), raw
+            yield response
     except HTTPError as error:
         status = error.code
         code = "proxy_auth_required" if status == 407 else "http_error"
@@ -151,6 +142,15 @@ def request_bytes(
             elapsed_ms=round((time.monotonic() - started) * 1000),
             code=code,
         )
+
+
+def request_bytes(request, *, limit=2 * 1024 * 1024, consume=None, **options):
+    """Return (status, headers, bytes) with a bounded default response size."""
+    with open_response(request, **options) as response:
+        raw = consume(response, limit) if consume is not None else response.read(limit + 1)
+        if consume is None and len(raw) > limit:
+            raise OutboundError("response_too_large", response.status)
+        return response.status, getattr(response, "headers", {}), raw
 
 
 def json_request(

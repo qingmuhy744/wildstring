@@ -118,7 +118,7 @@ test('单曲重绑和批量迁移共用预览，确认后保留原曲目', async
     ]);
     await dialog.getByRole('button', { name: '关闭', exact: true }).last().click();
 
-    await manageTab(page, '音乐库');
+    await manageTab(page, '存储与曲库');
     const panel = page.getByRole('region', { name: '音乐库配置', exact: true });
     await panel.locator('.music-library-list button').filter({ hasText: name }).click();
     const storage = panel.getByLabel(`${name}的存储设置`, { exact: true });

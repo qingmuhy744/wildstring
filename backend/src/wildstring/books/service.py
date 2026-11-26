@@ -1,5 +1,7 @@
 """Ingest library files without editing the original ebook or audio."""
 
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -17,7 +19,7 @@ from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
-from mutagen.flac import FLAC
+from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
@@ -76,12 +78,13 @@ def probe_mp4_chapters(stream):
         return []
 
 
-def _extract_embedded_audio_cover(stream) -> bytes | None:
-    stream.seek(0)
-    try:
-        audio = mutagen.File(stream)
-    except (OSError, mutagen.MutagenError, ValueError, TypeError, IndexError):
-        return None
+def _extract_embedded_audio_cover(stream, *, audio=None) -> bytes | None:
+    if audio is None:
+        stream.seek(0)
+        try:
+            audio = mutagen.File(stream)
+        except (OSError, mutagen.MutagenError, ValueError, TypeError, IndexError):
+            return None
     if audio is None:
         return None
     candidates: list[bytes] = []
@@ -96,6 +99,12 @@ def _extract_embedded_audio_cover(stream) -> bytes | None:
         ]
     elif isinstance(audio, MP4):
         candidates = [bytes(picture) for picture in (audio.tags or {}).get("covr", [])]
+    elif audio.tags:
+        for value in audio.tags.get("metadata_block_picture", []):
+            if len(value) > 12 * 1024 * 1024:
+                continue
+            with suppress(binascii.Error, mutagen.MutagenError, ValueError):
+                candidates.append(Picture(base64.b64decode(value, validate=True)).data)
     for raw in candidates:
         try:
             return normalized_image(raw)
@@ -186,6 +195,7 @@ class Books:
         *,
         allow_auto_pair: bool = True,
         extract_cover: bool = True,
+        remote=None,
     ):
         suffix = Path(name).suffix.lower()
         value = digest(source)
@@ -202,7 +212,9 @@ class Books:
         key = f"{book_id}-{value[:16]}"
         root = Path(library["managed_root"])
         published: Path | None = None
-        if not (root / relative).exists():
+        if remote is not None:
+            source_path = remote(source)
+        elif not (root / relative).exists():
             publish = link_exclusive if mode == "hardlink" else copy_exclusive
             publish(source, root, relative, value)
             published = root / relative
@@ -239,7 +251,11 @@ class Books:
                     prev_ebook = db.execute(
                         "SELECT source_path FROM book_ebooks WHERE book_id=?", (book_id,)
                     ).fetchone()
-                    if prev_ebook is not None and prev_ebook["source_path"] != source_path:
+                    if (
+                        remote is None
+                        and prev_ebook is not None
+                        and prev_ebook["source_path"] != source_path
+                    ):
                         raise HTTPException(409, "book_ebook_already_attached")
                 db.execute(
                     """INSERT INTO books(id,library_id,managed_dir,title,sort_title,authors_json,
@@ -291,6 +307,8 @@ class Books:
                         stamp,
                     ),
                 )
+                if remote is not None:
+                    remote.register(db, book_id)
                 db.execute("DELETE FROM book_ebook_chapters WHERE book_id=?", (book_id,))
                 db.executemany(
                     """INSERT INTO book_ebook_chapters
@@ -319,15 +337,16 @@ class Books:
         book_id=None,
         allow_auto_pair: bool = True,
         extract_cover: bool = True,
+        remote=None,
     ):
         entries = []
         embedded_cover: bytes | None = None
         for relative in files:
-            with open_source(source_root, relative) as stream:
+            with remote.open(relative) if remote else open_source(source_root, relative) as stream:
                 audio = mutagen.File(stream)
                 if audio is None or getattr(audio.info, "length", 0) <= 0:
                     raise ValueError("book_audio_invalid")
-                info = os.fstat(stream.fileno())
+                size = remote.size(relative) if remote else os.fstat(stream.fileno()).st_size
                 tags = audio.tags or {}
 
                 def text(*keys, tags=tags):
@@ -350,14 +369,18 @@ class Books:
                         (round(chapter.start * 1000), chapter.title) for chapter in audio.chapters
                     ]
                 elif relative.suffix.lower() in {".m4a", ".m4b"}:
-                    chapter_tags = probe_mp4_chapters(stream)
+                    if remote:
+                        with remote.materialize(relative) as materialized:
+                            chapter_tags = probe_mp4_chapters(materialized)
+                    else:
+                        chapter_tags = probe_mp4_chapters(stream)
                 if embedded_cover is None and extract_cover:
-                    embedded_cover = _extract_embedded_audio_cover(stream)
+                    embedded_cover = _extract_embedded_audio_cover(stream, audio=audio)
                 entries.append(
                     {
                         "relative": relative,
-                        "value": digest(stream),
-                        "size": info.st_size,
+                        "value": remote.signature(relative) if remote else digest(stream),
+                        "size": size,
                         "duration": duration,
                         "codec": relative.suffix.lower()[1:],
                         "bitrate": getattr(audio.info, "bitrate", None),
@@ -393,7 +416,10 @@ class Books:
         preserved_by_source: dict[tuple[str, str, int, int], str] = {}
         preserved_by_hash: dict[tuple[str, int, int], str] = {}
         claimed_title_hashes: set[tuple[str, int, int]] = set()
-        current_source_paths = {str(source_root / item["relative"]) for item in entries}
+        current_source_paths = {
+            remote.source(item["relative"]) if remote else str(source_root / item["relative"])
+            for item in entries
+        }
         old_managed_files: set[str] = set()
         with self.database.connect(scoped=False) as db:
             for row in db.execute(
@@ -425,7 +451,7 @@ class Books:
         try:
             for index, item in enumerate(entries):
                 relative = item["relative"]
-                source_str = str(source_root / relative)
+                source_str = remote.source(relative) if remote else str(source_root / relative)
                 file_source_by_index[index] = (source_str, item["value"])
                 managed = (
                     Path(book_id)
@@ -433,7 +459,9 @@ class Books:
                 )
                 file_mode = mode
                 prev = existing_paths.get(item["value"])
-                if prev is not None and (root / prev[0]).exists():
+                if remote:
+                    file_mode = "managed_only"
+                elif prev is not None and (root / prev[0]).exists():
                     managed = Path(prev[0])
                     file_mode = prev[1]
                 elif (root / managed).exists():
@@ -443,7 +471,7 @@ class Books:
                                 Path(book_id)
                                 / f"{index:04}-{item['value'][:8]}-{component(relative.stem, 'audio')}{relative.suffix.lower()}"
                             )
-                if not (root / managed).exists():
+                if remote is None and not (root / managed).exists():
                     with open_source(source_root, relative) as stream:
                         publish = link_exclusive if mode == "hardlink" else copy_exclusive
                         publish(stream, root, managed, item["value"])
@@ -602,6 +630,8 @@ class Books:
                         start_file_ms,end_file_ms,start_book_ms,duration_ms) VALUES (?,?,?,?,?,?,?,?)""",
                     chapters_rows,
                 )
+                if remote is not None:
+                    remote.register(db, book_id, entries)
                 if chapter_remap:
                     for progress_row in db.execute(
                         """SELECT user_id, chapter_index, chapter_position_ms, book_position_ms

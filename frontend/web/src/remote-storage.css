@@ -1,0 +1,38 @@
+.drive-accounts,
+.drive-library {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.drive-accounts {
+  margin-bottom: 24px;
+}
+
+.drive-accounts details p,
+.drive-library p,
+.drive-account-row p {
+  margin-block: 6px;
+}
+
+.drive-account-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.drive-account-row > div {
+  min-width: 0;
+}
+
+.drive-account-row .music-library-actions {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.drive-stats {
+  font-variant-numeric: tabular-nums;
+}
