@@ -28,4 +28,10 @@
 
 ## 个人状态与同步
 
+书目列表和详情返回同一份账号级状态。没有已存档的载体时，对应摘要为 `null`。`progress_status` 为 `unread`、`in_progress` 或 `finished`，`resume_kind` 为最近进行中的 `reading`、`listening` 或 `null`。阅读摘要 `reading_progress` 包含 `spine_index`、`chapter_title`、`overall_ratio`、`completed`、`updated_at`。有声摘要 `listening_progress` 包含 `chapter_index`、`chapter_title`、`chapter_position_ms`、`book_position_ms`、`total_duration_ms`、`overall_ratio`、`playback_rate`、`completed`、`updated_at`。
+
+Web 在另一个载体有较新且明显不同的位置时提供对齐操作。按章节标题或序号匹配，匹配不到的情况下按全书比例估算。用户选择跳转时写入目标载体的新进度。
+
+批注颜色支持 `amber`、`terracotta`、`sage`、`stone` 和六位十六进制色 `#rrggbb`。服务端将十六进制颜色保存为小写，拒绝其他写法。客户端编辑既有批注时保留其颜色。
+
 读取和写入取当前认证账号。阅读与听书进度分别使用 `reading-progress` 与 `listening-progress` 子路径。写入携带 `session_id`、`device_id`、`base_version`、`sequence`、`intent` 及对应位置；阅读已完成后再开新会话重读时可使用 `intent="restart"` 重置完成标记。阅读位置使用章节、块和字符偏移（支持零块空章节），有声书位置使用章节和章内毫秒数，服务端计算书内毫秒数，并记录倍速。新会话匹配基准版本才接管，当前会话按递增序号保存，过期会话写入返回 409 并附当前状态。同步原则见[播客进度契约](podcast-progress.md)。书签与批注支持创建和删除（`DELETE /bookmarks/{id}`、`DELETE /annotations/{id}`），按账号持久化，均不进入[便携侧车](wildstring-sidecar.md)。

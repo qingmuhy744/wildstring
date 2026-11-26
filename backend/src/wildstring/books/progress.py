@@ -7,14 +7,41 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring.books.content import book_record
 from wildstring.library.fs import open_source
 from wildstring.permissions import dependency
 
 Index = Annotated[int, Field(strict=True, ge=0)]
-Color = Literal["amber", "terracotta", "sage", "stone"]
+BOOK_PROGRESS_FIELDS = """
+    MAX(CASE WHEN r.completed=0 THEN r.updated_at ELSE 0 END,
+        CASE WHEN a.completed=0 THEN a.updated_at ELSE 0 END) AS progress_at,
+    CASE WHEN r.completed=0 AND (a.completed IS NOT 0 OR r.updated_at>=a.updated_at)
+         THEN 'reading' WHEN a.completed=0 THEN 'listening' END AS resume_kind,
+    CASE WHEN r.completed=0 OR a.completed=0 THEN 'in_progress'
+         WHEN r.completed=1 OR a.completed=1 THEN 'finished' ELSE 'unread' END AS progress_status,
+    CASE WHEN r.user_id IS NOT NULL THEN json_object(
+        'spine_index', r.spine_index, 'chapter_title', r.chapter_title,
+        'overall_ratio', r.overall_ratio, 'completed', json(iif(r.completed, 'true', 'false')),
+        'updated_at', r.updated_at
+    ) END AS reading_progress,
+    CASE WHEN a.user_id IS NOT NULL THEN json_object(
+        'chapter_index', a.chapter_index, 'chapter_title', ac.title,
+        'chapter_position_ms', a.chapter_position_ms, 'book_position_ms', a.book_position_ms,
+        'total_duration_ms', ab.total_duration_ms, 'overall_ratio',
+        CASE WHEN ab.total_duration_ms>0 THEN
+            MIN(1.0, 1.0*a.book_position_ms/ab.total_duration_ms) ELSE 0.0 END,
+        'playback_rate', a.playback_rate, 'completed', json(iif(a.completed, 'true', 'false')),
+        'updated_at', a.updated_at
+    ) END AS listening_progress
+"""
+BOOK_PROGRESS_JOINS = """
+    LEFT JOIN book_reading_progress r ON r.book_id=b.id AND r.user_id=? AND b.has_ebook=1
+    LEFT JOIN book_listening_progress a ON a.book_id=b.id AND a.user_id=? AND b.has_audiobook=1
+    LEFT JOIN book_audiobooks ab ON ab.book_id=a.book_id
+    LEFT JOIN book_audiobook_chapters ac ON ac.book_id=a.book_id AND ac.chapter_index=a.chapter_index
+"""
 
 
 class Checkpoint(BaseModel):
@@ -61,7 +88,12 @@ class Annotation(BaseModel):
     end_char_offset: Index
     selected_text: str = Field(min_length=1, max_length=8192)
     note: str | None = Field(default=None, max_length=4096)
-    color: Color
+    color: Annotated[str, Field(pattern=r"^(amber|terracotta|sage|stone|#[0-9a-fA-F]{6})$")]
+
+    @field_validator("color")
+    @classmethod
+    def normalize_color(cls, color: str) -> str:
+        return color.lower()
 
 
 def router(database, auth, settings=None):

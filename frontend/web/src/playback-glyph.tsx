@@ -8,7 +8,7 @@ export function PlaybackGlyph({ playing, buffering }: { playing: boolean; buffer
       aria-hidden="true"
     >
       <svg className="glyph-play" viewBox="0 0 24 24">
-        <path d="M8 5l11 7-11 7z" />
+        <path d="M8.33 5l11 7-11 7z" />
       </svg>
       <svg className="glyph-pause" viewBox="0 0 24 24">
         <path d="M7 5h4v14H7zm6 0h4v14h-4z" />

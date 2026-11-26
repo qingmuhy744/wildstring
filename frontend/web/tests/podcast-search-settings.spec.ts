@@ -105,7 +105,9 @@ test('编辑者看不到设置页，也不能修改播客搜索设置', async ({
   await signInAs(page, `writer-${info.project.name}`, 'editor');
   await section(page, '管理');
   await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '播客', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('main').getByRole('button', { name: '播客', exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByRole('button', { name: '共享音频管理', exact: true })).toHaveCount(0);
   const current = await (await page.request.get('/api/v1/podcasts/search-settings')).json();
   expect(current.can_manage).toBe(false);

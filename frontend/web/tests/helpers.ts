@@ -97,7 +97,7 @@ export async function podcastCatalog(page: Page) {
     changed = true;
   }
   if (changed) await page.reload();
-  await section(page, '电台 · 播客');
+  await section(page, '播客');
 }
 
 export async function leaveSettings(page: Page) {

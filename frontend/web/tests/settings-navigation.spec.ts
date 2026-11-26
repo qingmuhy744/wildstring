@@ -137,7 +137,7 @@ test('播客管理集中入口、策略持久化与快捷入口保持一致', as
     expect(
       await (await page.request.get('/api/v1/podcasts/resources/settings')).json(),
     ).toMatchObject({ enabled: true, retention_days: 3650 });
-    await section(page, '电台 · 播客');
+    await section(page, '播客');
     await manageTab(page, '共享音频管理');
     await expect(resources.getByLabel('零引用后保留天数')).toHaveValue('3650');
     await expect(page.getByRole('dialog')).toHaveCount(0);

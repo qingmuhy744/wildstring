@@ -1925,6 +1925,8 @@
     <string name="books_title">书架</string>
     <string name="books_back">返回书架</string>
     <string name="books_read">阅读</string>
+    <string name="books_continue_reading_action">继续阅读</string>
+    <string name="books_continue_listening_action">继续收听</string>
     <string name="books_listen">收听</string>
     <string name="books_find">查找书籍</string>
     <string name="books_error">无法加载或同步书籍，请检查连接后重试。</string>

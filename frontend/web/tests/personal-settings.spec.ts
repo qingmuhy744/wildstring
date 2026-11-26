@@ -77,7 +77,7 @@ test('两个账号分别设置同一节目的自动下载，普通用户只有�
       data: { feed_url: feed.podcast.feed_url },
     });
     expect(added.status()).toBe(200);
-    await section(other, '电台 · 播客');
+    await section(other, '播客');
     await expect(other.getByRole('button', { name: '本服节目', exact: true })).toHaveCount(0);
     await other.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
     await expect(other.getByRole('button', { name: '服务器下载设置' })).toHaveCount(0);

@@ -16,6 +16,7 @@ async function chooseStyle(page: Page, value: string) {
 }
 
 test('三种样式共用音频，暂停保留进度，开关歌词不重开串流', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
   let streams = 0;
   page.on('request', (request) => {
     if (request.method() === 'GET' && new URL(request.url()).pathname.endsWith('/stream'))
@@ -33,11 +34,27 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   const paused = await audio(page);
   const reads = streams;
+  const captureTransport = async (style: string) => {
+    await expect(dialog.locator('.play-button .playback-glyph')).toHaveCSS('width', '25px');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      if (style === 'cover') {
+        await expect(dialog.locator('.play-button')).toHaveCSS('color', 'rgb(38, 32, 25)');
+      }
+      await page.screenshot({
+        path: info.outputPath(`fullscreen-${style}-${theme}.png`),
+        animations: 'disabled',
+      });
+    }
+  };
+  await captureTransport('vinyl');
   for (const value of ['vinyl', 'cassette', 'cover', 'vinyl']) {
     await chooseStyle(page, value);
     await expect(visual).toHaveAttribute('data-style', value);
     await expect(visual).toHaveAttribute('data-moving', 'false');
     expect(await audio(page)).toEqual(paused);
+    if (value !== 'vinyl') await captureTransport(value);
   }
   expect(await element!.evaluate((node) => node === document.querySelector('audio'))).toBe(true);
   await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();

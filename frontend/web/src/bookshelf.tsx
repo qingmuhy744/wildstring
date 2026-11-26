@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api, time } from './api';
 import {
+  alignmentAvailable,
+  BookAlignmentNotice,
   BookReader,
+  matchingChapter,
   type AudioChapter,
   type Book,
   type BookAudioSession,
@@ -77,6 +80,7 @@ export function Bookshelf({
   const [selected, setSelected] = useState<Book | null>(null);
   const [reading, setReading] = useState(false);
   const [initialSpine, setInitialSpine] = useState<number | null>(null);
+  const [dismissedAlignment, setDismissedAlignment] = useState('');
   const [listening, setListening] = useState(false);
   const [audioChapters, setAudioChapters] = useState<AudioChapter[] | null>(null);
   const [ebookChapters, setEbookChapters] = useState<EbookChapter[] | null>(null);
@@ -396,7 +400,19 @@ export function Bookshelf({
     setCandidates(null);
     if (!book) {
       refresh((value) => value + 1);
+      return;
     }
+    const request = new AbortController();
+    readerRequest.current = request;
+    void api<Book>(`/books/${book.id}`, { signal: request.signal })
+      .then((value) => {
+        if (!request.signal.aborted) {
+          setSelected((current) => (current?.id === value.id ? value : current));
+        }
+      })
+      .catch(() => {
+        // The list already includes the book and its progress summaries.
+      });
   }
 
   async function uploadEbookFile(file: File, attach?: Book) {
@@ -476,6 +492,44 @@ export function Bookshelf({
         .filter(Boolean)
         .join(' · ')
     : '';
+  const readingProgress = selected?.reading_progress;
+  const listeningProgress = selected?.listening_progress;
+  const alignmentKey = `${selected?.id}:${readingProgress?.updated_at}`;
+  const showAudioAlignment =
+    selected?.has_ebook &&
+    selected.has_audiobook &&
+    readingProgress &&
+    alignmentKey !== dismissedAlignment &&
+    alignmentAvailable(readingProgress, listeningProgress);
+
+  function alignAudio() {
+    if (!selected || !readingProgress || !audioChapters?.length) return;
+    const match = matchingChapter(
+      audioChapters,
+      readingProgress.chapter_title,
+      readingProgress.spine_index,
+    );
+    const last = audioChapters[audioChapters.length - 1];
+    const position = Math.round(
+      readingProgress.overall_ratio * (last.start_book_ms + last.duration_ms),
+    );
+    const chapter =
+      match ??
+      audioChapters.find(
+        (_, index) => (audioChapters[index + 1]?.start_book_ms ?? Infinity) > position,
+      );
+    if (!chapter) return;
+    const offset = match ? 0 : Math.min(chapter.duration_ms, position - chapter.start_book_ms);
+    audioSession.open(selected, false, chapter.chapter_index, {
+      position: offset,
+      onSaved: () => {
+        void api<Book>(`/books/${selected.id}`)
+          .then((book) => setSelected((current) => (current?.id === book.id ? book : current)))
+          .catch(() => {});
+      },
+    });
+    setDismissedAlignment(alignmentKey);
+  }
 
   const pairableBooks = selected
     ? (pairCandidates ?? books ?? []).filter(
@@ -584,9 +638,15 @@ export function Bookshelf({
                     type="button"
                     className="primary"
                     aria-pressed={reading}
-                    onClick={() => enterReading(selected)}
+                    onClick={() => enterReading(selected, readingProgress?.completed ? 0 : null)}
                   >
-                    {t('bookshelf.read')}
+                    {t(
+                      readingProgress?.completed
+                        ? 'bookshelf.readAgain'
+                        : readingProgress
+                          ? 'bookshelf.continueReading'
+                          : 'bookshelf.read',
+                    )}
                   </button>
                 )}
                 {selected.has_audiobook && (
@@ -594,9 +654,21 @@ export function Bookshelf({
                     type="button"
                     className={!selected.has_ebook ? 'primary' : undefined}
                     aria-pressed={isSelectedPlaying}
-                    onClick={() => audioSession.open(selected, true)}
+                    onClick={() =>
+                      audioSession.open(
+                        selected,
+                        true,
+                        listeningProgress?.completed ? 0 : undefined,
+                      )
+                    }
                   >
-                    {t('bookshelf.listen')}
+                    {t(
+                      listeningProgress?.completed
+                        ? 'bookshelf.listenAgain'
+                        : listeningProgress
+                          ? 'bookshelf.continueListening'
+                          : 'bookshelf.listen',
+                    )}
                   </button>
                 )}
                 {selected.has_ebook && (
@@ -617,6 +689,35 @@ export function Bookshelf({
                   </button>
                 )}
               </nav>
+              {(readingProgress || listeningProgress) && (
+                <ul className="book-carrier-progress">
+                  {readingProgress && (
+                    <li>
+                      {t('bookshelf.readingSummary', {
+                        chapter: readingProgress.chapter_title || t('bookshelf.ebook'),
+                        percent: Math.round(readingProgress.overall_ratio * 100),
+                      })}
+                    </li>
+                  )}
+                  {listeningProgress && (
+                    <li>
+                      {t('bookshelf.listeningSummary', {
+                        chapter: listeningProgress.chapter_title || t('bookshelf.audiobook'),
+                        percent: Math.round(listeningProgress.overall_ratio * 100),
+                      })}
+                    </li>
+                  )}
+                </ul>
+              )}
+              {showAudioAlignment && (
+                <BookAlignmentNotice
+                  source="reading"
+                  progress={readingProgress}
+                  onAlign={alignAudio}
+                  onDismiss={() => setDismissedAlignment(alignmentKey)}
+                  disabled={!audioChapters?.length}
+                />
+              )}
             </div>
           </div>
           {showBookEdit && (canEdit || canUpload) && (

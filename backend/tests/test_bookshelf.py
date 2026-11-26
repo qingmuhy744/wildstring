@@ -1,6 +1,7 @@
 """Book libraries share the server's storage boundary and use separate grants."""
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -120,6 +121,10 @@ def test_restricted_books_require_a_book_grant_and_hide_paths(settings, authenti
             "has_cover": False,
             "has_ebook": False,
             "has_audiobook": False,
+            "progress_status": "unread",
+            "resume_kind": None,
+            "reading_progress": None,
+            "listening_progress": None,
         }
         assert owner.put(grant, headers=HEADERS, json={"granted": False}).status_code == 200
         assert reader.get("/api/v1/books/private-book").status_code == 404
@@ -276,6 +281,44 @@ def test_upload_scanning_portable_metadata_and_personal_checkpoints(
         )
         assert reader_book["resume_kind"] is None
         assert reader_book["progress_status"] == "unread"
+        assert reader_book["reading_progress"] is None
+        assert reader.get(prefix).json() == reader_book
+        details = owner.get(prefix).json()
+        assert details["reading_progress"]["spine_index"] == 0
+        assert details["reading_progress"]["chapter_title"] == "第一章"
+        assert details["reading_progress"]["overall_ratio"] > 0
+        assert details["reading_progress"]["completed"] is False
+        assert details["listening_progress"] is None
+        assert details == owner.get("/api/v1/books").json()["items"][0]
+        annotation = {
+            "spine_index": 0,
+            "start_block_index": 1,
+            "start_char_offset": 0,
+            "end_block_index": 1,
+            "end_char_offset": 2,
+            "selected_text": "听见",
+            "color": "sage",
+        }
+        created = owner.post(prefix + "/annotations", headers=HEADERS, json=annotation)
+        assert created.status_code == 201
+        saved = owner.get(prefix + "/annotations").json()["items"][0]
+        database = Database(settings.data_dir)
+        with database.connect(write=True) as db:
+            db.execute("PRAGMA user_version = 60")
+        database.initialize()
+        assert owner.get(prefix + "/annotations").json()["items"] == [saved]
+        edited = owner.put(
+            prefix + f"/annotations/{saved['id']}",
+            headers=HEADERS,
+            json=annotation | {"color": "#Ab12Cf"},
+        )
+        assert edited.status_code == 200
+        assert edited.json()["color"] == "#ab12cf"
+        for invalid in ("#abc", "#ab122233", "SAGE", "#abcdeg", "#ffffff\n"):
+            response = owner.post(
+                prefix + "/annotations", headers=HEADERS, json=annotation | {"color": invalid}
+            )
+            assert response.status_code == 422
         mark = owner.post(
             prefix + "/bookmarks",
             headers=HEADERS,
@@ -785,6 +828,18 @@ def test_audiobook_incremental_rescan_auto_pair_isolation_and_manual_pair_merge(
         assert paired.status_code == 200
         assert not (Path(lib["managed_root"]) / ext_id).exists()
         assert owner.get(f"/api/v1/books/{audio_id}/reading-progress").json()["char_offset"] == 2
+        dual = owner.get(f"/api/v1/books/{audio_id}").json()
+        assert dual == owner.get("/api/v1/books", params={"library_id": lib_id}).json()["items"][0]
+        assert dual["resume_kind"] == "reading"
+        assert dual["progress_status"] == "in_progress"
+        audio = dual["listening_progress"]
+        assert audio["chapter_title"] == "Edited Part 1"
+        assert audio["chapter_index"] == 0
+        assert audio["chapter_position_ms"] == audio["book_position_ms"] == 500
+        assert math.isclose(audio["overall_ratio"], 500 / audio["total_duration_ms"])
+        assert audio["playback_rate"] == 1
+        assert not audio["completed"]
+        assert audio["updated_at"] < dual["reading_progress"]["updated_at"]
         assert callable(import_music)
 
 

@@ -67,9 +67,7 @@ test('切换音乐库保留获授权的播放，跨库歌单统一显示', async
     'aria-pressed',
     'true',
   );
-  await expect(
-    page.getByRole('heading', { level: 2, name: '电台 · 播客', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: '播客', exact: true })).toBeVisible();
   await expect(page.getByLabel('选择音乐库', { exact: true })).toBeHidden();
   await expect(page.getByRole('search')).toHaveCount(0);
   await expect(page.getByText('YOUR OWN COLLECTION', { exact: true })).toHaveCount(0);
@@ -265,7 +263,7 @@ test('没有音乐库授权的听众可以关注节目，取关保留个人进�
   ).toBe(200);
   await page.reload();
   await expect(page.getByText('暂无可播放的音乐，可联系管理员分配访问权限。')).toBeVisible();
-  await section(page, '电台 · 播客');
+  await section(page, '播客');
   await expect(page.getByText('暂无可播放的音乐，可联系管理员分配访问权限。')).toBeHidden();
   await page.getByRole('button', { name: '我的关注', exact: true }).click();
   await expect(page.getByText('还没有关注的节目', { exact: true })).toBeVisible();
@@ -583,7 +581,7 @@ test('管理员可切换普通用户添加 RSS，普通用户只添加并关注'
     data: { username, password: 'rss-ui-test-password' },
   });
   await page.reload();
-  await section(page, '电台 · 播客');
+  await section(page, '播客');
   await expect(page.getByRole('button', { name: '本服节目', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '+ 添加节目', exact: true }).click();
   const search = page.getByRole('region', { name: '搜索或添加节目', exact: true });

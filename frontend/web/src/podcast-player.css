@@ -1,7 +1,7 @@
 /* The same receiver and printed journal, under two kinds of ambient light. */
 .podcast-transport {
   --transport-button-size: 44px;
-  --transport-play-size: 44px;
+  --transport-play-size: 38px;
   display: grid;
   grid-template-columns:
     var(--transport-button-size) var(--transport-button-size) var(--transport-play-size)
@@ -27,11 +27,14 @@
 .podcast-transport > .play-button {
   width: var(--transport-play-size);
   height: var(--transport-play-size);
-  background: #ece3ce;
-  color: #262019;
+  background: var(--accent);
+  color: var(--on-accent);
 }
-.podcast-transport > .icon-button:hover:not(:disabled),
 .podcast-transport > .play-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--on-accent);
+}
+.podcast-transport > .icon-button:hover:not(:disabled) {
   color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);

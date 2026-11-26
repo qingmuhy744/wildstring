@@ -158,7 +158,7 @@ test('听众可以查看聚合但没有修改入口', async ({ page }, info) => 
     data: { feed_url: current.podcast.feed_url },
   });
   await page.reload();
-  await section(page, '电台 · 播客');
+  await section(page, '播客');
   await open(page, 'radio-test', '午后广播测试');
   await expect(page.getByRole('button', { name: '修改出品方归属', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '共享出品方', exact: true }).click();

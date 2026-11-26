@@ -13,6 +13,7 @@ from wildstring.books.content import VISIBLE
 from wildstring.books.content import router as content_router
 from wildstring.books.metadata import router as metadata_router
 from wildstring.books.pairing import router as pairing_router
+from wildstring.books.progress import BOOK_PROGRESS_FIELDS, BOOK_PROGRESS_JOINS
 from wildstring.books.progress import router as progress_router
 from wildstring.library.catalog import normalize_source_roots
 from wildstring.library.fs import registered_source_paths
@@ -34,6 +35,9 @@ def public_book(row):
     item["has_cover"] = bool(item.pop("cover_path", None))
     item["has_ebook"] = bool(item["has_ebook"])
     item["has_audiobook"] = bool(item["has_audiobook"])
+    item.pop("progress_at", None)
+    for kind in ("reading_progress", "listening_progress"):
+        item[kind] = json.loads(item[kind]) if item[kind] is not None else None
     return item
 
 
@@ -399,16 +403,9 @@ def router(
             )
             params.extend((like_pattern, like_pattern, like_pattern))
         cte = f"""WITH catalog AS (
-            SELECT {BOOK_FIELDS}, b.sort_title,
-                MAX(CASE WHEN r.completed=0 THEN r.updated_at ELSE 0 END,
-                    CASE WHEN a.completed=0 THEN a.updated_at ELSE 0 END) AS progress_at,
-                CASE WHEN r.completed=0 AND (a.completed IS NOT 0 OR r.updated_at>=a.updated_at)
-                     THEN 'reading' WHEN a.completed=0 THEN 'listening' END AS resume_kind,
-                CASE WHEN r.completed=0 OR a.completed=0 THEN 'in_progress'
-                     WHEN r.completed=1 OR a.completed=1 THEN 'finished' ELSE 'unread' END AS progress_status
+            SELECT {BOOK_FIELDS}, b.sort_title, {BOOK_PROGRESS_FIELDS}
             FROM books b JOIN book_libraries l ON l.id=b.library_id
-            LEFT JOIN book_reading_progress r ON r.book_id=b.id AND r.user_id=?
-            LEFT JOIN book_listening_progress a ON a.book_id=b.id AND a.user_id=?
+            {BOOK_PROGRESS_JOINS}
             WHERE {" AND ".join(where_clauses)}
         )"""  # nosec B608
         with database.connect(scoped=False) as db:
@@ -428,7 +425,8 @@ def router(
             rows = db.execute(
                 f"""{cte}
                 SELECT id, library_id, title, subtitle, authors_json, cover_path,
-                       has_ebook, has_audiobook, resume_kind, progress_status
+                       has_ebook, has_audiobook, resume_kind, progress_status,
+                       reading_progress, listening_progress
                 FROM catalog
                 WHERE (? IS NULL OR progress_status=?)
                 ORDER BY progress_at DESC, sort_title, id
@@ -442,9 +440,11 @@ def router(
     def get_book(book_id: str, user: book_reader):
         with database.connect(scoped=False) as db:
             row = db.execute(
-                f"""SELECT {BOOK_FIELDS} FROM books b JOIN book_libraries l ON l.id=b.library_id
+                f"""SELECT {BOOK_FIELDS}, {BOOK_PROGRESS_FIELDS}
+                FROM books b JOIN book_libraries l ON l.id=b.library_id
+                {BOOK_PROGRESS_JOINS}
                 WHERE b.id=? AND {VISIBLE}""",  # nosec B608
-                (book_id, user["profile"], user["id"]),
+                (user["id"], user["id"], book_id, user["profile"], user["id"]),
             ).fetchone()
         if row is None:
             raise HTTPException(404, "book_not_found")
