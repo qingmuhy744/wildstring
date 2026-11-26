@@ -2465,6 +2465,7 @@
     "podcasts": "Podcasts",
     "title": "Bookshelf",
     "back": "Back to bookshelf",
+    "backToBook": "Back to book",
     "staleBookLink": "The linked book is no longer available; showing your bookshelf.",
     "retry": "Retry",
     "contentsLoadFailed": "Unable to load the table of contents.",

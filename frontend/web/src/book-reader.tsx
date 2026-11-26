@@ -201,6 +201,7 @@ function useCheckpoint<T>(
   onLoad: (value: T & Checkpoint) => void,
   initialIntent: 'resume' | 'restart' = 'resume',
   revision = 0,
+  onCommit?: () => void,
 ) {
   const [error, setError] = useState<{
     kind: 'load' | 'save' | 'conflict';
@@ -212,6 +213,8 @@ function useCheckpoint<T>(
   const [settledKey, setSettledKey] = useState('');
   const load = useRef(onLoad);
   load.current = onLoad;
+  const commit = useRef(onCommit);
+  commit.current = onCommit;
   const session = useRef({
     id: key(),
     version: 0,
@@ -276,6 +279,7 @@ function useCheckpoint<T>(
             }),
           });
           current.version = value.version;
+          commit.current?.();
           if (session.current === current) {
             setError((previous) => (previous?.kind === 'save' ? null : previous));
             onSaved?.();
@@ -474,6 +478,7 @@ export function BookReader({
   book,
   initialSpine = null,
   onClose,
+  onProgressSaved,
   listening = false,
   onToggleListen,
   audioSession,
@@ -481,6 +486,7 @@ export function BookReader({
   book: Book;
   initialSpine?: number | null;
   onClose?: () => void;
+  onProgressSaved?: () => void;
   listening?: boolean;
   onToggleListen?: () => void;
   audioSession?: BookAudioSession;
@@ -601,6 +607,8 @@ export function BookReader({
       }
     },
     book.reading_progress?.completed ? 'restart' : 'resume',
+    0,
+    onProgressSaved,
   );
   saveInitialView.current = () => {
     if (loadedSpine === spine && blocks.length && checkpoint.ready && !checkpoint.started()) {
@@ -1120,7 +1128,7 @@ export function BookReader({
           <div className="book-reader-top-start">
             {onClose && (
               <button type="button" className="book-reader-btn" onClick={onClose}>
-                {t('bookshelf.back')}
+                {t('bookshelf.backToBook')}
               </button>
             )}
             <strong className="book-reader-title">{book.title}</strong>
