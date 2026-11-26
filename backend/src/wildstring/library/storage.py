@@ -133,7 +133,10 @@ class LibraryStorage:
         try:
             if not Path(value).is_absolute():
                 raise ValueError
-            target = Path(value).resolve()
+            try:
+                target = Path(os.path.realpath(value, strict=True))
+            except FileNotFoundError:
+                target = Path(os.path.realpath(value))
             if target == current_root:
                 return StorageDestination(target, target)
             runtime = self.settings.data_dir.resolve()
