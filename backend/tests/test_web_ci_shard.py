@@ -61,6 +61,19 @@ def test_ci_workflow_matrix_matches_shard_count() -> None:
     assert indices == sorted(run_web_ci_shard.SHARDS)
 
 
+def test_spec_slices_are_valid_and_unique() -> None:
+    shard_slugs = {slug for entries in run_web_ci_shard.SHARDS.values() for _, slug, _ in entries}
+    seen_spec_slugs: set[str] = set()
+    for shard_index, slices in run_web_ci_shard.SPEC_SLICES.items():
+        assert shard_index in run_web_ci_shard.SHARDS
+        for target, slug, spec, extra_env in slices:
+            assert target in EXPECTED_TARGETS
+            assert slug not in shard_slugs and slug not in seen_spec_slugs
+            seen_spec_slugs.add(slug)
+            assert spec.endswith(".spec.ts")
+            assert isinstance(extra_env, dict) and extra_env
+
+
 def test_invalid_shard_is_rejected() -> None:
     with pytest.raises(SystemExit, match="shard must be between"):
         run_web_ci_shard.run_shard(run_web_ci_shard.SHARD_COUNT)
