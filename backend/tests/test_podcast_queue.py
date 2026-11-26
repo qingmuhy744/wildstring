@@ -1,5 +1,6 @@
 """Podcast inbox, play queue and new-episode delivery (contracts/podcast-queue.md)."""
 
+import json
 import sqlite3
 
 import pytest
@@ -11,7 +12,7 @@ HEADERS = {"X-Wildstring-Client": "web"}
 SHOW = "show-queue"
 
 
-def add_episode(database, episode_id, pub_date="2026-01-01"):
+def add_episode(database, episode_id, pub_date="2026-01-01", *, show=SHOW):
     with database.connect(write=True) as db:
         db.execute(
             """INSERT OR IGNORE INTO podcast_episodes
@@ -19,7 +20,7 @@ def add_episode(database, episode_id, pub_date="2026-01-01"):
                VALUES (?,?,?,?,?,?,?)""",
             (
                 episode_id,
-                SHOW,
+                show,
                 f"guid-{episode_id}",
                 episode_id,
                 f"https://example.test/{episode_id}.mp3",
@@ -264,16 +265,109 @@ def test_default_auto_continue_round_trip(context):
 
 def test_unavailable_episode_rejected(context):
     client, _ = context
+    valid = [{"episode_id": "ep-history-1"}, {"episode_id": "ep-history-2"}]
+    assert (
+        client.put(
+            "/api/v1/podcasts/queue", headers=HEADERS, json={"version": 0, "items": valid}
+        ).status_code
+        == 200
+    )
     current = queue(client)
     response = client.put(
         "/api/v1/podcasts/queue",
         headers=HEADERS,
         json={
             "version": current["version"],
-            "items": [{"episode_id": "does-not-exist", "origin": "manual"}],
+            "items": [valid[0], {"episode_id": "does-not-exist"}, valid[1]],
         },
     )
     assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "episode_unavailable",
+        "episode_id": "does-not-exist",
+        "dropped_episode_ids": ["does-not-exist"],
+    }
+    assert queue(client) == current
+
+
+def test_show_deletion_rewrites_all_queues_and_keeps_the_remaining_order(context):
+    client, database = context
+    with database.connect(write=True) as db:
+        db.execute(
+            "INSERT INTO podcasts(id,title,author,feed_url,created_at) VALUES (?,?,?,?,?)",
+            ("other", "Keep", "", "https://example.test/keep.xml", "2026-01-01"),
+        )
+    for episode in ("keep-1", "keep-2"):
+        add_episode(database, episode, show="other")
+    items = [{"episode_id": episode} for episode in ("keep-1", "ep-history-2", "keep-2")]
+    assert (
+        client.put(
+            "/api/v1/podcasts/queue",
+            headers=HEADERS,
+            json={
+                "version": 0,
+                "items": items,
+            },
+        ).status_code
+        == 200
+    )
+    member = client.post(
+        "/api/v1/manage/users",
+        headers=HEADERS,
+        json={
+            "username": "other-queue",
+            "password": "disposable-queue-password",
+            "profile": "listener",
+        },
+    ).json()["id"]
+    with database.connect(write=True) as db:
+        db.execute(
+            """INSERT INTO podcast_queue_state(user_id,items_json,version,device_id,updated_at)
+               SELECT ?,items_json,7,device_id,updated_at FROM podcast_queue_state
+               WHERE user_id<>?""",
+            (member, member),
+        )
+    deleted = client.delete(f"/api/v1/podcasts/{SHOW}", headers=HEADERS)
+    assert deleted.status_code == 200
+    current = queue(client)
+    assert current["version"] == 2
+    assert [item["episode_id"] for item in current["items"]] == ["keep-1", "keep-2"]
+    with database.connect() as db:
+        other = db.execute(
+            "SELECT version,items_json FROM podcast_queue_state WHERE user_id=?", (member,)
+        ).fetchone()
+    assert other["version"] == 8 and json.loads(other["items_json"]) == current["items"]
+    advanced = client.put(
+        "/api/v1/podcasts/queue",
+        headers=HEADERS,
+        json={
+            "version": current["version"],
+            "items": current["items"][1:],
+        },
+    )
+    assert advanced.status_code == 200
+    assert [item["episode_id"] for item in advanced.json()["items"]] == ["keep-2"]
+
+
+def test_queue_read_repairs_entries_hidden_by_a_role_change_once(context):
+    client, database = context
+    assert (
+        client.put(
+            "/api/v1/podcasts/queue",
+            headers=HEADERS,
+            json={
+                "version": 0,
+                "items": [{"episode_id": "ep-history-1"}],
+            },
+        ).status_code
+        == 200
+    )
+    with database.connect(write=True) as db:
+        db.execute("UPDATE users SET profile='listener' WHERE username='admin'")
+        db.execute("DELETE FROM podcast_user_catalog WHERE podcast_id=?", (SHOW,))
+    repaired = queue(client)
+    assert repaired["version"] == 2 and repaired["items"] == []
+    assert queue(client) == repaired
 
 
 def test_queue_put_stamps_and_preserves_added_at(context):

@@ -238,6 +238,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         return api().subscribePodcast(PodcastSubscribeRequest(feedUrl, itunesId), RequestOwner(owner)).also { requireProfile(owner) }
     }
     suspend fun podcastDirectory(query: String, region: String, forceRefresh: Boolean = false): PodcastDirectoryPage {
+        val owner = session.cacheScope(); requireProfile(owner)
         val trimmedQuery = query.trim()
         if (trimmedQuery.isBlank() && !forceRefresh) {
             cachedPodcastDirectory(region)?.let { return it }
@@ -245,6 +246,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val parameters = if (trimmedQuery.isNotBlank()) mapOf("q" to trimmedQuery) else if (region.isNotEmpty()) mapOf("region" to region) else emptyMap()
         val data = feature(if (trimmedQuery.isBlank()) "podcasts/discover" else "podcasts/search", query = parameters)
         val page = gson.fromJson(data, PodcastDirectoryPage::class.java)
+        requireProfile(owner)
         if (trimmedQuery.isBlank()) {
             discoveryCache[region.trim()] = Pair(System.currentTimeMillis(), page)
         }
@@ -346,22 +348,20 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope(); requireProfile(owner)
         val normalized = podcastQueueNormalize(items)
         val entries = normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, it.addedAt.takeIf { ts -> ts.isNotBlank() }) }
-        suspend fun send(subset: List<PodcastQueueWriteItem>, includeAddedAt: Boolean = true): PodcastQueueSnapshot =
-            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, subset).writeBody(includeAddedAt), RequestOwner(owner)).normalized().also { requireProfile(owner) }
+        suspend fun send(includeAddedAt: Boolean): PodcastQueueSnapshot {
+            requireProfile(owner)
+            return api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, entries).writeBody(includeAddedAt), RequestOwner(owner)).normalized().also { requireProfile(owner) }
+        }
         return try {
-            send(entries, includeAddedAt = true)
+            send(includeAddedAt = true)
         } catch (error: HttpException) {
             if (error.code() == 409) podcastQueueConflict(error)?.let { throw it }
-            if (error.code() == 422) {
-                if (entries.any { !it.addedAt.isNullOrBlank() }) {
-                    runCatching { return send(entries, includeAddedAt = false) }.onFailure { retryErr ->
-                        if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
-                    }
-                }
-                if (entries.size > 1) {
-                    runCatching { return send(listOf(entries.first()), includeAddedAt = false) }.onFailure { retryErr ->
-                        if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
-                    }
+            if (error.code() == 422 && entries.any { !it.addedAt.isNullOrBlank() }) {
+                try {
+                    return send(includeAddedAt = false)
+                } catch (retryError: HttpException) {
+                    if (retryError.code() == 409) podcastQueueConflict(retryError)?.let { throw it }
+                    if (retryError.code() != 422) throw retryError
                 }
             }
             throw error
@@ -378,6 +378,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     suspend fun favoritePodcastEpisode(episodeId: String, loved: Boolean): PodcastFavoriteResponse {
         val owner = session.cacheScope(); requireProfile(owner)
         val response = api().favoritePodcastEpisode(episodeId, PodcastFavoriteRequest(favorite = loved, loved = loved), RequestOwner(owner))
+        requireProfile(owner)
         if (loved) podcastFavoriteIds.value = podcastFavoriteIds.value + episodeId else podcastFavoriteIds.value = podcastFavoriteIds.value - episodeId
         cachedPodcastEpisode(episodeId)?.let { ep ->
             val updated = ep.copy(loved = loved, favorite = loved)
@@ -398,10 +399,12 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope(); requireProfile(owner)
         return try {
             val ids = api().podcastFavoriteIds(RequestOwner(owner)).ids.toSet()
-            podcastFavoriteIds.value = ids
             requireProfile(owner)
+            podcastFavoriteIds.value = ids
             ids
-        } catch (_: Exception) {
+        } catch (error: CancellationException) { throw error }
+        catch (_: Exception) {
+            requireProfile(owner)
             podcastFavoriteIds.value
         }
     }
@@ -458,6 +461,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         settings.bindAccount(session.activeServerId, session.account?.id)
         if (changed) {
             knownTracks.clear()
+            clearPodcastAccountCache()
             val owner = session.cacheScope()
             withContext(Dispatchers.IO) {
                 if (owner == session.cacheScope()) {
@@ -675,7 +679,9 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
             base.resolve("api/v1/auth/logout")!! to "${cookie.name}=${cookie.value}"
         }
         client.dispatcher.cancelAll()
-        cache.clear(); session.clearRouteSessions(); session.invalidate(); knownTracks.clear(); database.queue().clear()
+        cache.clear(); session.clearRouteSessions(); session.invalidate(); knownTracks.clear()
+        clearPodcastAccountCache()
+        database.queue().clear()
         settings.bindAccount(session.activeServerId, session.account?.id)
         withContext(Dispatchers.IO) {
             database.books().clearEverything()
@@ -690,6 +696,11 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
                 } catch (_: IOException) { /* The local session was already removed; unreachable routes expire server-side. */ }
             }
         }
+    }
+
+    private fun clearPodcastAccountCache() {
+        podcastFavoriteIds.value = emptySet()
+        clearDiscoveryCache()
     }
 
 }

@@ -93,9 +93,9 @@
 
 没有 `/podcasts/inbox`。调用它按未注册路由处理。
 
-`GET /podcasts/queue` 返回 `{version, device_id, items:[{episode_id, origin, added_at}], updated_at, notice}`。`notice` 为空字符串，或 `queue_full`。`added_at` 为服务端入队时间，历史条目缺失时退回该队列的 `updated_at`。
+`GET /podcasts/queue` 返回 `{version, device_id, items:[{episode_id, origin, added_at}], updated_at, notice}`。`notice` 为空字符串，或 `queue_full`。`added_at` 为服务端入队时间，历史条目缺失时退回该队列的 `updated_at`。删除节目时一并移除各账号队列中的该节目单集。读取时清理遗留或失权条目。两种清理均保留剩余顺序，并递增实际变化的队列版本。
 
-`PUT /podcasts/queue` 请求 `{version, device_id, items:[{episode_id, origin, added_at?}]}`，整份 CAS 替换。已存在的 `added_at` 保留，新条目由服务端补写，`added_at: null` 与缺省同等。成功响应带 `notice: ""`。版本落后返回 409 `{"detail":{"code":"podcast_queue_conflict","current":{...}}}`。条目不是可访问单集返回 422。冲突后客户端保留本机队列并给出三个动作：用服务器版本、用本机覆盖、仅保留本机且暂不覆盖。不静默覆盖。
+`PUT /podcasts/queue` 请求 `{version, device_id, items:[{episode_id, origin, added_at?}]}`，整份 CAS 替换。已存在的 `added_at` 保留，新条目由服务端补写，`added_at: null` 与缺省同等。成功响应带 `notice: ""`。版本落后返回 409 `{"detail":{"code":"podcast_queue_conflict","current":{...}}}`。含失效或不可访问单集时整份请求返回 422，`detail` 提供 `code: "episode_unavailable"`、首个 `episode_id` 和完整 `dropped_episode_ids`，原队列和版本保持不变。冲突后客户端保留本机队列并给出三个动作：用服务器版本、用本机覆盖、仅保留本机且暂不覆盖。不静默覆盖。
 
 `GET /podcasts/queue/preferences` 与 `PUT /podcasts/queue/preferences` 读写 `{default_action, auto_limit, auto_continue, shows:{[podcast_id]:{action, auto_limit, order, skip_completed, auto_continue}}}`，标量后写覆盖，`shows` 按提交映射同步。客户端读取续播偏好的优先级统一为：**节目单独设置 → 账号默认值 → 网络不可用时使用对应账号的本地缓存**。
 

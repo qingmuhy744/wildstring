@@ -361,6 +361,7 @@ class Management:
                     MetadataUpdate(version=version_number, overrides=body.overrides),
                     user_id=user_id,
                     source="folder-batch",
+                    merge=True,
                 )
         refresh_music_tracks(self.repository, requested)
         return {
@@ -814,6 +815,7 @@ class Management:
                     MetadataUpdate(version=version_number, overrides=body.overrides),
                     user_id=user_id,
                     source="album-batch",
+                    merge=True,
                 )
             first_track_id = next(iter(requested.keys()))
             new_album_row = connection.execute(

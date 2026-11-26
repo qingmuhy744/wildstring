@@ -178,6 +178,20 @@ def test_folder_metadata_batch_updates_all_members_and_keeps_versions(
         assert folders["total"] == 1 and folders["items"][0]["warning"]
         folder = folders["items"][0]["folder"]
         detail = client.get("/api/v1/manage/metadata/folders", params={"folder": folder}).json()
+        edited = detail["tracks"][0]
+        metadata = f"/api/v1/manage/tracks/{edited['track_id']}/metadata"
+        assert (
+            client.put(
+                metadata,
+                headers=HEADERS,
+                json={
+                    "version": edited["metadata_version"],
+                    "overrides": {"title": "单曲手工标题"},
+                },
+            ).status_code
+            == 200
+        )
+        edited["metadata_version"] += 1
         response = client.put(
             "/api/v1/manage/metadata/folders",
             headers=HEADERS,
@@ -193,6 +207,11 @@ def test_folder_metadata_batch_updates_all_members_and_keeps_versions(
         assert response.status_code == 200, response.text
         assert response.json()["updated"] == 2
         assert client.get("/api/v1/albums").json()["items"][0]["title"] == "2 的奉献"
+        assert client.get(metadata).json()["overrides"] == {
+            "title": "单曲手工标题",
+            "album": "2 的奉献",
+            "album_artists": ["GALA"],
+        }
 
 
 def test_album_metadata_batch_updates_shared_fields(settings, authenticated_client):
@@ -204,6 +223,20 @@ def test_album_metadata_batch_updates_shared_fields(settings, authenticated_clie
         detail = client.get("/api/v1/manage/metadata/albums", params={"album_id": album["id"]})
         assert detail.status_code == 200, detail.text
         payload = detail.json()
+        edited = payload["tracks"][0]
+        metadata = f"/api/v1/manage/tracks/{edited['track_id']}/metadata"
+        assert (
+            client.put(
+                metadata,
+                headers=HEADERS,
+                json={
+                    "version": edited["metadata_version"],
+                    "overrides": {"title": "单曲手工标题", "artists": ["单曲手工艺人"]},
+                },
+            ).status_code
+            == 200
+        )
+        edited["metadata_version"] += 1
         response = client.put(
             "/api/v1/manage/metadata/albums",
             headers=HEADERS,
@@ -220,6 +253,12 @@ def test_album_metadata_batch_updates_shared_fields(settings, authenticated_clie
         assert response.json()["updated"] == 2
         assert {item["title"] for item in client.get("/api/v1/albums").json()["items"]} == {
             "统一专辑"
+        }
+        assert client.get(metadata).json()["overrides"] == {
+            "title": "单曲手工标题",
+            "artists": ["单曲手工艺人"],
+            "album": "统一专辑",
+            "album_artists": ["统一艺人"],
         }
 
 
