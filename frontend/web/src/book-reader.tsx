@@ -552,6 +552,7 @@ export function BookReader({
       <input
         className="book-color-custom"
         type="color"
+        data-selected={isCustomColor(selected) ? 'true' : undefined}
         aria-label={t('bookshelf.customColor')}
         title={t('bookshelf.customColor')}
         value={isCustomColor(selected) ? selected : customColor}
