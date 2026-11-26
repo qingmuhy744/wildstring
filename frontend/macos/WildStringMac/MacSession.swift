@@ -499,6 +499,9 @@ final class MacSession {
                 } else {
                     defaults.removeObject(forKey: libraryKey)
                 }
+            } else {
+                client.selectLibrary(savedLibrary)
+                selectedLibraryID = savedLibrary
             }
         }
         playback.musicContinuationScope = { [weak client] in "\(username)|\(client?.selectedLibrary() ?? "")" }

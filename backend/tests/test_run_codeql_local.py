@@ -3,10 +3,16 @@ import re
 import runpy
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 CODEQL = runpy.run_path(str(ROOT / "scripts/run_codeql_local.py"))
 
 
+@pytest.mark.skipif(
+    not (ROOT / ".github/workflows/codeql.yml").is_file(),
+    reason="the container test image omits .github; the host run covers this",
+)
 def test_languages_and_modes_match_ci():
     workflow = (ROOT / ".github/workflows/codeql.yml").read_text()
     matrix = dict(re.findall(r"- language: ([\w-]+)\n\s+build-mode: (\w+)", workflow))
