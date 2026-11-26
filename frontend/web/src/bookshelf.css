@@ -790,7 +790,9 @@
 .book-reader-layout .book-reader button,
 .book-reader-layout .book-reader select,
 .book-reader-layout .book-reader textarea,
-.book-reader-layout .book-reader input:not([type='range']):not([type='checkbox']) {
+.book-reader-layout
+  .book-reader
+  input:not([type='range']):not([type='checkbox']):not([type='color']) {
   border-color: var(--border);
   color: var(--text);
   min-block-size: 2.25rem;
@@ -1071,13 +1073,21 @@
   outline-offset: 2px;
 }
 .book-reader-layout .book-reader input.book-color-custom {
+  box-sizing: border-box;
   inline-size: 1.75rem;
   block-size: 1.75rem;
   min-block-size: 1.75rem;
+  aspect-ratio: 1;
   padding: 2px;
   flex: none;
+  border: 1px solid var(--border);
   border-radius: 50%;
+  background: transparent;
   cursor: pointer;
+}
+.book-reader-layout .book-reader input.book-color-custom[data-selected='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .book-color-custom::-webkit-color-swatch-wrapper {
   padding: 0;
