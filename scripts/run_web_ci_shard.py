@@ -31,7 +31,12 @@ SHARDS: dict[int, tuple[tuple[str, str, str | None], ...]] = {
         ("test-podcast-web", "podcast-1", "1/2"),
         ("test-libraries-web", "libraries", None),
     ),
-    4: (("test-podcast-web", "podcast-2", "2/2"), ("test-web", "gdrive", None)),
+    4: (("test-podcast-web", "podcast-2", "2/2"),),
+}
+# Dedicated single-spec fixture slices appended to specific CI shards.
+# Each entry is (make_target, unique_output_slug, spec_file, extra_env).
+SPEC_SLICES: dict[int, tuple[tuple[str, str, str, dict[str, str]], ...]] = {
+    4: (("test-web", "gdrive", "gdrive-storage.spec.ts", {"WILDSTRING_TEST_GDRIVE": "1"}),),
 }
 SHARD_COUNT = len(SHARDS)
 
@@ -54,10 +59,17 @@ def run_shard(shard_index: int) -> None:
 
     for target, slug, part in SHARDS[shard_index]:
         web_args = build_web_test_args(slug, part)
+        print(f"[web-shard {shard_index}] Running {target} ({web_args})", flush=True)
+        subprocess.run(  # nosec B603 B607 - fixed make command, no shell
+            ["make", target, "SKIP_WEB_BUILD=1", f"WEB_TEST_ARGS={web_args}"],
+            cwd=ROOT,
+            check=True,
+        )
+
+    for target, slug, spec, extra_env in SPEC_SLICES.get(shard_index, ()):
+        web_args = f"{build_web_test_args(slug, None)} {spec}"
         env = os.environ.copy()
-        if slug == "gdrive":
-            web_args += " gdrive-storage.spec.ts"
-            env["WILDSTRING_TEST_GDRIVE"] = "1"
+        env.update(extra_env)
         print(f"[web-shard {shard_index}] Running {target} ({web_args})", flush=True)
         subprocess.run(  # nosec B603 B607 - fixed make command, no shell
             ["make", target, "SKIP_WEB_BUILD=1", f"WEB_TEST_ARGS={web_args}"],
