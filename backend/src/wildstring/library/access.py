@@ -21,6 +21,7 @@ from wildstring.library.scope import (
 MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
 EXEMPT_PREFIXES = (
     "auth",
+    "oauth",
     "server",
     "manage/server",
     "users",

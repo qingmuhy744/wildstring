@@ -192,3 +192,42 @@ export interface ToolCredential {
   revoked_at: string | null;
   token?: string;
 }
+export interface OAuthGrant {
+  id: string;
+  client_id: string;
+  client_name: string;
+  registration_source: 'dynamic' | 'manual';
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  access_expires_at: string | null;
+  revoked_at: string | null;
+}
+export interface OAuthClient {
+  client_id: string;
+  client_secret?: string;
+  name: string;
+  redirect_uris: string[];
+  token_endpoint_auth_method: 'none' | 'client_secret_post' | 'client_secret_basic';
+  created_at: string;
+  last_used_at: string | null;
+}
+export interface OAuthAuthorizeContext {
+  client: {
+    client_id: string;
+    name: string;
+    registration_source: 'dynamic' | 'manual';
+  };
+  redirect_uri: string;
+  redirect_host: string;
+  state: string | null;
+  resource: string | null;
+  requested_scopes: string[];
+  allowed_scopes: string[];
+  default_scopes: string[];
+  user: {
+    id: string;
+    username: string;
+    profile: string;
+  };
+}

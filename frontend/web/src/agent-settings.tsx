@@ -4,7 +4,13 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 import { useModelConnections } from './model-connection';
-import type { AgentConnection, AgentPage, ToolCredential } from './agent-api';
+import type {
+  AgentConnection,
+  AgentPage,
+  OAuthClient,
+  OAuthGrant,
+  ToolCredential,
+} from './agent-api';
 import {
   DiagnosticId,
   errorText,
@@ -521,7 +527,7 @@ function Capabilities({ value }: { value: Record<string, unknown> }) {
     </div>
   );
 }
-const scopeKeys: Record<string, string> = {
+export const scopeKeys: Record<string, string> = {
   'library:read': 'agentSettings.scopeLibraryRead',
   'library:manage': 'agentSettings.scopeLibraryManage',
   'personal:write': 'agentSettings.scopePersonalWrite',
@@ -533,6 +539,258 @@ const scopeKeys: Record<string, string> = {
   'diagnostics:read': 'agentSettings.scopeDiagnosticsRead',
   'notifications:read': 'agentSettings.scopeNotificationsRead',
 };
+function OAuthConnections() {
+  const { t } = useTranslation();
+  const grants = useWorkspaceResource<AgentPage<OAuthGrant>>('/oauth/grants');
+  const clients = useWorkspaceResource<AgentPage<OAuthClient>>('/oauth/clients');
+  const [name, setName] = useState('');
+  const [redirectText, setRedirectText] = useState('');
+  const [authMethod, setAuthMethod] = useState<
+    'client_secret_post' | 'client_secret_basic' | 'none'
+  >('client_secret_post');
+  const [created, setCreated] = useState<OAuthClient | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const mcpUrl = new URL('mcp', document.baseURI).href;
+
+  if (grants.unsupported && clients.unsupported) return null;
+
+  async function copyText(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice(t('oauth.copied', { label }));
+    } catch {
+      setError(t('oauth.copyFailed'));
+    }
+  }
+
+  async function revokeGrant(grant: OAuthGrant) {
+    if (!confirm(t('oauth.revokeGrantConfirm', { name: grant.client_name }))) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api(`/oauth/grants/${encodeURIComponent(grant.id)}`, { method: 'DELETE' });
+      setNotice(t('oauth.grantRevokedNotice'));
+      await grants.reload();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createClient(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    const redirectUris = redirectText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!redirectUris.length) {
+      setError(t('oauth.redirectRequired'));
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    setCreated(null);
+    try {
+      const result = await api<OAuthClient>('/oauth/clients', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          redirect_uris: redirectUris,
+          token_endpoint_auth_method: authMethod,
+        }),
+      });
+      setCreated(result);
+      setName('');
+      setRedirectText('');
+      await clients.reload();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteClient(item: OAuthClient) {
+    if (!confirm(t('oauth.deleteClientConfirm', { name: item.name }))) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api(`/oauth/clients/${encodeURIComponent(item.client_id)}`, { method: 'DELETE' });
+      if (created?.client_id === item.client_id) setCreated(null);
+      setNotice(t('oauth.clientDeletedNotice'));
+      await Promise.all([clients.reload(), grants.reload()]);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="oauth-section" aria-label={t('oauth.sectionAria')}>
+      <h3>{t('oauth.sectionTitle')}</h3>
+      <p className="muted">{t('oauth.sectionSubtitle')}</p>
+      <div className="oauth-endpoint-row">
+        <code>{mcpUrl}</code>
+        <button type="button" onClick={() => void copyText(mcpUrl, t('oauth.mcpUrlLabel'))}>
+          {t('common.copy')}
+        </button>
+      </div>
+      <WorkspaceNotice error={error || grants.error || clients.error} notice={notice} />
+
+      <div className="oauth-grants-list">
+        <h4>{t('oauth.authorizedAppsTitle')}</h4>
+        {grants.value?.items.length ? (
+          grants.value.items.map((grant) => (
+            <div className="workspace-row" key={grant.id}>
+              <div className="workspace-row-main">
+                <div className="oauth-grant-title">
+                  <strong>{grant.client_name}</strong>
+                  <span className="oauth-source-tag">
+                    {grant.registration_source === 'dynamic'
+                      ? t('oauth.sourceDynamic')
+                      : t('oauth.sourceManual')}
+                  </span>
+                </div>
+                <small>
+                  {grant.scopes.map((s) => (scopeKeys[s] ? t(scopeKeys[s]) : s)).join(' · ')}
+                  <br />
+                  {t('oauth.authorizedAt', { date: localDate(grant.created_at) })}
+                  {grant.last_used_at
+                    ? ` · ${t('oauth.lastRefreshedAt', { date: localDate(grant.last_used_at) })}`
+                    : ''}
+                </small>
+              </div>
+              {grant.revoked_at ? (
+                <StateBadge state="revoked" />
+              ) : (
+                <button type="button" disabled={busy} onClick={() => void revokeGrant(grant)}>
+                  {t('oauth.revokeGrant')}
+                </button>
+              )}
+            </div>
+          ))
+        ) : (
+          <p className="muted">{t('oauth.emptyGrants')}</p>
+        )}
+      </div>
+
+      <details className="oauth-manual-clients">
+        <summary>{t('oauth.manualClientsSummary')}</summary>
+        <p className="muted">{t('oauth.manualClientsHint')}</p>
+        {created && (
+          <div className="workspace-secret" role="status">
+            <strong>{t('oauth.clientSecretOnce')}</strong>
+            <div className="oauth-secret-grid">
+              <div>
+                <small>{t('oauth.clientIdLabel')}</small>
+                <code>{created.client_id}</code>
+              </div>
+              {created.client_secret && (
+                <div>
+                  <small>{t('oauth.clientSecretLabel')}</small>
+                  <code>{created.client_secret}</code>
+                </div>
+              )}
+            </div>
+            <div className="workspace-actions">
+              <button
+                type="button"
+                onClick={() => void copyText(created.client_id, t('oauth.clientIdLabel'))}
+              >
+                {t('oauth.copyClientId')}
+              </button>
+              {created.client_secret && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(created.client_secret!, t('oauth.clientSecretLabel'))
+                  }
+                >
+                  {t('oauth.copyClientSecret')}
+                </button>
+              )}
+              <button type="button" onClick={() => setCreated(null)}>
+                {t('agentSettings.hideToken')}
+              </button>
+            </div>
+          </div>
+        )}
+        <form onSubmit={(e) => void createClient(e)}>
+          <div className="workspace-form">
+            <label>
+              {t('oauth.clientNameLabel')}
+              <input
+                aria-label={t('oauth.clientNameLabel')}
+                required
+                maxLength={100}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label>
+              {t('oauth.authMethodLabel')}
+              <select
+                aria-label={t('oauth.authMethodLabel')}
+                value={authMethod}
+                onChange={(e) =>
+                  setAuthMethod(
+                    e.target.value as 'client_secret_post' | 'client_secret_basic' | 'none',
+                  )
+                }
+              >
+                <option value="client_secret_post">{t('oauth.authMethodPost')}</option>
+                <option value="client_secret_basic">{t('oauth.authMethodBasic')}</option>
+                <option value="none">{t('oauth.authMethodNone')}</option>
+              </select>
+            </label>
+            <label className="span-all">
+              {t('oauth.redirectUrisLabel')}
+              <textarea
+                aria-label={t('oauth.redirectUrisLabel')}
+                rows={3}
+                required
+                placeholder="https://oauth-redirect.googleusercontent.com/r/your-app"
+                value={redirectText}
+                onChange={(e) => setRedirectText(e.target.value)}
+              />
+            </label>
+            <div className="span-all">
+              <button className="primary" type="submit" disabled={busy}>
+                {t('oauth.createClient')}
+              </button>
+            </div>
+          </div>
+        </form>
+        {clients.value?.items.length ? (
+          <div>
+            {clients.value.items.map((item) => (
+              <div className="workspace-row" key={item.client_id}>
+                <div className="workspace-row-main">
+                  <strong>{item.name}</strong>
+                  <small>
+                    <code>{item.client_id}</code> · {item.redirect_uris.join(', ')}
+                  </small>
+                </div>
+                <button type="button" disabled={busy} onClick={() => void deleteClient(item)}>
+                  {t('oauth.deleteClient')}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </details>
+    </section>
+  );
+}
+
 export function ToolCredentials({ user }: { user: User }) {
   const { t } = useTranslation();
   const list = useWorkspaceResource<AgentPage<ToolCredential>>('/agent/credentials?limit=100');
@@ -594,6 +852,7 @@ export function ToolCredentials({ user }: { user: User }) {
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
       {!list.unsupported && (
         <>
+          <OAuthConnections />
           <McpOnboarding />
           {token && (
             <div className="workspace-secret" role="status">

@@ -2,13 +2,16 @@
 
 import logging
 
+REDACTED_PATHS = frozenset({"/api/v1/lastfm/callback", "/oauth/authorize"})
+
 
 class RedactLastfmCallback(logging.Filter):
     def filter(self, record):
         if isinstance(record.args, tuple) and len(record.args) == 5:
             values = list(record.args)
-            if str(values[2]).partition("?")[0].rstrip("/") == "/api/v1/lastfm/callback":
-                values[2] = "/api/v1/lastfm/callback"
+            base_path = str(values[2]).partition("?")[0].rstrip("/")
+            if base_path in REDACTED_PATHS:
+                values[2] = base_path
                 record.args = tuple(values)
         return True
 
@@ -24,7 +27,7 @@ class CallbackPrivacy:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"].rstrip("/") != "/api/v1/lastfm/callback":
+        if scope["type"] != "http" or scope["path"].rstrip("/") not in REDACTED_PATHS:
             await self.app(scope, receive, send)
             return
 

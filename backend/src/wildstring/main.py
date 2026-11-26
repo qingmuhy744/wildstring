@@ -30,6 +30,7 @@ from wildstring.library.repository import LibraryRepository
 from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
 from wildstring.mcp_http import HTTPMCP
+from wildstring.mcp_oauth import MCPOAuth
 from wildstring.mobile_experience import experience_router
 from wildstring.podcast_artwork import artwork_router
 from wildstring.podcast_identity_backfill import IdentityBackfill
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     podcast_search = PodcastSearch(podcasts, regions=current.podcast_search_regions)
     podcast_identity_backfill = IdentityBackfill(podcasts, podcast_search)
     mcp = HTTPMCP(platform)
+    mcp_oauth = MCPOAuth(database, auth, platform, server_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -184,6 +186,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.diagnostics = diagnostics
     app.state.agent_platform = platform
     app.include_router(platform.router())
+    app.include_router(mcp_oauth.router())
     app.router.routes.append(Route("/mcp", endpoint=mcp, methods=["GET", "POST", "DELETE"]))
     app.include_router(providers.router(auth))
     app.include_router(providers.sources.router(auth))
@@ -208,6 +211,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(catalog_gaps_router(database, auth))
 
     app.include_router(diagnostics_router(diagnostics, auth, database))
+
+    @app.get("/oauth/authorize", include_in_schema=False)
+    def oauth_authorize_page():
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if current.web_dir is not None:
+            return FileResponse(current.web_dir / "index.html", headers=headers)
+        return JSONResponse({"detail": "web_ui_unavailable"}, status_code=503, headers=headers)
 
     if current.web_dir is not None:
         web_index = current.web_dir / "index.html"
