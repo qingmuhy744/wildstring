@@ -102,7 +102,7 @@ internal fun CrashReportsDialog(onDismiss: () -> Unit) {
                                     label = {
                                         Text(
                                             "$timeText · ${report.summary}",
-                                            fontSize = 11.sp,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                             maxLines = 1
                                         )
                                     }

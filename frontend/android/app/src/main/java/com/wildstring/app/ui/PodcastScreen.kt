@@ -688,7 +688,7 @@ private fun PodcastUnifiedQueueSheet(
                                             if (show.author.isNotBlank()) {
                                                 Text(
                                                     text = show.author,
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
@@ -992,14 +992,14 @@ private fun PodcastCardItem(
                 ) {
                     Text(
                         text = stringResource(R.string.pod_scr_episodes_count, podcast.totalEpisodes),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, softWrap = false,
                     )
                     if (podcast.unplayedEpisodes > 0) {
                         Text(
                             text = stringResource(R.string.pod_scr_unplayed_count, podcast.unplayedEpisodes),
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1, softWrap = false,
                         )
@@ -1081,7 +1081,7 @@ private fun PodcastCardItem(
     }
     if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.pod_scr_delete_dialog_title)) },
         text = { Text(stringResource(R.string.pod_scr_delete_dialog_body, podcast.title)) },
-        confirmButton = { TextButton({ deleting = false; onDelete() }) { Text(stringResource(R.string.pod_scr_confirm_delete_shared)) } },
+        confirmButton = { TextButton({ deleting = false; onDelete() }, destructive = true) { Text(stringResource(R.string.pod_scr_confirm_delete_shared)) } },
         dismissButton = { TextButton({ deleting = false }) { Text(stringResource(R.string.pod_scr_keep_show)) } })
 }
 
@@ -1238,7 +1238,7 @@ private fun PodcastDetailView(
                                 if (episodeTotal > 0 || podcast.unplayedEpisodes > 0) {
                                     Text(
                                         text = stringResource(R.string.pod_scr_total_episodes, episodeTotal) + if (podcast.unplayedEpisodes > 0) " · " + stringResource(R.string.pod_scr_unplayed_episodes, podcast.unplayedEpisodes) else "",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         modifier = Modifier.padding(top = 2.dp),
@@ -1588,7 +1588,7 @@ internal fun EpisodeRowItem(
                             Spacer(Modifier.width(2.dp))
                             Text(
                                 text = stringResource(R.string.pod_scr_completed),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
@@ -1606,7 +1606,7 @@ internal fun EpisodeRowItem(
                     if (shortDate.isNotBlank()) {
                         Text(
                             text = shortDate,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             softWrap = false,
@@ -1624,7 +1624,7 @@ internal fun EpisodeRowItem(
                     if (episode.resourceSaved || episode.resourceAutomatic) {
                         Text(
                             text = if (episode.resourceSaved) stringResource(R.string.pod_scr_saved) else stringResource(R.string.pod_scr_auto_saved),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
                             softWrap = false,
@@ -1632,7 +1632,7 @@ internal fun EpisodeRowItem(
                     } else if (episode.resourcePlaybackCached) {
                         Text(
                             text = stringResource(R.string.pod_scr_playback_cached),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             softWrap = false,
@@ -1641,7 +1641,7 @@ internal fun EpisodeRowItem(
                     if (!episode.completed && episode.positionSeconds > 0) {
                         Text(
                             text = stringResource(R.string.pod_scr_remaining_minutes, ((episode.durationSeconds - episode.positionSeconds + 59) / 60).coerceAtLeast(1)),
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
                             softWrap = false,

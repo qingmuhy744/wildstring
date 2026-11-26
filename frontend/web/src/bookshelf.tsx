@@ -92,12 +92,19 @@ export function Bookshelf({
   const [pending, setPending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [revision, refresh] = useState(0);
+  const [routeAttempt, retryRoute] = useState(0);
   const [showBookEdit, setShowBookEdit] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [enabledSources, setEnabledSources] = useState<MetadataSource[]>([]);
   const [checkedSources, setCheckedSources] = useState<string[]>(['itunes', 'openlibrary']);
   const readerDialog = useRef<HTMLDialogElement>(null);
+  const readerRequest = useRef<AbortController | null>(null);
+  const openReaderBook = useRef<string | null>(null);
+  const returnFocusBook = useRef<string | null>(null);
+  const loadedRevision = useRef(-1);
+  const shelfRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const attachEbookInputRef = useRef<HTMLInputElement>(null);
@@ -125,6 +132,10 @@ export function Bookshelf({
 
   useEffect(() => {
     if (!focusedBook) return;
+    readerRequest.current?.abort();
+    openReaderBook.current = null;
+    returnFocusBook.current = null;
+    if (readingBookId()) window.history.replaceState(null, '', '/');
     setSelected(focusedBook);
     setReading(false);
     setInitialSpine(null);
@@ -216,10 +227,23 @@ export function Bookshelf({
         if (!request.signal.aborted) setError(cause.message);
       })
       .finally(() => {
-        if (!request.signal.aborted) setLoading(false);
+        if (!request.signal.aborted) {
+          loadedRevision.current = revision;
+          setLoading(false);
+        }
       });
     return () => request.abort();
   }, [libraryId, debouncedFilter, format, status, revision]);
+
+  useEffect(() => {
+    const bookId = returnFocusBook.current;
+    if (!bookId || reading || selected || loading || loadedRevision.current !== revision) return;
+    returnFocusBook.current = null;
+    const card = shelfRef.current?.querySelector<HTMLButtonElement>(
+      `[data-book-id="${CSS.escape(bookId)}"]`,
+    );
+    (card ?? searchRef.current)?.focus();
+  }, [reading, selected, loading, revision]);
 
   useEffect(() => {
     if (!showBookEdit || !selected || selected.has_ebook === selected.has_audiobook) {
@@ -272,23 +296,39 @@ export function Bookshelf({
     }
   }
 
+  function leaveReading() {
+    if (!openReaderBook.current) return;
+    returnFocusBook.current = openReaderBook.current;
+    openReaderBook.current = null;
+    readerDialog.current?.close();
+    setReading(false);
+    setInitialSpine(null);
+    setSelected(null);
+    setListening(false);
+    refresh((value) => value + 1);
+  }
+
   useEffect(() => {
-    const request = new AbortController();
     const route = () => {
+      readerRequest.current?.abort();
       const identity = readingBookId();
-      if (!identity) {
-        setReading(false);
-        return;
-      }
+      if (identity && identity === openReaderBook.current) return;
+      leaveReading();
+      if (!identity) return;
+      const request = new AbortController();
+      readerRequest.current = request;
       void api<Book>(`/books/${identity}`, { signal: request.signal })
         .then((book) => {
+          if (request.signal.aborted || readingBookId() !== identity) return;
+          openReaderBook.current = book.has_ebook ? book.id : null;
+          returnFocusBook.current = null;
           setStaleNotice('');
           setError('');
           setSelected(book);
           setReading(book.has_ebook);
         })
         .catch((cause: Error) => {
-          if (request.signal.aborted) return;
+          if (request.signal.aborted || readingBookId() !== identity) return;
           if (cause instanceof ApiError && cause.status === 404) {
             window.history.replaceState(null, '', '/');
             setReading(false);
@@ -303,12 +343,15 @@ export function Bookshelf({
     route();
     window.addEventListener('popstate', route);
     return () => {
-      request.abort();
+      readerRequest.current?.abort();
       window.removeEventListener('popstate', route);
     };
-  }, [revision, t]);
+  }, [routeAttempt, t]);
 
   function enterReading(book: Book, spineIndex: number | null = null) {
+    readerRequest.current?.abort();
+    openReaderBook.current = book.id;
+    returnFocusBook.current = null;
     setInitialSpine(spineIndex);
     setReading(true);
     if (readingBookId() !== book.id) {
@@ -317,11 +360,8 @@ export function Bookshelf({
   }
 
   function closeReader() {
-    setReading(false);
-    setInitialSpine(null);
-    setSelected(null);
-    setListening(false);
-    refresh((value) => value + 1);
+    readerRequest.current?.abort();
+    leaveReading();
     if (window.history.state?.bookReader) {
       window.history.back();
     } else if (readingBookId()) {
@@ -343,6 +383,10 @@ export function Bookshelf({
   }
 
   function changeBook(book: Book | null) {
+    readerRequest.current?.abort();
+    openReaderBook.current = null;
+    returnFocusBook.current = null;
+    if (readingBookId()) window.history.replaceState(null, '', '/');
     setReading(false);
     setInitialSpine(null);
     setListening(false);
@@ -351,7 +395,6 @@ export function Bookshelf({
     setSelected(book);
     setCandidates(null);
     if (!book) {
-      if (readingBookId()) window.history.replaceState(null, '', '/');
       refresh((value) => value + 1);
     }
   }
@@ -456,7 +499,7 @@ export function Bookshelf({
       : audioChapters;
 
   return (
-    <section className="workspace-page bookshelf">
+    <section className="workspace-page bookshelf" ref={shelfRef}>
       {!selected && (
         <header className="workspace-heading bookshelf-heading">
           <h1>{t('bookshelf.title')}</h1>
@@ -498,7 +541,13 @@ export function Bookshelf({
         <p role="alert" className="bookshelf-banner bookshelf-banner-error">
           <span>{error}</span>
           <span className="bookshelf-banner-actions">
-            <button type="button" onClick={() => refresh((value) => value + 1)}>
+            <button
+              type="button"
+              onClick={() => {
+                if (readingBookId()) retryRoute((value) => value + 1);
+                refresh((value) => value + 1);
+              }}
+            >
               {t('bookshelf.retry')}
             </button>
             <button type="button" onClick={() => setError('')}>
@@ -1011,6 +1060,7 @@ export function Bookshelf({
               ))}
             </select>
             <input
+              ref={searchRef}
               type="search"
               aria-label={t('bookshelf.find')}
               placeholder={t('bookshelf.find')}
@@ -1075,7 +1125,7 @@ export function Bookshelf({
               <ul className="bookshelf-grid">
                 {visible.map((book) => (
                   <li key={book.id}>
-                    <button type="button" onClick={() => changeBook(book)}>
+                    <button type="button" data-book-id={book.id} onClick={() => changeBook(book)}>
                       <div className="bookshelf-card-cover" aria-hidden="true">
                         {book.has_cover ? (
                           <img src={`/api/v1/books/${book.id}/cover`} alt="" loading="lazy" />

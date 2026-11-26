@@ -43,7 +43,7 @@ internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, c
             Text(
                 text = publisher.name,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.tertiary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -57,7 +57,7 @@ internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, c
             Text(
                 text = if (podcast.publisher == null) stringResource(R.string.pod_pub_confirm) else stringResource(R.string.pod_pub_edit),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable { editing = true }

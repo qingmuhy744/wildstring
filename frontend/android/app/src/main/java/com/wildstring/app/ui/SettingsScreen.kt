@@ -327,14 +327,14 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     if (crashReports) CrashReportsDialog { crashReports = false }
     if (downloadTasks) PodcastDownloadQueueDialog(vm = vm, onDismiss = { downloadTasks = false })
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
-    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
+    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }, destructive = true) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
     if (profile) ProfileDialog(vm) { profile = false }
     if (password) PasswordDialog(vm) { password = false }
 }
 
 @Composable private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(title, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxWidth(), content = content)
         }

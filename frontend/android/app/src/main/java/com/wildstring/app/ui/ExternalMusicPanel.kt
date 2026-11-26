@@ -86,8 +86,8 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
             }
             ActionStatus(action)
             result?.let { page ->
-                musicDate(page.generatedAt)?.let { Text(stringResource(R.string.ext_music_updated_at, it) + if (page.cached) stringResource(R.string.ext_music_cached_suffix) else "", style = MaterialTheme.typography.labelSmall) }
-                musicDate(page.nextRefreshAt)?.let { Text(stringResource(R.string.ext_music_next_update, it), style = MaterialTheme.typography.labelSmall) }
+                musicDate(page.generatedAt)?.let { Text(stringResource(R.string.ext_music_updated_at, it) + if (page.cached) stringResource(R.string.ext_music_cached_suffix) else "", style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")) }
+                musicDate(page.nextRefreshAt)?.let { Text(stringResource(R.string.ext_music_next_update, it), style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")) }
                 if (page.stale) Text(stringResource(R.string.ext_music_stale_hint), style = MaterialTheme.typography.bodySmall)
                 page.sourceStatus.filter { it.status != "disabled" }.forEach { source -> Text("${externalSourceLabels()[source.id] ?: recommendationSource(source.id)} · ${if (source.status == "ok") stringResource(R.string.ext_music_source_ok, source.candidateCount, source.matched) else if (source.status == "empty") stringResource(R.string.ext_music_source_empty) else stringResource(R.string.ext_music_source_unavailable)}", style = MaterialTheme.typography.bodySmall) }
                 page.warnings.forEach { warning -> Text("${externalSourceLabels()[warning.source] ?: recommendationSource(warning.source)}：${recommendationIssue(warning.code)}", style = MaterialTheme.typography.bodySmall) }
@@ -103,7 +103,7 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
                     if (!item.inLibrary) {
                         Text(localizeExternalReason(item.reason), style = MaterialTheme.typography.bodySmall)
                     }
-                    item.evidence.forEach { Text("${externalSourceLabels()[it.source] ?: recommendationSource(it.source)} · ${localizeExternalSummary(it.summary)}", style = MaterialTheme.typography.labelSmall) }
+                    item.evidence.forEach { Text("${externalSourceLabels()[it.source] ?: recommendationSource(it.source)} · ${localizeExternalSummary(it.summary)}", style = MaterialTheme.typography.bodySmall) }
                     Text(when {
                         versions.isNotEmpty() -> stringResource(R.string.ext_music_in_library_versions, versions.size)
                         item.inLibrary -> stringResource(R.string.ext_music_in_library)

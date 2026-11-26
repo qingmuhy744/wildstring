@@ -64,12 +64,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--accent);
+  color: var(--danger);
   padding: 12px 0;
   font-size: 13px;
 }
 .alphabet-rail button[aria-pressed='true'] {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .alphabet-preview {
@@ -286,9 +286,6 @@
     bottom: 172px;
     width: 29px;
   }
-  .alphabet-rail button {
-    font-size: 10px;
-  }
   .alphabet-preview {
     right: 44px;
   }
@@ -303,9 +300,6 @@
   .alphabet-rail {
     top: 16px;
     bottom: 124px;
-  }
-  .alphabet-rail button {
-    font-size: 9px;
   }
 }
 
@@ -429,11 +423,10 @@
 }
 .disc-heading small {
   white-space: nowrap;
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 12px;
 }
 .disc-chip {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 4px;

@@ -26,12 +26,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -420,7 +423,7 @@ private fun BookPlayerControlsPane(
 
     Column(Modifier.widthIn(max = 460.dp).fillMaxWidth()) {
         val displayPos = scrubMs?.toLong() ?: positionMs
-        val maxRange = durationMs.coerceAtLeast(1L).toFloat()
+        val maxRange = durationMs.coerceAtLeast(0L).toFloat()
         PlaybackSlider(
             value = (scrubMs ?: positionMs.toFloat()).coerceIn(0f, maxRange),
             onValueChange = { scrubMs = it },
@@ -455,15 +458,11 @@ private fun BookPlayerControlsPane(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(
+        PlaybackSkipButton(
+            rewind = true,
             onClick = tactile { vm.bookPlayback.seekBy(-15_000L) },
             enabled = activeChapter != null && !bookState.loading,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(28.dp))
-                Text("15", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
-            }
-        }
+        )
         IconButton(
             onClick = tactile { vm.bookPlayback.selectChapter((bookState.index - 1).coerceAtLeast(0), bookState.playing) },
             enabled = bookState.chapters.isNotEmpty() && bookState.index > 0 && !bookState.loading,
@@ -499,12 +498,11 @@ private fun BookPlayerControlsPane(
         ) {
             Icon(Icons.Default.SkipNext, stringResource(R.string.books_next_chapter), Modifier.size(30.dp))
         }
-        IconButton(
+        PlaybackSkipButton(
+            rewind = false,
             onClick = tactile { vm.bookPlayback.seekBy(30_000L) },
             enabled = activeChapter != null && !bookState.loading,
-        ) {
-            Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(28.dp))
-        }
+        )
     }
 
     Spacer(Modifier.height(10.dp))
@@ -604,6 +602,8 @@ private fun BookPlayerChapterList(
     onSelect: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val numberStyle = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontFeatureSettings = "tnum")
+    val numberWidth = chapterNumberWidth((chapters.lastOrNull()?.index ?: 0) + 1, numberStyle)
     LaunchedEffect(activeIndex) {
         if (activeIndex in chapters.indices) {
             listState.animateScrollToItem(activeIndex)
@@ -628,7 +628,7 @@ private fun BookPlayerChapterList(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(numberWidth), contentAlignment = Alignment.Center) {
                     if (current && playing) {
                         Icon(
                             Icons.Default.GraphicEq,
@@ -639,8 +639,10 @@ private fun BookPlayerChapterList(
                     } else {
                         Text(
                             "%02d".format(chapter.index + 1),
-                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                            color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = numberStyle,
+                            color = if (current) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }
@@ -660,4 +662,12 @@ private fun BookPlayerChapterList(
             }
         }
     }
+}
+
+@Composable
+internal fun chapterNumberWidth(largestNumber: Int, style: TextStyle): Dp {
+    val measurer = rememberTextMeasurer()
+    val digits = "0".repeat(largestNumber.toString().length.coerceAtLeast(2))
+    val widthPx = measurer.measure(digits, style, maxLines = 1, softWrap = false).size.width
+    return with(LocalDensity.current) { widthPx.toDp().coerceAtLeast(28.dp) }
 }

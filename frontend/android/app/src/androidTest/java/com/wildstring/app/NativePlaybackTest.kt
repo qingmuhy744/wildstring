@@ -276,6 +276,10 @@ class NativePlaybackTest {
     @Test fun loginCookieStreamingAndFullscreenLyrics() = withPlayback("lyrics") { session ->
         val vm = session.vm
         val player = session.player
+        val progress = compose.onNodeWithContentDescription(uiString(R.string.playback_progress_label))
+        progress.seekPlaybackTo(4500L)
+        compose.waitUntil(10_000) { compose.runOnIdle { player.currentPosition == 4500L } }
+        progress.assertPlaybackProgress(4500L, vm.state.value.duration)
         compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
         compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()

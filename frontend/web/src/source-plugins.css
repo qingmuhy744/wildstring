@@ -205,7 +205,7 @@
   overflow-wrap: anywhere;
 }
 .source-plugins .plugin-feedback[data-kind='error'] {
-  color: var(--accent);
+  color: var(--danger);
   background: color-mix(in srgb, var(--accent) 9%, var(--workspace-panel));
 }
 .source-plugins .plugin-unsaved {
@@ -274,7 +274,7 @@
   height: 16px;
 }
 .plugin-uninstall {
-  color: var(--accent);
+  color: var(--danger);
 }
 .plugin-maintenance-actions > div {
   display: grid;

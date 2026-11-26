@@ -128,6 +128,10 @@ class PodcastResumeUiTest {
                 compose.waitUntil(5000) { !vm.podcastProgress.conflict.value }
                 compose.onNodeWithText(uiString(R.string.podcast_use_local_progress)).assertDoesNotExist()
                 capture("podcast-resume-takeover-$suffix")
+                val progress = compose.onNodeWithContentDescription(uiString(R.string.playback_progress_label))
+                progress.seekPlaybackTo(7500L)
+                compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == 7500L } }
+                progress.assertPlaybackProgress(7500L, vm.state.value.duration)
                 compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
                 assertEquals("ask", mode.get())
                 // Back on the show page with the player closed: a completed episode's menu offers

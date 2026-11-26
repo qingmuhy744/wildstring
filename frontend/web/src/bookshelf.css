@@ -303,6 +303,7 @@
 }
 .bookshelf-card-body small {
   color: var(--muted);
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 .bookshelf-card-authors {
@@ -507,6 +508,7 @@
 }
 .book-detail-chapter-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.25rem;
   margin: 0;
   padding: 0;
@@ -518,7 +520,6 @@
   gap: 0.35rem;
   min-block-size: 2.75rem;
   border-radius: 10px;
-  transition: background-color 140ms ease;
 }
 .book-detail-chapter-row:hover {
   background: var(--surface-subtle);
@@ -617,6 +618,39 @@
   gap: 0.5rem;
   margin-inline-start: auto;
   flex-shrink: 0;
+}
+
+.book-mobile-controls {
+  display: none;
+}
+@media (max-width: 760px) {
+  .book-mobile-controls {
+    display: block;
+  }
+  .book-mobile-controls-panel {
+    position: fixed;
+    inset: auto 12px calc(var(--player-bar-height, 152px) + 8px) auto;
+    width: min(18rem, calc(100% - 24px));
+    max-height: calc(100dvh - var(--player-bar-height, 152px) - 20px);
+    overflow: auto;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .book-mobile-controls-panel:popover-open {
+    display: grid;
+    gap: 8px;
+  }
+  .book-mobile-controls-panel label {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 7rem);
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+  }
 }
 
 /* Companion audiobook player inside fullscreen reader */
@@ -944,8 +978,13 @@
   font-size: 0.875rem;
 }
 .book-reader-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
   margin-block: 0.5rem 0;
   color: var(--danger);
+  font-size: 0.875rem;
 }
 .book-reader-stage {
   position: relative;
@@ -964,7 +1003,8 @@
   max-height: calc(100% - 1.5rem);
   overflow: auto;
   display: grid;
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -973,6 +1013,20 @@
 }
 .book-reader.book-reader-dark .book-reader-drawer {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+}
+.book-reader-layout .book-reader .book-reader-drawer-close {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-block-size: 28px;
+  padding: 0;
+}
+.book-reader-drawer-close svg {
+  width: 16px;
+  height: 16px;
 }
 .book-highlight-bar {
   position: absolute;

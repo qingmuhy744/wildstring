@@ -1718,6 +1718,50 @@ export type Player = ReturnType<typeof usePlayer>;
 
 const BOOK_PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5] as const;
 
+function BookPlaybackRate({ session }: { session: BookAudioSession }) {
+  const { t } = useTranslation();
+  return (
+    <select
+      aria-label={t('playerPage.playbackRateAria')}
+      value={session.rate}
+      onChange={(event) => session.setRate(Number(event.target.value))}
+    >
+      {BOOK_PLAYBACK_RATES.map((value) => (
+        <option key={value} value={value}>
+          {value}×
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function BookSleepTime({
+  session,
+  onChange,
+}: {
+  session: BookAudioSession;
+  onChange?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <select
+      aria-label={t('playerPage.sleepTimer')}
+      value={session.timer}
+      onChange={(event) => {
+        session.setTimer(Number(event.target.value));
+        onChange?.();
+      }}
+    >
+      <option value="0">{t('playerPage.sleepOff')}</option>
+      {[15, 30, 45, 60].map((minutes) => (
+        <option key={minutes} value={minutes}>
+          {t('bookshelf.minutes', { minutes })}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function BookSleepControl({ session }: { session: BookAudioSession }) {
   const { t } = useTranslation();
   const id = useId();
@@ -1748,21 +1792,44 @@ function BookSleepControl({ session }: { session: BookAudioSession }) {
         <p>{label}</p>
         <label>
           {t('playerPage.stopTime')}
-          <select
-            aria-label={t('playerPage.sleepTimer')}
-            value={String(session.timer)}
-            onChange={(event) => {
-              session.setTimer(Number(event.target.value));
-              panel.current?.hidePopover();
-            }}
-          >
-            <option value="0">{t('playerPage.sleepOff')}</option>
-            {[15, 30, 45, 60].map((minutes) => (
-              <option key={minutes} value={String(minutes)}>
-                {t('bookshelf.minutes', { minutes })}
-              </option>
-            ))}
-          </select>
+          <BookSleepTime session={session} onChange={() => panel.current?.hidePopover()} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function BookMobileControls({ session }: { session: BookAudioSession }) {
+  const { t } = useTranslation();
+  const id = useId();
+  return (
+    <div className="book-mobile-controls">
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={t('bookshelf.listeningControls')}
+        popoverTarget={id}
+      >
+        <Icon name="more" />
+      </button>
+      <div
+        id={id}
+        popover="auto"
+        role="group"
+        aria-label={t('bookshelf.listeningControls')}
+        className="book-mobile-controls-panel"
+        onToggle={(event) => {
+          const panel = event.currentTarget;
+          if (panel.matches(':popover-open')) panel.querySelector('select')?.focus();
+        }}
+      >
+        <label>
+          {t('playerPage.playbackRateAria')}
+          <BookPlaybackRate session={session} />
+        </label>
+        <label>
+          {t('playerPage.sleepTimer')}
+          <BookSleepTime session={session} />
         </label>
       </div>
     </div>
@@ -1879,6 +1946,10 @@ function BookPlayerBarContent({
           <input
             type="range"
             aria-label={t('playerPage.progressAria')}
+            aria-valuetext={t('playerPage.progressTimeAria', {
+              elapsed: time(positionSeconds),
+              total: time(durationSeconds),
+            })}
             min="0"
             max={durationSeconds || 1}
             step="0.1"
@@ -1895,18 +1966,9 @@ function BookPlayerBarContent({
         <BookSleepControl session={session} />
         <label className="playback-rate-control">
           <span>{t('playerPage.playbackRate')}</span>
-          <select
-            aria-label={t('playerPage.playbackRateAria')}
-            value={session.rate}
-            onChange={(event) => session.setRate(Number(event.target.value))}
-          >
-            {BOOK_PLAYBACK_RATES.map((value) => (
-              <option key={value} value={value}>
-                {value}×
-              </option>
-            ))}
-          </select>
+          <BookPlaybackRate session={session} />
         </label>
+        <BookMobileControls session={session} />
         <VolumeControl player={player} />
         <button
           type="button"

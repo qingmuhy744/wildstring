@@ -80,7 +80,7 @@ fun CatalogGapCard(
                     Spacer(Modifier.height(3.dp))
                     Text(
                         text = stringResource(R.string.gap_card_subtitle),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -92,7 +92,7 @@ fun CatalogGapCard(
                         text = stringResource(R.string.gap_card_coverage, data.coveragePercent),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (data.coveragePercent == 100) SuccessColor else MaterialTheme.colorScheme.primary,
+                        color = if (data.coveragePercent == 100) SuccessColor else MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
@@ -155,7 +155,7 @@ fun CatalogGapCard(
                                         Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                         Text(
                                             text = listOf(item.album, item.year).filter { it.isNotBlank() }.joinToString(" · "),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -165,7 +165,7 @@ fun CatalogGapCard(
                                     ) {
                                         Text(
                                             stringResource(R.string.gap_card_status_missing),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                         )
@@ -195,7 +195,7 @@ fun CatalogGapCard(
                                         Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                         Text(
                                             text = listOf(item.album ?: "", item.format.uppercase()).filter { it.isNotBlank() }.joinToString(" · "),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }

@@ -205,7 +205,7 @@ Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 PodcastShowName(
                                     name = (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
                                     onOpen = if (track.podcast?.podcastId != null || track.podcastEpisodeId != null) tactile(onOpenShow) else null,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = MaterialTheme.colorScheme.tertiary,
                                     style = MaterialTheme.typography.labelMedium,
                                     tag = "podcast-player-article-show",
                                 )
@@ -629,7 +629,7 @@ private fun PodcastPlayerControls(
                     DropdownMenuItem(text = { Text(stringResource(R.string.pod_player_queue_label)) }, onClick = tactile { moreMenu = false; onQueue() })
                     listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { rate ->
                         DropdownMenuItem(
-                            text = { Text("${rate}×", color = if (rate == speed) MaterialTheme.colorScheme.primary else Color.Unspecified) },
+                            text = { Text("${rate}×", color = if (rate == speed) MaterialTheme.colorScheme.tertiary else Color.Unspecified) },
                             onClick = tactile { vm.controller?.setPlaybackSpeed(rate); speed = rate; moreMenu = false },
                         )
                     }
@@ -660,7 +660,7 @@ private fun PodcastPlayerControls(
         dismissButton = { TextButton(tactile { vm.settings.podcastGainDb(podcastId, 0) }, enabled = gainDb != 0) { Text(stringResource(R.string.gain_panel_reset)) } },
     )
     val sideIcon by animateDpAsState(if (compact) 24.dp else 28.dp, dpSpec, label = "podcast-side-icon")
-    val skipIcon by animateDpAsState(if (compact) 26.dp else 28.dp, dpSpec, label = "podcast-skip-icon")
+    val skipArrow by animateDpAsState(if (compact) 16.dp else 18.dp, dpSpec, label = "podcast-skip-icon")
     val playButton by animateDpAsState(if (compact) 48.dp else 64.dp, dpSpec, label = "podcast-play-size")
     val playIcon by animateDpAsState(if (compact) 26.dp else 34.dp, dpSpec, label = "podcast-play-icon")
     val rowGap by animateDpAsState(if (compact) 0.dp else 8.dp, dpSpec, label = "podcast-row-gap")
@@ -679,7 +679,7 @@ private fun PodcastPlayerControls(
                     }
                     scrub = null
                 },
-                valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
+                valueRange = 0f..duration.coerceAtLeast(0).toFloat(),
                 enabled = duration > 0,
             )
             Row(
@@ -717,7 +717,7 @@ private fun PodcastPlayerControls(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = if (speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (speed != 1f) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             )
                         }
@@ -778,12 +778,12 @@ private fun PodcastPlayerControls(
                         Icon(Icons.Default.SkipPrevious, stringResource(R.string.podcast_previous_episode), Modifier.size(sideIcon))
                     }
                 }
-                IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }, Modifier.testTag("podcast-rewind")) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(skipIcon))
-                        Text("15", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
-                    }
-                }
+                PlaybackSkipButton(
+                    rewind = true,
+                    onClick = tactile { vm.seek((position - 15_000).coerceAtLeast(0)) },
+                    modifier = Modifier.testTag("podcast-rewind"),
+                    arrowSize = skipArrow,
+                )
                 FilledIconButton(
                     onClick = tactile(vm::toggle),
                     modifier = Modifier.size(playButton).testTag("podcast-play-pause")
@@ -827,9 +827,12 @@ private fun PodcastPlayerControls(
                         ) { glyph(it) }
                     }
                 }
-                IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }, Modifier.testTag("podcast-forward")) {
-                    Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(skipIcon))
-                }
+                PlaybackSkipButton(
+                    rewind = false,
+                    onClick = tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) },
+                    modifier = Modifier.testTag("podcast-forward"),
+                    arrowSize = skipArrow,
+                )
                 if (sideShown > 0f) Box(Modifier.presence(sideShown)) {
                     IconButton(tactile { vm.skipPodcastEpisode(1) }, Modifier.testTag("podcast-skip-next")) {
                         Icon(Icons.Default.SkipNext, stringResource(R.string.podcast_next_episode), Modifier.size(sideIcon))

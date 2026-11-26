@@ -30,7 +30,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -155,7 +154,7 @@ internal fun PodcastQueuePanel(
                         text = stringResource(R.string.q_panel_auto_continue),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     )
                     cloud.autoPreview.forEach { item ->
@@ -167,22 +166,22 @@ internal fun PodcastQueuePanel(
                             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(item.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    if (item.showTitle.isNotBlank()) Text(item.showTitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                    if (item.showTitle.isNotBlank()) Text(item.showTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 FilledTonalButton(
                                     onClick = { feedback(TactileKind.Tap); vm.addPodcastEpisodeToQueue(item.episode, item.summary, next = false) },
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(32.dp),
-                                ) { Text(stringResource(R.string.q_panel_add_to_queue), style = MaterialTheme.typography.labelSmall) }
+                                    modifier = Modifier.heightIn(min = 32.dp),
+                                ) { Text(stringResource(R.string.q_panel_add_to_queue), style = MaterialTheme.typography.labelMedium) }
                             }
                         }
                     }
                     Text(
                         text = stringResource(R.string.q_panel_not_written_to_queue),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
                     )
                 }
@@ -449,7 +448,7 @@ internal fun QueueList(
         Row(headerModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.queue_drag_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Text(stringResource(R.string.queue_drag_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
             if (currentOffscreen) {
                 TextButton({
@@ -642,7 +641,7 @@ private fun QueueChromeRow(
         }
         Column(Modifier.weight(1f).clickable(enabled = playEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onPlay).padding(vertical = 12.dp, horizontal = 8.dp)) {
             Text(title, color = if (current) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
-            if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.size(48.dp).testTag(handleTag)
             .onGloballyPositioned(onHandlePositioned)

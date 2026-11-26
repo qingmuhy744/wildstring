@@ -208,7 +208,7 @@ internal fun alphabetGutter(indexed: Boolean): androidx.compose.ui.unit.Dp =
         .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.Center) {
         if (error != null) {
             Text(stringResource(R.string.load_failed_retry), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            Text(error, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+            Text(error, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
         } else {
             Box(Modifier.fillMaxWidth(.6f).height(12.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(4.dp)))
             Spacer(Modifier.height(9.dp))
@@ -320,7 +320,11 @@ private val AlphabetRailLetterHeight = 14.dp
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("DISC ${disc.number.toString().padStart(2, '0')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
-        Text(stringResource(R.string.track_count, disc.trackCount), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 11.sp)
+        Text(
+            stringResource(R.string.track_count, disc.trackCount),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+        )
         HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
     }
 }

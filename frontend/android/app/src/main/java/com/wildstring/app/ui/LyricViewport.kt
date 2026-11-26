@@ -275,7 +275,7 @@ import kotlin.math.roundToInt
                         if (line.words.isNullOrEmpty() || !highlighted) append(line.text.ifBlank { "♪" })
                         else line.words.forEach { word ->
                             val progress = ((renderPosition - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
-                            val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.primary, progress)
+                            val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.tertiary, progress)
                             withStyle(SpanStyle(color = color)) { append(word.text) }
                         }
                     }
@@ -299,7 +299,7 @@ import kotlin.math.roundToInt
             }
         }
         if (!follow) {
-            TextButton({ follow = true }, Modifier.align(Alignment.TopStart)) { Text(stringResource(R.string.lyric_vp_resume_follow), fontSize = 11.sp) }
+            TextButton({ follow = true }, Modifier.align(Alignment.TopStart)) { Text(stringResource(R.string.lyric_vp_resume_follow), style = MaterialTheme.typography.labelMedium) }
             val target = candidate?.let { lines.getOrNull(it)?.timeMs }
             if (target != null) Row(Modifier.align(Alignment.Center).fillMaxWidth().testTag("lyric-seek-preview"),
                 verticalAlignment = Alignment.CenterVertically) {

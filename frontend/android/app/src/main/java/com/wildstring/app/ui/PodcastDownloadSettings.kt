@@ -385,7 +385,7 @@ fun PodcastDownloadQueueDialog(
                                                 )
                                                 Text(
                                                     text = task.podcastTitle,
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
@@ -395,8 +395,8 @@ fun PodcastDownloadQueueDialog(
                                             Text(
                                                 text = if (task.status == "retrying") stringResource(R.string.pod_dl_status_retrying, task.attempt ?: 1, task.maxRetries ?: 3)
                                                 else if (pct != null) "$pct%" else stringResource(R.string.pod_dl_status_downloading),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.tertiary,
                                                 fontWeight = FontWeight.SemiBold,
                                             )
                                         }
@@ -414,12 +414,12 @@ fun PodcastDownloadQueueDialog(
                                         ) {
                                             Text(
                                                 text = (if (task.slowMode) stringResource(R.string.pod_dl_slow_prefix) else "") + (task.speedHuman ?: stringResource(R.string.pod_dl_fetching_data)),
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
                                                 text = if (!task.downloadedHuman.isNullOrBlank()) "${task.downloadedHuman} / ${task.totalHuman?.takeUnless { it == "未知大小" } ?: stringResource(R.string.pod_dl_unknown_total)}" else stringResource(R.string.pod_dl_connecting),
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
@@ -445,7 +445,7 @@ fun PodcastDownloadQueueDialog(
                                             )
                                             Text(
                                                 text = task.podcastTitle,
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -454,7 +454,7 @@ fun PodcastDownloadQueueDialog(
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             text = stringResource(R.string.pod_dl_queued_rank, idx + 1),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -549,7 +549,7 @@ fun PodcastDownloadQueueDialog(
                                             )
                                             Text(
                                                 text = task.podcastTitle,
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
@@ -657,7 +657,7 @@ fun PodcastDownloadQueueDialog(
                                             )
                                             Text(
                                                 text = task.podcastTitle,
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -666,8 +666,8 @@ fun PodcastDownloadQueueDialog(
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             text = stringResource(R.string.pod_dl_downloaded_badge),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.tertiary,
                                         )
                                     }
                                 }

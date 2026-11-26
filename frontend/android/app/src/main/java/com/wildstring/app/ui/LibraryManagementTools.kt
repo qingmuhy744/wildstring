@@ -129,7 +129,7 @@ private fun OnlineMetadataMatcherCard(
                             ) {
                                 Text(
                                     stringResource(R.string.lib_mgmt_candidates_count, suggestions.size),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
@@ -161,7 +161,7 @@ private fun OnlineMetadataMatcherCard(
                 Text(
                     message!!,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
 
@@ -209,11 +209,11 @@ private fun OnlineMetadataMatcherCard(
                                         ) {
                                             Text(
                                                 stringResource(R.string.lib_mgmt_score_match, scorePct),
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                             )
                                         }
-                                        Text(providerLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(providerLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Button(
                                         onClick = {
@@ -240,9 +240,9 @@ private fun OnlineMetadataMatcherCard(
                                             message = AppLanguage.string(R.string.lib_mgmt_applied_candidate_message, index + 1)
                                         },
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(32.dp)
+                                        modifier = Modifier.heightIn(min = 32.dp)
                                     ) {
-                                        Text(stringResource(R.string.lib_mgmt_apply_to_form), style = MaterialTheme.typography.labelSmall)
+                                        Text(stringResource(R.string.lib_mgmt_apply_to_form), style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
 
@@ -368,7 +368,7 @@ internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
                 if (state.current?.id != track.id) Button({ vm.play(listOf(track)) }) { Text(stringResource(R.string.lib_mgmt_play_to_time)) }
                 else Row(verticalAlignment = Alignment.CenterVertically) { TextButton(vm::toggle) { Text(if (state.playing) stringResource(R.string.lib_mgmt_pause) else stringResource(R.string.lib_mgmt_play)) }; Text(formatTime(position), style = TextStyle(fontFeatureSettings = "tnum")); TextButton({ vm.seek(0) }) { Text(stringResource(R.string.lib_mgmt_seek_start)) } }
                 lines.forEachIndexed { index, line -> Row(Modifier.fillMaxWidth().clickable { cursor = index }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: stringResource(R.string.lib_mgmt_unmarked)) + "  " + line.ifBlank { stringResource(R.string.lib_mgmt_interlude) }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = TextStyle(fontFeatureSettings = "tnum"))
+                    RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: stringResource(R.string.lib_mgmt_unmarked)) + "  " + line.ifBlank { stringResource(R.string.lib_mgmt_interlude) }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface, style = TextStyle(fontFeatureSettings = "tnum"))
                 } }
                 Button({
                     if (cursor < lines.size) {

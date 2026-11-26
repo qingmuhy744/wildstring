@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError, time } from './api';
+import { Icon } from './icons';
 
 export interface Book {
   id: string;
@@ -24,6 +25,7 @@ export interface Book {
 }
 
 type Mode = 'scroll' | 'paginated';
+type ReaderPanel = 'contents' | 'notes' | 'search' | 'appearance';
 export type Color = 'amber' | 'terracotta' | 'sage' | 'stone';
 const colors: Color[] = ['amber', 'terracotta', 'sage', 'stone'];
 interface Anchor {
@@ -107,8 +109,13 @@ function useCheckpoint<T>(
   onLoad: (value: T & Checkpoint) => void,
   initialIntent: 'resume' | 'restart' = 'resume',
 ) {
-  const [error, setError] = useState('');
-  const requestKey = path ? `${path}|${initialIntent}` : '';
+  const [error, setError] = useState<{
+    kind: 'load' | 'save' | 'conflict';
+    message: string;
+  } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retryIntent = useRef(initialIntent);
+  const requestKey = path ? `${path}|${initialIntent}|${attempt}` : '';
   const [settledKey, setSettledKey] = useState('');
   const load = useRef(onLoad);
   load.current = onLoad;
@@ -122,36 +129,37 @@ function useCheckpoint<T>(
   });
   const requests = useRef(Promise.resolve());
   useEffect(() => {
-    session.current = {
+    const active = {
       id: key(),
       version: 0,
       sequence: 0,
       ready: false,
       blocked: false,
-      intent: initialIntent,
+      intent: attempt ? retryIntent.current : initialIntent,
     };
-    setError('');
+    session.current = active;
+    setError(null);
     if (!path) {
       setSettledKey('');
       return;
     }
-    const currentKey = `${path}|${initialIntent}`;
     const controller = new AbortController();
     void api<T & Checkpoint>(path, { signal: controller.signal })
       .then((value) => {
-        session.current.version = value.version;
-        session.current.ready = true;
+        if (controller.signal.aborted) return;
+        active.version = value.version;
+        active.ready = true;
         load.current(value);
-        setSettledKey(currentKey);
+        setSettledKey(requestKey);
       })
       .catch((cause: Error) => {
         if (!controller.signal.aborted) {
-          setError(cause.message);
-          setSettledKey(currentKey);
+          setError({ kind: 'load', message: cause.message });
+          setSettledKey(requestKey);
         }
       });
     return () => controller.abort();
-  }, [path, initialIntent]);
+  }, [path, initialIntent, requestKey, attempt]);
   const save = useCallback(
     (fields: T, completed = false) => {
       const current = session.current;
@@ -175,15 +183,29 @@ function useCheckpoint<T>(
             }),
           });
           current.version = value.version;
+          if (session.current === current) {
+            setError((previous) => (previous?.kind === 'save' ? null : previous));
+          }
         } catch (cause) {
-          if (cause instanceof ApiError && cause.status === 409) current.blocked = true;
-          setError((cause as Error).message);
+          const conflict = cause instanceof ApiError && cause.status === 409;
+          if (conflict) current.blocked = true;
+          if (session.current === current) {
+            setError({ kind: conflict ? 'conflict' : 'save', message: (cause as Error).message });
+          }
         }
       });
     },
     [path],
   );
-  return { save, error, ready: !path || settledKey === requestKey };
+  return {
+    save,
+    error,
+    ready: !path || settledKey === requestKey,
+    retry: () => {
+      retryIntent.current = session.current.blocked ? 'resume' : session.current.intent;
+      setAttempt((value) => value + 1);
+    },
+  };
 }
 
 function codePointLength(value: string): number {
@@ -363,10 +385,14 @@ export function BookReader({
   const { t } = useTranslation();
   const prefix = `/books/${book.id}`;
   const [chapters, setChapters] = useState<EbookChapter[]>([]);
+  const [manifestFailed, setManifestFailed] = useState(false);
+  const [manifestAttempt, setManifestAttempt] = useState(0);
   const [spine, setSpine] = useState(initialSpine ?? 0);
   const initialJump = useRef<number | null>(initialSpine);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [loadedSpine, setLoadedSpine] = useState(-1);
+  const [failedSpine, setFailedSpine] = useState<number | null>(null);
+  const [chapterAttempt, setChapterAttempt] = useState(0);
   const [mode, setMode] = useState<Mode>('scroll');
   const [dark, setDark] = useState(false);
   const [font, setFont] = useState('serif');
@@ -392,7 +418,9 @@ export function BookReader({
   const [editingAnnColor, setEditingAnnColor] = useState<Color>('amber');
   const [editingAnnNote, setEditingAnnNote] = useState('');
   const [query, setQuery] = useState('');
-  const [panel, setPanel] = useState<'contents' | 'notes' | 'search' | 'appearance' | null>(null);
+  const [panel, setPanel] = useState<ReaderPanel | null>(null);
+  const panelTrigger = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const pending = useRef<Anchor | null>(null);
@@ -423,6 +451,9 @@ export function BookReader({
   const checkpoint = useCheckpoint<Reading>(
     prefix + '/reading-progress',
     (value) => {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = 0;
+      completedSent.current = false;
       if (value.version) setMode(value.reading_mode);
       if (initialJump.current !== null) {
         const target = initialJump.current;
@@ -441,18 +472,27 @@ export function BookReader({
   );
 
   useEffect(() => {
-    completedSent.current = false;
-    setPanel(null);
-    setSearchedQuery(null);
+    setManifestFailed(false);
+    const request = new AbortController();
+    void api<{ chapters: EbookChapter[] }>(prefix + '/ebook/manifest', { signal: request.signal })
+      .then((value) => {
+        if (!request.signal.aborted) setChapters(value.chapters);
+      })
+      .catch(() => {
+        if (!request.signal.aborted) setManifestFailed(true);
+      });
+    return () => request.abort();
+  }, [prefix, manifestAttempt]);
+
+  useEffect(() => {
     const request = new AbortController();
     const load = <T,>(path: string) => api<T>(prefix + path, { signal: request.signal });
     void Promise.all([
-      load<{ chapters: EbookChapter[] }>('/ebook/manifest'),
       load<{ items: Bookmark[] }>('/bookmarks'),
       load<{ items: Annotation[] }>('/annotations'),
     ])
-      .then(([bookData, savedMarks, savedAnnotations]) => {
-        setChapters(bookData.chapters);
+      .then(([savedMarks, savedAnnotations]) => {
+        if (request.signal.aborted) return;
         setMarks(savedMarks.items.filter((mark) => mark.kind === 'ebook'));
         setAnnotations(savedAnnotations.items);
       })
@@ -466,17 +506,19 @@ export function BookReader({
     setSelection(null);
     setDraftNoteMode(false);
     setActiveMark(null);
+    setFailedSpine(null);
     const request = new AbortController();
     void api<{ blocks: Block[] }>(prefix + `/ebook/chapters/${spine}`, { signal: request.signal })
       .then((data) => {
+        if (request.signal.aborted) return;
         setBlocks(data.blocks);
         setLoadedSpine(spine);
       })
-      .catch((cause: Error) => {
-        if (!request.signal.aborted) setError(cause.message);
+      .catch(() => {
+        if (!request.signal.aborted) setFailedSpine(spine);
       });
     return () => request.abort();
-  }, [prefix, spine]);
+  }, [prefix, spine, chapterAttempt]);
 
   function restore(anchor: Anchor) {
     const viewport = scroll.current;
@@ -537,6 +579,11 @@ export function BookReader({
     return () => observer.disconnect();
     // The active reading mode determines the scroll axis on resize.
   }, [mode, spine, loadedSpine]);
+
+  useEffect(() => {
+    const selector = panel === 'search' ? 'input[type="search"]' : 'button';
+    if (panel) drawerRef.current?.querySelector<HTMLElement>(selector)?.focus();
+  }, [panel]);
 
   function syncAnchor() {
     const viewport = scroll.current;
@@ -646,7 +693,7 @@ export function BookReader({
     const next = spine + direction;
     if (next >= 0 && next < chapters.length)
       jump({ spine_index: next, block_index: 0, char_offset: 0 });
-    else if (direction > 0 && blocks.length) {
+    else if (direction > 0 && loadedSpine === spine && blocks.length) {
       completedSent.current = true;
       checkpoint.save(
         {
@@ -830,12 +877,57 @@ export function BookReader({
   const activeChapter =
     chapters.find((chapter) => chapter.spine_index === spine) || chapters[spine];
 
-  function togglePanel(next: 'contents' | 'notes' | 'search' | 'appearance') {
-    setPanel((current) => (current === next ? null : next));
+  function dismissPanel() {
+    setPanel(null);
+    setEditingAnnId(null);
+    panelTrigger.current?.focus();
+  }
+
+  function togglePanel(next: ReaderPanel, trigger: HTMLButtonElement) {
+    if (panel === next) dismissPanel();
+    else {
+      panelTrigger.current = trigger;
+      setPanel(next);
+      setEditingAnnId(null);
+    }
+  }
+
+  function recoveryNotice(message: string, retry: () => void, label = t('bookshelf.retry')) {
+    return (
+      <div className="book-reader-alert book-reader-rail">
+        <span role="alert">{message}</span>
+        <button
+          type="button"
+          onClick={() => {
+            scroll.current?.focus({ preventScroll: true });
+            retry();
+          }}
+        >
+          {label}
+        </button>
+      </div>
+    );
   }
 
   return (
-    <section className={`book-reader ${dark ? 'book-reader-dark' : ''}`}>
+    <section
+      className={`book-reader ${dark ? 'book-reader-dark' : ''}`}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        if (selection || activeMark) {
+          setSelection(null);
+          setDraftNoteMode(false);
+          setActiveMark(null);
+          window.getSelection()?.removeAllRanges();
+          scroll.current?.focus({ preventScroll: true });
+        } else if (editingAnnId) {
+          setEditingAnnId(null);
+          drawerRef.current?.querySelector('button')?.focus();
+        } else if (panel) dismissPanel();
+        else return;
+        event.preventDefault();
+      }}
+    >
       <header className="book-reader-topbar">
         <div className="book-reader-rail book-reader-topbar-inner">
           <div className="book-reader-top-start">
@@ -867,7 +959,7 @@ export function BookReader({
               type="button"
               className="book-reader-btn"
               aria-expanded={panel === 'contents'}
-              onClick={() => togglePanel('contents')}
+              onClick={(event) => togglePanel('contents', event.currentTarget)}
             >
               {t('bookshelf.contents')}
             </button>
@@ -875,7 +967,7 @@ export function BookReader({
               type="button"
               className="book-reader-btn tnum"
               aria-expanded={panel === 'notes'}
-              onClick={() => togglePanel('notes')}
+              onClick={(event) => togglePanel('notes', event.currentTarget)}
             >
               {noteCount > 0
                 ? t('bookshelf.notesCount', { count: noteCount })
@@ -885,7 +977,7 @@ export function BookReader({
               type="button"
               className="book-reader-btn"
               aria-expanded={panel === 'search'}
-              onClick={() => togglePanel('search')}
+              onClick={(event) => togglePanel('search', event.currentTarget)}
             >
               {t('bookshelf.search')}
             </button>
@@ -893,7 +985,7 @@ export function BookReader({
               type="button"
               className="book-reader-btn"
               aria-expanded={panel === 'appearance'}
-              onClick={() => togglePanel('appearance')}
+              onClick={(event) => togglePanel('appearance', event.currentTarget)}
             >
               {t('bookshelf.appearance')}
             </button>
@@ -917,14 +1009,39 @@ export function BookReader({
           </div>
         </div>
       )}
-      {(error || checkpoint.error) && (
+      {(error || checkpoint.error?.kind === 'save') && (
         <p className="book-reader-alert book-reader-rail" role="alert">
-          {error || checkpoint.error}
+          {error || checkpoint.error?.message}
         </p>
       )}
+      {manifestFailed &&
+        recoveryNotice(t('bookshelf.contentsLoadFailed'), () => setManifestAttempt((i) => i + 1))}
+      {failedSpine === spine &&
+        recoveryNotice(t('bookshelf.chapterLoadFailed'), () => setChapterAttempt((i) => i + 1))}
+      {checkpoint.error?.kind === 'load' &&
+        recoveryNotice(t('bookshelf.readingProgressLoadFailed'), checkpoint.retry)}
+      {checkpoint.error?.kind === 'conflict' &&
+        recoveryNotice(
+          t('bookshelf.readingProgressConflict'),
+          checkpoint.retry,
+          t('bookshelf.reloadReadingProgress'),
+        )}
       <div ref={stageRef} className="book-reader-stage">
         {panel !== null && (
-          <div className="book-reader-drawer">
+          <div
+            ref={drawerRef}
+            className="book-reader-drawer"
+            role="group"
+            aria-label={t(`bookshelf.${panel}`)}
+          >
+            <button
+              type="button"
+              className="book-reader-drawer-close icon-button"
+              aria-label={t('common.close')}
+              onClick={dismissPanel}
+            >
+              <Icon name="close" />
+            </button>
             {panel === 'contents' &&
               (chapters.length ? (
                 <ul className="book-chapter-list">
@@ -939,7 +1056,7 @@ export function BookReader({
                             block_index: 0,
                             char_offset: 0,
                           });
-                          setPanel(null);
+                          dismissPanel();
                         }}
                       >
                         <span className="book-chapter-num tnum">
@@ -982,7 +1099,7 @@ export function BookReader({
                             className="book-bookmark-quote"
                             onClick={() => {
                               jump(mark);
-                              setPanel(null);
+                              dismissPanel();
                             }}
                           >
                             {mark.excerpt || t('bookshelf.bookmark')}
@@ -1023,7 +1140,7 @@ export function BookReader({
                                   block_index: annotation.start_block_index,
                                   char_offset: annotation.start_char_offset,
                                 });
-                                setPanel(null);
+                                dismissPanel();
                               }}
                             >
                               {annotation.selected_text}
@@ -1147,7 +1264,7 @@ export function BookReader({
                           className="book-bookmark-quote"
                           onClick={() => {
                             jump(match);
-                            setPanel(null);
+                            dismissPanel();
                           }}
                         >
                           {match.excerpt}
@@ -1380,10 +1497,12 @@ export function BookReader({
           tabIndex={0}
           aria-label={book.title}
         >
-          {loadedSpine !== spine && !error ? (
-            <p role="status" className="muted book-reader-loading">
-              {t('bookshelf.loading')}
-            </p>
+          {loadedSpine !== spine ? (
+            failedSpine !== spine && (
+              <p role="status" className="muted book-reader-loading">
+                {t('bookshelf.loading')}
+              </p>
+            )
           ) : (
             <article
               className="book-reader-document"
@@ -1450,11 +1569,34 @@ export function BookReader({
             <span />
           )}
           <div className="book-reader-pager">
-            <button type="button" onClick={() => page(-1)}>
-              {t('bookshelf.previous')}
+            <button
+              type="button"
+              onClick={() => page(-1)}
+              disabled={mode === 'scroll' && spine === 0}
+            >
+              {t(mode === 'scroll' ? 'bookshelf.prevChapter' : 'bookshelf.previous')}
             </button>
-            <button type="button" onClick={() => page(1)}>
-              {t('bookshelf.next')}
+            <button
+              type="button"
+              onClick={() => page(1)}
+              disabled={
+                !chapters.length ||
+                (mode === 'scroll' &&
+                  spine === chapters.length - 1 &&
+                  (loadedSpine !== spine ||
+                    !blocks.length ||
+                    !checkpoint.ready ||
+                    checkpoint.error?.kind === 'load' ||
+                    checkpoint.error?.kind === 'conflict'))
+              }
+            >
+              {t(
+                mode === 'paginated'
+                  ? 'bookshelf.next'
+                  : spine === chapters.length - 1
+                    ? 'bookshelf.finishReading'
+                    : 'bookshelf.nextChapter',
+              )}
             </button>
           </div>
         </div>
@@ -1749,7 +1891,7 @@ export function useBookAudioSession({
     timer,
     playing,
     positionMs,
-    error: error || checkpoint.error,
+    error: error || checkpoint.error?.message || '',
     audio,
     open,
     close,
@@ -1869,6 +2011,10 @@ export function BookAudio({ book, session }: { book: Book; session: BookAudioSes
           type="range"
           className="book-audio-scrubber"
           aria-label={current.title}
+          aria-valuetext={t('playerPage.progressTimeAria', {
+            elapsed: time(session.positionMs / 1000),
+            total: time(current.duration_ms / 1000),
+          })}
           min={0}
           max={Math.max(1, current.duration_ms)}
           value={Math.min(current.duration_ms, session.positionMs)}
