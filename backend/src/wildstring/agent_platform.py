@@ -147,7 +147,7 @@ class Core:
     def credentials(self, actor):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM agent_credentials WHERE user_id=? ORDER BY created_at DESC",
+                "SELECT * FROM agent_credentials WHERE user_id=? AND oauth_grant_id IS NULL ORDER BY created_at DESC",
                 (actor.user_id,),
             ).fetchall()
         return [self.credential_public(row) for row in rows]

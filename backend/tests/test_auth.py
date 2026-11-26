@@ -60,7 +60,7 @@ def test_schema_62_preserves_sessions_and_removes_legacy_login_guard(settings):
             db.execute("PRAGMA user_version=61")
         database.initialize()
         with database.connect() as db:
-            assert db.execute("PRAGMA user_version").fetchone()[0] == 62
+            assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
             assert db.execute("PRAGMA index_info(sessions_by_expiry)").fetchone()[2] == "expires_at"
             assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='login_guard'").fetchone()
             assert [tuple(row) for row in db.execute("SELECT * FROM sessions")] == before

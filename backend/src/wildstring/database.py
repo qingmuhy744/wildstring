@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 62
+SCHEMA_VERSION = 63
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -809,6 +809,10 @@ class Database:
                 connection.execute("DROP TABLE IF EXISTS login_guard")
                 connection.execute("PRAGMA user_version = 62")
                 connection.commit()
+            if current < 63:
+                from wildstring.oauth_schema import migrate as migrate_oauth
+
+                migrate_oauth(connection)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tracks_by_album ON tracks(album_id, status)"
             )

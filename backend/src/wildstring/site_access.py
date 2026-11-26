@@ -96,7 +96,8 @@ class HostAllowlist:
             return
         path = scope["path"]
         is_mcp = path == "/mcp" or path.startswith("/mcp/")
-        private_headers = {"Cache-Control": "no-store"} if is_mcp else None
+        is_no_store = is_mcp or path == "/oauth" or path.startswith("/oauth/")
+        private_headers = {"Cache-Control": "no-store"} if is_no_store else None
 
         try:
             settings = await anyio.to_thread.run_sync(self.access.read)
@@ -146,10 +147,12 @@ class HostAllowlist:
                 return
 
         async def private_send(message):
-            if message["type"] == "http.response.start" and (is_mcp or path.startswith("/api/v1/")):
+            if message["type"] == "http.response.start" and (
+                is_no_store or path.startswith("/api/v1/")
+            ):
                 raw_headers = list(message.get("headers", []))
-                cache_control = b"no-store" if is_mcp else b"private, no-store"
-                if not is_mcp and any(
+                cache_control = b"no-store" if is_no_store else b"private, no-store"
+                if not is_no_store and any(
                     key.lower() == b"cache-control"
                     and value.strip().lower() == b"private, no-cache"
                     for key, value in raw_headers

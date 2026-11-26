@@ -109,3 +109,12 @@ remote + headers + oauth=false，Antigravity 使用 serverUrl + headers 占位�
 - https://cursor.com/docs/context/mcp
 - https://antigravity.google/docs/mcp
 - https://opencode.ai/docs/mcp-servers/
+
+## OAuth 2.1（与静态凭据双轨并存）
+
+为适配 Gemini、Claude Web、ChatGPT Web 等通过浏览器授权码接入的云端 MCP 客户端，在完整保留手动签发 `ws_…` 静态个人访问令牌（PAT）与局域网／stdio 接入方式的前提下，叠加标准 OAuth 2.1 发现与换票层，底层复用同一张 `agent_credentials` 表及 `/mcp` 鉴权与权限／多库隔离校验：
+
+- **发现元数据**：`GET /.well-known/oauth-protected-resource`、`GET /.well-known/oauth-protected-resource/mcp`（RFC 9728）与 `GET /.well-known/oauth-authorization-server`（RFC 8414）；`/mcp` 未鉴权时在 `401` 响应返回 `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`。
+- **动态与静态客户端**：`POST /oauth/register`（RFC 7591，按 IP 限流并自动清理未授权超期注册；支持 1–16 条精确回调地址，仅允许 `https://` 与 RFC 8252 回环 `http://127.0.0.1|localhost|[::1]`）；同时提供需登录的 `GET/POST/DELETE /api/v1/oauth/clients` 供手动创建静态 `client_id` / `client_secret`。
+- **浏览器授权确认**：`GET /oauth/authorize` 渲染 Web 授权确认页（复用现有 `SameSite=Strict` 会话 Cookie 与登录流），经 `POST /api/v1/oauth/authorize/context` 与 `POST /api/v1/oauth/authorize/decision`（均需 `X-Wildstring-Client`）核验客户端、回调地址、PKCE `S256`、`resource`（RFC 8707）及账号权限上限，签发 60 秒单次授权码。
+- **换票、轮换与吊销**：`POST /oauth/token` 支持 `authorization_code`（强制 PKCE `S256`、重放检测并吊销关联授权）与 `refresh_token`（30 天滚动轮换、重放检测并吊销整条授权、仅允许缩小 scope、实时重检账号启用状态与角色上限），签发 1 小时有效 `ws_…` 访问令牌（`agent_credentials.oauth_grant_id` 关联对应授权，不混入手工 PAT 列表）；`POST /oauth/revoke`（RFC 7009）与 `GET/DELETE /api/v1/oauth/grants` 支持客户端或站内一键撤销。

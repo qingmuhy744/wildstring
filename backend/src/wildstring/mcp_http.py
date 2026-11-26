@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from wildstring.mcp_bridge import BridgeError, BridgeProtocol
+from wildstring.mcp_oauth import protected_resource_metadata_url
 
 
 def _normalized_authority(scheme: str, netloc: str) -> str:
@@ -104,7 +105,13 @@ class HTTPMCP:
             response = JSONResponse(
                 {"detail": detail},
                 status_code=status,
-                headers={"WWW-Authenticate": "Bearer"} if status == 401 else None,
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer resource_metadata="{protected_resource_metadata_url(request)}"'
+                    )
+                }
+                if status == 401
+                else None,
             )
             await response(scope, receive, send)
             return

@@ -5,6 +5,7 @@ import i18n, { applyLanguagePreference } from './i18n';
 import { api, type User } from './api';
 import { Brand } from './brand';
 import { Library } from './library';
+import { OAuthAuthorize } from './oauth-authorize';
 import { ThemeControl } from './theme';
 import { DesktopHelpProvider } from './desktop-help';
 import { clearOfflineAccount, offlineUser, setOfflineAccount } from './offline';
@@ -259,11 +260,39 @@ function App() {
         <p role="status">{t('connection.connecting')}</p>
       </main>
     );
+  const isOAuthAuthorize = window.location.pathname.replace(/\/+$/, '') === '/oauth/authorize';
+  async function handleLogout() {
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    let revoked = false;
+    try {
+      if (navigator.onLine) {
+        await api('/auth/logout', { method: 'POST', signal: controller.signal });
+        revoked = true;
+      }
+    } catch {
+      /* Local sign-out must remain available when the server is unreachable. */
+    } finally {
+      clearTimeout(timer);
+    }
+    localStorage.setItem('wildstring:offline-signed-out', '1');
+    setAuth((value) => (value ? { ...value, authenticated: false } : value));
+    try {
+      await clearOfflineAccount();
+      setNotice(revoked ? '' : i18n.t('session.localSignedOut'));
+    } catch {
+      setNotice(i18n.t('session.localSignedOutCleanupFailed'));
+    } finally {
+      logoutPending.current = false;
+    }
+  }
   if (!auth.authenticated)
     return (
       <Login
         configured={auth.configured}
-        notice={notice}
+        notice={notice || (isOAuthAuthorize ? t('oauth.signInToContinue') : '')}
         onLogin={async (user) => {
           setNotice('');
           if (offlineUser() && offlineUser()?.id !== user.id) await clearOfflineAccount();
@@ -273,39 +302,8 @@ function App() {
         }}
       />
     );
-  return (
-    <Library
-      key={auth.user!.id}
-      user={auth.user!}
-      onLogout={async () => {
-        if (logoutPending.current) return;
-        logoutPending.current = true;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 2000);
-        let revoked = false;
-        try {
-          if (navigator.onLine) {
-            await api('/auth/logout', { method: 'POST', signal: controller.signal });
-            revoked = true;
-          }
-        } catch {
-          /* Local sign-out must remain available when the server is unreachable. */
-        } finally {
-          clearTimeout(timer);
-        }
-        localStorage.setItem('wildstring:offline-signed-out', '1');
-        setAuth({ ...auth, authenticated: false });
-        try {
-          await clearOfflineAccount();
-          setNotice(revoked ? '' : i18n.t('session.localSignedOut'));
-        } catch {
-          setNotice(i18n.t('session.localSignedOutCleanupFailed'));
-        } finally {
-          logoutPending.current = false;
-        }
-      }}
-    />
-  );
+  if (isOAuthAuthorize) return <OAuthAuthorize user={auth.user!} onSwitchAccount={handleLogout} />;
+  return <Library key={auth.user!.id} user={auth.user!} onLogout={handleLogout} />;
 }
 
 createRoot(document.getElementById('root')!).render(
