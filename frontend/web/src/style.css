@@ -1762,7 +1762,7 @@ a {
 }
 
 /* Immersive player: one persistent audio element, two views of its controls. */
-.transport-buttons svg {
+.transport-buttons .icon-button svg {
   width: 20px;
   height: 20px;
   fill: currentColor;
@@ -2146,7 +2146,7 @@ a {
 .fullscreen-controls .transport-buttons .icon-button:hover {
   background: #ffffff0a;
 }
-.fullscreen-controls .transport-buttons svg {
+.fullscreen-controls .transport-buttons .icon-button svg {
   width: 25px;
   height: 25px;
 }

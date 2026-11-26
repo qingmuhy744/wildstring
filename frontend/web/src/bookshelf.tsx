@@ -492,15 +492,41 @@ export function Bookshelf({
         .filter(Boolean)
         .join(' · ')
     : '';
+  const isSelectedAudioLoaded = Boolean(selected && audioSession.book?.id === selected.id);
+  const isSelectedPlaying = Boolean(isSelectedAudioLoaded && audioSession.playing);
   const readingProgress = selected?.reading_progress;
-  const listeningProgress = selected?.listening_progress;
+  const savedListeningProgress = selected?.listening_progress;
+  const liveAudioTotal =
+    isSelectedAudioLoaded && audioSession.chapters?.length
+      ? audioSession.chapters.reduce((sum, chapter) => sum + chapter.duration_ms, 0)
+      : 0;
+  const listeningProgress =
+    isSelectedAudioLoaded && audioSession.current
+      ? {
+          chapter_index: audioSession.current.chapter_index,
+          chapter_title: audioSession.current.title,
+          chapter_position_ms: audioSession.positionMs,
+          book_position_ms: audioSession.current.start_book_ms + audioSession.positionMs,
+          total_duration_ms: liveAudioTotal,
+          overall_ratio:
+            liveAudioTotal > 0
+              ? Math.min(
+                  1,
+                  (audioSession.current.start_book_ms + audioSession.positionMs) / liveAudioTotal,
+                )
+              : 0,
+          playback_rate: audioSession.rate,
+          completed: false,
+          updated_at: savedListeningProgress?.updated_at ?? Date.now() / 1000,
+        }
+      : savedListeningProgress;
   const alignmentKey = `${selected?.id}:${readingProgress?.updated_at}`;
   const showAudioAlignment =
     selected?.has_ebook &&
     selected.has_audiobook &&
     readingProgress &&
     alignmentKey !== dismissedAlignment &&
-    alignmentAvailable(readingProgress, listeningProgress);
+    alignmentAvailable(readingProgress, savedListeningProgress);
 
   function alignAudio() {
     if (!selected || !readingProgress || !audioChapters?.length) return;
@@ -541,9 +567,6 @@ export function Bookshelf({
       )
     : [];
 
-  const isSelectedPlaying = Boolean(
-    selected && audioSession.book?.id === selected.id && audioSession.playing,
-  );
   const showAudioChapters = Boolean(
     selected?.has_audiobook && (!selected.has_ebook || chapterTab === 'audio'),
   );
@@ -654,20 +677,28 @@ export function Bookshelf({
                     type="button"
                     className={!selected.has_ebook ? 'primary' : undefined}
                     aria-pressed={isSelectedPlaying}
-                    onClick={() =>
-                      audioSession.open(
-                        selected,
-                        true,
-                        listeningProgress?.completed ? 0 : undefined,
-                      )
-                    }
+                    onClick={() => {
+                      if (isSelectedAudioLoaded) {
+                        audioSession.togglePlay();
+                      } else {
+                        audioSession.open(
+                          selected,
+                          true,
+                          savedListeningProgress?.completed ? 0 : undefined,
+                        );
+                      }
+                    }}
                   >
                     {t(
-                      listeningProgress?.completed
-                        ? 'bookshelf.listenAgain'
-                        : listeningProgress
+                      isSelectedPlaying
+                        ? 'bookshelf.pauseListening'
+                        : isSelectedAudioLoaded
                           ? 'bookshelf.continueListening'
-                          : 'bookshelf.listen',
+                          : savedListeningProgress?.completed
+                            ? 'bookshelf.listenAgain'
+                            : savedListeningProgress
+                              ? 'bookshelf.continueListening'
+                              : 'bookshelf.listen',
                     )}
                   </button>
                 )}
@@ -1148,6 +1179,33 @@ export function Bookshelf({
       ) : (
         <>
           <div className="bookshelf-controls bookshelf-filter-bar">
+            {!loading && resume && (
+              <button
+                type="button"
+                className="primary bookshelf-resume-btn"
+                title={t(
+                  resume.resume_kind === 'reading'
+                    ? 'bookshelf.resumeReading'
+                    : 'bookshelf.resumeListening',
+                  { title: resume.title },
+                )}
+                onClick={() => {
+                  changeBook(resume);
+                  if (resume.resume_kind === 'reading') enterReading(resume);
+                  else {
+                    audioSession.open(resume, true);
+                    setListening(true);
+                  }
+                }}
+              >
+                {t(
+                  resume.resume_kind === 'reading'
+                    ? 'bookshelf.resumeReading'
+                    : 'bookshelf.resumeListening',
+                  { title: resume.title },
+                )}
+              </button>
+            )}
             <select
               aria-label={t('bookshelf.library')}
               value={libraryId}
@@ -1188,28 +1246,6 @@ export function Bookshelf({
               <option value="finished">{t('bookshelf.finished')}</option>
             </select>
           </div>
-          {!loading && resume && (
-            <p className="bookshelf-resume">
-              <button
-                className="primary"
-                onClick={() => {
-                  changeBook(resume);
-                  if (resume.resume_kind === 'reading') enterReading(resume);
-                  else {
-                    audioSession.open(resume);
-                    setListening(true);
-                  }
-                }}
-              >
-                {t(
-                  resume.resume_kind === 'reading'
-                    ? 'bookshelf.resumeReading'
-                    : 'bookshelf.resumeListening',
-                  { title: resume.title },
-                )}
-              </button>
-            </p>
-          )}
           {loading ? (
             <div className="bookshelf-loading">
               <p role="status" className="muted">

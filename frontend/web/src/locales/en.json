@@ -2476,6 +2476,7 @@
     "listen": "Listen",
     "continueReading": "Continue reading",
     "continueListening": "Continue listening",
+    "pauseListening": "Pause listening",
     "readAgain": "Read again",
     "listenAgain": "Listen again",
     "readingSummary": "Read · {{chapter}} ({{percent}}%)",
