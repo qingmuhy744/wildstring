@@ -620,18 +620,6 @@
     "home": "WildString home",
     "name": "WildString"
   },
-  "catalogGapCard": {
-    "coveragePercent": "{{percent}}% collected",
-    "emptyMatched": "No tracks by this artist in the local library yet",
-    "emptyMissing": "🎉 Perfect! All chart masterpieces for this artist are in your library!",
-    "playButton": "▶ Play",
-    "playTrackTitle": "Play this track",
-    "statusMissing": "Missing",
-    "subtitle": "Authoritative chart comparison",
-    "tabMatched": "In Library ({{count}})",
-    "tabMissing": "Missing ({{count}})",
-    "title": "{{artist}} · Global Charts Gap Analysis"
-  },
   "catalogSort": {
     "added_at": "Date added",
     "ariaLabel": "Sort list",
@@ -666,6 +654,7 @@
     "tracks": "Songs"
   },
   "common": {
+    "loading": "Loading…",
     "discardUnsavedChanges": "Discard unsaved changes?",
     "actionError": "That didn't finish. Try again.",
     "actions": "Actions for {{label}}",
@@ -3082,6 +3071,7 @@
     "unfollowedNotice": "Show unfollowed; auto-download paused. This setting will resume upon re-following."
   },
   "podcastDownloads": {
+    "retrySingle": "Retry",
     "activeCountSummary": "{{active}} downloading · {{queued}} queued",
     "clearCompletedNotice": "Completed records cleared; downloaded audio is preserved",
     "clearRecords": "Clear Records",
@@ -3911,7 +3901,6 @@
     "emptyHint": "Add tracks to the queue from song actions, or play directly from the library.",
     "moveDownIndex": "Move queue item {{index}} down",
     "moveUpIndex": "Move queue item {{index}} up",
-    "nextEpisode": "Next episode",
     "noMoreEpisodes": "No more episodes available to continue automatically for this podcast.",
     "orderAdjusted": "Playback order adjusted",
     "orderAria": "Podcast continue order",
@@ -4046,12 +4035,6 @@
       "model": "A model step didn't finish. Check the connection and try again.",
       "other": "This source query didn't finish; other available results were kept."
     }
-  },
-  "roles": {
-    "editor": "Metadata editor",
-    "librarian": "Librarian",
-    "listener": "Listener",
-    "owner": "Owner"
   },
   "serverSettings": {
     "description": "Name the server hosting your music library. Web settings take priority over environment configuration and persist across restarts.",

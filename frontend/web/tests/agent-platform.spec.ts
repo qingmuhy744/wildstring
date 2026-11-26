@@ -1,4 +1,4 @@
-import { section, manageTab, test } from './helpers';
+import { captureThemes, section, manageTab, test } from './helpers';
 import { expect, type Page } from '@playwright/test';
 import { login } from './helpers';
 const now = '2026-10-17T09:00:00Z';
@@ -1145,4 +1145,49 @@ test('整理方式由用户选择、按类型授权并保存，重新打开仍�
     path: `../../artifacts/application-policy-${info.project.name}.png`,
     fullPage: true,
   });
+});
+
+test('检查任务只在成功返回空列表后显示空态，隐藏与离线后可继续读取', async ({
+  page,
+  isMobile,
+}, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page);
+  let release = () => {};
+  const firstRead = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reads = 0;
+  await page.route('**/api/v1/agent/tasks?*', async (route) => {
+    if (++reads === 1) await firstRead;
+    return route.fulfill({ json: list([]) });
+  });
+  await login(page);
+  await section(page, '曲库检查');
+  const panel = page.getByRole('region', { name: '曲库检查', exact: true });
+  try {
+    await expect(panel.getByRole('status').filter({ hasText: '正在加载…' })).toBeVisible();
+    await expect(panel.getByText('还没有检查记录。')).toHaveCount(0);
+    await captureThemes(page, panel, info, 'audit-tasks-loading');
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(panel.getByText('正在加载…', { exact: true })).toHaveCount(0);
+    await expect(panel.getByText('还没有检查记录。')).toHaveCount(0);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+      window.dispatchEvent(new Event('offline'));
+    });
+    await expect(panel.getByRole('alert')).toContainText('无法连接音乐服务');
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
+      window.dispatchEvent(new Event('online'));
+    });
+    await expect(panel.getByText('还没有检查记录。')).toBeVisible();
+  } finally {
+    release();
+  }
 });

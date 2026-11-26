@@ -1,5 +1,14 @@
 import { expect, type Page } from '@playwright/test';
-import { audio, login, section, podcastCatalog, leaveSettings, manageTab, test } from './helpers';
+import {
+  captureThemes,
+  audio,
+  login,
+  section,
+  podcastCatalog,
+  leaveSettings,
+  manageTab,
+  test,
+} from './helpers';
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -1283,4 +1292,146 @@ test('单集行快捷待播切换、统一待播列表一键播放及底栏队�
     path: `../../artifacts/podcast-queue-panel-${info.project.name}.png`,
   });
   await queuePanel.getByRole('button', { name: '关闭队列', exact: true }).click();
+});
+
+test('待播仅把移动的单集转为手动，单节目分发保存失败恢复原值', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  let items = [5, 6, 4].map((n) => ({ episode_id: `radio-${n}`, origin: 'rule' }));
+  let written: typeof items = [];
+  let version = 1;
+  await page.route('**/api/v1/podcasts/queue', (route) => {
+    if (route.request().method() === 'PUT') {
+      items = written = route.request().postDataJSON().items;
+      return route.fulfill({ json: { version: ++version, items, notice: '' } });
+    }
+    return route.fulfill({ json: { version, items, device_id: '', updated_at: null } });
+  });
+  await page.route('**/api/v1/podcasts/queue/preferences', (route) =>
+    route.request().method() === 'PUT'
+      ? route.fulfill({ status: 503, json: { detail: 'temporary_failure' } })
+      : route.fulfill({ json: { auto_limit: 3, default_action: 'queue_last', shows: {} } }),
+  );
+  await podcastCatalog(page);
+  await page.getByRole('button', { name: '待播列表', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '待播列表' });
+  await dialog.getByRole('button', { name: /上移 .*第 6 集/ }).click();
+  await expect
+    .poll(() => written.map(({ episode_id, origin }) => [episode_id, origin]))
+    .toEqual([
+      ['radio-6', 'manual'],
+      ['radio-5', 'rule'],
+      ['radio-4', 'rule'],
+    ]);
+
+  await dialog.getByRole('tab', { name: /新集自动加入待播/ }).click();
+  const rule = dialog.getByRole('combobox', { name: '午后广播测试新集自动待播', exact: true });
+  await expect(rule).toHaveValue('queue_last');
+  await rule.selectOption('ignore');
+  await expect(dialog.getByRole('alert')).toContainText('暂时无法保存节目新集自动待播');
+  await expect(rule).toHaveValue('queue_last');
+  await captureThemes(page, dialog, info, 'audit-inbox');
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
+  const showRule = page
+    .locator('.podcast-meta-card')
+    .getByRole('combobox', { name: '新集自动待播' });
+  await expect(showRule).toHaveValue('queue_last');
+  await showRule.selectOption('ignore');
+  await expect(page.locator('.podcast-meta-card').getByRole('alert')).toBeVisible();
+  await expect(showRule).toHaveValue('queue_last');
+});
+
+test('共享音频翻页请求期间锁住按钮，失败后保留原页并允许重试', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  let release = () => {};
+  const firstNextPage = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let attempts = 0;
+  await page.route('**/api/v1/podcasts/resources?*', async (route) => {
+    const offset = Number(new URL(route.request().url()).searchParams.get('offset'));
+    if (offset === 50 && ++attempts === 1) {
+      await firstNextPage;
+      return route.fulfill({ status: 503, json: { detail: '暂时无法读取共享音频' } });
+    }
+    return route.fulfill({
+      json: {
+        total: 51,
+        total_bytes: 1_048_576,
+        items: [
+          {
+            id: `resource-${offset}`,
+            title: offset ? '第二页测试单集' : '第一页测试单集',
+            podcast_title: '午后广播测试',
+            reference_count: 1,
+            size_bytes: 524288,
+            version: 1,
+            active: false,
+            protected: false,
+          },
+        ],
+      },
+    });
+  });
+  await manageTab(page, '共享音频管理');
+  const panel = page.getByRole('region', { name: '共享音频管理', exact: true });
+  await expect(panel.getByText('第一页测试单集')).toBeVisible();
+  const next = panel.getByRole('button', { name: '下一页' });
+  const previous = panel.getByRole('button', { name: '上一页' });
+  await next.click();
+  try {
+    await expect(panel).toHaveAttribute('aria-busy', 'true');
+    await expect(next).toBeDisabled();
+    await expect(previous).toBeDisabled();
+    await expect(panel.getByText('第一页测试单集')).toBeVisible();
+  } finally {
+    release();
+  }
+  await expect(panel.getByRole('alert')).toContainText('暂时无法读取共享音频');
+  await next.click();
+  await expect(panel.getByText('第二页测试单集')).toBeVisible();
+  await expect(previous).toBeEnabled();
+  await expect(next).toBeDisabled();
+  await captureThemes(
+    page,
+    panel.locator('.podcast-resource-pagination'),
+    info,
+    'audit-resources',
+    {
+      viewport: true,
+    },
+  );
+  await previous.click();
+  await expect(panel.getByText('第一页测试单集')).toBeVisible();
+});
+
+test('失败单集显示翻译后的下载重试并重新保存', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await podcastCatalog(page);
+  const podcasts = await (await page.request.get('/api/v1/podcasts')).json();
+  const { id } = podcasts.find((show: { title: string }) => show.title === '午后广播测试')!;
+  await page.route(`**/api/v1/podcasts/${id}`, async (route) => {
+    const response = await route.fetch();
+    const detail = await response.json();
+    detail.episodes.find((episode: { id: string }) => episode.id === 'radio-6').download_status =
+      'failed';
+    return route.fulfill({ response, json: detail });
+  });
+  let retried = false;
+  await page.route('**/api/v1/podcasts/episodes/radio-6/download', (route) => {
+    retried = route.request().method() === 'POST';
+    return route.fulfill({ json: { saved: true, reused: true } });
+  });
+  await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
+  await page.getByRole('button', { name: /全部单集/ }).click();
+  const row = page.locator('.podcast-episode-row').filter({ hasText: '第 6 集' });
+  const retry = row.getByRole('button', { name: '重试', exact: true });
+  await expect(retry).toBeVisible();
+  await captureThemes(page, row, info, 'audit-download-retry');
+  await retry.click();
+  await expect.poll(() => retried).toBe(true);
+  await expect(retry).toHaveCount(0);
 });

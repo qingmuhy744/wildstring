@@ -3067,7 +3067,8 @@ def podcast_router(
             raise HTTPException(status_code=404, detail="episode_not_found")
         return ep
 
-    @router.api_route("/episodes/{episode_id}/stream", methods=["GET", "HEAD"])
+    @router.get("/episodes/{episode_id}/stream")
+    @router.head("/episodes/{episode_id}/stream")
     def stream_episode(
         episode_id: str,
         request: Request,

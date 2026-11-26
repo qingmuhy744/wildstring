@@ -10,26 +10,15 @@ export function QueuePanel({
   onClose,
   onNotice,
   embedded = false,
-  upNextOnly = false,
-  upNextPodcastId,
 }: {
   player: Player;
   onClose: () => void;
   onNotice: (message: string) => void;
   embedded?: boolean;
-  upNextOnly?: boolean;
-  upNextPodcastId?: string;
 }) {
   const { t } = useTranslation();
   const instruction = useId();
-  const entries = player.queue
-    .map((track, index) => ({ track, index }))
-    .filter(
-      ({ track, index }) =>
-        !upNextOnly ||
-        (index > player.index && (!upNextPodcastId || track.podcast_id === upNextPodcastId)),
-    );
-  const isPodcast = Boolean(player.current?.podcast_id) && !embedded && !upNextOnly;
+  const isPodcast = Boolean(player.current?.podcast_id) && !embedded;
   const preview = isPodcast ? player.podcastPreview : [];
   const preference = player.podcastPreference;
   const auto = preference.order !== 'off' && preference.autoContinue !== false;
@@ -50,16 +39,14 @@ export function QueuePanel({
       <div className="queue-heading">
         <div>
           <h2>
-            {upNextOnly
-              ? t('queuePanel.nextEpisode')
-              : t(
-                  player.heart
-                    ? player.heart.recommended
-                      ? 'queuePanel.heartActive'
-                      : 'queuePanel.heartAfter'
-                    : 'queuePanel.title',
-                )}{' '}
-            <small>{entries.length}</small>
+            {t(
+              player.heart
+                ? player.heart.recommended
+                  ? 'queuePanel.heartActive'
+                  : 'queuePanel.heartAfter'
+                : 'queuePanel.title',
+            )}{' '}
+            <small>{player.queue.length}</small>
           </h2>
         </div>
         <button className="icon-button" onClick={onClose} aria-label={t('queuePanel.close')}>
@@ -69,9 +56,9 @@ export function QueuePanel({
       <p className="sr-only" id={instruction}>
         {t('queuePanel.reorderInstruction')}
       </p>
-      {entries.length ? (
+      {player.queue.length ? (
         <ol>
-          {entries.map(({ track, index: i }, entryIndex) => (
+          {player.queue.map((track, i) => (
             <li
               key={`${track.id}-${i}`}
               aria-current={i === player.index ? 'true' : undefined}
@@ -80,8 +67,6 @@ export function QueuePanel({
               <span className="queue-index">
                 {i === player.index ? (
                   <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
-                ) : upNextOnly ? (
-                  entryIndex + 1
                 ) : (
                   i + 1
                 )}
@@ -156,7 +141,7 @@ export function QueuePanel({
             <div className="queue-continuation-list">
               {preview.map((track, idx) => (
                 <div className="queue-continuation-item" key={`${track.id}-${idx}`}>
-                  <span className="queue-index">{entries.length + idx + 1}</span>
+                  <span className="queue-index">{player.queue.length + idx + 1}</span>
                   <button
                     type="button"
                     className="track-title"

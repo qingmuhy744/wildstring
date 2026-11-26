@@ -1326,9 +1326,11 @@ export function AgentTasks({
                     </button>
                   </div>
                 ))}
-                {!tasks.value?.items.length && (
+                {tasks.loading && !tasks.value?.items.length ? (
+                  <p role="status">{t('common.loading')}</p>
+                ) : tasks.value?.items.length === 0 ? (
                   <p className="workspace-empty">{t('agentWorkbench.emptyTasks')}</p>
-                )}
+                ) : null}
                 <WorkspacePagination
                   total={tasks.value?.total || 0}
                   offset={offset}

@@ -274,7 +274,8 @@ def router(database, settings, auth, transcoding):
         except OSError as error:
             raise HTTPException(404, "book_asset_not_found") from error
 
-    @router.api_route("/books/{book_id}/ebook/download", methods=["GET", "HEAD"])
+    @router.get("/books/{book_id}/ebook/download")
+    @router.head("/books/{book_id}/ebook/download")
     def download(book_id: str, user: read, request: Request):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
@@ -307,9 +308,8 @@ def router(database, settings, auth, transcoding):
             )
             return {"total_duration_ms": audio[0], "chapters": [dict(row) for row in chapters]}
 
-    @router.api_route(
-        "/books/{book_id}/audiobook/files/{file_index}/stream", methods=["GET", "HEAD"]
-    )
+    @router.get("/books/{book_id}/audiobook/files/{file_index}/stream")
+    @router.head("/books/{book_id}/audiobook/files/{file_index}/stream")
     def audio(
         book_id: str,
         file_index: int,

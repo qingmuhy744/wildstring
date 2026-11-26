@@ -163,6 +163,7 @@ final class AlbumTracksModel {
 
     func loadInitial() async {
         revision += 1
+        isLoading = false
         items = []
         discs = []
         total = 0
@@ -220,10 +221,14 @@ final class AlbumTracksModel {
     func loadMore() async {
         guard !isLoading else { return }
         if didLoadOnce, !canLoadMore { return }
+        let loadingRevision = revision
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if loadingRevision == revision { isLoading = false }
+        }
         do {
             let page = try await fetchPage(pageSize, nextOffset)
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             var seen = Set(items.map(\.id))
             for item in page.items where seen.insert(item.id).inserted {
                 items.append(item)
@@ -234,6 +239,7 @@ final class AlbumTracksModel {
             didLoadOnce = true
             errorMessage = nil
         } catch {
+            guard loadingRevision == revision, !Task.isCancelled else { return }
             errorMessage = ErrorText.message(for: error)
             didLoadOnce = true
         }

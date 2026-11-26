@@ -1,4 +1,4 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 export const test = base.extend({
   page: async ({ page }, use) => {
@@ -159,4 +159,31 @@ export async function manageTab(page: Page, tab: string) {
     .getByRole('navigation', { name: '管理分类' })
     .getByRole('button', { name: tab, exact: true })
     .click();
+}
+
+export async function captureThemes(
+  page: Page,
+  target: Locator,
+  info: TestInfo,
+  name: string,
+  { viewport = false }: { viewport?: boolean } = {},
+) {
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    expect(await target.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    );
+    const screenshot = {
+      animations: 'disabled' as const,
+      scale: 'css' as const,
+      path: info.outputPath(`${name}-${theme}.png`),
+    };
+    if (viewport) {
+      await target.scrollIntoViewIfNeeded();
+      await page.screenshot(screenshot);
+    } else {
+      await target.screenshot(screenshot);
+    }
+  }
 }

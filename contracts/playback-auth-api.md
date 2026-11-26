@@ -30,6 +30,8 @@
 - 曲目不存在或文件已消失返回 404；已扫描为不可用、源文件发生变化或无法安全打开返回 409；未登录返回 401。路径不来自请求参数，拒绝绝对路径、父目录及 POSIX 符号链接替换。
 - 响应使用 `Cache-Control: private, no-store`，减少共享浏览器退出后复用缓存。已加载进客户端的音频字节不可能通过服务端撤回；网页退出会停止并卸载播放器。
 
+Apple 客户端读取磁盘分片前按当前音频的强 ETag 和完整长度校验，任一变化即清除该曲目缓存。非零偏移请求需要有效的 206 与匹配的 Content-Range。
+
 HTTP 行为参考 [MDN Range requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests)。已增加显式请求的 AAC 转码；[响度均衡](../docs/architecture/playback-gain.md)在客户端输出端应用，不改变此处原文件串流的字节内容。跨设备继续与离线能力见 [移动端补齐](mobile-completion.md)。可扫描不等于浏览器可解码，无法解码时网页提示并允许换歌/重试。
 
 ## 网页播放

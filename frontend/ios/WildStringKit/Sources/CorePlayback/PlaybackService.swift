@@ -942,8 +942,13 @@ public final class PlaybackService {
 
     // MARK: - Cross-device handoff
 
-    /// Snapshot of the current queue/position/mode for another device.
-    public func playbackSnapshot() -> PlaybackSnapshot {
+    /// The music handoff endpoint accepts only music; podcasts sync their own progress.
+    public func playbackSnapshot() -> PlaybackSnapshot? {
+        guard let current = queue.currentIndex, let item = currentItem,
+            Self.podcastEpisodeID(item.trackID) == nil
+        else { return nil }
+        let music = queue.items.filter { Self.podcastEpisodeID($0.trackID) == nil }
+        let index = queue.items.prefix(current).filter { Self.podcastEpisodeID($0.trackID) == nil }.count
         let mode: String
         if queue.isShuffled {
             mode = "shuffle"
@@ -955,8 +960,8 @@ public final class PlaybackService {
             }
         }
         return PlaybackSnapshot(
-            trackIDs: queue.items.map(\.trackID),
-            index: queue.currentIndex ?? 0,
+            trackIDs: music.map(\.trackID),
+            index: index,
             positionMs: Int64(max(0, currentTime) * 1000),
             mode: mode,
             playbackState: didFinishQueue ? "ended" : (isPlaying ? "playing" : "paused")

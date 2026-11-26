@@ -227,7 +227,7 @@ import-music: env ## Copy and organize source music into the managed library, th
 	$(RUN) python -m wildstring.import_music $(SCAN_ARGS)
 
 upload-music: ## Upload a local folder or file via CLI (e.g. make upload-music TARGET=/path/to/music)
-	@test -n "$(TARGET)" || (echo "Usage: make upload-music TARGET=/path/to/music [SERVER=http://127.0.0.1:8000]" >&2; exit 1)
+	@test -n "$(TARGET)" || (echo "Usage: make upload-music TARGET=/path/to/music [SERVER=http://127.0.0.1:$${WILDSTRING_PORT:-18780}]" >&2; exit 1)
 	$(PYTHON) scripts/upload_music.py "$(TARGET)" $${SERVER:+--server "$$SERVER"}
 
 admin: env ## Set/reset admin password interactively; revoke existing sessions

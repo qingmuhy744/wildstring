@@ -326,7 +326,8 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             include_unavailable=include_unavailable,
         )
 
-    @router.api_route("/tracks/{track_id}/stream", methods=["GET", "HEAD"])
+    @router.get("/tracks/{track_id}/stream")
+    @router.head("/tracks/{track_id}/stream")
     def stream(
         track_id: str,
         request: Request,

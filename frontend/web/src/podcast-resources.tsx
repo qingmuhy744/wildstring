@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { DialogCloseButton } from './dialog-close';
@@ -163,17 +163,42 @@ export function PodcastResourceManager() {
   const [candidateDialogOpen, setCandidateDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  async function load(start = offset) {
-    const [items, policy] = await Promise.all([
-      api<ResourcePage>(`/podcasts/resources?offset=${start}&limit=50`),
-      api<Settings>('/podcasts/resources/settings'),
-    ]);
-    setPage(items);
-    setSettings(policy);
-  }
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const request = useRef<AbortController | null>(null);
+  const sequence = useRef(0);
+  const load = useCallback(
+    async (start: number) => {
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
+      const current = ++sequence.current;
+      setLoading(true);
+      setLoadError('');
+      try {
+        const [items, policy] = await Promise.all([
+          api<ResourcePage>(`/podcasts/resources?offset=${start}&limit=50`, {
+            signal: controller.signal,
+          }),
+          api<Settings>('/podcasts/resources/settings', { signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted || current !== sequence.current) return;
+        setPage(items);
+        setSettings(policy);
+        setOffset(start);
+      } catch (error) {
+        if (!controller.signal.aborted && current === sequence.current)
+          setLoadError(error instanceof Error ? error.message : t('podcastResources.actionFailed'));
+      } finally {
+        if (!controller.signal.aborted && current === sequence.current) setLoading(false);
+      }
+    },
+    [t],
+  );
   useEffect(() => {
-    void load(offset).catch((error: Error) => setMessage(error.message));
-  }, [offset]);
+    void load(0);
+    return () => request.current?.abort();
+  }, [load]);
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
     setMessage('');
@@ -205,7 +230,7 @@ export function PodcastResourceManager() {
             : '',
         }),
       );
-      await load();
+      await load(offset);
       return result;
     }
   }
@@ -220,7 +245,7 @@ export function PodcastResourceManager() {
   }
 
   return (
-    <section aria-labelledby="podcast-resources-title">
+    <section aria-labelledby="podcast-resources-title" aria-busy={loading}>
       <div className="podcast-resource-manager">
         <div className="podcast-resource-heading">
           <h2 id="podcast-resources-title">{t('podcastResources.heading')}</h2>
@@ -228,6 +253,7 @@ export function PodcastResourceManager() {
         <p>{t('podcastResources.summaryIntro')}</p>
         <p className="muted">{t('podcastResources.summaryAutoIntro')}</p>
         {message && <p role="status">{message}</p>}
+        {loadError && <p role="alert">{loadError}</p>}
         {settings && (
           <form
             onSubmit={(e) => {
@@ -244,7 +270,7 @@ export function PodcastResourceManager() {
               });
             }}
           >
-            <fieldset disabled={busy}>
+            <fieldset disabled={busy || loading}>
               <legend>{t('podcastResources.autoCleanupLegend')}</legend>
               <label>
                 <input
@@ -277,16 +303,22 @@ export function PodcastResourceManager() {
                   total: page.total,
                   size: size(page.total_bytes),
                 })
-              : t('podcastResources.loadingResources')}
+              : loading
+                ? t('podcastResources.loadingResources')
+                : null}
           </p>
           <div className="podcast-cleanup-action-row">
-            <button type="button" disabled={busy} onClick={() => void run(() => cleanup(true))}>
+            <button
+              type="button"
+              disabled={busy || loading}
+              onClick={() => void run(() => cleanup(true))}
+            >
               {t('podcastResources.previewZeroRefCleanup')}
             </button>
             <button
               type="button"
               className="podcast-cleanup-view-btn"
-              disabled={busy}
+              disabled={busy || loading}
               onClick={() => void openCandidateDialog()}
             >
               {preview
@@ -364,7 +396,7 @@ export function PodcastResourceManager() {
                       body: JSON.stringify({ version: item.version, protected: !item.protected }),
                     });
                     setPreview(null);
-                    await load();
+                    await load(offset);
                   })
                 }
               >
@@ -378,19 +410,19 @@ export function PodcastResourceManager() {
         <div className="podcast-resource-pagination">
           <button
             type="button"
-            disabled={busy || offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - 50))}
+            disabled={busy || loading || offset === 0}
+            onClick={() => void load(Math.max(0, offset - 50))}
           >
             {t('podcastResources.previousPage')}
           </button>
           <button
             type="button"
-            disabled={busy || !page || offset + 50 >= page.total}
-            onClick={() => setOffset(offset + 50)}
+            disabled={busy || loading || !page || offset + 50 >= page.total}
+            onClick={() => void load(offset + 50)}
           >
             {t('podcastResources.nextPage')}
           </button>
-          <button type="button" disabled={busy} onClick={() => void run(() => load())}>
+          <button type="button" disabled={busy || loading} onClick={() => void load(offset)}>
             {t('podcastResources.reload')}
           </button>
         </div>

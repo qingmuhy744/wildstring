@@ -107,7 +107,7 @@ class WildStringClient:
             try:
                 err_data = json.loads(raw)
                 message = err_data.get("detail", str(err))
-            except Exception:
+            except (json.JSONDecodeError, AttributeError):
                 message = raw or str(err)
             raise RuntimeError(f"HTTP {err.code}: {message}") from err
 
@@ -136,11 +136,12 @@ def main():
         description="Upload audio files or folders to WildString server."
     )
     parser.add_argument("path", help="Local music file or folder path to upload")
+    port = os.environ.get("WILDSTRING_PORT") or "18780"
     parser.add_argument(
         "--server",
         "-s",
-        default=os.environ.get("WILDSTRING_SERVER", "http://127.0.0.1:8000"),
-        help="WildString server URL (default: http://127.0.0.1:8000)",
+        default=os.environ.get("WILDSTRING_SERVER") or f"http://127.0.0.1:{port}",
+        help="WildString server URL (default: WILDSTRING_SERVER, otherwise loopback at WILDSTRING_PORT or 18780)",
     )
     parser.add_argument(
         "--token",
@@ -228,7 +229,7 @@ def main():
                 imported_count += 1
                 target = res.get("target_path", "")
                 sys.stdout.write(f"✓ [已导入] -> {target}\n" if target else "✓ [已导入]\n")
-        except Exception as err:
+        except (OSError, RuntimeError, ValueError, AttributeError) as err:
             error_count += 1
             sys.stdout.write(f"✕ [失败: {err}]\n")
 

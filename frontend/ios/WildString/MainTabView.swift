@@ -60,6 +60,15 @@ struct MainTabView: View {
         .overlay(alignment: .top) {
             if let handoff = sharing.handoff {
                 handoffBanner(handoff)
+            } else if let message = sharing.message {
+                HStack {
+                    Text(message).font(.footnote)
+                    Spacer()
+                    Button("handoff.dismiss") { sharing.dismissMessage() }
+                        .font(.footnote)
+                }
+                .padding()
+                .background(.regularMaterial)
             }
         }
         .onChange(of: playback.isPlaying) { _, playing in

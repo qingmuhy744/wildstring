@@ -26,6 +26,7 @@ struct AudioRangeFetcherTests {
                 headers: [
                     "Content-Range": "bytes 100-199/500",
                     "Content-Type": "audio/mpeg",
+                    "ETag": "\"revision-1\"",
                 ],
                 body: Data(repeating: 7, count: 100)
             )
@@ -37,13 +38,14 @@ struct AudioRangeFetcherTests {
         )
         #expect(chunk.data.count == 100)
         #expect(chunk.totalLength == 500)
+        #expect(chunk.etag == "\"revision-1\"")
         #expect(chunk.contentType == "audio/mpeg")
     }
 
     @Test func fetchUsesOpenEndedRangeWhenLengthUnknown() async throws {
         StubURLProtocol.respond { request in
             #expect(request.value(forHTTPHeaderField: "Range") == "bytes=50-")
-            return .init(statusCode: 206, headers: [:], body: Data(repeating: 1, count: 10))
+            return .init(statusCode: 206, headers: ["Content-Range": "bytes 50-59/60"], body: Data(repeating: 1, count: 10))
         }
         _ = try await makeFetcher().fetch(
             path: "api/v1/tracks/t1/stream",
@@ -67,6 +69,21 @@ struct AudioRangeFetcherTests {
         )
         #expect(chunk.data.count == 100)
         #expect(chunk.totalLength == 300)
+    }
+
+    @Test(arguments: [200, 206])
+    func fetchRejectsBytesFromZeroForANonzeroOffset(status: Int) async throws {
+        StubURLProtocol.respond { _ in
+            .init(
+                statusCode: status,
+                headers: status == 206 ? ["Content-Range": "bytes 0-9/100"] : [:],
+                body: Data(repeating: 1, count: 10)
+            )
+        }
+        let fetcher = try makeFetcher()
+        await #expect(throws: URLError.self) {
+            try await fetcher.fetch(path: "api/v1/tracks/t1/stream", offset: 50, length: 10)
+        }
     }
 
     @Test func probeReturnsLengthAndType() async throws {

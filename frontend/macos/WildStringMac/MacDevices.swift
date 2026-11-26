@@ -68,14 +68,17 @@ final class MacPlaybackSync {
     }
 
     func publishCurrent() async {
-        guard !playback.items.isEmpty else { return }
-        let snap = playback.playbackSnapshot()
+        guard let snap = playback.playbackSnapshot() else { return }
         if await save(snap, version: version) { return }
         await refresh()
         _ = await save(snap, version: version)
     }
 
     func shareCurrent() async {
+        guard playback.playbackSnapshot() != nil else {
+            message = L10n("macDevices.failedToShare")
+            return
+        }
         busy = true
         defer { busy = false }
         await publishCurrent()
