@@ -885,23 +885,71 @@
   padding: 3px;
   gap: 2px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+:root[data-theme='light'] .book-segmented,
+.book-reader:not(.book-reader-dark) .book-segmented {
   background: var(--surface-subtle);
 }
-.book-reader-layout .book-reader .book-segmented button {
-  border: 0;
-  border-radius: 6px;
-  min-block-size: 1.875rem;
-  padding: 0.25rem 0.7rem;
+:is(.bookshelf, .book-reader-layout .book-reader) .book-segmented button,
+:root[data-theme='light'] .book-segmented button,
+.book-segmented button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  min-block-size: 2rem;
+  padding: 0.25rem 0.75rem;
   background: transparent;
   color: var(--muted);
   font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  box-shadow: none;
 }
-.book-reader-layout .book-reader .book-segmented button[aria-pressed='true'],
-.book-reader-layout .book-reader .book-segmented button[aria-pressed='true']:not(.primary):hover {
-  background: var(--nav-active);
+.book-reader-layout .book-reader .book-segmented button {
+  min-block-size: 1.875rem;
+  padding: 0.25rem 0.7rem;
+}
+:root[data-theme='light'] .bookshelf .book-segmented button:not(.primary):hover,
+.book-reader-layout .book-reader .book-segmented button:not(.primary):hover,
+.book-segmented button:not(.primary):hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-color: transparent;
+  color: var(--text);
+}
+:is(.bookshelf, .book-reader-layout .book-reader)
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']),
+:is(.bookshelf, .book-reader-layout .book-reader)
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']):not(.primary):hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
   color: var(--text);
   font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 24%);
+}
+:root[data-theme='light']
+  .bookshelf
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']),
+:root[data-theme='light']
+  .bookshelf
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']):not(.primary):hover,
+.book-reader-layout
+  .book-reader:not(.book-reader-dark)
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']),
+.book-reader-layout
+  .book-reader:not(.book-reader-dark)
+  .book-segmented
+  button:is([aria-selected='true'], [aria-pressed='true']):not(.primary):hover {
+  background: var(--surface-input);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(42 43 37 / 8%);
 }
 .book-reader-panel-wrap {
   border-bottom: 1px solid var(--border);

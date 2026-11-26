@@ -3,12 +3,12 @@ import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from './api';
 import type { AgentNotification, NotificationAction, NotificationPage } from './agent-api';
+import { Icon } from './icons';
 import {
   DiagnosticId,
   errorText,
   localDate,
   RefreshWorkspace,
-  WorkspaceHeader,
   WorkspaceNotice,
 } from './workspace-ui';
 
@@ -256,9 +256,11 @@ export type NotificationInbox = ReturnType<typeof useNotifications>;
 export function Notifications({
   inbox,
   onOpen,
+  onClose,
 }: {
   inbox: NotificationInbox;
   onOpen: (action: NotificationAction) => void;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState('unread');
@@ -266,27 +268,61 @@ export function Notifications({
     filter === 'unread' ? !item.read_at : filter === 'read' ? !!item.read_at : true,
   );
   return (
-    <section className="workspace-page" aria-label={t('notificationsPage.sectionAria')}>
-      <WorkspaceHeader
-        title={t('notificationsPage.title')}
-        description={t('notificationsPage.description')}
-      >
-        <RefreshWorkspace busy={inbox.busy} onClick={() => void inbox.refresh(true)} />
-      </WorkspaceHeader>
+    <section
+      id="notification-popover"
+      className="notification-popover"
+      aria-label={t('notificationsPage.sectionAria')}
+    >
+      <header className="notification-popover-header">
+        <h2>{t('notificationsPage.title')}</h2>
+        <div className="notification-popover-header-actions">
+          <RefreshWorkspace busy={inbox.busy} onClick={() => void inbox.refresh(true)} />
+          {onClose && (
+            <button
+              type="button"
+              className="icon-button notification-popover-close"
+              aria-label={t('common.close')}
+              onClick={onClose}
+            >
+              <Icon name="close" />
+            </button>
+          )}
+        </div>
+      </header>
       <WorkspaceNotice error={inbox.error} unavailable={inbox.unsupported} />
       {!inbox.unsupported && (
         <>
-          <div className="workspace-tabs">
-            <button aria-pressed={filter === 'unread'} onClick={() => setFilter('unread')}>
-              {t('notificationsPage.tabUnread', { count: inbox.unread })}
-            </button>
-            <button aria-pressed={filter === 'read'} onClick={() => setFilter('read')}>
-              {t('notificationsPage.tabRead')}
-            </button>
-            <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-              {t('notificationsPage.tabAll')}
-            </button>
+          <div className="notification-popover-toolbar">
+            <div
+              className="notification-popover-tabs"
+              role="group"
+              aria-label={t('notificationsPage.title')}
+            >
+              <button
+                type="button"
+                aria-pressed={filter === 'unread'}
+                onClick={() => setFilter('unread')}
+              >
+                {t('notificationsPage.tabUnread', { count: inbox.unread })}
+              </button>
+              <button
+                type="button"
+                aria-pressed={filter === 'read'}
+                onClick={() => setFilter('read')}
+              >
+                {t('notificationsPage.tabRead')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={filter === 'all'}
+                onClick={() => setFilter('all')}
+              >
+                {t('notificationsPage.tabAll')}
+              </button>
+            </div>
             <button
+              type="button"
+              className="notification-mark-all"
               data-help={t('notificationsPage.markAllReadHelp')}
               disabled={!inbox.unread || inbox.busy}
               onClick={() => void inbox.read()}
@@ -294,7 +330,7 @@ export function Notifications({
               {t('notificationsPage.markAllRead')}
             </button>
           </div>
-          <div className="workspace-card">
+          <div className="notification-popover-body">
             {!visible.length && (
               <p className="workspace-empty" role="status">
                 {inbox.busy
@@ -314,7 +350,7 @@ export function Notifications({
                     item.read_at ? t('notificationsPage.dotRead') : t('notificationsPage.dotUnread')
                   }
                 />
-                <div>
+                <div className="notification-row-content">
                   <h3>{localizeNotificationTitle(t, item.title)}</h3>
                   <p>{localizeNotificationSummary(t, item.summary)}</p>
                   <small>
@@ -326,57 +362,66 @@ export function Notifications({
                         : t('notificationsPage.severityInfo')}
                   </small>
                   <DiagnosticId id={item.trace_id} />
-                </div>
-                <div className="workspace-actions">
-                  {(item.actions || []).map((action) => (
-                    <button
-                      key={action.id}
-                      className={action.id === item.actions?.[0]?.id ? 'primary' : undefined}
-                      onClick={() => onOpen(action)}
-                    >
-                      {localizeNotificationAction(t, action.label)}
-                      {typeof action.count === 'number' && action.count > 0
-                        ? ` · ${action.count}`
-                        : ''}
-                    </button>
-                  ))}
-                  {!item.actions?.length && item.draft_id && (
-                    <button
-                      onClick={() =>
-                        onOpen({
-                          id: 'draft',
-                          target: 'draft',
-                          label: t('notificationsPage.viewDraft'),
-                          params: { id: item.draft_id! },
-                        })
-                      }
-                    >
-                      {t('notificationsPage.viewDraft')}
-                    </button>
-                  )}
-                  {!item.actions?.length && item.task_id && (
-                    <button
-                      onClick={() =>
-                        onOpen({
-                          id: 'task',
-                          target: 'task',
-                          label: t('notificationsPage.viewTask'),
-                          params: { id: item.task_id! },
-                        })
-                      }
-                    >
-                      {t('notificationsPage.viewTask')}
-                    </button>
-                  )}
-                  {!item.read_at && (
-                    <button
-                      aria-label={t('notificationsPage.markReadAria', {
-                        title: localizeNotificationTitle(t, item.title),
-                      })}
-                      onClick={() => void inbox.read([item.id])}
-                    >
-                      {t('notificationsPage.markRead')}
-                    </button>
+                  {(Boolean(item.actions?.length) ||
+                    Boolean(item.draft_id) ||
+                    Boolean(item.task_id) ||
+                    !item.read_at) && (
+                    <div className="workspace-actions notification-row-actions">
+                      {(item.actions || []).map((action) => (
+                        <button
+                          type="button"
+                          key={action.id}
+                          className={action.id === item.actions?.[0]?.id ? 'primary' : undefined}
+                          onClick={() => onOpen(action)}
+                        >
+                          {localizeNotificationAction(t, action.label)}
+                          {typeof action.count === 'number' && action.count > 0
+                            ? ` · ${action.count}`
+                            : ''}
+                        </button>
+                      ))}
+                      {!item.actions?.length && item.draft_id && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onOpen({
+                              id: 'draft',
+                              target: 'draft',
+                              label: t('notificationsPage.viewDraft'),
+                              params: { id: item.draft_id! },
+                            })
+                          }
+                        >
+                          {t('notificationsPage.viewDraft')}
+                        </button>
+                      )}
+                      {!item.actions?.length && item.task_id && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onOpen({
+                              id: 'task',
+                              target: 'task',
+                              label: t('notificationsPage.viewTask'),
+                              params: { id: item.task_id! },
+                            })
+                          }
+                        >
+                          {t('notificationsPage.viewTask')}
+                        </button>
+                      )}
+                      {!item.read_at && (
+                        <button
+                          type="button"
+                          aria-label={t('notificationsPage.markReadAria', {
+                            title: localizeNotificationTitle(t, item.title),
+                          })}
+                          onClick={() => void inbox.read([item.id])}
+                        >
+                          {t('notificationsPage.markRead')}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </article>

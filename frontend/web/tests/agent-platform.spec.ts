@@ -1191,3 +1191,70 @@ test('检查任务只在成功返回空列表后显示空态，隐藏与离线�
     release();
   }
 });
+
+test('通知中心以弹出浮层展示，不打断当前页面且支持外部点击和 Escape 关闭', async ({
+  page,
+  isMobile,
+}, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page);
+  const notices = [
+    {
+      id: 'pop-1',
+      event_id: 'event-pop-1',
+      event_type: 'draft.created',
+      title: '歌单草案已准备好',
+      summary: '3 项依据已核对，确认后应用到歌单。',
+      severity: 'info',
+      task_id: null,
+      draft_id: 'pop-draft',
+      trace_id: null,
+      created_at: now,
+      read_at: null,
+      version: 1,
+      detail_route: null,
+    },
+  ];
+  await page.route('**/api/v1/agent/notifications?*', (route) =>
+    route.fulfill({
+      json: list(new URL(route.request().url()).searchParams.has('cursor') ? [] : notices, {
+        next_cursor: '1',
+        unread_count: 1,
+        high_watermark: 1,
+      }),
+    }),
+  );
+  await login(page);
+  const bell = page.getByRole('button', { name: '通知中心', exact: true });
+  await expect(bell).toHaveAttribute('aria-expanded', 'false');
+  await bell.click();
+  await expect(bell).toHaveAttribute('aria-expanded', 'true');
+  const popover = page.getByRole('region', { name: '通知中心', exact: true });
+  await expect(popover).toBeVisible();
+  await expect(page.getByRole('table', { name: '歌曲列表' })).toBeVisible();
+  await expect(
+    popover.getByRole('heading', { name: '歌单草案已准备好', exact: true }),
+  ).toBeVisible();
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => {
+      localStorage.setItem('wildstring-theme', value);
+      window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+    }, theme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: info.outputPath(`notification-popover-${theme}.png`),
+      animations: 'disabled',
+    });
+  }
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(bell).toHaveAttribute('aria-expanded', 'false');
+  await expect(bell).toBeFocused();
+  await bell.click();
+  await expect(popover).toBeVisible();
+  await page.getByText('夜晚测试曲').click();
+  await expect(popover).toHaveCount(0);
+});

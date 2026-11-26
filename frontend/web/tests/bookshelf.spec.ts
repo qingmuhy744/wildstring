@@ -252,13 +252,32 @@ test('双载体摘要、对齐与暖纸自定义高亮', async ({ page, isMobile
     await reader.getByRole('button', { name: '返回书籍' }).click();
     const audioHint = page.locator('.book-align-notice');
     await expect(audioHint).toContainText('电子书已读到「第三章」');
+    const audioTab = page.getByRole('tab', { name: /有声章节/ });
+    const ebookTab = page.getByRole('tab', { name: /阅读目录/ });
+    await expect(audioTab).toHaveAttribute('aria-selected', 'true');
+    await expect(ebookTab).toHaveAttribute('aria-selected', 'false');
+    await ebookTab.click();
+    await expect(ebookTab).toHaveAttribute('aria-selected', 'true');
+    await expect(audioTab).toHaveAttribute('aria-selected', 'false');
     for (const theme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: theme });
+      const activeStyle = await ebookTab.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { bg: s.backgroundColor, weight: Number(s.fontWeight) };
+      });
+      const inactiveStyle = await audioTab.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { bg: s.backgroundColor, weight: Number(s.fontWeight) };
+      });
+      expect(activeStyle.bg).not.toBe(inactiveStyle.bg);
+      expect(activeStyle.weight).toBeGreaterThan(inactiveStyle.weight);
       await page.screenshot({
         path: info.outputPath(`align-listening-${theme}.png`),
         animations: 'disabled',
       });
     }
+    await audioTab.click();
+    await expect(audioTab).toHaveAttribute('aria-selected', 'true');
     await audioHint.getByRole('button', { name: '跳到对应位置' }).click();
     await expect
       .poll(

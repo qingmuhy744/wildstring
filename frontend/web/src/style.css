@@ -4900,6 +4900,11 @@ textarea {
   padding-top: 7px;
   padding-bottom: 7px;
 }
+.notification-popover-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 50;
+}
 .notification-entry {
   position: relative;
   flex-shrink: 0;
@@ -4907,6 +4912,11 @@ textarea {
   height: 42px;
   border: 0;
   background: transparent;
+}
+.notification-entry.selected,
+[data-theme='light'] .notification-entry.selected {
+  background: var(--nav-active);
+  color: var(--text);
 }
 .notification-corner-count {
   position: absolute;

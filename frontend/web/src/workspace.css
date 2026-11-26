@@ -376,11 +376,147 @@
 .workspace-two-column > .workspace-card {
   margin: 0;
 }
+.notification-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 50;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(560px, calc(100dvh - 180px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 26%);
+}
+:root[data-theme='light'] .notification-popover {
+  box-shadow: 0 16px 40px rgb(42 43 37 / 14%);
+}
+.notification-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.notification-popover-header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.notification-popover-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.notification-popover-header-actions .workspace-refresh {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.notification-popover-close {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.notification-popover-close svg {
+  width: 16px;
+  height: 16px;
+}
+.notification-popover-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.notification-popover-tabs {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+:root[data-theme='light'] .notification-popover-tabs {
+  background: var(--surface-subtle);
+}
+.notification-popover-tabs button,
+:root[data-theme='light'] .notification-popover-tabs button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  min-height: 28px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme='light'] .notification-popover-tabs button:not(.primary):hover,
+.notification-popover-tabs button:not(.primary):hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-color: transparent;
+  color: var(--text);
+}
+.notification-popover-tabs button[aria-pressed='true'],
+.notification-popover-tabs button[aria-pressed='true']:not(.primary):hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 24%);
+}
+:root[data-theme='light'] .notification-popover-tabs button[aria-pressed='true'],
+:root[data-theme='light']
+  .notification-popover-tabs
+  button[aria-pressed='true']:not(.primary):hover {
+  background: var(--surface-input);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(42 43 37 / 8%);
+}
+.notification-mark-all {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.notification-popover > .workspace-notice {
+  margin: 12px 16px 0;
+}
+.notification-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.notification-popover-body .workspace-empty {
+  padding: 28px 18px;
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+}
 .notification-row {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 24px 0;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
   border-top: 1px solid var(--border);
 }
 .notification-row:first-child {
@@ -391,20 +527,40 @@
   height: 7px;
   border-radius: 50%;
   background: transparent;
-  margin-top: 8px;
+  margin-top: 7px;
 }
 .notification-dot.unread {
   background: var(--accent);
 }
+.notification-row-content {
+  min-width: 0;
+}
 .notification-row h3 {
-  margin: 0 0 10px;
-  font-size: 16px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 .notification-row p {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 .notification-row small {
-  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+.notification-row-actions {
+  margin-top: 10px;
+  gap: 8px;
+}
+.notification-row-actions button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 .notification-nav {
   display: flex;
@@ -677,12 +833,17 @@
   .workspace-form .span-all {
     grid-column: auto;
   }
+  .notification-popover {
+    right: -8px;
+    top: calc(100% + 8px);
+    width: min(440px, calc(100vw - 24px));
+    max-height: min(64dvh, calc(100dvh - 220px));
+    border-radius: 14px;
+  }
   .notification-row {
     grid-template-columns: 8px minmax(0, 1fr);
     gap: 10px;
-  }
-  .notification-row > .workspace-actions {
-    grid-column: 2;
+    padding: 12px 14px;
   }
   .assistant-composer {
     flex-direction: column;
