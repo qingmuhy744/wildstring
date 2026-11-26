@@ -695,7 +695,7 @@ test('账号续听模式读取、失败不缓存及刷新', async ({ page }) => 
   });
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect(select).toHaveValue('ask');
-  await section(page, '电台 · 播客');
+  await section(page, '播客');
   await page.request.put(modePath, {
     headers: { 'X-Wildstring-Client': 'web' },
     data: { resume_mode: 'restart' },

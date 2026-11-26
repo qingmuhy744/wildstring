@@ -15,6 +15,39 @@ async function expectReadableText(label: Locator, minimumSize: number) {
   expect(size, `font size for ${await label.innerText()}`).toBeGreaterThanOrEqual(minimumSize);
 }
 
+async function expectBottomPlayButton(page: Page, isMobile: boolean) {
+  const play = page.locator('.player .play-button');
+  await expect(play).toHaveCSS('width', '38px');
+  await expect(play).toHaveCSS('height', '38px');
+  await expect(play.locator('.playback-glyph')).toHaveCSS('width', '24px');
+  const colors = (hover: boolean) =>
+    play.evaluate((button, hovered) => {
+      const computed = getComputedStyle(button);
+      const sample = document.createElement('span');
+      sample.style.color = computed.getPropertyValue(hovered ? '--accent-hover' : '--accent');
+      sample.style.backgroundColor = computed.getPropertyValue('--on-accent');
+      button.append(sample);
+      const expected = getComputedStyle(sample);
+      const actual = { background: computed.backgroundColor, color: computed.color };
+      const tokens = { background: expected.color, color: expected.backgroundColor };
+      const hoveredNow = button.matches(':hover');
+      sample.remove();
+      return { actual, tokens, hoveredNow };
+    }, hover);
+  const normal = await colors(false);
+  expect(normal.actual).toEqual(normal.tokens);
+  if (!isMobile) {
+    await play.hover();
+    await expect
+      .poll(async () => {
+        const { actual, tokens, hoveredNow } = await colors(true);
+        return { actual, tokens, hoveredNow };
+      })
+      .toMatchObject({ actual: (await colors(true)).tokens, hoveredNow: true });
+    await page.mouse.move(1, 1);
+  }
+}
+
 async function expectContrast(label: Locator) {
   await expect(label).toBeVisible();
   const ratio = await label.evaluate(async (element) => {
@@ -85,6 +118,7 @@ test('曲库和播放栏显示可辨认的功能文字与当前曲目', async ({
   const selectedView = page.locator('.view-switch').getByRole('button', { name: '歌曲' });
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
+    await expectBottomPlayButton(page, isMobile);
     await expectReadableText(table.getByRole('columnheader', { name: '歌曲 / 艺人' }), 11);
     await expectReadableText(player.locator('.timeline time').first(), 11);
     await expectReadableText(player.getByRole('button', { name: '播放队列' }).locator('small'), 11);
@@ -112,6 +146,7 @@ test('播客状态与收音机显示可辨认的操作和时间', async ({ page,
   if (isMobile) await page.setViewportSize({ width: 390, height: 900 });
   await login(page);
   await podcastCatalog(page);
+  await expect(page.getByRole('heading', { name: '播客', exact: true })).toBeVisible();
   const card = page.locator('.podcast-card').filter({ hasText: '午后广播测试' });
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
@@ -137,6 +172,14 @@ test('播客状态与收音机显示可辨认的操作和时间', async ({ page,
   }
 
   await page.locator('.episode-play-btn').first().click();
+  for (const theme of ['light', 'dark'] as const) {
+    await setTheme(page, theme);
+    await expectBottomPlayButton(page, isMobile);
+    await page.screenshot({
+      path: info.outputPath(`podcast-transport-${theme}.png`),
+      animations: 'disabled',
+    });
+  }
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.locator('.retro-radio')).toHaveAttribute('data-live', 'true');
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();

@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -21,13 +22,102 @@ export interface Book {
   has_ebook: boolean;
   has_audiobook: boolean;
   progress_status?: 'unread' | 'in_progress' | 'finished';
-  resume_kind?: 'reading' | 'listening';
+  resume_kind?: 'reading' | 'listening' | null;
+  reading_progress?: (CarrierProgress & { spine_index: number }) | null;
+  listening_progress?:
+    | (CarrierProgress &
+        Listening & {
+          book_position_ms: number;
+          total_duration_ms: number;
+        })
+    | null;
+}
+
+interface CarrierProgress {
+  chapter_title: string | null;
+  overall_ratio: number;
+  completed: boolean;
+  updated_at: number;
+}
+
+function chapterKey(title: string | null) {
+  return (
+    title
+      ?.normalize('NFKC')
+      .toLocaleLowerCase()
+      .replace(/[\s\p{P}]+/gu, '') || ''
+  );
+}
+
+export function matchingChapter<T extends { title: string }>(
+  chapters: T[],
+  sourceTitle: string | null,
+  sourceIndex: number,
+) {
+  const title = chapterKey(sourceTitle);
+  return (
+    (title ? chapters.find((chapter) => chapterKey(chapter.title) === title) : null) ??
+    chapters[sourceIndex]
+  );
+}
+
+export function alignmentAvailable(
+  other: CarrierProgress | null | undefined,
+  own: CarrierProgress | null | undefined,
+) {
+  if (!other) return false;
+  return (
+    !own ||
+    (other.updated_at > own.updated_at &&
+      (Math.abs(other.overall_ratio - own.overall_ratio) >= 0.03 ||
+        chapterKey(other.chapter_title) !== chapterKey(own.chapter_title)))
+  );
+}
+
+export function BookAlignmentNotice({
+  source,
+  progress,
+  onAlign,
+  onDismiss,
+  disabled,
+}: {
+  source: 'reading' | 'listening';
+  progress: CarrierProgress;
+  onAlign: () => void;
+  onDismiss: () => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="book-align-notice">
+      <span>
+        {t(source === 'reading' ? 'bookshelf.alignReading' : 'bookshelf.alignListening', {
+          chapter: progress.chapter_title || t('bookshelf.title'),
+          percent: Math.round(progress.overall_ratio * 100),
+        })}
+      </span>
+      <div className="book-align-actions">
+        <button type="button" onClick={onAlign} disabled={disabled}>
+          {t('bookshelf.alignJump')}
+        </button>
+        <button type="button" onClick={onDismiss}>
+          {t('bookshelf.alignIgnore')}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 type Mode = 'scroll' | 'paginated';
 type ReaderPanel = 'contents' | 'notes' | 'search' | 'appearance';
-export type Color = 'amber' | 'terracotta' | 'sage' | 'stone';
-const colors: Color[] = ['amber', 'terracotta', 'sage', 'stone'];
+type CustomColor = `#${string}`;
+export type Color = 'amber' | 'terracotta' | 'sage' | 'stone' | CustomColor;
+const colors = ['amber', 'terracotta', 'sage', 'stone'] as const;
+const CUSTOM_COLOR_KEY = 'wildstring:reader:custom-highlight';
+
+function isCustomColor(value: string): value is CustomColor {
+  return /^#[0-9a-f]{6}$/.test(value);
+}
 interface Anchor {
   spine_index: number;
   block_index: number;
@@ -61,6 +151,8 @@ interface Block {
 export interface EbookChapter {
   spine_index: number;
   title: string;
+  char_count: number;
+  start_global_char: number;
 }
 interface Bookmark extends Anchor {
   id: string;
@@ -108,6 +200,7 @@ function useCheckpoint<T>(
   path: string,
   onLoad: (value: T & Checkpoint) => void,
   initialIntent: 'resume' | 'restart' = 'resume',
+  revision = 0,
 ) {
   const [error, setError] = useState<{
     kind: 'load' | 'save' | 'conflict';
@@ -115,7 +208,7 @@ function useCheckpoint<T>(
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retryIntent = useRef(initialIntent);
-  const requestKey = path ? `${path}|${initialIntent}|${attempt}` : '';
+  const requestKey = path ? `${path}|${initialIntent}|${attempt}|${revision}` : '';
   const [settledKey, setSettledKey] = useState('');
   const load = useRef(onLoad);
   load.current = onLoad;
@@ -161,7 +254,7 @@ function useCheckpoint<T>(
     return () => controller.abort();
   }, [path, initialIntent, requestKey, attempt]);
   const save = useCallback(
-    (fields: T, completed = false) => {
+    (fields: T, completed = false, onSaved?: () => void) => {
       const current = session.current;
       if (!path || !current.ready || current.blocked) return;
       const sequence = ++current.sequence;
@@ -185,6 +278,7 @@ function useCheckpoint<T>(
           current.version = value.version;
           if (session.current === current) {
             setError((previous) => (previous?.kind === 'save' ? null : previous));
+            onSaved?.();
           }
         } catch (cause) {
           const conflict = cause instanceof ApiError && cause.status === 409;
@@ -201,6 +295,7 @@ function useCheckpoint<T>(
     save,
     error,
     ready: !path || settledKey === requestKey,
+    started: () => session.current.version > 0 || session.current.sequence > 0,
     retry: () => {
       retryIntent.current = session.current.blocked ? 'resume' : session.current.intent;
       setAttempt((value) => value + 1);
@@ -356,7 +451,16 @@ function renderBlockContent(block: Block, highlights: Annotation[]): ReactNode {
     if (seg.bold) node = <strong>{node}</strong>;
     if (seg.annotation) {
       node = (
-        <mark key={idx} data-color={seg.annotation.color} data-annotation-id={seg.annotation.id}>
+        <mark
+          key={idx}
+          data-color={seg.annotation.color}
+          data-annotation-id={seg.annotation.id}
+          style={
+            isCustomColor(seg.annotation.color)
+              ? ({ '--annotation-color': seg.annotation.color } as CSSProperties)
+              : undefined
+          }
+        >
           {node}
         </mark>
       );
@@ -385,6 +489,9 @@ export function BookReader({
   const { t } = useTranslation();
   const prefix = `/books/${book.id}`;
   const [chapters, setChapters] = useState<EbookChapter[]>([]);
+  const [totalChars, setTotalChars] = useState(0);
+  const [alignmentDismissed, dismissAlignment] = useState(false);
+  const alignmentRequest = useRef<AbortController | null>(null);
   const [manifestFailed, setManifestFailed] = useState(false);
   const [manifestAttempt, setManifestAttempt] = useState(0);
   const [spine, setSpine] = useState(initialSpine ?? 0);
@@ -409,6 +516,10 @@ export function BookReader({
   } | null>(null);
   const [draftNoteMode, setDraftNoteMode] = useState(false);
   const [draftColor, setDraftColor] = useState<Color>('amber');
+  const [customColor, setCustomColor] = useState<CustomColor>(() => {
+    const stored = localStorage.getItem(CUSTOM_COLOR_KEY) || '';
+    return isCustomColor(stored) ? stored : '#b6845c';
+  });
   const [draftNote, setDraftNote] = useState('');
   const [activeMark, setActiveMark] = useState<{
     annotation: Annotation;
@@ -433,7 +544,27 @@ export function BookReader({
   } | null>(null);
   const saveTimer = useRef<number>(0);
   const saveAnchor = useRef<() => void>(() => {});
+  const saveInitialView = useRef<() => void>(() => {});
   const completedSent = useRef(false);
+
+  function customColorPicker(selected: Color, onChange: (color: Color) => void) {
+    return (
+      <input
+        className="book-color-custom"
+        type="color"
+        aria-label={t('bookshelf.customColor')}
+        title={t('bookshelf.customColor')}
+        value={isCustomColor(selected) ? selected : customColor}
+        onChange={(event) => {
+          const color = event.currentTarget.value;
+          if (!isCustomColor(color)) return;
+          setCustomColor(color);
+          localStorage.setItem(CUSTOM_COLOR_KEY, color);
+          onChange(color);
+        }}
+      />
+    );
+  }
 
   function jump({ spine_index, block_index, char_offset }: Anchor, persist = true) {
     const anchor = { spine_index, block_index, char_offset };
@@ -468,15 +599,26 @@ export function BookReader({
         jump(value, false);
       }
     },
-    book.progress_status === 'finished' ? 'restart' : 'resume',
+    book.reading_progress?.completed ? 'restart' : 'resume',
   );
+  saveInitialView.current = () => {
+    if (loadedSpine === spine && blocks.length && checkpoint.ready && !checkpoint.started()) {
+      checkpoint.save({ ...visible.current, reading_mode: mode });
+    }
+  };
+
+  useEffect(() => () => alignmentRequest.current?.abort(), []);
 
   useEffect(() => {
     setManifestFailed(false);
     const request = new AbortController();
-    void api<{ chapters: EbookChapter[] }>(prefix + '/ebook/manifest', { signal: request.signal })
+    void api<{ chapters: EbookChapter[]; total_chars: number }>(prefix + '/ebook/manifest', {
+      signal: request.signal,
+    })
       .then((value) => {
-        if (!request.signal.aborted) setChapters(value.chapters);
+        if (request.signal.aborted) return;
+        setChapters(value.chapters);
+        setTotalChars(value.total_chars);
       })
       .catch(() => {
         if (!request.signal.aborted) setManifestFailed(true);
@@ -519,6 +661,42 @@ export function BookReader({
       });
     return () => request.abort();
   }, [prefix, spine, chapterAttempt]);
+
+  async function alignReading(progress: NonNullable<Book['listening_progress']>) {
+    const match = matchingChapter(chapters, progress.chapter_title, progress.chapter_index);
+    const target = Math.floor(progress.overall_ratio * totalChars);
+    const chapter =
+      match ??
+      chapters.find((_, index) => (chapters[index + 1]?.start_global_char ?? Infinity) > target);
+    if (!chapter) return;
+    const anchor = { spine_index: chapter.spine_index, block_index: 0, char_offset: 0 };
+    const offset = match ? 0 : target - chapter.start_global_char;
+    alignmentRequest.current?.abort();
+    if (offset > 0) {
+      const request = new AbortController();
+      alignmentRequest.current = request;
+      try {
+        const content = await api<{ blocks: Block[] }>(
+          prefix + `/ebook/chapters/${chapter.spine_index}`,
+          { signal: request.signal },
+        );
+        if (request.signal.aborted) return;
+        let remaining = offset;
+        for (const block of content.blocks) {
+          const length = codePointLength(block.text);
+          anchor.block_index = block.block_index;
+          anchor.char_offset = Math.min(length, remaining);
+          if (remaining <= length) break;
+          remaining -= length;
+        }
+      } catch (cause) {
+        if (!request.signal.aborted) setError((cause as Error).message);
+        return;
+      }
+    }
+    jump(anchor);
+    dismissAlignment(true);
+  }
 
   function restore(anchor: Anchor) {
     const viewport = scroll.current;
@@ -667,7 +845,7 @@ export function BookReader({
       if (saveTimer.current) {
         window.clearTimeout(saveTimer.current);
         saveAnchor.current();
-      }
+      } else saveInitialView.current();
     },
     [],
   );
@@ -687,6 +865,7 @@ export function BookReader({
       const proposed = viewport.scrollLeft + direction * viewport.clientWidth;
       if (proposed >= 0 && proposed < viewport.scrollWidth - 1) {
         viewport.scrollLeft = proposed;
+        syncAnchor();
         return;
       }
     }
@@ -798,6 +977,7 @@ export function BookReader({
         }),
       });
       setMarks((items) => [...items, saved]);
+      checkpoint.save({ ...visible.current, reading_mode: mode });
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -825,6 +1005,12 @@ export function BookReader({
         }),
       });
       setAnnotations((items) => [...items, saved]);
+      checkpoint.save({
+        spine_index: saved.spine_index,
+        block_index: saved.end_block_index,
+        char_offset: saved.end_char_offset,
+        reading_mode: mode,
+      });
       setSelection(null);
       setDraftNoteMode(false);
       setDraftNote('');
@@ -1002,6 +1188,23 @@ export function BookReader({
           </div>
         </div>
       </header>
+      {!alignmentDismissed &&
+        book.listening_progress &&
+        book.has_audiobook &&
+        alignmentAvailable(book.listening_progress, book.reading_progress) && (
+          <div className="book-reader-rail book-reader-alignment">
+            <BookAlignmentNotice
+              source="listening"
+              progress={book.listening_progress}
+              disabled={!chapters.length || !checkpoint.ready || Boolean(checkpoint.error)}
+              onAlign={() => void alignReading(book.listening_progress!)}
+              onDismiss={() => {
+                alignmentRequest.current?.abort();
+                dismissAlignment(true);
+              }}
+            />
+          </div>
+        )}
       {listening && audioSession && (
         <div className="book-reader-panel-wrap book-reader-audio-wrap">
           <div className="book-reader-rail">
@@ -1200,6 +1403,7 @@ export function BookReader({
                                     onClick={() => setEditingAnnColor(color)}
                                   />
                                 ))}
+                                {customColorPicker(editingAnnColor, setEditingAnnColor)}
                               </div>
                               <textarea
                                 aria-label={t('bookshelf.note')}
@@ -1354,6 +1558,7 @@ export function BookReader({
                       onClick={() => setDraftColor(color)}
                     />
                   ))}
+                  {customColorPicker(draftColor, setDraftColor)}
                 </div>
                 <textarea
                   aria-label={t('bookshelf.note')}
@@ -1392,6 +1597,16 @@ export function BookReader({
                     onClick={() => void annotate(color)}
                   />
                 ))}
+                {customColorPicker(draftColor, setDraftColor)}
+                <button
+                  type="button"
+                  className="book-highlight-note-btn"
+                  aria-label={t('bookshelf.applyCustomColor')}
+                  title={t('bookshelf.applyCustomColor')}
+                  onClick={() => void annotate(customColor)}
+                >
+                  <span aria-hidden="true">✓</span>
+                </button>
                 <span className="book-highlight-divider" aria-hidden="true" />
                 <button
                   type="button"
@@ -1440,6 +1655,7 @@ export function BookReader({
                     onClick={() => setEditingAnnColor(color)}
                   />
                 ))}
+                {customColorPicker(editingAnnColor, setEditingAnnColor)}
               </div>
               <textarea
                 aria-label={t('bookshelf.note')}
@@ -1611,7 +1827,13 @@ export interface AudioChapter {
   title: string;
   duration_ms: number;
   start_file_ms: number;
+  start_book_ms: number;
   end_file_ms: number;
+}
+
+interface AudioAlignment {
+  position: number;
+  onSaved: () => void;
 }
 
 export interface BookAudioSession {
@@ -1626,7 +1848,12 @@ export interface BookAudioSession {
   positionMs: number;
   error: string;
   audio: RefObject<HTMLAudioElement | null>;
-  open: (nextBook: Book, autoplayNow?: boolean, targetChapterIndex?: number) => void;
+  open: (
+    nextBook: Book,
+    autoplayNow?: boolean,
+    targetChapterIndex?: number,
+    align?: AudioAlignment,
+  ) => void;
   close: () => void;
   choose: (next: number, play?: boolean) => void;
   seekBy: (seconds: number) => void;
@@ -1666,10 +1893,12 @@ export function useBookAudioSession({
   const [positionMs, setPositionMs] = useState(0);
   const [error, setError] = useState('');
   const [manualStart, setManualStart] = useState(false);
+  const [restartRevision, restartAudio] = useState(0);
   const restore = useRef(0);
   const touched = useRef(false);
   const autoplay = useRef(false);
   const pendingChapter = useRef<number | null>(null);
+  const alignment = useRef<(AudioAlignment & { bookId: string; index: number }) | null>(null);
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
   const prevElsewhere = useRef(activeElsewhere);
@@ -1686,8 +1915,27 @@ export function useBookAudioSession({
         setRate(value.playback_rate);
       }
     },
-    book?.progress_status === 'finished' ? 'restart' : 'resume',
+    book?.listening_progress?.completed ? 'restart' : 'resume',
+    restartRevision,
   );
+
+  useEffect(() => {
+    const target = alignment.current;
+    if (
+      !target ||
+      target.bookId !== book?.id ||
+      target.index !== current?.chapter_index ||
+      !checkpoint.ready ||
+      checkpoint.error
+    )
+      return;
+    alignment.current = null;
+    checkpoint.save(
+      { chapter_index: target.index, chapter_position_ms: target.position, playback_rate: rate },
+      false,
+      target.onSaved,
+    );
+  }, [book?.id, current?.chapter_index, checkpoint, rate]);
 
   useEffect(() => {
     audio.current?.pause();
@@ -1717,7 +1965,8 @@ export function useBookAudioSession({
       .then((value) => {
         setChapters(value.chapters);
         if (pendingChapter.current !== null && value.chapters?.[pendingChapter.current]) {
-          restore.current = 0;
+          restore.current =
+            alignment.current?.bookId === book?.id ? (alignment.current?.position ?? 0) : 0;
           touched.current = true;
           setManualStart(true);
           setIndex(pendingChapter.current);
@@ -1771,6 +2020,7 @@ export function useBookAudioSession({
     save();
     audio.current?.pause();
     pendingChapter.current = null;
+    alignment.current = null;
     autoplay.current = false;
     setManualStart(false);
     setPlaying(false);
@@ -1788,17 +2038,17 @@ export function useBookAudioSession({
   }, [activeElsewhere, book, close]);
 
   const choose = useCallback(
-    (next: number, play = false) => {
+    (next: number, play = false, position = 0, recordPrevious = true) => {
       if (!chapters?.[next]) return;
       if (play) onPlay();
-      save();
-      restore.current = 0;
+      if (recordPrevious) save();
+      restore.current = position;
       touched.current = true;
       setManualStart(true);
       autoplay.current = play;
       if (audio.current && chapters[next].file_index === current?.file_index) {
-        audio.current.currentTime = chapters[next].start_file_ms / 1000;
-        setPositionMs(0);
+        audio.current.currentTime = (chapters[next].start_file_ms + position) / 1000;
+        setPositionMs(position);
         if (play) {
           autoplay.current = false;
           void audio.current.play().catch((cause: Error) => setError(cause.message));
@@ -1810,11 +2060,33 @@ export function useBookAudioSession({
   );
 
   const open = useCallback(
-    (nextBook: Book, autoplayNow = false, targetChapterIndex?: number) => {
+    (nextBook: Book, autoplayNow = false, targetChapterIndex?: number, align?: AudioAlignment) => {
+      if (targetChapterIndex !== undefined && align) {
+        alignment.current = { bookId: nextBook.id, index: targetChapterIndex, ...align };
+      }
       if (autoplayNow) onPlay();
       if (book?.id === nextBook.id) {
+        const restarting =
+          autoplayNow && targetChapterIndex === 0 && nextBook.listening_progress?.completed;
+        if (restarting) {
+          setBook(nextBook);
+          restartAudio((revision) => revision + 1);
+        }
         if (targetChapterIndex !== undefined && chapters?.[targetChapterIndex]) {
-          choose(targetChapterIndex, autoplayNow);
+          choose(
+            targetChapterIndex,
+            autoplayNow || Boolean(align && playing),
+            align?.position,
+            !restarting,
+          );
+          if (targetChapterIndex === index && align && checkpoint.ready && !checkpoint.error) {
+            alignment.current = null;
+            checkpoint.save(
+              { chapter_index: index, chapter_position_ms: align.position, playback_rate: rate },
+              false,
+              align.onSaved,
+            );
+          }
         } else if (autoplayNow && audio.current) {
           if (audio.current.paused) {
             touched.current = true;
@@ -1833,7 +2105,7 @@ export function useBookAudioSession({
       autoplay.current = autoplayNow;
       setBook(nextBook);
     },
-    [book?.id, chapters, choose, onPlay, save],
+    [book?.id, chapters, checkpoint, choose, index, onPlay, playing, rate, save],
   );
 
   const seekBy = useCallback(

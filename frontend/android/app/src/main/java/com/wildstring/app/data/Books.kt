@@ -26,6 +26,14 @@ data class BookSummary(
     @SerializedName("has_cover") val hasCover: Boolean = false,
     @SerializedName("progress_status") val progressStatus: String? = null,
     @SerializedName("resume_kind") val resumeKind: String? = null,
+    @SerializedName("reading_progress") val readingProgress: BookCarrierProgress? = null,
+    @SerializedName("listening_progress") val listeningProgress: BookCarrierProgress? = null,
+)
+data class BookCarrierProgress(
+    @SerializedName("chapter_title") val chapterTitle: String?,
+    @SerializedName("overall_ratio") val overallRatio: Double = 0.0,
+    val completed: Boolean = false,
+    @SerializedName("updated_at") val updatedAt: Double = 0.0,
 )
 data class BookLibrary(
     val id: String,

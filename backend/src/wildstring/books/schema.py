@@ -1,5 +1,25 @@
 """Bookshelf tables installed together with the schema 57 storage columns."""
 
+ANNOTATIONS = """CREATE TABLE IF NOT EXISTS book_annotations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    spine_index INTEGER NOT NULL,
+    start_block_index INTEGER NOT NULL,
+    start_char_offset INTEGER NOT NULL,
+    end_block_index INTEGER NOT NULL,
+    end_char_offset INTEGER NOT NULL,
+    selected_text TEXT NOT NULL,
+    note TEXT,
+    color TEXT NOT NULL CHECK(color IN ('amber','terracotta','sage','stone') OR
+        color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+)"""
+ANNOTATION_INDEX = (
+    "CREATE INDEX IF NOT EXISTS book_annotations_by_user_book ON book_annotations(user_id,book_id)"
+)
+
 TABLES = (
     """CREATE TABLE IF NOT EXISTS book_libraries (
         id TEXT PRIMARY KEY,
@@ -208,23 +228,9 @@ TABLES = (
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL
     )""",
-    """CREATE TABLE IF NOT EXISTS book_annotations (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-        spine_index INTEGER NOT NULL,
-        start_block_index INTEGER NOT NULL,
-        start_char_offset INTEGER NOT NULL,
-        end_block_index INTEGER NOT NULL,
-        end_char_offset INTEGER NOT NULL,
-        selected_text TEXT NOT NULL,
-        note TEXT,
-        color TEXT NOT NULL CHECK(color IN ('amber','terracotta','sage','stone')),
-        created_at REAL NOT NULL,
-        updated_at REAL NOT NULL
-    )""",
+    ANNOTATIONS,
     """CREATE INDEX IF NOT EXISTS book_bookmarks_by_user_book ON book_bookmarks(user_id,book_id)""",
-    """CREATE INDEX IF NOT EXISTS book_annotations_by_user_book ON book_annotations(user_id,book_id)""",
+    ANNOTATION_INDEX,
     """CREATE TABLE IF NOT EXISTS book_metadata_settings (
         id INTEGER PRIMARY KEY CHECK(id=1),
         itunes INTEGER NOT NULL DEFAULT 1 CHECK(itunes IN (0,1)),

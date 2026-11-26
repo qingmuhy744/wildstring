@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { login, manageTab, section, test } from './helpers';
@@ -28,6 +28,284 @@ async function uploadReaderFixture(page: Page, title: string) {
   const { id } = await created.json();
   return { id, libraryId };
 }
+
+async function selectReaderText(page: Page, text: string) {
+  const paragraph = page.getByText(text, { exact: true });
+  await paragraph.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  });
+}
+
+test('从详情点阅读后返回书架，迟到详情响应不会重开阅读器', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `短篇返回 ${info.project.name} ${Date.now()}`;
+  const { id, libraryId } = await uploadReaderFixture(page, title);
+  await section(page, '书架');
+  await page.getByLabel('书库', { exact: true }).selectOption(libraryId);
+  const card = page.locator('.bookshelf-grid').getByRole('button', { name: new RegExp(title) });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    `**/api/v1/books/${id}`,
+    async (route) => {
+      const response = await route.fetch();
+      await held;
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
+  try {
+    const requested = page.waitForRequest((request) => request.url().endsWith(`/books/${id}`));
+    await card.click();
+    const old = await requested;
+    const aborted = page.waitForEvent('requestfailed', (request) => request === old);
+    await page.getByRole('button', { name: '阅读', exact: true }).click();
+    const reader = page.getByRole('dialog', { name: title });
+    await expect(reader.getByRole('article')).toContainText('晨间正文。');
+    await reader.getByRole('button', { name: '返回书架' }).click();
+    release();
+    await aborted;
+    await expect(reader).toHaveCount(0);
+    await expect(card).toBeFocused();
+    await expect(page).toHaveURL(/\/$/);
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(`/api/v1/books/${id}`);
+        return (await response.json()).progress_status;
+      })
+      .toBe('in_progress');
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+});
+
+test('双载体摘要、对齐与暖纸自定义高亮', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `双载体暖纸复验 ${info.project.name} ${Date.now()}`;
+  const source = await mkdtemp(join(tmpdir(), 'wildstring-book-alignment-'));
+  try {
+    const series = join(source, title);
+    await mkdir(series);
+    const sample = new URL('../../../tests/fixtures/audio/playback.mp3', import.meta.url);
+    await copyFile(sample, join(series, '01.mp3'));
+    await copyFile(sample, join(series, '02.mp3'));
+    const library = await page.request.post('/api/v1/book-libraries', {
+      headers: bookClientHeaders,
+      data: { name: title, source_roots: [source] },
+    });
+    expect(library.status()).toBe(201);
+    const { id: libraryId } = await library.json();
+    expect(
+      (
+        await page.request.post(`/api/v1/book-libraries/${libraryId}/scan`, {
+          headers: bookClientHeaders,
+        })
+      ).ok(),
+    ).toBe(true);
+    const listing = await page.request.get(`/api/v1/books?library_id=${libraryId}`);
+    const { id } = (await listing.json()).items[0];
+    const prefix = `/api/v1/books/${id}`;
+    expect(
+      (
+        await page.request.post(prefix + '/ebook', {
+          headers: bookClientHeaders,
+          multipart: {
+            file: {
+              name: `${title}.txt`,
+              mimeType: 'text/plain',
+              buffer: Buffer.from('第一章\n晨间正文。\n\n第二章\n午后正文。\n\n第三章\n夜间正文。'),
+            },
+          },
+        })
+      ).status(),
+    ).toBe(201);
+    expect(
+      (
+        await page.request.patch(prefix + '/audiobook/chapters/1', {
+          headers: bookClientHeaders,
+          data: { title: '第二章' },
+        })
+      ).ok(),
+    ).toBe(true);
+    const basics = { device_id: 'fixture', base_version: 0, sequence: 1 };
+    expect(
+      (
+        await page.request.put(prefix + '/reading-progress', {
+          headers: bookClientHeaders,
+          data: {
+            ...basics,
+            session_id: 'fixture-reading-in-progress',
+            spine_index: 0,
+            block_index: 0,
+            char_offset: 0,
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    expect(
+      (
+        await page.request.put(prefix + '/listening-progress', {
+          headers: bookClientHeaders,
+          data: {
+            ...basics,
+            session_id: 'fixture-listening-in-progress',
+            chapter_index: 1,
+            chapter_position_ms: 500,
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+
+    await section(page, '书架');
+    await page.getByLabel('书库', { exact: true }).selectOption(libraryId);
+    const card = page.locator('.bookshelf-grid').getByRole('button', { name: new RegExp(title) });
+    await card.click();
+    const read = page.getByRole('button', { name: '继续阅读', exact: true });
+    await expect(read).toBeVisible();
+    await expect(page.getByRole('button', { name: '继续收听', exact: true })).toBeVisible();
+    await expect(page.locator('.book-carrier-progress')).toContainText('已听 · 第二章');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.screenshot({
+        path: info.outputPath(`book-detail-${theme}.png`),
+        animations: 'disabled',
+      });
+    }
+    await read.click();
+    const reader = page.getByRole('dialog', { name: title });
+    const hint = reader.locator('.book-align-notice');
+    await expect(hint).toContainText('有声书已听到「第二章」');
+    await expect(reader.getByRole('article')).toContainText('晨间正文。');
+    await expect(hint.getByRole('button', { name: '跳到对应位置' })).toBeEnabled();
+    const setPaper = async (theme: '浅色纸张' | '深色纸张') => {
+      await reader.getByRole('button', { name: '排版', exact: true }).click();
+      await reader.getByRole('button', { name: theme }).click();
+      await reader
+        .getByRole('group', { name: '排版' })
+        .getByRole('button', { name: '关闭' })
+        .click();
+    };
+    await page.screenshot({
+      path: info.outputPath('align-reading-light.png'),
+      animations: 'disabled',
+    });
+    await setPaper('深色纸张');
+    await page.screenshot({
+      path: info.outputPath('align-reading-dark.png'),
+      animations: 'disabled',
+    });
+    await hint.getByRole('button', { name: '忽略' }).click();
+    await expect(hint).toHaveCount(0);
+    expect((await (await page.request.get(prefix + '/reading-progress')).json()).version).toBe(1);
+    await reader.getByRole('button', { name: '返回书架' }).click();
+    await card.click();
+    await read.click();
+    await hint.getByRole('button', { name: '跳到对应位置' }).click();
+    await expect(reader.getByRole('article')).toContainText('午后正文。');
+    await selectReaderText(page, '午后正文。');
+    const toolbar = reader.getByRole('toolbar', { name: '批注' });
+    await toolbar.getByLabel('自定义高亮颜色').fill('#3456ab');
+    await page.screenshot({
+      path: info.outputPath('custom-color-picker.png'),
+      animations: 'disabled',
+    });
+    await toolbar.getByRole('button', { name: '应用自定义颜色' }).click();
+    const mark = reader.locator('mark[data-color="#3456ab"]');
+    await expect(mark).toHaveText('午后正文。');
+    await page.screenshot({
+      path: info.outputPath('custom-mark-light.png'),
+      animations: 'disabled',
+    });
+    await setPaper('深色纸张');
+    await expect(mark).toHaveCSS('color', 'rgb(232, 227, 217)');
+    await page.screenshot({
+      path: info.outputPath('custom-mark-dark.png'),
+      animations: 'disabled',
+    });
+    await mark.click();
+    await expect(reader.getByLabel('自定义高亮颜色')).toHaveValue('#3456ab');
+    await page.screenshot({
+      path: info.outputPath('custom-color-editor-dark.png'),
+      animations: 'disabled',
+    });
+    await reader.getByLabel('自定义高亮颜色').fill('#892543');
+    await reader.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(reader.locator('mark[data-color="#892543"]')).toHaveText('午后正文。');
+    await reader.getByRole('button', { name: '下一章' }).click();
+    await expect(reader.getByRole('article')).toContainText('夜间正文。');
+    await expect
+      .poll(
+        async () =>
+          (await (await page.request.get(prefix + '/reading-progress')).json()).spine_index,
+      )
+      .toBe(2);
+    await reader.getByRole('button', { name: '返回书架' }).click();
+    await card.click();
+    const audioHint = page.locator('.book-align-notice');
+    await expect(audioHint).toContainText('电子书已读到「第三章」');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.screenshot({
+        path: info.outputPath(`align-listening-${theme}.png`),
+        animations: 'disabled',
+      });
+    }
+    await audioHint.getByRole('button', { name: '跳到对应位置' }).click();
+    await expect
+      .poll(
+        async () => (await (await page.request.get(prefix + '/listening-progress')).json()).version,
+      )
+      .toBeGreaterThan(1);
+    const aligned = await (await page.request.get(prefix + '/listening-progress')).json();
+    expect(aligned.chapter_index).toBe(1);
+    expect(aligned.chapter_position_ms).toBeGreaterThan(500);
+    await expect(page.locator('.player .play-button')).toHaveCSS('width', '38px');
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.screenshot({
+        path: info.outputPath(`book-transport-${theme}.png`),
+        animations: 'disabled',
+      });
+    }
+    const savedReading = await (await page.request.get(prefix + '/reading-progress')).json();
+    expect(
+      (
+        await page.request.put(prefix + '/reading-progress', {
+          headers: bookClientHeaders,
+          data: {
+            ...basics,
+            base_version: savedReading.version,
+            session_id: 'fixture-finished-reading',
+            spine_index: 2,
+            block_index: 1,
+            char_offset: 5,
+            completed: true,
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await page.getByRole('button', { name: '返回书架', exact: true }).click();
+    await card.click();
+    await page.getByRole('button', { name: '重新阅读', exact: true }).click();
+    await expect(reader.getByRole('article')).toContainText('晨间正文。');
+    await expect
+      .poll(async () => {
+        const progress = await (await page.request.get(prefix + '/reading-progress')).json();
+        return [progress.spine_index, progress.completed];
+      })
+      .toEqual([0, false]);
+  } finally {
+    await rm(source, { recursive: true, force: true });
+  }
+});
 
 test('正文、目录和初次阅读进度读取失败各自原位重试', async ({ page }, info) => {
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
@@ -799,7 +1077,7 @@ test('有声书延迟读取进度时不覆盖原章节与倍速', async ({ page 
       ),
     ).toBe(0);
 
-    await page.getByRole('button', { name: '收听', exact: true }).click();
+    await page.getByRole('button', { name: '继续收听', exact: true }).click();
     const audioEl = page.locator(`audio[src*="/api/v1/books/${audioBook.id}/audiobook/files/"]`);
     await expect(audioEl).toHaveAttribute('src', new RegExp(`/files/1/stream$`));
     await expect

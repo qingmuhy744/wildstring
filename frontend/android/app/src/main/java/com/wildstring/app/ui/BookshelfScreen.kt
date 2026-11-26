@@ -47,6 +47,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -835,6 +837,16 @@ private fun BookDetailScreen(
                 }
 
                 val isPad = LocalAndroidLayoutMode.current == AndroidLayoutMode.Pad
+                val readLabel = when {
+                    book.readingProgress?.completed == true -> R.string.books_read
+                    book.readingProgress != null || book.resumeKind == "reading" -> R.string.books_continue_reading_action
+                    else -> R.string.books_read
+                }
+                val listenLabel = when {
+                    book.listeningProgress?.completed == true -> R.string.books_listen
+                    book.listeningProgress != null || book.resumeKind == "listening" -> R.string.books_continue_listening_action
+                    else -> R.string.books_listen
+                }
                 if (book.hasEbook || book.hasAudiobook || canEdit || canUpload) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -855,7 +867,7 @@ private fun BookDetailScreen(
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.MenuBook, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.books_read), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                Text(stringResource(readLabel), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         if (book.hasAudiobook) {
@@ -868,7 +880,7 @@ private fun BookDetailScreen(
                                 ) {
                                     Icon(Icons.Default.Headphones, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text(stringResource(R.string.books_listen), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                    Text(stringResource(listenLabel), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
                             } else {
                                 Button(
@@ -879,7 +891,7 @@ private fun BookDetailScreen(
                                 ) {
                                     Icon(Icons.Default.Headphones, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text(stringResource(R.string.books_listen), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                    Text(stringResource(listenLabel), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -1574,12 +1586,16 @@ private fun BookEditCard(
     }
 }
 
-private fun annotationHighlightColorOrNull(color: String): Color? = when (color) {
+private val customAnnotationColor = Regex("#[0-9a-fA-F]{6}")
+
+internal fun annotationHighlightColorOrNull(color: String): Color? = when (color) {
     "amber" -> Color(0xFFECCB84)
     "terracotta" -> Color(0xFFE1AD99)
     "sage" -> Color(0xFFC1C8AA)
     "stone" -> Color(0xFFD4C8BB)
-    else -> null
+    else -> if (customAnnotationColor.matches(color)) {
+        Color(0xFF000000 or color.drop(1).toLong(16))
+    } else null
 }
 
 @Composable
@@ -2725,6 +2741,14 @@ private fun BookReading(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
+                                if (customAnnotationColor.matches(editing.color)) {
+                                    BookChoicePill(
+                                        label = editing.color,
+                                        selected = chosenColor == editing.color,
+                                        onClick = { chosenColor = editing.color },
+                                        swatchColor = annotationHighlightColorOrNull(editing.color),
+                                    )
+                                }
                                 listOf(
                                     "amber" to R.string.books_amber,
                                     "terracotta" to R.string.books_terracotta,
@@ -3248,8 +3272,13 @@ private fun BookParagraph(
                 val end = if (block.index == mark.endBlock) (mark.endOffset - piece.offset).coerceIn(0, length) else length
                 val color = annotationHighlightColorOrNull(mark.color) ?: continue
                 if (start < end) {
+                    val custom = mark.color.startsWith('#')
+                    val paper = if (ink.luminance() > 0.5f) Color(0xFF181614) else Color(0xFFF6F3ED)
                     addStyle(
-                        SpanStyle(color = Color(0xFF2A2B25), background = color),
+                        SpanStyle(
+                            color = if (custom) ink else Color(0xFF2A2B25),
+                            background = if (custom) lerp(paper, color, 0.25f) else color,
+                        ),
                         text.offsetByCodePoints(0, start),
                         text.offsetByCodePoints(0, end),
                     )

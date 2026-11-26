@@ -1918,6 +1918,8 @@
     <string name="books_back">Back to bookshelf</string>
     <string name="books_read">Read</string>
     <string name="books_listen">Listen</string>
+    <string name="books_continue_reading_action">Continue reading</string>
+    <string name="books_continue_listening_action">Continue listening</string>
     <string name="books_find">Find books</string>
     <string name="books_error">Unable to load or sync books. Check your connection and try again.</string>
     <string name="books_retry">Retry</string>
