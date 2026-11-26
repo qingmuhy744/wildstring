@@ -64,7 +64,7 @@ jobs:
           config-file: .github/codeql/config.yml
       - name: Compile Android Kotlin for extraction
         if: matrix.language == 'java-kotlin'
-        run: make android-codeql
+        run: scripts/retry_on_429.sh make android-codeql
       - name: Analyze and upload findings
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { audio, login, section, podcastCatalog, leaveSettings, manageTab } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { audio, login, section, podcastCatalog, leaveSettings, manageTab, test } from './helpers';
 
 test.describe.configure({ timeout: 90_000 });
 

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login } from './helpers';
+import { expect } from '@playwright/test';
+import { login, test } from './helpers';
 
 test('歌曲菜单打开文件属性与路径弹窗，展示相对与物理路径并支持重排', async ({ page }, info) => {
   await login(page);

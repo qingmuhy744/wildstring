@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { login, manageTab, section } from './helpers';
+import { login, manageTab, section, test } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 let cleanupAction: (() => Promise<void>) | null = null;

@@ -1,8 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { login, manageTab, section } from './helpers';
+import { login, manageTab, section, test } from './helpers';
 
 const bookClientHeaders = { 'X-Wildstring-Client': 'web' };
 

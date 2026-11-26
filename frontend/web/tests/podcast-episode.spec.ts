@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { login, podcastCatalog } from './helpers';
+import { login, podcastCatalog, test } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_PODCAST !== '1', 'Requires the isolated podcast fixture.');
 

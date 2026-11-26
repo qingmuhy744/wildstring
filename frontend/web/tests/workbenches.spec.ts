@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { audio, login, manageTab, personalCategory } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { audio, login, manageTab, personalCategory, test } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 test.use({ actionTimeout: 7000 });

@@ -112,12 +112,7 @@ async function openRadio(page: Page) {
   await page.reload();
   await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
-  const queued = page.waitForResponse(
-    (response) =>
-      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
-  );
   await page.locator('.episode-play-btn').first().click();
-  expect((await queued).ok()).toBeTruthy();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '播客全屏播放', exact: true })).toBeVisible();

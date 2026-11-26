@@ -1,5 +1,5 @@
-import { section } from './helpers';
-import { expect, test, type Page } from '@playwright/test';
+import { section, test } from './helpers';
+import { expect, type Page } from '@playwright/test';
 import { login } from './helpers';
 
 test('回答逐步出现并渲染 Markdown，终态停止跟随且不加载外部图片', async ({ page }, info) => {

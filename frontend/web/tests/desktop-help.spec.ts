@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
-import { login, section, manageTab } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { login, section, manageTab, test } from './helpers';
 
 async function gain(page: Page) {
   await login(page);

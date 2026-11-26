@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { audio, login } from './helpers';
+import { expect } from '@playwright/test';
+import { audio, login, test } from './helpers';
 import { readFile } from 'node:fs/promises';
 
 test('长按动画或歌词查看大封面，松手不切换或跳转，返回保持原播放状态', async ({ page }, info) => {

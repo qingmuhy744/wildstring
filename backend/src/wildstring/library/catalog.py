@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.folders import FolderCreate, browse_folders, create_folder
+from wildstring.library.fs import normalize_absolute_path, registered_source_paths
 from wildstring.library.import_files import HardlinkError, validate_hardlink_capability
 from wildstring.library.metadata import SUPPORTED_SUFFIXES
 from wildstring.library.scope import allowed_ids, library_for_root
@@ -21,13 +22,13 @@ from wildstring.library.storage import (
 )
 
 
-def normalize_source_roots(values):
+def normalize_source_roots(values: list[str]) -> list[Path]:
     try:
-        roots = [Path(value).resolve(strict=True) for value in values]
+        roots = [normalize_absolute_path(value) for value in values]
     except (OSError, RuntimeError, ValueError):
         raise HTTPException(422, "library_source_invalid") from None
-    for index, (value, root) in enumerate(zip(values, roots, strict=True)):
-        if not Path(value).is_absolute() or not root.is_dir():
+    for index, root in enumerate(roots):
+        if not root.is_dir():
             raise HTTPException(422, "library_source_invalid")
         if any(overlapping(root, other) for other in roots[:index]):
             raise HTTPException(422, "library_sources_overlap")
@@ -168,8 +169,15 @@ class LibraryCatalog:
         identity = identity or uuid4().hex
         old = None if creating else self.record(identity)
         root = Path(old["root"]) if old else self.settings.data_dir / "libraries" / identity
-        if old and body.managed_root and Path(body.managed_root).resolve() != root:
-            raise HTTPException(409, "library_migration_required")
+        if old and body.managed_root:
+            try:
+                requested_root = normalize_absolute_path(
+                    Path(body.managed_root).absolute(), allow_missing=True
+                )
+            except (OSError, RuntimeError, ValueError):
+                raise HTTPException(422, "library_target_invalid") from None
+            if requested_root != root:
+                raise HTTPException(409, "library_migration_required")
         if not old and body.managed_root:
             root = LibraryStorage(self).destination(body.managed_root, body.source_roots).path
         roots = self.roots(body.source_roots, root)
@@ -184,9 +192,12 @@ class LibraryCatalog:
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
 
-        paused = {str(Path(p).resolve()) for p in body.paused_source_roots or []}
-        if not paused <= {str(p) for p in roots}:
-            raise HTTPException(422, "library_source_invalid")
+        try:
+            paused = registered_source_paths(
+                body.paused_source_roots or [], body.source_roots, roots, resolve_aliases=True
+            )
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(422, "library_source_invalid") from None
         if old and old["is_default"] and not body.enabled:
             raise HTTPException(409, "default_library_required")
         try:

@@ -1,4 +1,4 @@
-"""No-follow directory descriptor and regular-file opening primitives."""
+"""Canonical path checks and no-follow filesystem access."""
 
 import os
 import stat
@@ -10,6 +10,43 @@ class SourceChangedError(Exception):
     """The source changed while metadata was being read."""
 
 
+def normalize_absolute_path(value: str | Path, *, allow_missing: bool = False) -> Path:
+    if not Path(value).is_absolute():
+        raise ValueError("Expected an absolute path")
+    try:
+        return Path(os.path.realpath(value, strict=True))
+    except FileNotFoundError:
+        if not allow_missing:
+            raise
+        target = os.path.realpath(value)
+        # A missing component followed by ".." may expose a loop in the resolved path.
+        with suppress(FileNotFoundError):
+            target = os.path.realpath(target, strict=True)
+        return Path(target)
+
+
+def registered_source_paths(
+    values: list[str],
+    source_roots: list[str],
+    sources: list[Path],
+    *,
+    resolve_aliases: bool = False,
+) -> set[str]:
+    """Match requested roots to canonical directories already checked at registration."""
+    known = dict(zip(map(Path, source_roots), sources, strict=True))
+    registered = set(sources)
+    matches = set()
+    for value in values:
+        path = Path(value)
+        root = known.get(path, path)
+        if resolve_aliases and root not in registered:
+            root = normalize_absolute_path(path.absolute(), allow_missing=True)
+        if root not in registered:
+            raise ValueError("Source directory is not registered")
+        matches.add(str(root))
+    return matches
+
+
 @contextmanager
 def open_directory(path, *, dir_fd=None):
     """Own each directory descriptor explicitly, including failed nested opens."""
@@ -18,6 +55,13 @@ def open_directory(path, *, dir_fd=None):
         yield descriptor
     finally:
         os.close(descriptor)
+
+
+def directory_device(path: Path) -> int | None:
+    if os.open not in os.supports_dir_fd:
+        return None
+    with open_directory(path) as directory:
+        return os.fstat(directory).st_dev
 
 
 @contextmanager

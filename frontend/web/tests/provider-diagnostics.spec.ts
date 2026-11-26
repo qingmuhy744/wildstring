@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { login, manageTab } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { login, manageTab, test } from './helpers';
 
 async function management(page: Page) {
   if (await page.getByLabel('浏览方式', { exact: true }).isVisible())

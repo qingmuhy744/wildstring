@@ -1,4 +1,15 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test as base, type Page } from '@playwright/test';
+
+export const test = base.extend({
+  page: async ({ page }, use) => {
+    try {
+      await use(page);
+    } finally {
+      // Tests can still wait explicitly for handlers they release before teardown.
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    }
+  },
+});
 
 export async function section(page: Page, name: string) {
   await expect(page.locator('.app-shell')).toBeVisible();

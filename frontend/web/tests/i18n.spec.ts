@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { section } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { section, test } from './helpers';
 
 test.use({ locale: 'en-US' });
 

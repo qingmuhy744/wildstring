@@ -15,6 +15,7 @@ from wildstring.books.metadata import router as metadata_router
 from wildstring.books.pairing import router as pairing_router
 from wildstring.books.progress import router as progress_router
 from wildstring.library.catalog import normalize_source_roots
+from wildstring.library.fs import registered_source_paths
 from wildstring.library.import_files import HardlinkError, validate_hardlink_capability
 from wildstring.library.storage import LibraryStorage, MigrationInput, overlapping
 from wildstring.permissions import dependency
@@ -75,17 +76,10 @@ class BookLibraryGrant(BaseModel):
 def _normalize_paused_roots(
     raw_paused: list[str] | None, source_roots: list[str], sources: list[Path]
 ) -> set[str]:
-    if raw_paused is None:
-        return set()
-    known = {Path(value): str(source) for value, source in zip(source_roots, sources, strict=True)}
-    known.update({source: str(source) for source in sources})
-    paused = set()
-    for value in raw_paused:
-        source = known.get(Path(value))
-        if source is None:
-            raise HTTPException(422, "library_source_invalid")
-        paused.add(source)
-    return paused
+    try:
+        return registered_source_paths(raw_paused or [], source_roots, sources)
+    except ValueError:
+        raise HTTPException(422, "library_source_invalid") from None
 
 
 def _check_book_source_overlaps(

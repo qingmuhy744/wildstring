@@ -18,7 +18,13 @@ from fastapi import HTTPException
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field
 
-from wildstring.library.fs import SourceChangedError, fingerprint, open_directory, open_source
+from wildstring.library.fs import (
+    SourceChangedError,
+    directory_device,
+    fingerprint,
+    normalize_absolute_path,
+    open_source,
+)
 from wildstring.library.import_files import (
     HardlinkError,
     copy_exclusive,
@@ -131,12 +137,7 @@ class LibraryStorage:
     ) -> StorageDestination:
         """Validate an owner-selected server directory on a writable mount."""
         try:
-            if not Path(value).is_absolute():
-                raise ValueError
-            try:
-                target = Path(os.path.realpath(value, strict=True))
-            except FileNotFoundError:
-                target = Path(os.path.realpath(value))
+            target = normalize_absolute_path(value, allow_missing=True)
             if target == current_root:
                 return StorageDestination(target, target)
             runtime = self.settings.data_dir.resolve()
@@ -236,13 +237,10 @@ class LibraryStorage:
             if body.managed_root
             else StorageDestination(root, root)
         )
-        device = None
-        if os.open in os.supports_dir_fd:
-            try:
-                with open_directory(destination.parent) as directory:
-                    device = os.fstat(directory).st_dev
-            except OSError:
-                raise HTTPException(422, "library_target_not_writable") from None
+        try:
+            device = directory_device(destination.parent)
+        except OSError:
+            raise HTTPException(422, "library_target_not_writable") from None
         return MusicRebind(self.database, library_id, root, destination.path, device)
 
     def submit_rebind(self, library_id, body, user):

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { login, manageTab } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { login, manageTab, test } from './helpers';
 
 const sources = [
   { id: 'source-a', name: '磁盘 A', path: '/imports/a' },

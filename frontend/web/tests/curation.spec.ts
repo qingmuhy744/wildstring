@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { login, section } from './helpers';
+import { expect } from '@playwright/test';
+import { login, section, test } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 

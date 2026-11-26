@@ -41,12 +41,14 @@ SPECIAL_WEB_ENVS: dict[str, dict[str, str]] = {
     "podcast-presentation.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "ui-design-standards.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-episode.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
+    "podcast-favorite-challenge.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-progress.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "personal-settings.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-search.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-search-settings.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-opml.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "podcast-identity-admin.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
+    "radio-click.spec.ts": {"WILDSTRING_TEST_PODCAST": "1"},
     "multipage-real.spec.ts": {"WILDSTRING_TEST_LARGE_LIBRARY": "1"},
     "browse-real.spec.ts": {"WILDSTRING_TEST_BROWSE_LIBRARY": "1"},
     "catalog-sort-real.spec.ts": {"WILDSTRING_TEST_DISC_LIBRARY": "1"},
@@ -90,6 +92,18 @@ WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
         "catalog-sort-real.spec.ts",
         "track-availability.spec.ts",
     ],
+    "library-storage": ["music-libraries.spec.ts", "music-rebind.spec.ts"],
+    "music-libraries": ["music-libraries.spec.ts", "music-rebind.spec.ts"],
+    "music-rebind": ["music-rebind.spec.ts"],
+    "track-file-info-dialog": ["track-file-info.spec.ts", "music-rebind.spec.ts"],
+    "import-folder-dialog": ["import-folder.spec.ts"],
+    "folder-picker": ["music-libraries.spec.ts", "bookshelf.spec.ts"],
+    "user-library-access": ["music-libraries.spec.ts"],
+    "metadata-editor": [
+        "management.spec.ts",
+        "metadata-refresh.spec.ts",
+        "source-selection.spec.ts",
+    ],
     "discover": ["recommendations-unified.spec.ts", "podcast-search.spec.ts"],
     "assistant": ["agent-platform.spec.ts", "agent-real.spec.ts", "assistant-research.spec.ts"],
     "assistant-settings": ["agent-platform.spec.ts", "assistant-research.spec.ts"],
@@ -100,6 +114,7 @@ WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
     "podcasts": ["podcast-presentation.spec.ts", "ui-design-standards.spec.ts"],
     "podcast-player": ["podcast-player.spec.ts", "ui-design-standards.spec.ts"],
     "bookshelf": ["bookshelf.spec.ts"],
+    "book-reader": ["bookshelf.spec.ts"],
     "book-libraries-admin": ["bookshelf.spec.ts", "player-focus.spec.ts"],
     "settings-layout": ["settings-navigation.spec.ts", "personal-settings.spec.ts"],
     "workspace-ui": ["collections.spec.ts", "settings-navigation.spec.ts"],
@@ -242,7 +257,13 @@ def resolve_affected_tests(
     )
 
     for path in files:
-        if path.startswith("frontend/web/tests/") and path.endswith(".spec.ts"):
+        if path == "frontend/web/tests/helpers.ts":
+            web_specs.update(
+                spec.name
+                for spec in WEB_TESTS_DIR.glob("*.spec.ts")
+                if "from './helpers'" in spec.read_text(encoding="utf-8")
+            )
+        elif path.startswith("frontend/web/tests/") and path.endswith(".spec.ts"):
             if (ROOT / path).exists():
                 web_specs.add(Path(path).name)
         elif path.startswith("frontend/web/src/"):

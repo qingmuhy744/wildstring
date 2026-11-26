@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { audio, login } from './helpers';
+import { expect } from '@playwright/test';
+import { audio, login, test } from './helpers';
 
 test('登录、中文搜索、空结果与退出', async ({ page }) => {
   await login(page);
@@ -159,7 +159,6 @@ test('播放页艺人入口和专辑加载反馈可用', async ({ page }) => {
   await expect(skeleton).toBeHidden();
   await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(3);
-  await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
 test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词', async ({ page }, testInfo) => {

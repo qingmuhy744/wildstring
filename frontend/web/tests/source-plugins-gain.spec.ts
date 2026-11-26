@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { login, audio, manageTab } from './helpers';
+import { login, audio, manageTab, test } from './helpers';
 
 const zip = execFileSync(
   'backend/.venv/bin/python',

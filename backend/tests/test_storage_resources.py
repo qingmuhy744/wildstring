@@ -249,6 +249,8 @@ def test_custom_storage_watch_pause_and_verified_migration(
 ):
     source = tmp_path / "watch"
     source.mkdir()
+    source_alias = tmp_path / "watch-alias"
+    source_alias.symlink_to(source, target_is_directory=True)
     destination = tmp_path / "managed"
     with authenticated_client(settings) as client:
         catalog = client.app.state.library_catalog
@@ -256,7 +258,7 @@ def test_custom_storage_watch_pause_and_verified_migration(
             LibraryInput(
                 name="archive",
                 source_roots=[str(source)],
-                paused_source_roots=[str(source)],
+                paused_source_roots=[str(source_alias)],
                 managed_root=str(destination),
             )
         )
@@ -539,13 +541,22 @@ def test_storage_resolves_aliases_before_rejecting_reserved_roots(
             assert not (root / "unexpected-copy").exists()
         loop = tmp_path / "directory-loop"
         loop.symlink_to(loop, target_is_directory=True)
-        response = client.post(
-            f"/api/v1/libraries/{library['id']}/migrations",
-            headers=HEADERS,
-            json={"version": library["version"], "managed_root": str(loop / "copy")},
-        )
-        assert response.status_code == 422, response.text
-        assert response.json()["detail"] == "library_target_invalid"
+        for path in (loop / "copy", tmp_path / "missing" / ".." / loop.name / "copy"):
+            response = client.post(
+                f"/api/v1/libraries/{library['id']}/migrations",
+                headers=HEADERS,
+                json={"version": library["version"], "managed_root": str(path)},
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["detail"] == "library_target_invalid"
+        for roots in ({"source_roots": [str(loop)]}, {"paused_source_roots": [str(loop)]}):
+            response = client.post(
+                "/api/v1/libraries",
+                headers=HEADERS,
+                json={"name": "Bad source", "source_roots": [str(settings.music_dir)], **roots},
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["detail"] == "library_source_invalid"
 
 
 @pytest.mark.parametrize("profile,enabled", [("librarian", 1), ("owner", 0)])
