@@ -74,9 +74,15 @@ def open_source(root: Path, relative: Path):
     ):
         raise OSError("Invalid library path")
     if os.open in os.supports_dir_fd:
+        base = os.path.join(os.path.abspath(root), "")
+        path = os.path.abspath(root / relative)
+        if not path.startswith(base):
+            raise OSError("Source is outside the library")
         with open_parent_directory(root, relative) as directory:
             descriptor = os.open(
-                relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                os.path.basename(path),
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory,
             )
             with os.fdopen(descriptor, "rb") as source:
                 if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):

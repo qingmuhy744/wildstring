@@ -9,6 +9,7 @@ import stat
 import time
 from collections import defaultdict
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -17,7 +18,7 @@ from fastapi import HTTPException
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field
 
-from wildstring.library.fs import SourceChangedError, fingerprint, open_source
+from wildstring.library.fs import SourceChangedError, fingerprint, open_directory, open_source
 from wildstring.library.import_files import (
     HardlinkError,
     copy_exclusive,
@@ -51,6 +52,12 @@ class RebindPreview(MigrationInput):
 
 class RebindInput(MigrationInput):
     selections: list[ApprovedBinding]
+
+
+@dataclass(frozen=True)
+class StorageDestination:
+    path: Path
+    parent: Path
 
 
 def overlapping(first, second):
@@ -115,13 +122,20 @@ class LibraryStorage:
         return [root.resolve() for root in roots]
 
     def destination(
-        self, value, sources=(), *, collection: Literal["libraries", "books"] = "libraries"
-    ):
+        self,
+        value,
+        sources=(),
+        *,
+        collection: Literal["libraries", "books"] = "libraries",
+        current_root: Path | None = None,
+    ) -> StorageDestination:
         """Validate an owner-selected server directory on a writable mount."""
         try:
             if not Path(value).is_absolute():
                 raise ValueError
             target = Path(value).resolve()
+            if target == current_root:
+                return StorageDestination(target, target)
             runtime = self.settings.data_dir.resolve()
             managed_parent = runtime / collection
             if runtime.is_relative_to(target) or (
@@ -143,7 +157,7 @@ class LibraryStorage:
                 parent = parent.parent
             if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
                 raise HTTPException(422, "library_target_not_writable")
-            return target
+            return StorageDestination(target, parent)
         except (OSError, RuntimeError, ValueError):
             raise HTTPException(422, "library_target_invalid") from None
 
@@ -214,12 +228,19 @@ class LibraryStorage:
         ):
             raise HTTPException(422, "library_target_invalid")
         root = Path(row["storage_root"])
-        target = (
-            self.destination(body.managed_root)
-            if body.managed_root and Path(body.managed_root).resolve() != root
-            else root
+        destination = (
+            self.destination(body.managed_root, current_root=root)
+            if body.managed_root
+            else StorageDestination(root, root)
         )
-        return MusicRebind(self.database, library_id, root, target)
+        device = None
+        if os.open in os.supports_dir_fd:
+            try:
+                with open_directory(destination.parent) as directory:
+                    device = os.fstat(directory).st_dev
+            except OSError:
+                raise HTTPException(422, "library_target_not_writable") from None
+        return MusicRebind(self.database, library_id, root, destination.path, device)
 
     def submit_rebind(self, library_id, body, user):
         if body.target_storage_mode is None and len(body.selections) != 1:
@@ -240,16 +261,15 @@ class LibraryStorage:
         source = Path(record["storage_root"])
         current_mode = record["storage_mode"]
         mode = body.target_storage_mode or current_mode
-        if not body.managed_root or Path(body.managed_root).resolve() == source:
-            if body.managed_root and not Path(body.managed_root).is_absolute():
-                raise HTTPException(422, "library_target_invalid")
-            if mode == current_mode and rebind_plan is None:
-                raise HTTPException(422, "library_target_invalid")
-            target = source
-        else:
+        target = source
+        if body.managed_root:
             target = self.destination(
-                body.managed_root, collection="books" if self.book else "libraries"
-            )
+                body.managed_root,
+                collection="books" if self.book else "libraries",
+                current_root=source,
+            ).path
+        if target == source and mode == current_mode and rebind_plan is None:
+            raise HTTPException(422, "library_target_invalid")
         if mode == "hardlink" and not (rebind_plan and rebind_plan["single"]):
             try:
                 validate_hardlink_capability(roots, target, self.media_suffixes)

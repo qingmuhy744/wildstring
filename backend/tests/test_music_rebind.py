@@ -57,7 +57,7 @@ def wait_job(client, library, job_id):
         if job["status"] in {"completed", "failed"}:
             return job
         time.sleep(0.05)
-    pytest.fail("Migration did not finish")
+    raise AssertionError("Migration did not finish")
 
 
 def approve(item):
@@ -212,9 +212,11 @@ def test_batch_rebind_preserves_fresh_tags_and_skips_unapproved_track(
         old_tags.save()
         old_bytes = old.read_bytes()
         destination = tmp_path / "moved" if move else managed
-        base = {"version": library["version"], "target_storage_mode": "hardlink"}
-        if move:
-            base["managed_root"] = str(destination)
+        base = {
+            "version": library["version"],
+            "target_storage_mode": "hardlink",
+            "managed_root": str(destination),
+        }
         endpoint = f"/api/v1/libraries/{library['id']}/rebind"
         preview = client.post(endpoint + "/preview", headers=HEADERS, json=base)
         assert preview.status_code == 200, preview.text

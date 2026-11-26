@@ -870,6 +870,8 @@ def test_book_library_update_owner_path_privacy_and_watch_discovery(
     paused_dir = tmp_path / "paused-books"
     watched_dir.mkdir()
     paused_dir.mkdir()
+    paused_alias = tmp_path / "paused-books-alias"
+    paused_alias.symlink_to(paused_dir, target_is_directory=True)
     with authenticated_client(settings) as owner:
         created = create_library(
             owner,
@@ -886,8 +888,9 @@ def test_book_library_update_owner_path_privacy_and_watch_discovery(
             headers=HEADERS,
             json={
                 "name": "Governance v2",
-                "source_roots": [str(watched_dir), str(paused_dir)],
+                "source_roots": [str(watched_dir), str(paused_alias)],
                 "paused_source_roots": [str(paused_dir)],
+                "managed_root": created["managed_root"],
                 "default_access": "all",
                 "auto_pair": False,
                 "version": created["version"],

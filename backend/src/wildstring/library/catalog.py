@@ -171,7 +171,7 @@ class LibraryCatalog:
         if old and body.managed_root and Path(body.managed_root).resolve() != root:
             raise HTTPException(409, "library_migration_required")
         if not old and body.managed_root:
-            root = LibraryStorage(self).destination(body.managed_root, body.source_roots)
+            root = LibraryStorage(self).destination(body.managed_root, body.source_roots).path
         roots = self.roots(body.source_roots, root)
         mode = old["storage_mode"] if old else (body.storage_mode or "copy")
         if old and body.storage_mode and body.storage_mode != mode:
