@@ -54,7 +54,8 @@ Open [http://127.0.0.1:18780](http://127.0.0.1:18780) and sign in as `admin`. Co
 
 ## Release highlights
 
-- **Version [v0.8.29](docs/releases/v0.8.29.md)** · Faster single-track lyric and metadata lookup with per-search source selection, plus Android Pad layout-matched skeletons and floating fullscreen player queue. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
+- **Stable [v0.8.29](docs/releases/v0.8.29.md)** · Faster single-track lyric and metadata lookup with per-search source selection, plus Android Pad layout-matched skeletons and floating fullscreen player queue. See [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) for availability.
+- **Pre-release [v0.9.0-alpha.1](docs/releases/v0.9.0-alpha.1.md)** · Adds the self-hosted bookshelf and portable storage sidecars, MCP OAuth 2.1, native Google Drive storage, and Google Gemini Native protocol support; distributed only on the Pre-release channel without affecting stable updates.
 
 Tauri desktop clients for Linux and Windows are planned. See the [product scope](docs/product/scope.md) for future work.
 
