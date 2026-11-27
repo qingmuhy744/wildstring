@@ -104,15 +104,107 @@ def test_responses_keeps_completed_items_sources_and_usage():
     assert parse({"options": {"protocol": "responses"}}, result)["_sources"][0]["title"] == "来源"
 
 
-@pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "gemini"])
 def test_disconnected_stream_is_incomplete(protocol):
     with pytest.raises(OutboundError, match="ai_output_incomplete"):
         collect_events(
             stream({"type": "response.output_text.delta", "delta": "partial"})
             if protocol == "responses"
+            else stream(
+                {"candidates": [{"content": {"role": "model", "parts": [{"text": "partial"}]}}]}
+            )
+            if protocol == "gemini"
             else stream(chunk({"content": "partial"})),
             protocol,
         )
+
+
+def test_gemini_stream_filters_thoughts_preserves_signature_and_grounding(monkeypatch):
+    from wildstring.model_stream import stream_request
+
+    result, previews = collect_events(
+        stream(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "role": "model",
+                            "parts": [
+                                {
+                                    "text": "private thought",
+                                    "thought": True,
+                                    "thoughtSignature": "s0",
+                                },
+                                {"text": "找到"},
+                            ],
+                        }
+                    }
+                ]
+            },
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "role": "model",
+                            "parts": [
+                                {"text": "发行记录"},
+                                {
+                                    "functionCall": {
+                                        "id": "g-1",
+                                        "name": "search_tracks",
+                                        "args": {"q": "晴天"},
+                                    },
+                                    "thoughtSignature": "s1",
+                                },
+                            ],
+                        },
+                        "finishReason": "STOP",
+                        "groundingMetadata": {
+                            "groundingChunks": [
+                                {"web": {"uri": "https://example.org/g", "title": "Google 来源"}}
+                            ]
+                        },
+                    }
+                ],
+                "usageMetadata": {"totalTokenCount": 33},
+            },
+        ),
+        "gemini",
+    )
+    message = parse({"options": {"protocol": "gemini"}}, result)
+    assert previews == ["找到", "找到发行记录"]
+    assert message["content"] == "找到发行记录"
+    assert message["tool_calls"][0]["id"] == "g-1"
+    assert message["_gemini_parts"][0]["thoughtSignature"] == "s0"
+    assert message["_gemini_parts"][-1]["thoughtSignature"] == "s1"
+    assert message["_sources"] == [{"url": "https://example.org/g", "title": "Google 来源"}]
+    assert result["usageMetadata"]["totalTokenCount"] == 33
+
+    captured = {}
+
+    def fake_request_bytes(req, **kwargs):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return 200, {}, {"candidates": []}
+
+    monkeypatch.setattr("wildstring.model_stream.request_bytes", fake_request_bytes)
+    stream_request(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        payload={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
+        headers={"x-goog-api-key": "synthetic"},
+        timeout=30,
+        proxy_mode="direct",
+        proxy_url=None,
+        service="agent_model",
+        on_text=lambda _t: None,
+        protocol="gemini",
+    )
+    assert (
+        captured["url"]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+    )
+    assert "stream" not in captured["body"]
+    assert "stream_options" not in captured["body"]
 
 
 def test_stream_bounds_and_terminal_limit_are_preserved():

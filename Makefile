@@ -316,6 +316,17 @@ test-transcoding-web: build-web ## Verify real AAC playback and seeking (require
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
+AI_TEST_ENV ?= .env.test.local
+AI_TEST_PORT ?=
+AI_TEST_RUN = $(RUN) $(if $(wildcard $(AI_TEST_ENV)),--env-file "$(AI_TEST_ENV)",--no-env-file)
+
+.PHONY: test-ai-local test-ai-live
+test-ai-local: build-web ## Start a persistent loopback test instance for manual AI checks
+	@$(AI_TEST_RUN) python scripts/ai_test.py serve $(if $(AI_TEST_PORT),--port "$(AI_TEST_PORT)")
+
+test-ai-live: ## Probe the configured AI model using a disposable test database
+	@$(AI_TEST_RUN) python scripts/ai_test.py probe
+
 shots: ## Capture screenshots through scripts/agent_shot.sh
 	bash scripts/agent_shot.sh $(ARGS)
 

@@ -188,3 +188,52 @@ test('联网回答来源可点击、历史摘要可查看并清除', async ({ pa
   await page.getByRole('button', { name: '清除摘要', exact: true }).click();
   await expect(page.getByText('已压缩较早对话 · 查看上下文摘要', { exact: true })).toHaveCount(0);
 });
+
+test('真实后端：Gemini 原生接口联动供应商与原生搜索开关', async ({ page }, info) => {
+  await login(page);
+  await section(page, '助手设置');
+  const panel = page.getByRole('region', { name: '模型连接管理' });
+  const name = `Gemini 原生-${info.project.name}`;
+  await panel.getByLabel('API 协议', { exact: true }).selectOption('gemini');
+  await expect(panel.getByLabel('供应商适配', { exact: true })).toHaveValue('gemini');
+  const nativeSearch = panel.getByLabel('使用模型原生联网搜索（按供应商计费）');
+  await expect(nativeSearch).toBeVisible();
+  await nativeSearch.check();
+  await panel.getByLabel('连接名称', { exact: true }).fill(name);
+  await panel
+    .getByLabel('新连接 API 地址', { exact: true })
+    .fill('https://generativelanguage.googleapis.com/v1beta');
+  await panel.getByLabel('新连接模型 ID', { exact: true }).fill('gemini-2.5-flash');
+  await panel.getByLabel('新连接 API Key', { exact: true }).fill('synthetic-gemini-browser-key');
+  await panel.getByLabel('推理强度', { exact: true }).selectOption('auto');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: `../../artifacts/gemini-verification/connections-${info.project.name}-light.png`,
+    fullPage: true,
+  });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  await page.screenshot({
+    path: `../../artifacts/gemini-verification/connections-${info.project.name}-dark.png`,
+    fullPage: true,
+  });
+  await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  await panel.getByRole('button', { name: '添加连接', exact: true }).click();
+  await expect(panel.getByText(name, { exact: true })).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/agent/connections')).json()).items.find(
+    (item: { name: string }) => item.name === name,
+  );
+  expect(saved).toMatchObject({
+    name,
+    protocol: 'gemini',
+    provider: 'gemini',
+    reasoning_effort: 'auto',
+    native_search: true,
+    has_api_key: true,
+  });
+  const row = panel.locator('article.workspace-row').filter({ hasText: name });
+  page.once('dialog', (dialog) => dialog.accept());
+  await row.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(panel.getByText(name, { exact: true })).toHaveCount(0);
+});

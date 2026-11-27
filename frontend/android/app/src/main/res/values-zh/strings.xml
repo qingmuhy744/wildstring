@@ -832,6 +832,7 @@
     <string name="agent_ws_prompt_example_3">把我很久没听的收藏整理成歌单</string>
     <string name="agent_ws_prompt_example_4">盘点我曲库里播放次数最多的艺人</string>
     <string name="agent_ws_prompt_example_5">周杰伦全网代表作曲库查漏补缺</string>
+    <string name="agent_ws_protocol_gemini">Gemini 原生</string>
     <string name="agent_ws_provider">供应商</string>
     <string name="agent_ws_provider_gemini">Gemini 兼容接口</string>
     <string name="agent_ws_provider_generic">通用兼容接口</string>

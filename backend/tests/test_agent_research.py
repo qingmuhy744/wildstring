@@ -373,3 +373,229 @@ def test_v18_migration_is_atomic_and_preserves_existing_connection(agent, monkey
     }
     assert current["options"] == "{}"
     assert service.read_secret(current["secret_ref"]) == "synthetic-preserved-model-secret"
+
+
+def test_gemini_native_protocol_payload_continuation_grounding_and_validation(agent):
+    client, service = agent
+    actor = service.current_actor("admin")
+
+    # Gemini 2.5 maps reasoning_effort to thinkingBudget; Gemini 3/4 maps to thinkingLevel.
+    path25, body25 = request(
+        {
+            "model": "models/gemini-2.5-pro",
+            "options": {
+                "protocol": "gemini",
+                "provider": "gemini",
+                "reasoning_effort": "medium",
+                "max_output_tokens": 4096,
+                "native_search": True,
+            },
+        },
+        [
+            {"role": "system", "content": "你是音乐助手。"},
+            {"role": "user", "content": "查一下最近发行"},
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_tracks",
+                    "description": "Search tracks",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ],
+    )
+    assert path25 == "/models/gemini-2.5-pro:generateContent"
+    assert body25["systemInstruction"] == {"parts": [{"text": "你是音乐助手。"}]}
+    assert body25["generationConfig"] == {
+        "maxOutputTokens": 4096,
+        "thinkingConfig": {"thinkingBudget": 8192},
+    }
+    assert body25["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"] == {
+        "type": "object",
+        "properties": {"q": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    assert body25["tools"][1] == {"googleSearch": {}}
+
+    _, body3 = request(
+        {
+            "model": "gemini-3-pro",
+            "options": {
+                "protocol": "gemini",
+                "provider": "gemini",
+                "reasoning_effort": "high",
+                "max_output_tokens": 2048,
+            },
+        },
+        [{"role": "user", "content": "hello"}],
+    )
+    assert body3["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "high"}
+
+    # Parse response with thought part (filtered from text), thoughtSignature, multi-calls, grounding.
+    raw_parts = [
+        {"text": "hidden chain of thought", "thought": True, "thoughtSignature": "sig-t"},
+        {
+            "functionCall": {"id": "fc-1", "name": "search_tracks", "args": {"q": "许巍"}},
+            "thoughtSignature": "sig-fc1",
+        },
+        {"functionCall": {"name": "get_track", "args": {"track_id": "t1"}}},
+    ]
+    parsed = parse(
+        {"options": {"protocol": "gemini"}},
+        {
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": raw_parts},
+                    "finishReason": "STOP",
+                    "groundingMetadata": {
+                        "groundingChunks": [
+                            {"web": {"uri": "https://example.org/album", "title": "官方发行页"}}
+                        ]
+                    },
+                }
+            ]
+        },
+    )
+    assert parsed["content"] == ""
+    assert len(parsed["tool_calls"]) == 2
+    assert parsed["tool_calls"][0]["id"] == "fc-1"
+    assert parsed["tool_calls"][1]["id"] == "gemini-call-2"
+    assert parsed["_gemini_parts"] == raw_parts
+    assert parsed["_sources"] == [{"url": "https://example.org/album", "title": "官方发行页"}]
+
+    # Consecutive tool messages must be grouped into a single Gemini user turn.
+    _, next_body = request(
+        {
+            "model": "gemini-2.5-flash",
+            "options": {"protocol": "gemini", "reasoning_effort": "auto"},
+        },
+        [
+            {"role": "user", "content": "查一下"},
+            {"role": "assistant", "content": None, "tool_calls": parsed["tool_calls"], **parsed},
+            {"role": "tool", "tool_call_id": "fc-1", "content": '{"items":[]}'},
+            {"role": "tool", "tool_call_id": "gemini-call-2", "content": "[1,2]"},
+        ],
+        tools=[{"type": "function", "function": {"name": "search_tracks", "description": "d"}}],
+        tool_choice="none",
+    )
+    assert "thinkingConfig" not in next_body["generationConfig"]
+    assert next_body["toolConfig"] == {"functionCallingConfig": {"mode": "NONE"}}
+    assert next_body["contents"][1] == {"role": "model", "parts": raw_parts}
+    assert next_body["contents"][2] == {
+        "role": "user",
+        "parts": [
+            {
+                "functionResponse": {
+                    "id": "fc-1",
+                    "name": "search_tracks",
+                    "response": {"items": []},
+                }
+            },
+            {"functionResponse": {"name": "get_track", "response": {"result": [1, 2]}}},
+        ],
+    }
+
+    for reason, expected_code in (
+        ("MAX_TOKENS", "ai_output_limit"),
+        ("SAFETY", "ai_content_filtered"),
+        ("MALFORMED_FUNCTION_CALL", "ai_response_failed"),
+    ):
+        with pytest.raises(OutboundError, match=expected_code):
+            parse(
+                {"options": {"protocol": "gemini"}},
+                {"candidates": [{"content": {"parts": []}, "finishReason": reason}]},
+            )
+    with pytest.raises(OutboundError, match="ai_content_filtered"):
+        parse(
+            {"options": {"protocol": "gemini"}},
+            {"promptFeedback": {"blockReason": "SAFETY"}},
+        )
+
+    # Save connection validation + x-goog-api-key header + usageMetadata token accounting.
+    saved = connection(
+        client,
+        name="Gemini 原生测试",
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        model="gemini-2.5-flash",
+        api_key="synthetic-gemini-api-key",
+        protocol="gemini",
+        native_search=True,
+        reasoning_effort="low",
+        background_allowed=True,
+    )
+    assert saved["protocol"] == "gemini" and saved["provider"] == "gemini"
+    assert saved["native_search"] is True
+
+    captured = []
+
+    def fake_transport(url, *, payload, headers, **kwargs):
+        captured.append((url, payload, headers))
+        return {
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "已通过原生接口回答"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 11,
+                "candidatesTokenCount": 7,
+                "totalTokenCount": 18,
+            },
+        }
+
+    service.transport = fake_transport
+    cfg = service.connection_for(actor, saved["id"])
+    reply = service.model_request(actor, cfg, [{"role": "user", "content": "hi"}], background=True)
+    assert reply["content"] == "已通过原生接口回答"
+    assert (
+        captured[0][0]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    )
+    assert captured[0][2] == {"x-goog-api-key": "synthetic-gemini-api-key"}
+    assert "tools" not in captured[0][1]  # background=True suppresses native_search
+    assert (
+        service.usage_summary(actor, saved["id"], saved["daily_call_budget"])["my_usage"]["tokens"]
+        == 18
+    )
+
+    with pytest.raises(HTTPException, match="reasoning_effort_not_supported"):
+        service.save_connection(
+            actor,
+            Connection(
+                name="不支持max",
+                base_url="https://generativelanguage.googleapis.com/v1beta",
+                model="gemini-2.5-flash",
+                protocol="gemini",
+                provider="gemini",
+                reasoning_effort="max",
+            ),
+        )
+    with pytest.raises(HTTPException, match="invalid_protocol_provider"):
+        service.save_connection(
+            actor,
+            Connection(
+                name="协议不匹配",
+                base_url="https://generativelanguage.googleapis.com/v1beta",
+                model="gemini-2.5-flash",
+                protocol="gemini",
+                provider="openai",
+            ),
+        )
+    with pytest.raises(HTTPException, match="invalid_ai_model"):
+        service.save_connection(
+            actor,
+            Connection(
+                name="非法模型名",
+                base_url="https://generativelanguage.googleapis.com/v1beta",
+                model="../evil?key=1",
+                protocol="gemini",
+                provider="gemini",
+            ),
+        )

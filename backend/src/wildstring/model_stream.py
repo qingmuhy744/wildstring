@@ -18,6 +18,8 @@ def collect(response, limit, protocol, on_text, deadline):
     calls, usage = {}, None
     finish, completed, total = None, None, 0
     text, pending = "", []
+    gemini_parts, gemini_grounding, gemini_usage = [], None, None
+    gemini_blocked = False
 
     def events():
         nonlocal total
@@ -45,6 +47,38 @@ def collect(response, limit, protocol, on_text, deadline):
         event = json.loads(raw)
         if not isinstance(event, dict) or event.get("error") or event.get("type") == "error":
             raise OutboundError("ai_response_failed")
+        if protocol == "gemini":
+            if isinstance(event.get("usageMetadata"), dict):
+                gemini_usage = event["usageMetadata"]
+            feedback = event.get("promptFeedback")
+            candidates = event.get("candidates") or []
+            if isinstance(feedback, dict) and feedback.get("blockReason") and not candidates:
+                gemini_blocked = True
+                continue
+            if not candidates or not isinstance(candidates[0], dict):
+                continue
+            candidate = candidates[0]
+            content = candidate.get("content")
+            for part in (content.get("parts") if isinstance(content, dict) else None) or []:
+                if not isinstance(part, dict):
+                    continue
+                gemini_parts.append(part)
+                if isinstance(part.get("text"), str) and not part.get("thought"):
+                    text += part["text"]
+                    on_text(text)
+            grounding = candidate.get("groundingMetadata")
+            if isinstance(grounding, dict):
+                if gemini_grounding is None:
+                    gemini_grounding = dict(grounding)
+                else:
+                    merged_chunks = list(gemini_grounding.get("groundingChunks") or [])
+                    merged_chunks.extend(grounding.get("groundingChunks") or [])
+                    gemini_grounding = gemini_grounding | grounding
+                    if merged_chunks:
+                        gemini_grounding["groundingChunks"] = merged_chunks
+            if candidate.get("finishReason") is not None:
+                finish = candidate["finishReason"]
+            continue
         if protocol == "responses":
             kind = event.get("type")
             if kind == "response.output_text.delta":
@@ -86,6 +120,21 @@ def collect(response, limit, protocol, on_text, deadline):
                     call["function"][key] += value
         if choice.get("finish_reason") is not None:
             finish = choice["finish_reason"]
+    if protocol == "gemini":
+        if gemini_blocked and not gemini_parts:
+            raise OutboundError("ai_content_filtered")
+        if finish is None:
+            raise OutboundError("ai_output_incomplete")
+        candidate_result = {
+            "content": {"role": "model", "parts": gemini_parts},
+            "finishReason": finish,
+        }
+        if gemini_grounding is not None:
+            candidate_result["groundingMetadata"] = gemini_grounding
+        result = {"candidates": [candidate_result]}
+        if gemini_usage is not None:
+            result["usageMetadata"] = gemini_usage
+        return result
     if protocol == "responses":
         if not isinstance(completed, dict):
             raise OutboundError("ai_output_incomplete")
@@ -100,11 +149,16 @@ def collect(response, limit, protocol, on_text, deadline):
 def stream_request(
     url, *, payload, headers, timeout, proxy_mode, proxy_url, service, on_text, protocol
 ):
-    body = payload | {"stream": True}
-    if protocol != "responses":
-        body["stream_options"] = {"include_usage": True}
+    if protocol == "gemini":
+        target_url = url.removesuffix(":generateContent") + ":streamGenerateContent?alt=sse"
+        body = payload
+    else:
+        target_url = url
+        body = payload | {"stream": True}
+        if protocol != "responses":
+            body["stream_options"] = {"include_usage": True}
     request = Request(
-        url,
+        target_url,
         data=json.dumps(body, ensure_ascii=False).encode(),
         headers={
             "Accept": "text/event-stream",
