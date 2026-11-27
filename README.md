@@ -55,7 +55,7 @@ make docker-import
 ## 版本动态
 
 - **稳定版本 [v0.8.29](docs/releases/v0.8.29.md)** · 加快单曲歌词与资料查询并支持按次选择数据来源，修复单曲在线匹配检索，Android 平板对齐骨架屏并统一宽屏悬浮队列。正式发布状态见 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases)。
-- **预发布 [v0.9.0-alpha.1](docs/releases/v0.9.0-alpha.1.md)** · 新增自托管电台书架与便携存储侧车、MCP OAuth 2.1、Google Drive 原生远端存储及 Google Gemini 原生协议；仅发布于 Pre-release 渠道，不影响稳定版更新。
+- **预发布 [v0.9.0-alpha.2](docs/releases/v0.9.0-alpha.2.md)** · 新增自托管电台书架与便携存储侧车、MCP OAuth 2.1、Google Drive 原生远端存储及 Google Gemini 原生协议；仅发布于 Pre-release 渠道，不影响稳定版更新。
 
 Linux 和 Windows 的 Tauri 桌面客户端仍在规划中，见[产品范围](docs/product/scope.md#后置能力)。
 
