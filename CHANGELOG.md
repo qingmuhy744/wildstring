@@ -4,12 +4,17 @@
 
 ## [未发布]
 
-## [0.9.0-alpha.1]
+## [0.9.0-alpha.2]
 
 - Web 与 Android 的电台新增书架入口，支持 TXT／EPUB 阅读与有声书浏览播放、章节校对、配对拆分、个人书签、句内批注及跨端进度同步；音乐库与书库支持独立副本、硬链接、显式存储模式迁移、源路径重绑定与便携 `.wildstring` 侧车，并补齐多端界面与播放加固。
 - MCP 服务在保留静态个人令牌的基础上新增 OAuth 2.1（PKCE 与动态注册），支持网页端 AI 连接器直接授权接入。
 - 音乐库与书架新增原生 Google Drive 远端存储后端，服务端按需流式读取并仅存轻量索引与热缓存。
 - 内置音乐助手新增 Google Gemini 原生接口协议（含 `x-goog-api-key` 鉴权、思考签名续接、推理强度映射、原生 Google Search 来源归一及统一 HTTP 代理支持），并合入 `make test-ai-local`／`make test-ai-live` 本地 AI 测试工具。
+- Android 有声书播放服务改为按需延迟连接，避免空闲启动或音乐／播客播放期间产生重复平台 `MediaSession`；修复书架集成测试与无头模拟器软件渲染崩溃问题。
+
+## [0.9.0-alpha.1]
+
+- 标签已创建，有声书服务预连接导致的重复 `MediaSession`、书架集成测试及旧 SwiftShader 宽屏渲染崩溃阻断五项 Android 设备测试，未发布产物。功能由 [0.9.0-alpha.2](docs/releases/v0.9.0-alpha.2.md) 承接。
 
 ## [0.8.29]
 
