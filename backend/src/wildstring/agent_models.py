@@ -211,7 +211,7 @@ class Connection(Input):
     daily_call_budget: int = Field(default=100, ge=0, le=10000)
     enabled: bool = True
     version: int | None = Field(default=None, ge=1)
-    protocol: Literal["chat_completions", "responses"] = "chat_completions"
+    protocol: Literal["chat_completions", "responses", "gemini"] = "chat_completions"
     provider: Literal["generic", "openai", "deepseek", "qwen", "gemini"] = "generic"
     reasoning_effort: Literal["auto", "none", "low", "medium", "high", "max", "xhigh"] = "low"
     max_output_tokens: int = Field(default=8192, ge=128, le=32768)

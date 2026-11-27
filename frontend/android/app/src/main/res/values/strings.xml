@@ -832,6 +832,7 @@
     <string name="agent_ws_prompt_example_3">Organize favorites I haven\'t listened to in a while into a playlist</string>
     <string name="agent_ws_prompt_example_4">List the most played artists in my library</string>
     <string name="agent_ws_prompt_example_5">Check my library for missing Jay Chou signature tracks</string>
+    <string name="agent_ws_protocol_gemini">Gemini Native</string>
     <string name="agent_ws_provider">Provider</string>
     <string name="agent_ws_provider_gemini">Gemini Compatible</string>
     <string name="agent_ws_provider_generic">Generic Compatible</string>

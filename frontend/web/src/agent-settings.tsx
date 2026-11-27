@@ -231,14 +231,21 @@ export function AgentConnections({ user }: { user: User }) {
                 <select
                   aria-label={t('agentSettings.apiProtocol')}
                   value={form.protocol}
-                  onChange={(e) =>
-                    setForm({ ...form, protocol: e.target.value, native_search: false })
-                  }
+                  onChange={(e) => {
+                    const protocol = e.target.value;
+                    setForm({
+                      ...form,
+                      protocol,
+                      provider: protocol === 'gemini' ? 'gemini' : form.provider,
+                      native_search: false,
+                    });
+                  }}
                 >
                   <option value="chat_completions">
                     {t('agentSettings.protocolChatCompletions')}
                   </option>
                   <option value="responses">{t('agentSettings.protocolResponses')}</option>
+                  <option value="gemini">{t('agentSettings.protocolGemini')}</option>
                 </select>
               </label>
               <label>
@@ -246,9 +253,18 @@ export function AgentConnections({ user }: { user: User }) {
                 <select
                   aria-label={t('agentSettings.providerAdapter')}
                   value={form.provider}
-                  onChange={(e) =>
-                    setForm({ ...form, provider: e.target.value, native_search: false })
-                  }
+                  onChange={(e) => {
+                    const provider = e.target.value;
+                    setForm({
+                      ...form,
+                      provider,
+                      protocol:
+                        form.protocol === 'gemini' && provider !== 'gemini'
+                          ? 'chat_completions'
+                          : form.protocol,
+                      native_search: false,
+                    });
+                  }}
                 >
                   {[
                     ['generic', t('agentSettings.providerGeneric')],
@@ -296,17 +312,18 @@ export function AgentConnections({ user }: { user: User }) {
                 />
                 <HelpLabel hint="aiStream">{t('agentSettings.streamOutput')}</HelpLabel>
               </label>
-              {form.protocol === 'responses' &&
-                ['openai', 'deepseek', 'qwen'].includes(form.provider) && (
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={form.native_search}
-                      onChange={(e) => setForm({ ...form, native_search: e.target.checked })}
-                    />
-                    <HelpLabel hint="nativeSearch">{t('agentSettings.nativeSearch')}</HelpLabel>
-                  </label>
-                )}
+              {((form.protocol === 'responses' &&
+                ['openai', 'deepseek', 'qwen'].includes(form.provider)) ||
+                (form.protocol === 'gemini' && form.provider === 'gemini')) && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.native_search}
+                    onChange={(e) => setForm({ ...form, native_search: e.target.checked })}
+                  />
+                  <HelpLabel hint="nativeSearch">{t('agentSettings.nativeSearch')}</HelpLabel>
+                </label>
+              )}
               <label>
                 {t('agentSettings.nameLabel')}
                 <input

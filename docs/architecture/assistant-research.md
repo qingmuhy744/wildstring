@@ -4,13 +4,13 @@
 
 ## 模型连接
 
-模型连接可选择 Chat Completions 或 Responses，及 generic / OpenAI / DeepSeek / 千问 / Gemini 兼容档案。档案负责请求参数，不能替代实际模型能力验证。实例 AI 配置统一由模型连接管理；旧实例配置文件不再读取，旧偏好不会自动绑定到新连接。旧客户端编辑新连接时，未提交的协议选项保留。
+模型连接可选择 Chat Completions、Responses 或 Gemini 原生接口（`gemini`），及 generic / OpenAI / DeepSeek / 千问 / Gemini 兼容档案。档案负责请求参数，不能替代实际模型能力验证。实例 AI 配置统一由模型连接管理；旧实例配置文件不再读取，旧偏好不会自动绑定到新连接。旧客户端编辑新连接时，未提交的协议选项保留。
 
-适配层保留 Chat 的 reasoning_content、extra_content 及工具调用内部字段；Responses 原样续接当前轮的 output items，包括推理与搜索状态。OpenAI 无状态请求显式索取加密推理内容和已启用原生搜索的来源。续接状态只在当前模型执行中使用，不展示为证据、不跨供应商转交。跨轮历史保留可见文本与来源；未持久化供应商原始推理状态，进程中断不承诺原生研究断点续接。截断响应不会当作完整回答执行。
+适配层保留 Chat 的 reasoning_content、extra_content 及工具调用内部字段；Responses 原样续接当前轮的 output items，包括推理与搜索状态；Gemini 原生接口通过 `x-goog-api-key` 请求头鉴权（不将密钥放入 URL Query），原样续接当前轮 `parts`（含 `thoughtSignature` 与 `functionCall`）并过滤 `thought: true` 分片不展示给预览。OpenAI 无状态请求显式索取加密推理内容和已启用原生搜索的来源。续接状态只在当前模型执行中使用，不展示为证据、不跨供应商转交。跨轮历史保留可见文本与来源；未持久化供应商原始推理状态，进程中断不承诺原生研究断点续接。截断响应不会当作完整回答执行。
 
-推理强度和 Token 上限由用户配置；auto 沿用模型默认。DeepSeek 不接受 medium/xhigh；千问映射到 enable_thinking，其具体强度仍由模型决定。Gemini 此批只实现其官方 Chat 兼容协议，原生 Google Search 与 Claude Messages 尚未增加。
+推理强度和 Token 上限由用户配置；auto 沿用模型默认。DeepSeek 不接受 medium/xhigh；千问映射到 enable_thinking，其具体强度仍由模型决定；Gemini 不接受 max，原生接口按模型代际映射到 `thinkingConfig.thinkingBudget`（Gemini 2.5）或 `thinkingConfig.thinkingLevel`（Gemini 3 / 4）。Claude Messages 协议尚未增加。
 
-Responses 可显式启用 OpenAI / DeepSeek Pro / 千问原生 web_search，具体可用性仍按模型、地域与账号验证。搜索事件及引用归一为来源。原生搜索可能在一次模型请求里执行多次，不受独立搜索请求上限约束；默认关闭，能力检测不宣称已验证原生搜索。后台巡检及推荐、摘要请求不额外开启原生搜索。
+Responses（OpenAI / DeepSeek Pro / 千问）与 Gemini 原生接口均可显式启用原生联网搜索（`web_search` / `googleSearch`），具体可用性仍按模型、地域与账号验证。搜索事件、注解及 `groundingMetadata.groundingChunks` 归一为来源。原生搜索可能在一次模型请求里执行多次，不受独立搜索请求上限约束；默认关闭，能力检测不宣称已验证原生搜索。后台巡检及推荐、摘要请求不额外开启原生搜索。
 
 ## 独立检索
 

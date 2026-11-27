@@ -328,9 +328,24 @@ class Assistant:
             else json.loads(previous["options"])
             | {key: getattr(body, key) for key in option_keys & body.model_fields_set}
         )
-        if settings.get("native_search") and (
-            settings.get("protocol") != "responses"
-            or settings.get("provider") not in {"openai", "deepseek", "qwen"}
+        if settings.get("protocol") == "gemini":
+            if "provider" not in body.model_fields_set and settings.get("provider") == "generic":
+                settings["provider"] = "gemini"
+            if settings.get("provider") != "gemini":
+                raise HTTPException(422, "invalid_protocol_provider")
+            from wildstring.model_protocol import gemini_model_id
+            from wildstring.outbound import OutboundError
+
+            try:
+                gemini_model_id(body.model)
+            except OutboundError:
+                raise HTTPException(422, "invalid_ai_model") from None
+        if settings.get("native_search") and not (
+            (
+                settings.get("protocol") == "responses"
+                and settings.get("provider") in {"openai", "deepseek", "qwen"}
+            )
+            or (settings.get("protocol") == "gemini" and settings.get("provider") == "gemini")
         ):
             raise HTTPException(422, "native_search_not_supported")
         if (
@@ -342,6 +357,10 @@ class Assistant:
         if settings.get("provider") == "deepseek" and settings.get(
             "reasoning_effort", "auto"
         ) not in {"auto", "none", "low", "high", "max"}:
+            raise HTTPException(422, "reasoning_effort_not_supported")
+        if settings.get("provider") == "gemini" and settings.get(
+            "reasoning_effort", "auto"
+        ) not in {"auto", "none", "low", "medium", "high", "xhigh"}:
             raise HTTPException(422, "reasoning_effort_not_supported")
         secret = old_secret
         if body.clear_api_key:
@@ -450,14 +469,22 @@ class Assistant:
         if on_call is not None:
             on_call()
         key = self.read_secret(configuration["secret_ref"])
-        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        from wildstring.model_protocol import options
+
+        protocol = options(configuration).get("protocol", "chat_completions")
+        if key:
+            headers = (
+                {"x-goog-api-key": key}
+                if protocol == "gemini"
+                else {"Authorization": f"Bearer {key}"}
+            )
+        else:
+            headers = {}
         mode, proxy = self.network_policy()
         from wildstring.outbound import OutboundError, json_request
 
         wire_config = configuration
         if background:
-            from wildstring.model_protocol import options
-
             wire_config = configuration | {
                 "options": options(configuration) | {"native_search": False}
             }
@@ -474,8 +501,6 @@ class Assistant:
         try:
             transport = self.transport or json_request
             extra = {}
-            from wildstring.model_protocol import options
-
             if (
                 on_delta is not None
                 and self.transport is None
@@ -486,7 +511,7 @@ class Assistant:
                 transport = stream_request
                 extra = {
                     "on_text": preview,
-                    "protocol": options(configuration).get("protocol", "chat_completions"),
+                    "protocol": protocol,
                 }
             response = transport(
                 configuration["base_url"] + path,
@@ -539,6 +564,22 @@ class Assistant:
                             "UPDATE agent_usage SET tokens=tokens+? WHERE connection_id=? AND user_id=? AND day=?",
                             (tokens, configuration["id"], actor.user_id, day),
                         )
+        if tokens is None and isinstance(response.get("usageMetadata"), dict):
+            meta = response["usageMetadata"]
+            total = meta.get("totalTokenCount")
+            if type(total) is int:
+                tokens = total
+            elif (
+                type(meta.get("promptTokenCount")) is int
+                and type(meta.get("candidatesTokenCount")) is int
+            ):
+                tokens = meta["promptTokenCount"] + meta["candidatesTokenCount"]
+            if type(tokens) is int and 0 <= tokens <= 100000000:
+                with self.database.connect(write=True) as connection:
+                    connection.execute(
+                        "UPDATE agent_usage SET tokens=tokens+? WHERE connection_id=? AND user_id=? AND day=?",
+                        (tokens, configuration["id"], actor.user_id, day),
+                    )
         try:
             parsed = parse_model(configuration, response)
             if on_delta is not None and isinstance(parsed.get("content"), str):

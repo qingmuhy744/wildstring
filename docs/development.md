@@ -42,6 +42,27 @@ make ci                   # 全量后端、Web 与构建检查
 
 修改依赖后同步对应锁文件：Python 使用 `uv lock --project backend`，Web 在 `frontend/web` 更新 npm 锁文件，Android 使用 `make android-locks`。Gradle 跨平台校验的补充步骤见 `AGENTS.md` §4。
 
+### 本地 AI 测试
+
+运行 `make test-ai-local` 并打开命令显示的回环地址。首次启动时按提示设置 `admin` 的密码，也可在 `.env.test.local` 预填 `WILDSTRING_TEST_ADMIN_PASSWORD`。测试账号、模型连接和合成曲库存放在已忽略的 `runtime/ai-test/`。在「个人设置 → 助手与通知 → 模型连接」手动保存的连接，重启后用同一账号登录即可继续使用。用 `make test-ai-local AI_TEST_PORT=新端口` 可调整监听端口，复用同一份数据。
+
+要从文件自动配置连接，在仓库根目录创建已忽略的 `.env.test.local`，权限设为 `600`，填入测试用的模型地址、模型 ID 和密钥。
+
+```dotenv
+WILDSTRING_TEST_AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+WILDSTRING_TEST_AI_MODEL=gemini-2.5-flash
+WILDSTRING_TEST_AI_API_KEY=your-test-key
+WILDSTRING_TEST_AI_PROTOCOL=gemini
+# WILDSTRING_TEST_AI_PROVIDER=gemini          # gemini 协议默认自动选 gemini；兼容接口默认 generic
+# WILDSTRING_TEST_AI_REASONING_EFFORT=auto    # auto / none / low / medium / high / xhigh
+# WILDSTRING_TEST_AI_NATIVE_SEARCH=true       # 仅 responses(openai/deepseek/qwen) 与 gemini 原生支持
+# WILDSTRING_TEST_AI_PROXY=http://127.0.0.1:7890  # 可选 HTTP 代理（或 direct）；不填则跟随环境变量代理
+```
+
+启动时会为 `admin` 同步名为 `Local test AI` 的个人连接（以及可选的代理设置）。同名连接的地址、模型、协议、供应商、推理强度、原生搜索开关与密钥以文件为准，可以改文件后重启来轮换密钥。免密端点可留空密钥。也可以只用界面配置，省略配置文件。
+
+`make test-ai-live` 读取同一份文件，在临时数据库里运行模型连接探测。它报告当前代理模式以及文本、结构化输出、工具调用和回传的探测结果，失败时输出 `error_code` 并退出非零。此命令会调用配置的提供方，统一代理仅支持 `http://` 地址（HTTPS 请求走 `CONNECT` 隧道，不支持 `socks5://`）。`make test`、`make test-web` 与 CI 仍使用各自的临时测试数据。
+
 ## Android 本地与远程设备调试
 
 ### 1. 本机一键模拟器
