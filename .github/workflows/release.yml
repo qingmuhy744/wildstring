@@ -82,7 +82,8 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
-          cache-disabled: ${{ github.run_attempt > 1 }}
+          cache-cleanup: never
+          cache-disabled: ${{ github.run_attempt > 2 }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           cmdline-tools-version: "15859902"
@@ -108,7 +109,7 @@ jobs:
           path.touch(mode=0o600, exist_ok=False)
           path.write_bytes(base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True))
           PY
-          make android-release
+          scripts/retry_on_429.sh make android-release
           ACTUAL=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --print-certs artifacts/android-release/*.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           test "$ACTUAL" = "$ANDROID_SIGNING_CERT_SHA256"
           printf '%s\n' "$ACTUAL" > artifacts/android-release/android-signing-certificate.sha256
