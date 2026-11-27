@@ -62,6 +62,7 @@ class BookshelfRealBackendTest {
         val endpoint = InstrumentationRegistry.getArguments().getString("realBackend")
         assumeTrue("Disposable synthetic realBackend is required", endpoint != null)
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        try {
         val connecting = compose.runOnIdle {
             vm.repository.session.invalidate(); vm.sharing.mode("off")
             vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true)
@@ -100,8 +101,9 @@ class BookshelfRealBackendTest {
             id
         }
         compose.onAllNodes(book).onFirst().performClick()
+        val readAction = hasText(uiString(R.string.books_continue_reading_action)) or hasText(uiString(R.string.books_read))
         compose.waitUntil(15_000) {
-            compose.onAllNodesWithText(uiString(R.string.books_read)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(readAction).fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Chapter 1 — A Window").fetchSemanticsNodes().isNotEmpty()
@@ -146,11 +148,11 @@ class BookshelfRealBackendTest {
             compose.waitForIdle()
             compose.onNodeWithTag("assistant-back").performClick()
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText(uiString(R.string.books_read)).fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodes(readAction).fetchSemanticsNodes().isNotEmpty() &&
                     compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty()
             }
         }
-        compose.onNodeWithText(uiString(R.string.books_read)).performClick()
+        compose.onNode(readAction).performClick()
         val chapter = hasText("Chapter 1 — A Window", substring = false) and
             SemanticsMatcher.keyIsDefined(SemanticsActions.SetSelection)
         val chapter2 = hasText("Chapter 2 — The Door", substring = false) and
@@ -257,38 +259,43 @@ class BookshelfRealBackendTest {
         compose.runOnIdle { vm.settings.appearance("light") }
         compose.waitForIdle()
         capture("bookshelf-in-progress-light.png")
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system") }
+        } finally {
+            compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system") }
+        }
     }
 
     @Test fun audiobookSessionSurvivesLeavingTheBookshelf() {
         val endpoint = InstrumentationRegistry.getArguments().getString("realBackend")
         assumeTrue("Disposable synthetic realBackend is required", endpoint != null)
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        var controller: MediaController? = null
+        try {
         val connecting = compose.runOnIdle {
             vm.repository.session.invalidate(); vm.sharing.mode("off")
             vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true)
         }
         compose.waitUntil(20_000) { connecting.isCompleted && vm.state.value.connected && !vm.state.value.loading }
         openBookshelf()
-        val audio = hasText(uiString(R.string.books_audiobook), substring = true) and hasClickAction()
+        val audio = hasText("雨夜电台故事集", substring = true) and hasClickAction()
         compose.waitUntil(20_000) { compose.onAllNodes(audio).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(audio).onFirst().performClick()
-        val listen = hasText(uiString(R.string.books_listen), substring = false) and hasClickAction()
+        val listen = (hasText(uiString(R.string.books_listen), substring = false) or hasText(uiString(R.string.books_continue_listening_action), substring = false)) and hasClickAction()
         compose.waitUntil(15_000) { compose.onAllNodes(listen).fetchSemanticsNodes().isNotEmpty() }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("第一话：雨夜来信").fetchSemanticsNodes().isNotEmpty()
         }
         val token = SessionToken(compose.activity, ComponentName(compose.activity, BookPlaybackService::class.java))
         val connection = MediaController.Builder(compose.activity, token).buildAsync()
-        val controller = connection.get(10, TimeUnit.SECONDS)
-        try {
+        controller = connection.get(10, TimeUnit.SECONDS)
+        val activeController = checkNotNull(controller)
+        run {
             compose.onNode(listen).performClick()
             try {
-                compose.waitUntil(12_000) { compose.runOnIdle { controller.isPlaying } }
+                compose.waitUntil(12_000) { compose.runOnIdle { activeController.isPlaying } }
             } catch (cause: ComposeTimeoutException) {
                 val state = compose.runOnIdle {
-                    "items=${controller.mediaItemCount}, state=${controller.playbackState}, " +
-                        "playWhenReady=${controller.playWhenReady}, error=${controller.playerError?.errorCodeName}"
+                    "items=${activeController.mediaItemCount}, state=${activeController.playbackState}, " +
+                        "playWhenReady=${activeController.playWhenReady}, error=${activeController.playerError?.errorCodeName}"
                 }
                 throw AssertionError("Audiobook failed to start ($state)", cause)
             }
@@ -307,14 +314,14 @@ class BookshelfRealBackendTest {
             compose.waitForIdle()
             capture("book-audio-player-dark.png")
             compose.runOnIdle { vm.settings.appearance("light") }
-            compose.runOnIdle { controller.pause() }
-            compose.waitUntil(10_000) { compose.runOnIdle { !controller.isPlaying } }
+            compose.runOnIdle { activeController.pause() }
+            compose.waitUntil(10_000) { compose.runOnIdle { !activeController.isPlaying } }
             val progress = compose.onNodeWithContentDescription(uiString(R.string.playback_progress_label))
             progress.seekPlaybackTo(4500L)
-            compose.waitUntil(10_000) { compose.runOnIdle { controller.currentPosition == 4500L } }
-            progress.assertPlaybackProgress(4500L, compose.runOnIdle { controller.duration })
-            compose.runOnIdle { controller.play() }
-            compose.waitUntil(10_000) { compose.runOnIdle { controller.isPlaying } }
+            compose.waitUntil(10_000) { compose.runOnIdle { activeController.currentPosition == 4500L } }
+            progress.assertPlaybackProgress(4500L, compose.runOnIdle { activeController.duration })
+            compose.runOnIdle { activeController.play() }
+            compose.waitUntil(10_000) { compose.runOnIdle { activeController.isPlaying } }
             compose.onNodeWithTag("book-audio-collapse").performClick()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("book-audio-player").fetchSemanticsNodes().isEmpty()
@@ -322,8 +329,8 @@ class BookshelfRealBackendTest {
             compose.onNodeWithText(uiString(R.string.books_back)).performClick()
             compose.onNodeWithTag("nav-search").performClick()
             compose.onNodeWithTag("book-mini-player").assertIsDisplayed()
-            assertTrue(compose.runOnIdle { controller.isPlaying })
-            assertTrue(compose.runOnIdle { controller.currentMediaItem?.mediaId?.startsWith("book:") == true })
+            assertTrue(compose.runOnIdle { activeController.isPlaying })
+            assertTrue(compose.runOnIdle { activeController.currentMediaItem?.mediaId?.startsWith("book:") == true })
 
             // Temporarily pair audiobook into Portable Pages to verify companion read+listen controls, then split back.
             compose.runOnIdle { vm.bookPlayback.stopAndClose() }
@@ -331,7 +338,7 @@ class BookshelfRealBackendTest {
                 val api = vm.repository.api()
                 val owner = RequestOwner(vm.repository.session.cacheScope())
                 val items = api.books().items
-                val portable = items.first { it.hasEbook }
+                val portable = items.first { it.title == "Portable Pages" }
                 val audioBook = items.first { it.hasAudiobook && !it.hasEbook }
                 api.pairBook(portable.id, JsonObject().apply { addProperty("other_book_id", audioBook.id) }, owner)
                 Triple(portable.id, audioBook.id, audioBook.title)
@@ -341,8 +348,9 @@ class BookshelfRealBackendTest {
                 val readCard = hasText("Portable Pages", substring = true) and hasClickAction()
                 compose.waitUntil(15_000) { compose.onAllNodes(readCard).fetchSemanticsNodes().isNotEmpty() }
                 compose.onAllNodes(readCard).onFirst().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.books_read)).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText(uiString(R.string.books_read)).performClick()
+                val openRead = hasText(uiString(R.string.books_continue_reading_action)) or hasText(uiString(R.string.books_read))
+                compose.waitUntil(10_000) { compose.onAllNodes(openRead).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNode(openRead).performClick()
                 compose.waitUntil(15_000) {
                     compose.onAllNodesWithTag("book-reader-audio-toggle").fetchSemanticsNodes().isNotEmpty()
                 }
@@ -350,7 +358,7 @@ class BookshelfRealBackendTest {
                 compose.onNodeWithTag("book-reader-audio-toggle").performClick()
                 compose.waitUntil(12_000) {
                     compose.onAllNodesWithTag("book-reader-audio-bar").fetchSemanticsNodes().isNotEmpty() &&
-                        compose.runOnIdle { controller.isPlaying }
+                        compose.runOnIdle { activeController.isPlaying }
                 }
                 assertTrue(compose.onNodeWithTag("book-reader-stage").getBoundsInRoot() == stage)
                 compose.onNodeWithContentDescription(uiString(R.string.pod_player_rewind_15)).assertHasClickAction()
@@ -382,7 +390,7 @@ class BookshelfRealBackendTest {
                     compose.onAllNodesWithTag("book-reader-top-bar").fetchSemanticsNodes().isEmpty() &&
                         compose.onAllNodesWithTag("book-reader-bottom-bar").fetchSemanticsNodes().isEmpty()
                 }
-                assertTrue(compose.runOnIdle { controller.isPlaying })
+                assertTrue(compose.runOnIdle { activeController.isPlaying })
                 assertTrue(compose.onNodeWithTag("book-reader-stage").getBoundsInRoot() == stage)
                 compose.onNodeWithTag("book-reader-stage").performTouchInput { click(center) }
                 compose.waitUntil(10_000) {
@@ -390,7 +398,7 @@ class BookshelfRealBackendTest {
                 }
                 compose.onNodeWithTag("book-reader-audio-hide").performClick()
                 compose.onNodeWithTag("book-reader-bottom-bar").assertDoesNotExist()
-                assertTrue(compose.runOnIdle { controller.isPlaying })
+                assertTrue(compose.runOnIdle { activeController.isPlaying })
             } finally {
                 compose.runOnIdle { vm.bookPlayback.stopAndClose() }
                 runBlocking {
@@ -409,11 +417,12 @@ class BookshelfRealBackendTest {
                     }
                 }
             }
+        }
         } finally {
             compose.runOnIdle {
                 vm.bookPlayback.stopAndClose()
-                controller.pause()
-                controller.release()
+                controller?.pause()
+                controller?.release()
                 vm.settings.appearance("system")
                 vm.repository.session.invalidate()
             }

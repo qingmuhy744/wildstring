@@ -253,8 +253,9 @@ jobs:
           profile: pixel_2
           cores: 4
           ram-size: 4096M
-          # Use the supported SwiftShader mode. This suite only needs GLES.
-          emulator-options: -no-window -gpu swiftshader -feature -Vulkan -no-snapshot -noaudio -no-boot-anim -no-metrics
+          # Use ANGLE over SwiftShader Vulkan (`swangle`) instead of legacy SwiftShader GLES
+          # to avoid host RenderThread SIGSEGV on wide-layout Compose canvases.
+          emulator-options: -no-window -gpu swangle -no-snapshot -noaudio -no-boot-anim -no-metrics
           disable-animations: true
           # Wait for boot completion, unlocked owner user, and PackageManager before
           # installing APKs; WildStringTestRunner sets the test locale without restarting

@@ -143,7 +143,7 @@ android-emu: ## Start/reuse Phone emulator (headless, 4 cores) and install debug
 		test -f "$$HOME/.android/avd/$(ANDROID_EMU_AVD).avd/config.ini" || { echo "AVD $(ANDROID_EMU_AVD) not found in $$HOME/.android/avd/" >&2; exit 1; }; \
 		echo "Starting AVD $(ANDROID_EMU_AVD) on $$serial (window=$(ANDROID_EMU_WINDOW))..."; \
 		nohup "$$emu" -avd "$(ANDROID_EMU_AVD)" -port "$(ANDROID_EMU_PORT)" -cores 4 \
-			-gpu swiftshader -feature -Vulkan -no-snapshot -no-boot-anim -no-metrics \
+			-gpu swangle -no-snapshot -no-boot-anim -no-metrics \
 			$(if $(filter 1,$(ANDROID_EMU_WINDOW)),,-no-window) \
 			>"/tmp/$(ANDROID_EMU_AVD).log" 2>&1 & \
 		"$$adb" -s "$$serial" wait-for-device; \

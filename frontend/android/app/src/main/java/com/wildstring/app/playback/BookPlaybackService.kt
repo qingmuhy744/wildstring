@@ -55,6 +55,7 @@ class BookPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        isActive = true
         val extractors = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
@@ -142,6 +143,7 @@ class BookPlaybackService : MediaSessionService() {
                     if (customCommand.customAction == STOP_CLEAR) {
                         save(player.currentMediaItem, player.currentPosition)
                         clearSessionPlayback()
+                        stopSelf()
                         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                     }
                     if (customCommand.customAction != SLEEP) {
@@ -293,6 +295,7 @@ class BookPlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     override fun onDestroy() {
+        isActive = false
         work.cancel()
         session.release()
         player.release()
@@ -301,6 +304,8 @@ class BookPlaybackService : MediaSessionService() {
     }
 
     companion object {
+        @Volatile var isActive: Boolean = false
+            private set
         const val SLEEP = "wildstring.book.sleep"
         const val SLEEP_STATUS = "wildstring.book.sleep.status"
         const val STOP_CLEAR = "wildstring.book.stop"

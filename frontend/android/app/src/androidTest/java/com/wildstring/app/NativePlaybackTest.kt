@@ -722,7 +722,13 @@ class NativePlaybackTest {
         waitForAndroidWindow("phone baseline")
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         activeVm = vm
-        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor") }
+        compose.runOnIdle {
+            vm.settings.playbackStyle("cover"); vm.settings.appearance("system"); vm.settings.orientation("sensor")
+            if (vm.state.value.connected || vm.repository.session.endpoint != null) {
+                vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems()
+            }
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.server_address)).fetchSemanticsNodes().isNotEmpty() }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)
