@@ -9,11 +9,12 @@ fi
 log=$(mktemp) || exit "$?"
 trap 'rm -f -- "$log"' EXIT
 
-for delay in 0 30 60; do
-  if (( delay > 0 )); then
-    sleep "$delay"
-  fi
-  if "$@" 2>&1 | tee "$log"; then
+refresh_dependencies=false
+show_stacktrace=false
+for attempt in 1 2 3; do
+  if WILDSTRING_GRADLE_REFRESH_DEPENDENCIES="$refresh_dependencies" \
+    WILDSTRING_GRADLE_STACKTRACE="$show_stacktrace" \
+    "$@" 2>&1 | tee "$log"; then
     exit 0
   else
     statuses=("${PIPESTATUS[@]}")
@@ -22,8 +23,30 @@ for delay in 0 30 60; do
   if (( status == 0 )); then
     exit "${statuses[1]}"
   fi
-  if ! grep -Fq -e 'Received status code 429 from server' -e 'could not resolve plugin artifact' "$log"; then
-    exit "$status"
+  if (( attempt == 3 )); then
+    break
   fi
+  show_stacktrace=true
+  if grep -Eiq 'received status code 429 from server|HTTP (status |response code: )?429' "$log"; then
+    # Reuse successful resolutions when Maven is already rate limiting requests.
+    refresh_dependencies=false
+    reason='HTTP 429'
+  elif grep -Eiq 'received status code 50[234] from server|HTTP (status |response code: )?50[234]|connection reset|read timed out' "$log"; then
+    refresh_dependencies=false
+    reason='transient upstream repository error'
+  elif grep -Fiq 'could not resolve plugin artifact' "$log"; then
+    if [[ $refresh_dependencies == true ]]; then
+      refresh_dependencies=false
+      reason='Gradle plugin resolution still failing after refresh'
+    else
+      refresh_dependencies=true
+      reason='Gradle plugin resolution failed; refreshing dependency metadata'
+    fi
+  else
+    break
+  fi
+  delay=$((30 * attempt))
+  printf 'Attempt %d/3 failed (%s). Retrying in %ds.\n' "$attempt" "$reason" "$delay" >&2
+  sleep "$delay" || exit "$?"
 done
 exit "$status"

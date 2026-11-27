@@ -115,9 +115,24 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
   const first = cards.filter({ has: page.getByRole('link', { name: '曲库版本' }) });
   const alternate = cards.filter({ has: page.getByRole('link', { name: '同名候选' }) });
   const firstPreview = first.getByRole('button', { name: '预览歌词', exact: true });
-  await firstPreview.scrollIntoViewIfNeeded();
   const beforeOpening = await audio(page);
-  const initialTop = await editorBody.evaluate((node) => node.scrollTop);
+  // Sample after Playwright has scrolled the button into view, before React expands the preview.
+  const scrollFrames = await editorBody.evaluateHandle((node) => ({
+    positions: new Promise<number[]>((resolve) => {
+      node.addEventListener(
+        'click',
+        async () => {
+          const samples = [node.scrollTop];
+          for (let i = 0; i < 18; i += 1) {
+            await new Promise(requestAnimationFrame);
+            samples.push(node.scrollTop);
+          }
+          resolve(samples);
+        },
+        { capture: true, once: true },
+      );
+    }),
+  }));
   await firstPreview.click();
   await expect(first.getByRole('button', { name: '收起预览' })).toHaveAttribute(
     'aria-expanded',
@@ -126,14 +141,8 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
   await expect(first.getByRole('list', { name: '预览歌词' })).toContainText(
     fixture.lines[0].translation,
   );
-  const positions = await editorBody.evaluate(async (node) => {
-    const samples = [];
-    for (let i = 0; i < 18; i += 1) {
-      await new Promise(requestAnimationFrame);
-      samples.push(node.scrollTop);
-    }
-    return samples;
-  });
+  const [initialTop, ...positions] = await scrollFrames.evaluate((probe) => probe.positions);
+  await scrollFrames.dispose();
   expect(positions).toEqual(Array(18).fill(initialTop));
   await expect(alternate).toContainText('匹配 55%');
   await expect(alternate).toContainText('逐字覆盖 100%');
@@ -146,10 +155,23 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
   await firstPreview.click();
   const list = first.getByRole('list', { name: '预览歌词' });
   const row = list.getByRole('listitem').nth(18).getByRole('button');
-  await row.scrollIntoViewIfNeeded();
-  const outerTop = await editorBody.evaluate((node) => node.scrollTop);
-  const innerTop = await list.evaluate((node) => node.scrollTop);
+  const auditionScroll = await row.evaluateHandle((button) => ({
+    positions: new Promise<[number, number]>((resolve) => {
+      button.addEventListener(
+        'click',
+        () => {
+          resolve([
+            button.closest('.scroll-dialog-body')!.scrollTop,
+            button.closest('[role="list"]')!.scrollTop,
+          ]);
+        },
+        { capture: true, once: true },
+      );
+    }),
+  }));
   await row.click();
+  const [outerTop, innerTop] = await auditionScroll.evaluate((probe) => probe.positions);
+  await auditionScroll.dispose();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
   await expect.poll(() => list.evaluate((node) => node.scrollTop)).not.toBe(innerTop);
   expect(await editorBody.evaluate((node) => node.scrollTop)).toBe(outerTop);

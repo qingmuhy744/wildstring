@@ -428,7 +428,7 @@ test('加入待播和刷新不抢占进度；默认自动接续开始收听', as
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
-  expect((await state(page)).session_id).not.toBe(saved.session_id);
+  await expect.poll(async () => (await state(page)).session_id).not.toBe(saved.session_id);
 });
 
 test('配置为询问模式时，开始收听弹窗询问并接续', async ({ page }) => {
@@ -459,7 +459,7 @@ test('配置为询问模式时，开始收听弹窗询问并接续', async ({ pa
   await dialog.getByRole('button', { name: '继续 0:07', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
-  expect((await state(page)).session_id).not.toBe(saved.session_id);
+  await expect.poll(async () => (await state(page)).session_id).not.toBe(saved.session_id);
   await page.request.put('/api/v1/podcasts/resume-mode', {
     headers: { 'X-Wildstring-Client': 'web' },
     data: { resume_mode: 'auto' },
