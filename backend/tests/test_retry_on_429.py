@@ -13,6 +13,10 @@ PLUGIN_MISSING = "Plugin Repositories (could not resolve plugin artifact 'exampl
 RATE_LIMITED = "Received status code 429 from server: Too Many Requests"
 
 
+@pytest.mark.skipif(
+    not SCRIPT.is_file(),
+    reason="the container test image omits shell CI scripts; the host run covers this",
+)
 @pytest.mark.parametrize(
     ("failures", "modes", "delays", "status"),
     [
