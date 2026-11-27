@@ -16,8 +16,7 @@ nohup "$EMULATOR_BIN" \
   -port 5554 \
   -avd "$AVD_NAME" \
   -no-window \
-  -gpu swiftshader \
-  -feature -Vulkan \
+  -gpu swangle \
   -no-snapshot \
   -noaudio \
   -no-boot-anim \
@@ -27,6 +26,8 @@ nohup "$EMULATOR_BIN" \
 timeout 180 adb wait-for-device
 timeout 180 adb shell 'until settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true; settings put secure anr_show_background 0 >/dev/null 2>&1 || true; [ "$(getprop sys.boot_completed)" = "1" ] && am get-started-user-state 0 2>/dev/null | grep -qx RUNNING_UNLOCKED && pm path android >/dev/null 2>&1; do sleep 2; done'
 
+adb shell wm size reset >/dev/null 2>&1 || true
+adb shell wm density reset >/dev/null 2>&1 || true
 adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
 adb shell input keyevent 82 >/dev/null 2>&1 || true
 adb shell settings put global window_animation_scale 0.0

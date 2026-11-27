@@ -57,8 +57,11 @@ class BookPlaybackSyncConflictTest {
         }
     }
 
-    private class FakeBookMediaTransport : BookMediaTransport {
-        override var isConnected: Boolean = true
+    private class FakeBookMediaTransport(
+        override var isConnected: Boolean = true,
+        override var hasActiveSession: Boolean = isConnected,
+    ) : BookMediaTransport {
+        var connectCount: Int = 0
         var lastMediaItems: List<MediaItem> = emptyList()
         var lastStartIndex: Int = 0
         var lastStartPositionMs: Long = 0L
@@ -74,7 +77,10 @@ class BookPlaybackSyncConflictTest {
         override val duration: Long get() = 60_000L
 
         override fun connect(onResolved: (Boolean) -> Unit) {
-            onResolved(isConnected)
+            connectCount++
+            isConnected = true
+            hasActiveSession = true
+            onResolved(true)
         }
 
         override fun addListener(listener: Player.Listener) = Unit
@@ -123,6 +129,53 @@ class BookPlaybackSyncConflictTest {
         }
 
         override fun release() = Unit
+    }
+
+    @Test
+    fun idleStartupDoesNotConnectBookPlaybackServiceUntilAudiobookOpens() = BookFixture().use { fixture ->
+        fixture.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/api/v1/books/book-lazy/audiobook" -> json(
+                    """{"total_duration_ms":60000,"chapters":[{"chapter_index":0,"file_index":0,"start_file_ms":0,"end_file_ms":60000,"start_book_ms":0,"duration_ms":60000,"title":"Chapter 1"}]}""",
+                )
+                "/api/v1/books/book-lazy/listening-progress" -> json(
+                    """{"book_id":"book-lazy","chapter_index":0,"chapter_position_ms":0,"book_position_ms":0,"playback_rate":1.0,"completed":false,"version":1,"sequence":1}""",
+                )
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val fakeTransport = FakeBookMediaTransport(isConnected = false, hasActiveSession = false)
+        val controller = BookPlaybackController(
+            repository = fixture.repository,
+            scope = scope,
+            context = fixture.context,
+            onPlayStarted = {},
+            onSessionCleared = {},
+            transport = fakeTransport,
+        )
+        try {
+            assertEquals("Idle app launch must not start a second MediaSession service", 0, fakeTransport.connectCount)
+            runBlocking {
+                val summary = BookSummary(
+                    id = "book-lazy",
+                    title = "Lazy Book",
+                    subtitle = null,
+                    authors = emptyList(),
+                    libraryId = "lib-1",
+                    hasEbook = false,
+                    hasAudiobook = true,
+                )
+                controller.open(summary, autoplay = false)
+                withTimeout(5000) {
+                    controller.state.first { !it.loading && it.book?.id == "book-lazy" }
+                }
+            }
+            assertEquals("Opening an audiobook connects the book service lazily once", 1, fakeTransport.connectCount)
+        } finally {
+            controller.release()
+            scope.cancel()
+        }
     }
 
     @Test

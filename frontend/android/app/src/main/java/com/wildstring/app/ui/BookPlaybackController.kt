@@ -11,6 +11,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.gson.Gson
 import com.wildstring.app.data.BookAudioChapter
 import com.wildstring.app.data.BookAudiobookChapterEntity
@@ -54,6 +55,7 @@ data class BookPlaybackState(
 
 internal interface BookMediaTransport {
     val isConnected: Boolean
+    val hasActiveSession: Boolean get() = isConnected
     val currentMediaItem: MediaItem?
     val currentMediaItemIndex: Int
     val currentPosition: Long
@@ -82,23 +84,14 @@ internal interface BookMediaTransport {
 
 private class MediaControllerBookTransport(private val context: Context) : BookMediaTransport {
     private val token = SessionToken(context, ComponentName(context, BookPlaybackService::class.java))
-    private val controllerFuture = MediaController.Builder(context, token).buildAsync()
+    private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
-    private var resolved = false
+    private var connecting = false
     private val callbacks = mutableListOf<(Boolean) -> Unit>()
-
-    init {
-        controllerFuture.addListener({
-            val next = runCatching { controllerFuture.get() }.getOrNull()
-            controller = next
-            resolved = true
-            val pending = callbacks.toList()
-            callbacks.clear()
-            pending.forEach { it(next != null) }
-        }, ContextCompat.getMainExecutor(context))
-    }
+    private val listeners = mutableListOf<Player.Listener>()
 
     override val isConnected: Boolean get() = controller != null
+    override val hasActiveSession: Boolean get() = controller != null || BookPlaybackService.isActive
     override val currentMediaItem: MediaItem? get() = controller?.currentMediaItem
     override val currentMediaItemIndex: Int get() = controller?.currentMediaItemIndex ?: 0
     override val currentPosition: Long get() = controller?.currentPosition ?: 0L
@@ -110,18 +103,43 @@ private class MediaControllerBookTransport(private val context: Context) : BookM
     override val playerError: androidx.media3.common.PlaybackException? get() = controller?.playerError
 
     override fun connect(onResolved: (Boolean) -> Unit) {
-        if (resolved) {
-            onResolved(controller != null)
-        } else {
-            callbacks.add(onResolved)
+        if (controller != null) {
+            onResolved(true)
+            return
         }
+        callbacks.add(onResolved)
+        if (connecting) return
+        connecting = true
+        val future = MediaController.Builder(context, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+            if (controllerFuture !== future) {
+                MediaController.releaseFuture(future)
+                return@addListener
+            }
+            val next = runCatching { future.get() }.getOrNull()
+            connecting = false
+            if (next != null) {
+                controller = next
+                listeners.forEach { next.addListener(it) }
+            } else {
+                controllerFuture = null
+            }
+            val pending = callbacks.toList()
+            callbacks.clear()
+            pending.forEach { it(next != null) }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     override fun addListener(listener: Player.Listener) {
-        controller?.addListener(listener)
+        if (listener !in listeners) {
+            listeners.add(listener)
+            controller?.addListener(listener)
+        }
     }
 
     override fun removeListener(listener: Player.Listener) {
+        listeners.remove(listener)
         controller?.removeListener(listener)
     }
 
@@ -172,14 +190,43 @@ private class MediaControllerBookTransport(private val context: Context) : BookM
     }
 
     override fun stopAndClear() {
-        val c = controller ?: return
-        runCatching {
+        val c = controller
+        val oldFuture = controllerFuture
+        listeners.forEach { c?.removeListener(it) }
+        controller = null
+        controllerFuture = null
+        connecting = false
+        val pending = callbacks.toList()
+        callbacks.clear()
+        pending.forEach { it(false) }
+        if (c == null) {
+            if (oldFuture != null) MediaController.releaseFuture(oldFuture)
+            return
+        }
+        val commandFuture = runCatching {
             c.sendCustomCommand(SessionCommand(BookPlaybackService.STOP_CLEAR, Bundle.EMPTY), Bundle.EMPTY)
+        }.getOrNull()
+        if (commandFuture != null && oldFuture != null) {
+            commandFuture.addListener({
+                MediaController.releaseFuture(oldFuture)
+            }, ContextCompat.getMainExecutor(context))
+        } else if (oldFuture != null) {
+            MediaController.releaseFuture(oldFuture)
         }
     }
 
     override fun release() {
-        MediaController.releaseFuture(controllerFuture)
+        val c = controller
+        val oldFuture = controllerFuture
+        listeners.forEach { c?.removeListener(it) }
+        listeners.clear()
+        controller = null
+        controllerFuture = null
+        connecting = false
+        val pending = callbacks.toList()
+        callbacks.clear()
+        pending.forEach { it(false) }
+        if (oldFuture != null) MediaController.releaseFuture(oldFuture)
     }
 }
 
@@ -229,10 +276,12 @@ internal class BookPlaybackController(
     }
 
     init {
-        transport.connect { connected ->
-            if (connected) {
-                transport.addListener(listener)
-                syncFromController(reconcileService = true)
+        if (transport.hasActiveSession) {
+            transport.connect { connected ->
+                if (connected) {
+                    transport.addListener(listener)
+                    syncFromController(reconcileService = true)
+                }
             }
         }
 
@@ -255,9 +304,13 @@ internal class BookPlaybackController(
     }
 
     private suspend fun awaitTransport(): BookMediaTransport? {
-        if (transport.isConnected) return transport
+        if (transport.isConnected) {
+            transport.addListener(listener)
+            return transport
+        }
         return suspendCancellableCoroutine { cont ->
             transport.connect { ok ->
+                if (ok) transport.addListener(listener)
                 if (cont.isActive) cont.resume(if (ok) transport else null)
             }
         }

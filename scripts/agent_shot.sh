@@ -312,9 +312,9 @@ boot_avd() {
   fi
   echo "No $avd-size device is connected. Booting $avd headless (no window) as $serial;"
   echo "this takes a few minutes and no user interaction is required." >&2
-  local gpu="${WILDSTRING_EMULATOR_GPU:-swiftshader}"
+  local gpu="${WILDSTRING_EMULATOR_GPU:-swangle}"
   "$emulator" -avd "$avd" -port "${serial#emulator-}" -cores 4 -no-window -no-audio -no-boot-anim \
-    -no-snapshot -no-metrics -feature -Vulkan -gpu "$gpu" >"$STAGING/emulator-$avd.log" 2>&1 &
+    -no-snapshot -no-metrics -gpu "$gpu" >"$STAGING/emulator-$avd.log" 2>&1 &
   pid=$!
   deadline=$((SECONDS + 300))
   while [ "$SECONDS" -lt "$deadline" ]; do
