@@ -3,6 +3,9 @@ name: Android dependency graph
 on:
   push:
     branches: [main]
+    paths:
+      - "frontend/android/**"
+      - ".github/workflows/dependency-submission.yml"
   schedule:
     - cron: "41 3 * * 1"
   workflow_dispatch:
@@ -34,5 +37,6 @@ jobs:
         with:
           build-root-directory: frontend/android
           additional-arguments: --no-daemon --no-configuration-cache
+          cache-cleanup: never
           dependency-graph: generate-submit-and-upload
           artifact-retention-days: 14
