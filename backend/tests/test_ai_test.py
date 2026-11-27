@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 import threading
-import urllib.request
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -143,7 +143,7 @@ def _fake_gemini_server(*, fail_status: int | None = None):
 
 
 @contextmanager
-def _fake_http_proxy():
+def _fake_http_proxy(target_port: int, expected_path: str):
     proxied_targets: list[str] = []
 
     class ProxyHandler(BaseHTTPRequestHandler):
@@ -155,25 +155,31 @@ def _fake_http_proxy():
             length = int(self.headers.get("Content-Length", "0"))
             data = self.rfile.read(length)
             parsed = urlsplit(self.path)
-            assert parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
+            assert (
+                parsed.scheme == "http"
+                and parsed.hostname == "127.0.0.1"
+                and parsed.port == target_port
+                and parsed.path == expected_path
+            )
             forward_headers = {
                 key: value
                 for key, value in self.headers.items()
                 if key.lower() not in {"host", "proxy-connection", "content-length"}
             }
-            req = urllib.request.Request(
-                self.path, data=data, headers=forward_headers, method="POST"
-            )
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(req, timeout=10) as upstream:
+            connection = http.client.HTTPConnection("127.0.0.1", target_port, timeout=10)
+            try:
+                connection.request("POST", expected_path, body=data, headers=forward_headers)
+                upstream = connection.getresponse()
                 raw = upstream.read()
                 self.send_response(upstream.status)
                 self.send_header(
-                    "Content-Type", upstream.headers.get("Content-Type", "application/json")
+                    "Content-Type", upstream.getheader("Content-Type", "application/json")
                 )
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 self.wfile.write(raw)
+            finally:
+                connection.close()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -282,42 +288,43 @@ def test_probe_gemini_native_through_local_http_proxy_and_failure_exit(capsys, m
     for key in ("no_proxy", "NO_PROXY"):
         monkeypatch.delenv(key, raising=False)
     secret = "synthetic-gemini-secret-12345"
-    with (
-        _fake_gemini_server() as (base_url, received),
-        _fake_http_proxy() as (
+    expected_path = "/v1beta/models/gemini-2.5-flash:generateContent"
+    with _fake_gemini_server() as (base_url, received):
+        target_port = urlsplit(base_url).port
+        assert target_port is not None
+        with _fake_http_proxy(target_port, expected_path) as (
             proxy_url,
             proxied_targets,
-        ),
-    ):
-        config = Connection(
-            name=ai_test.CONNECTION_NAME,
-            base_url=base_url,
-            model="gemini-2.5-flash",
-            api_key=SecretStr(secret),
-            protocol="gemini",
-            provider="gemini",
-            reasoning_effort="low",
-        )
-        code = ai_test.probe(config, ("custom", proxy_url))
-        out = capsys.readouterr().out
-        assert code == 0
-        assert "proxy_mode: custom" in out
-        assert "text: pass" in out
-        assert "structured: pass" in out
-        assert "tools: pass" in out
-        assert "tools_roundtrip: pass" in out
-        assert secret not in out
-        assert len(received) == 4
-        assert len(proxied_targets) == 4
-        assert all(
-            item["path"] == "/v1beta/models/gemini-2.5-flash:generateContent" for item in received
-        )
-        assert all(item["api_key"] == secret and item["authorization"] is None for item in received)
-        assert all(secret not in item["path"] for item in received)
-        # Verify the roundtrip turn echoed back the model's thoughtSignature verbatim.
-        roundtrip_contents = received[-1]["body"]["contents"]
-        model_parts = roundtrip_contents[1]["parts"]
-        assert any(part.get("thoughtSignature") == "sig-probe-call-1" for part in model_parts)
+        ):
+            config = Connection(
+                name=ai_test.CONNECTION_NAME,
+                base_url=base_url,
+                model="gemini-2.5-flash",
+                api_key=SecretStr(secret),
+                protocol="gemini",
+                provider="gemini",
+                reasoning_effort="low",
+            )
+            code = ai_test.probe(config, ("custom", proxy_url))
+            out = capsys.readouterr().out
+            assert code == 0
+            assert "proxy_mode: custom" in out
+            assert "text: pass" in out
+            assert "structured: pass" in out
+            assert "tools: pass" in out
+            assert "tools_roundtrip: pass" in out
+            assert secret not in out
+            assert len(received) == 4
+            assert len(proxied_targets) == 4
+            assert all(item["path"] == expected_path for item in received)
+            assert all(
+                item["api_key"] == secret and item["authorization"] is None for item in received
+            )
+            assert all(secret not in item["path"] for item in received)
+            # Verify the roundtrip turn echoed back the model's thoughtSignature verbatim.
+            roundtrip_contents = received[-1]["body"]["contents"]
+            model_parts = roundtrip_contents[1]["parts"]
+            assert any(part.get("thoughtSignature") == "sig-probe-call-1" for part in model_parts)
 
     with _fake_gemini_server(fail_status=401) as (fail_url, _):
         failing = Connection(
