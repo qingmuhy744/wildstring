@@ -33,6 +33,7 @@ from wildstring.books.ebooks import (
     normalized_image,
     parse_ebook,
     tag,
+    txt_heading_level,
 )
 from wildstring.diagnostics import record_event
 from wildstring.library.import_files import (
@@ -59,17 +60,11 @@ from wildstring.library.sidecar import (
 
 EBOOK_SUFFIXES = {".epub", ".txt"}
 BOOK_AUDIO_SUFFIXES = AUDIO_SUFFIXES & {".m4b", ".m4a", ".mp3", ".flac", ".ogg", ".opus"}
-DESCRIPTION_NAMES = (
-    "desc.txt",
-    "内容简介.txt",
-    "简介.txt",
-    "书籍简介.txt",
-    "作品简介.txt",
-    "description.txt",
-    "synopsis.txt",
-    "readme.txt",
-)
+DESCRIPTION_NAMES = ("desc.txt",)
 METADATA_TEXT_NAMES = {*DESCRIPTION_NAMES, "reader.txt"}
+TXT_SCAN_BYTES = 16 * 1024
+LOCAL_COVER_BYTES = 64 * 1024 * 1024
+LOCAL_COVER_PIXELS = 80_000_000
 DISC_DIRECTORY = re.compile(r"(?:disc|disk|cd)[ _-]*(\d+)?", re.I)
 SERIES_VOLUME = re.compile(
     r"(?:(?P<prefix>.*?)\s*[-·：:]?\s*)?"
@@ -158,6 +153,46 @@ def _audio_folder(root, directory):
     while directory != root and DISC_DIRECTORY.fullmatch(directory.name):
         directory = directory.parent
     return directory
+
+
+def _source_layout(root: Path, suffixes: set[str]) -> tuple[dict[Path, list[Path]], set[Path]]:
+    folders: dict[Path, list[Path]] = {}
+    restricted_txt_dirs: set[Path] = set()
+    for folder, dirs, names in os.walk(root, followlinks=False):
+        directory = Path(folder)
+        dirs[:] = sorted(
+            name
+            for name in dirs
+            if not name.startswith(".") and not (directory / name).is_symlink()
+        )
+        if dirs:
+            restricted_txt_dirs.add(directory)
+        for name in sorted(names):
+            path = directory / name
+            suffix = path.suffix.lower()
+            if name.startswith(".") or suffix not in suffixes or path.is_symlink():
+                continue
+            folders.setdefault(directory, []).append(path)
+            if suffix in BOOK_AUDIO_SUFFIXES:
+                restricted_txt_dirs.update((directory, _audio_folder(root, directory)))
+    return folders, restricted_txt_dirs
+
+
+def _scan_txt(root: Path, path: Path, ebook_sources, restricted_txt_dirs: set[Path]) -> bool:
+    if str(path) in ebook_sources:
+        return True
+    if path.name.casefold() in METADATA_TEXT_NAMES:
+        return False
+    if path.parent not in restricted_txt_dirs:
+        return True
+    try:
+        with open_source(root, path.relative_to(root)) as stream:
+            if os.fstat(stream.fileno()).st_size >= TXT_SCAN_BYTES:
+                return True
+            text, _ = decode_text(stream.read(TXT_SCAN_BYTES))
+    except (OSError, ValueError):
+        return False
+    return any(txt_heading_level(line.strip()) > 0 for line in text.splitlines())
 
 
 def _disc_number(path):
@@ -609,7 +644,7 @@ class Books:
                         "bitrate": getattr(audio.info, "bitrate", None),
                         "sample_rate": getattr(audio.info, "sample_rate", None),
                         "channels": getattr(audio.info, "channels", None),
-                        "title": _audio_text(raw_title) or relative.stem,
+                        "tag_title": _audio_text(raw_title),
                         "raw_title": raw_title or relative.stem,
                         "album": text("album", "TALB", "©alb"),
                         "author": text("author", "TXXX:AUTHOR", "TXXX:Author", "©aut"),
@@ -618,6 +653,14 @@ class Books:
                         "chapters": chapter_tags,
                     }
                 )
+        title_stems: dict[str, set[str]] = {}
+        if len(entries) > 1:
+            for item in entries:
+                if not item["chapters"] and item["tag_title"]:
+                    title_stems.setdefault(normalize(item["tag_title"]), set()).add(
+                        item["relative"].stem
+                    )
+        repeated_titles = {title for title, stems in title_stems.items() if len(stems) > 1}
         orders = {item["order"] for item in entries}
         if len(orders) == len(entries) and all(disc > 0 and track > 0 for disc, track in orders):
             entries.sort(key=lambda item: item["order"])
@@ -627,7 +670,12 @@ class Books:
         title = (
             title_default
             if grouped_discs
-            else first["album"] or (first["title"] if len(entries) == 1 else title_default)
+            else first["album"]
+            or (
+                (first["tag_title"] or first["relative"].stem)
+                if len(entries) == 1
+                else title_default
+            )
         )
         authors = list(dict.fromkeys(item["author"] for item in entries if item["author"]))
         narrators = list(dict.fromkeys(item["narrator"] for item in entries if item["narrator"]))
@@ -734,14 +782,29 @@ class Books:
                 )
                 if not chapters or chapters[0][0] != 0:
                     chapters.insert(0, (0, item["raw_title"]))
+                repeated_title = (
+                    not item["chapters"]
+                    and item["tag_title"]
+                    and normalize(item["tag_title"]) in repeated_titles
+                )
                 for offset, (start, chapter_title) in enumerate(chapters):
                     end = chapters[offset + 1][0] if offset + 1 < len(chapters) else duration
                     hash_key = (item["value"], start, end)
                     effective_title = preserved_by_source.get((source_str, *hash_key))
                     if effective_title is None and hash_key not in claimed_title_hashes:
                         effective_title = preserved_by_hash.get(hash_key)
-                    if effective_title is None or (repair and effective_title == chapter_title):
-                        effective_title = _audio_text(chapter_title) or item["title"]
+                    if effective_title is None or (
+                        repair
+                        and (
+                            effective_title == chapter_title
+                            or (repeated_title and effective_title == item["tag_title"])
+                        )
+                    ):
+                        effective_title = (
+                            relative.stem
+                            if repeated_title
+                            else _audio_text(chapter_title) or item["tag_title"] or relative.stem
+                        )
                     chapters_rows.append(
                         (
                             book_id,
@@ -1122,19 +1185,43 @@ class Books:
         self, managed_root: Path, book_id: str, source_root: Path, folder: Path, *, refresh=False
     ):
         with self.database.connect(scoped=False) as db:
-            row = db.execute("SELECT cover_path FROM books WHERE id=?", (book_id,)).fetchone()
+            row = db.execute("SELECT cover_path,title FROM books WHERE id=?", (book_id,)).fetchone()
             if row is None or (row["cover_path"] and not refresh):
                 return
-        for stem in ("cover", "folder", "front"):
-            for ext in IMAGE_SUFFIXES:
-                raw = read_asset(source_root, folder / f"{stem}{ext}", 8 * 1024 * 1024)
-                if raw is not None:
-                    try:
-                        jpeg = normalized_image(raw)
-                        self._save_cover(managed_root, book_id, jpeg, refresh=refresh)
-                        return
-                    except (OSError, ValueError):
-                        continue
+        stems = (
+            "cover",
+            "folder",
+            "front",
+            (source_root / folder).name.casefold(),
+            row["title"].casefold(),
+        )
+        try:
+            entries = sorted((source_root / folder).iterdir())
+        except OSError:
+            return
+        candidates: dict[str, list[Path]] = {}
+        for entry in entries:
+            stem = entry.stem.casefold()
+            if (
+                stem in stems
+                and entry.suffix.casefold() in IMAGE_SUFFIXES
+                and not entry.name.startswith(".")
+                and not entry.is_symlink()
+            ):
+                candidates.setdefault(stem, []).append(entry)
+        for stem in dict.fromkeys(stems):
+            for entry in candidates.get(stem, ()):
+                raw = read_asset(source_root, folder / entry.name, LOCAL_COVER_BYTES)
+                if raw is None:
+                    continue
+                try:
+                    jpeg = normalized_image(
+                        raw, max_bytes=LOCAL_COVER_BYTES, max_pixels=LOCAL_COVER_PIXELS
+                    )
+                    self._save_cover(managed_root, book_id, jpeg, refresh=refresh)
+                    return
+                except (OSError, ValueError):
+                    continue
 
     def _apply_embedded_cover(
         self, managed_root: Path, book_id: str, source_root: Path, audio_relatives, ebook_paths
@@ -1225,7 +1312,7 @@ class Books:
         return True
 
     def watch_probe(self, library) -> tuple[bool, tuple]:
-        """Collect an os.stat snapshot for watched source roots without reading files."""
+        """Snapshot watched roots and check untracked media against scan rules."""
         identity = library["id"]
         with self.database.connect(scoped=False) as db:
             sources = [
@@ -1261,37 +1348,18 @@ class Books:
                 )
             }
 
-        watched_suffixes = (
-            EBOOK_SUFFIXES
-            | BOOK_AUDIO_SUFFIXES
-            | IMAGE_SUFFIXES
-            | {
-                ".opf",
-                ".json",
-                ".txt",
-            }
-        )
+        watched_suffixes = EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES | IMAGE_SUFFIXES | {".opf", ".json"}
         has_unimported = False
         source_entries: list[tuple[str, int, int]] = []
+        txt_contexts = []
         for source_root in sources:
             if not source_root.is_dir() or source_root.is_symlink():
                 continue
-            for folder, dirs, names in os.walk(source_root, followlinks=False):
-                directory = Path(folder)
-                dirs[:] = sorted(
-                    name
-                    for name in dirs
-                    if not name.startswith(".") and not (directory / name).is_symlink()
-                )
-                for name in sorted(names):
-                    if name.startswith("."):
-                        continue
-                    path = directory / name
-                    if path.is_symlink():
-                        continue
+            folders, restricted_txt_dirs = _source_layout(source_root, watched_suffixes)
+            txt_contexts.append(tuple(sorted(restricted_txt_dirs)))
+            for paths in folders.values():
+                for path in paths:
                     suffix = path.suffix.lower()
-                    if suffix not in watched_suffixes:
-                        continue
                     try:
                         stat_info = path.stat(follow_symlinks=False)
                     except OSError:
@@ -1299,10 +1367,14 @@ class Books:
                     key_str = str(path)
                     source_entries.append((key_str, stat_info.st_size, stat_info.st_mtime_ns))
                     if (
-                        suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
-                        and path.name.casefold() not in METADATA_TEXT_NAMES
+                        not has_unimported
+                        and suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
                         and key_str not in ebook_sources
                         and key_str not in audio_sources
+                        and (
+                            suffix != ".txt"
+                            or _scan_txt(source_root, path, ebook_sources, restricted_txt_dirs)
+                        )
                     ):
                         has_unimported = True
 
@@ -1330,6 +1402,7 @@ class Books:
             tuple(str(root) for root in sources),
             tuple(source_entries),
             tuple(managed_entries),
+            tuple(txt_contexts),
         )
         return has_unimported, snapshot
 
@@ -1531,29 +1604,20 @@ class Books:
                         failures += 1
                         last_error = last_error or "book_scan_file_unavailable"
                         continue
-                    for folder, dirs, names in os.walk(source_root, followlinks=False):
-                        directory = Path(folder)
-                        dirs[:] = sorted(
-                            name
-                            for name in dirs
-                            if not name.startswith(".") and not (directory / name).is_symlink()
-                        )
+                    folders, restricted_txt_dirs = _source_layout(
+                        source_root, EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
+                    )
+                    for directory, paths in folders.items():
                         audio = []
                         ebooks = []
-                        for name in sorted(names):
-                            path = directory / name
+                        for path in paths:
                             suffix = path.suffix.lower()
-                            if (
-                                name.startswith(".")
-                                or path.is_symlink()
-                                or suffix not in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
-                                or path.name.casefold() in METADATA_TEXT_NAMES
-                            ):
-                                continue
-                            if suffix in EBOOK_SUFFIXES:
-                                ebooks.append(path)
-                            else:
+                            if suffix in BOOK_AUDIO_SUFFIXES:
                                 audio.append(path.relative_to(source_root))
+                            elif suffix != ".txt" or _scan_txt(
+                                source_root, path, ebook_sources, restricted_txt_dirs
+                            ):
+                                ebooks.append(path)
                         if ebooks:
                             folder_items.setdefault((source_root, directory), ([], []))[1].extend(
                                 ebooks
