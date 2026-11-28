@@ -5,10 +5,11 @@ import math
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from test_multiple_libraries import HEADERS, listener
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 
 
 def create_library(client, name, **fields):
@@ -1584,6 +1585,8 @@ def test_scan_and_watch_share_txt_admission(settings, authenticated_client, tmp_
         owner.app.state.management.stop()
         lib = create_library(owner, "Mixed books", source_roots=[str(root)])
         service = Books(Database(settings.data_dir), settings)
+        with service.database.connect() as db:
+            library = db.execute("SELECT * FROM book_libraries WHERE id=?", (lib["id"],)).fetchone()
         base = f"/api/v1/book-libraries/{lib['id']}/scan"
         first = owner.post(base, headers=HEADERS)
         assert first.json()["added_books"] == 2, first.text
@@ -1596,7 +1599,7 @@ def test_scan_and_watch_share_txt_admission(settings, authenticated_client, tmp_
         (disc / "Notes.txt").write_text("Disc notes.")
         (series / "Readme.txt").write_bytes(b"x" * (16 * 1024 - 1))
         (leaf / "Visible child").mkdir()
-        assert service.watch_probe(lib)[0] is False
+        assert service.watch_probe(library)[0] is True  # New skipped TXT files need a scan as well.
         repair = owner.post(base, params={"repair": "true"}, headers=HEADERS)
         assert repair.json()["status"] == "completed", repair.text
         assert repair.json()["added_books"] == 0
@@ -1604,19 +1607,19 @@ def test_scan_and_watch_share_txt_admission(settings, authenticated_client, tmp_
         books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
         assert {item["title"] for item in books} == {"Story", "Short"}
         assert all(item["description"] is None for item in books)
-        assert service.watch_probe(lib)[0] is False
+        assert service.watch_probe(library)[0] is False
 
         (audio / "Story.txt").write_text("  Chapter 1\nStory body.")
-        assert service.watch_probe(lib)[0] is True
+        assert service.watch_probe(library)[0] is True
         paired = owner.post(base, headers=HEADERS)
         assert paired.json()["paired_books"] == 1, paired.text
-        assert service.watch_probe(lib)[0] is False
+        assert service.watch_probe(library)[0] is False
 
         (series / "Omnibus.txt").write_bytes(b"x" * (16 * 1024))
-        assert service.watch_probe(lib)[0] is True
+        assert service.watch_probe(library)[0] is True
         omnibus = owner.post(base, headers=HEADERS)
         assert omnibus.json()["added_books"] == 1, omnibus.text
-        assert service.watch_probe(lib)[0] is False
+        assert service.watch_probe(library)[0] is False
         books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
         assert {item["title"] for item in books if item["has_ebook"]} == {
             "Story",
@@ -1625,13 +1628,15 @@ def test_scan_and_watch_share_txt_admission(settings, authenticated_client, tmp_
         }
 
         (leaf / "Another.txt").write_text("Another short story.")
-        pending, snapshot = service.watch_probe(lib)
+        assert service.watch_probe(library)[0] is True
+        assert owner.post(base, headers=HEADERS).json()["added_books"] == 0
+        pending, snapshot = service.watch_probe(library)
         assert pending is False
         (leaf / "Visible child").rmdir()
-        pending, leaf_snapshot = service.watch_probe(lib)
+        pending, leaf_snapshot = service.watch_probe(library)
         assert pending is True and leaf_snapshot != snapshot
         assert owner.post(base, headers=HEADERS).json()["added_books"] == 1
-        assert service.watch_probe(lib)[0] is False
+        assert service.watch_probe(library)[0] is False
 
 
 def test_audiobook_repeated_tag_titles_use_filenames_and_repair_legacy_chapters(
@@ -1972,11 +1977,11 @@ def test_book_scan_reports_progress_and_diagnoses_cover_write_conflict(
     original_metadata = Books.directory_metadata
     original_write = Books.write
 
-    def pause_second(self, book_id, root, folder, defaults=None):
+    def pause_second(self, library, book_id, root, folder, defaults=None):
         if folder.name == "b":
             entered.set()
             assert resume.wait(10)
-        return original_metadata(self, book_id, root, folder, defaults)
+        return original_metadata(self, library, book_id, root, folder, defaults)
 
     @contextmanager
     def write(self, library_id, **kwargs):
@@ -2259,3 +2264,373 @@ def test_book_series_matches_parent_prefix_volumes_and_omnibus_txt(
         removed_ebook = owner.delete(f"/api/v1/books/{ebook_id}", headers=HEADERS)
         assert removed_ebook.status_code == 204
         assert (series_dir / "盗墓笔记全集.txt").is_file()
+
+
+def test_book_intake_migrates_schema_64_idempotently(settings):
+    from wildstring.books.schema import migrate_intake
+
+    database = Database(settings.data_dir)
+    database.initialize()
+    with database.connect(write=True) as db:
+        db.execute("DROP TABLE book_scan_skipped_files")
+        db.execute("ALTER TABLE book_libraries DROP COLUMN external_metadata_mode")
+        db.execute("ALTER TABLE book_libraries DROP COLUMN ignore_patterns_json")
+        db.execute("PRAGMA user_version = 64")
+        db.execute(
+            """INSERT INTO book_libraries(id,name,managed_root,created_at,updated_at)
+               VALUES ('legacy','Legacy','/legacy-books',1,1)"""
+        )
+    database.initialize()
+    with database.connect(write=True) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        db.execute(
+            "INSERT INTO book_scan_skipped_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "entry",
+                "legacy",
+                None,
+                "/source",
+                "/source/file.txt",
+                "file.txt",
+                3,
+                1,
+                "txt_admission",
+                "pending",
+                "abc",
+                "abc",
+                1,
+            ),
+        )
+    with database.connect(write=True) as db:
+        migrate_intake(db)
+        assert db.execute(
+            "SELECT external_metadata_mode,ignore_patterns_json FROM book_libraries WHERE id='legacy'"
+        ).fetchone()[:] == ("sanitized", "[]")
+        assert db.execute("SELECT id FROM book_scan_skipped_files").fetchone()[0] == "entry"
+        assert any(
+            row["name"] == "book_scan_skipped_by_library_status"
+            for row in db.execute("PRAGMA index_list(book_scan_skipped_files)")
+        )
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_external_book_sidecars_sanitize_and_respect_library_policy(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "external-books"
+    series = root / "完整系列"
+    first, second, third = (series / name for name in ("第一卷", "第二卷", "第三卷"))
+    for folder in (first, second):
+        folder.mkdir(parents=True)
+        shutil.copyfile(fixture, folder / "01.mp3")
+
+    payload = {
+        "title": "External title",
+        "authors": [series.name],
+        "series": [None, "", "Renamed series #1.5", "Unused #9"],
+        "publishedYear": " 1999 ",
+        "description": '<p>First &amp; <a href="https://example.invalid">second</a>'
+        "<br>third</p><script>hidden</script><p>Last &#x2605;</p>",
+    }
+    (first / "metadata.json").write_text(json.dumps(payload, ensure_ascii=False))
+    (second / "metadata.json").write_text(
+        json.dumps({"title": "Fallback", "description": "Bilibili VXCode Swarm Transcoder 5.1"})
+    )
+    (second / "desc.txt").write_text("Description from desc.txt")
+    (second / "metadata.opf").write_text(
+        "<package><metadata><description>Lavf59.27.100</description></metadata></package>"
+    )
+
+    with authenticated_client(settings) as owner:
+        owner.app.state.management.stop()
+        library = create_library(owner, "External sidecars", source_roots=[str(root)])
+        endpoint = f"/api/v1/book-libraries/{library['id']}"
+        assert owner.post(f"{endpoint}/scan", headers=HEADERS).json()["added_books"] == 2
+        books = {item["title"]: item for item in owner.get("/api/v1/books").json()["items"]}
+        detail_url = f"/api/v1/books/{books['External title']['id']}"
+        detail = owner.get(detail_url).json()
+        assert (detail["series_name"], detail["series_index"], detail["published_year"]) == (
+            "Renamed series",
+            1.5,
+            1999,
+        )
+        assert series.name not in detail["authors"]
+        assert detail["description"] == "First & second\nthird\n\nLast ★"
+        assert books["Fallback"]["description"] == "Description from desc.txt"
+
+        assert (
+            owner.patch(
+                f"{detail_url}/metadata",
+                headers=HEADERS,
+                json={"description": "Locked", "authors": ["Manual author"]},
+            ).status_code
+            == 200
+        )
+        (first / "metadata.json").write_text(json.dumps(payload | {"description": "Lavf60.1.1"}))
+        assert owner.post(f"{endpoint}/scan", headers=HEADERS).status_code == 200
+        detail = owner.get(detail_url).json()
+        assert (detail["description"], detail["authors"]) == ("Locked", ["Manual author"])
+
+        updated = owner.put(
+            endpoint,
+            headers=HEADERS,
+            json={
+                "name": library["name"],
+                "version": library["version"],
+                "source_roots": [str(root)],
+                "external_metadata_mode": "off",
+            },
+        )
+        assert updated.json()["external_metadata_mode"] == "off"
+        third.mkdir()
+        shutil.copyfile(fixture, third / "01.mp3")
+        (third / "metadata.json").write_text(json.dumps(payload))
+        (third / "metadata.opf").write_text("<package><title>OPF title</title></package>")
+        (third / "desc.txt").write_text("Local description")
+        (third / "reader.txt").write_text("Local narrator")
+        assert owner.post(f"{endpoint}/scan", headers=HEADERS).json()["added_books"] == 1
+        (book,) = [
+            row for row in owner.get("/api/v1/books").json()["items"] if row["series_index"] == 3
+        ]
+        assert book["title"] == "播放测试曲"
+        assert book["description"] == "Local description"
+        assert book["narrators"] == ["Local narrator"]
+
+
+@pytest.mark.parametrize("storage_mode", ["copy", "hardlink"])
+def test_book_intake_queue_resolution_and_watch(
+    settings, authenticated_client, tmp_path, storage_mode
+):
+    import shutil
+
+    from wildstring.books.service import Books
+
+    root = tmp_path / "intake-books"
+    story = root / "Story"
+    other = root / "Other"
+    story.mkdir(parents=True)
+    other.mkdir()
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    shutil.copyfile(fixture, story / "01.mp3")
+    shutil.copyfile(fixture, other / "01.mp3")
+    description = "[b]A book synopsis[/b]\n\n[img]https://example.invalid/cover.jpg[/img]\n仅供试听，请在 24 小时内删除"
+    (story / "Notes.txt").write_text(description)
+    (story / "Read.txt").write_text("A short readable text.")
+    (story / "Missing.txt").write_text("Soon gone.")
+    (story / "Config.txt").write_text("Rule added by edit.")
+    (story / "release.TXT").write_text("Group release.")
+    (other / "RELEASE.txt").write_text("Group release in another directory.")
+    (story / "Noise.dat.txt").write_text("Does not enter the queue.")
+    (story / "Banner.txt").write_text("Chapter 1\nWould normally import.")
+    (story / "DESC.txt").write_text("Explicit description fallback")
+
+    with authenticated_client(settings) as owner:
+        owner.app.state.management.stop()
+        library = create_library(
+            owner,
+            "Intake",
+            source_roots=[str(root)],
+            storage_mode=storage_mode,
+            ignore_patterns=[" *.DAT.txt ", "*.dat.TXT", "STORY/banner.TXT"],
+        )
+        assert library["ignore_patterns"] == ["*.DAT.txt", "STORY/banner.TXT"]
+        lib_id = library["id"]
+        base = f"/api/v1/book-libraries/{lib_id}"
+        queue = f"{base}/skipped-files"
+        database = Database(settings.data_dir)
+        service = Books(database, settings)
+
+        def library_row():
+            with database.connect() as db:
+                return db.execute("SELECT * FROM book_libraries WHERE id=?", (lib_id,)).fetchone()
+
+        assert service.watch_probe(library_row())[0] is True
+        assert owner.post(f"{base}/scan", headers=HEADERS).json()["added_books"] == 2
+        first_probe = service.watch_probe(library_row())
+        assert first_probe[0] is False
+        (story / "Noise.dat.txt").write_text("Ignored files do not change snapshots.")
+        assert service.watch_probe(library_row()) == first_probe
+
+        assert owner.get(queue).status_code == 403
+        response = owner.get(queue, headers=HEADERS)
+        assert str(root) not in response.text
+        assert response.json()["total"] == response.json()["pending_count"] == 6
+        items = {item["relative_path"]: item for item in response.json()["items"]}
+        note = items["Story/Notes.txt"]
+        book_id = note["book_id"]
+        assert note["preview_text"] == description
+        assert note["cleaned_preview"] == "A book synopsis"
+        assert {"source_root", "source_path"}.isdisjoint(note)
+        filtered = owner.get(
+            queue, headers=HEADERS, params={"book_id": book_id, "limit": 1, "offset": 1}
+        ).json()
+        assert len(filtered["items"]) == 1
+        assert filtered["total"] == filtered["pending_count"] == 5
+
+        def resolve(relative, **body):
+            return owner.post(
+                f"{queue}/{items[relative]['id']}/resolve", headers=HEADERS, json=body
+            )
+
+        remote_library = create_library(owner, "Remote intake")
+        with database.connect(write=True) as db:
+            db.execute(
+                "UPDATE book_libraries SET storage_backend='gdrive' WHERE id=?",
+                (remote_library["id"],),
+            )
+        remote = owner.post(
+            f"/api/v1/book-libraries/{remote_library['id']}/skipped-files/{note['id']}/resolve",
+            headers=HEADERS,
+            json={"action": "import_ebook"},
+        )
+        assert remote.status_code == 409
+        assert remote.json()["detail"] == "remote_storage_local_operation"
+        assert (
+            resolve("Story/Notes.txt", action="absorb_description", book_id="unknown").status_code
+            == 404
+        )
+        saved = resolve(
+            "Story/Notes.txt", action="absorb_description", description="Edited synopsis"
+        )
+        assert saved.json()["status"] == "absorbed_description"
+        assert (story / "Notes.txt").read_text() == description
+
+        picked = story / "Read.txt"
+        picked.unlink()
+        picked.symlink_to(other / "RELEASE.txt")
+        blocked = resolve("Story/Read.txt", action="import_ebook", book_id=book_id)
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"] == "book_skipped_file_source_changed"
+        picked.unlink()
+        picked.write_text("A short readable text.")
+        current = owner.post(f"{base}/scan", headers=HEADERS)
+        assert current.json()["status"] == "completed"
+        added = resolve("Story/Read.txt", action="import_ebook", book_id=book_id)
+        assert added.json()["book_id"] == book_id
+        assert added.json()["status"] == "imported_ebook"
+        assert picked.read_text() == "A short readable text."
+        (published,) = (Path(library["managed_root"]) / book_id).glob("ebook-*.txt")
+        assert published.samefile(picked) is (storage_mode == "hardlink")
+        detail = owner.get(f"/api/v1/books/{book_id}").json()
+        assert detail["description"] == "Edited synopsis"
+        assert detail["has_ebook"] is True
+        manifest = json.loads(
+            (Path(library["managed_root"]) / book_id / ".wildstring" / "manifest.json").read_text()
+        )
+        assert manifest["description"] == "Edited synopsis"
+        assert "description" in manifest["locked_fields"]
+
+        before = library_row()["version"]
+        assert (
+            resolve("Story/release.TXT", action="ignore", add_pattern="unrelated.txt").status_code
+            == 422
+        )
+        assert (
+            resolve("Story/release.TXT", action="ignore", add_pattern="release.txt").status_code
+            == 200
+        )
+        assert library_row()["version"] == before + 1
+        assert owner.get(queue, headers=HEADERS, params={"status": "ignored"}).json()["total"] == 2
+        updated = owner.put(
+            base,
+            headers=HEADERS,
+            json={
+                "name": "Intake",
+                "source_roots": [str(root)],
+                "version": before + 1,
+                "ignore_patterns": ["*.DAT.txt", "STORY/banner.TXT", "release.txt", "config.txt"],
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert owner.get(queue, headers=HEADERS, params={"status": "ignored"}).json()["total"] == 3
+        (story / "Missing.txt").unlink()
+        assert owner.post(f"{base}/scan", headers=HEADERS).status_code == 200
+        all_rows = owner.get(queue, headers=HEADERS, params={"status": "all"}).json()
+        assert all_rows["pending_count"] == 0
+        assert {item["status"] for item in all_rows["items"]} == {
+            "absorbed_description",
+            "imported_ebook",
+            "ignored",
+        }
+        assert "Story/Missing.txt" not in {item["relative_path"] for item in all_rows["items"]}
+        (story / "Notes.txt").write_text("Revised source synopsis.")
+        assert service.watch_probe(library_row())[0] is True
+        assert owner.post(f"{base}/scan", headers=HEADERS).status_code == 200
+        (changed,) = owner.get(queue, headers=HEADERS).json()["items"]
+        assert changed["id"] == note["id"]
+        assert changed["preview_text"] == "Revised source synopsis."
+        assert service.watch_probe(library_row())[0] is False
+        separate = resolve("Story/Notes.txt", action="import_ebook").json()
+        assert separate["status"] == "imported_ebook"
+        assert separate["book_id"] != book_id
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected"), [("editor", 403), ("listener", 403), ("librarian", 200)]
+)
+def test_book_intake_queue_requires_capability_and_library_grant(
+    settings, authenticated_client, profile, expected
+):
+    with authenticated_client(settings) as owner:
+        library = create_library(owner, "Intake access")
+        base = f"/api/v1/book-libraries/{library['id']}"
+        music = owner.get("/api/v1/libraries").json()[0]["id"]
+        member, identity = listener(owner, [music], profile=profile)
+        assert member.get(f"{base}/skipped-files", headers=HEADERS).status_code == (
+            404 if profile == "librarian" else 403
+        )
+        assert (
+            owner.put(
+                f"{base}/access/{identity}", headers=HEADERS, json={"granted": True}
+            ).status_code
+            == 200
+        )
+        assert member.get(f"{base}/skipped-files", headers=HEADERS).status_code == expected
+        denied = member.post(
+            f"{base}/skipped-files/missing/resolve", headers=HEADERS, json={"action": "ignore"}
+        )
+        assert denied.status_code == (404 if profile == "librarian" else 403)
+        if profile == "librarian":
+            (visible,) = member.get("/api/v1/book-libraries").json()["items"]
+            assert visible["ignore_patterns"] == []
+            assert visible["external_metadata_mode"] == "sanitized"
+            assert {"managed_root", "sources"}.isdisjoint(visible)
+
+
+def test_cleaned_preview_strips_long_bbcode_preamble_before_truncation(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "bbcode-preview"
+    book_dir = root / "Volume 1"
+    book_dir.mkdir(parents=True)
+    shutil.copyfile(fixture, book_dir / "01.mp3")
+    preamble = (
+        "\n".join(f"[img]http://example.invalid/scan-{i}-{'a' * 110}.jpg[/img]" for i in range(6))
+        + "\n\n[b][color=Red][size=3]\n"
+        "作品版权归唱片公司所有，如侵犯您的权益，请通知我，我将及时删除。\n"
+        "本作品仅用于试听，严禁用于任何商业用途！\n"
+        "请于试听后24小时内删除，如果喜欢请自觉购买正版光碟！\n"
+        "原抓作品，严禁转载，谢谢！\n\n"
+        "WARNING:\n"
+        "All copyrights belong to the original company.\n"
+        "This work is ONLY used for listening test and ANY commercial purposes are strictly PROHIBITED.\n"
+        "[b][color=Blue][size=3]DO DELETE[/b][/color][/size] this copy within 24 hours!\n"
+        "[/b][/color][/size]\n\n"
+        "[b][color=Green][size=3]五十年前，一群长沙土夫子挖到一部战国帛书。[/b][/color][/size]"
+    )
+    assert len(preamble) > 900
+    (book_dir / "内容简介.txt").write_bytes(preamble.encode("gb18030"))
+
+    with authenticated_client(settings) as owner:
+        library = create_library(owner, "BBCode", source_roots=[str(root)])
+        base = f"/api/v1/book-libraries/{library['id']}"
+        assert owner.post(f"{base}/scan", headers=HEADERS).status_code == 200
+        (item,) = owner.get(f"{base}/skipped-files", headers=HEADERS).json()["items"]
+        assert len(item["preview_text"]) == 800
+        assert item["cleaned_preview"] == "五十年前，一群长沙土夫子挖到一部战国帛书。"

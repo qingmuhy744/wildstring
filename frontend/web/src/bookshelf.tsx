@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api, time } from './api';
+import { BookIntakeQueue } from './book-intake';
 import {
   alignmentAvailable,
   BookAlignmentNotice,
@@ -1050,6 +1051,14 @@ export function Bookshelf({
               )}
             </div>
           </div>
+          {canManage && selectedLibrary?.storage_backend !== 'gdrive' && (
+            <BookIntakeQueue
+              key={selected.id}
+              libraryId={selected.library_id}
+              detail={{ id: selected.id, hasEbook: selected.has_ebook }}
+              onResolved={() => refreshDetail(selected.id)}
+            />
+          )}
           {(selected.description || seriesName || hasMoreMetadata) && (
             <div className="book-detail-information">
               {seriesName && (

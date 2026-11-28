@@ -20,7 +20,7 @@ from PIL import Image
 from test_bookshelf import sample_epub
 from test_multiple_libraries import HEADERS, listener
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.storage.gdrive import DriveError
 
 DRIVE = "/api/v1/remote-storage"
@@ -520,7 +520,7 @@ def test_actual_v63_migration_preserves_local_modes(settings):
         sql.execute("PRAGMA user_version=63")
     db.initialize()
     with db.connect(scoped=False) as sql:
-        assert sql.execute("PRAGMA user_version").fetchone()[0] == 64
+        assert sql.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert tuple(
             sql.execute(
                 "SELECT storage_mode,storage_backend FROM libraries WHERE id='v63'"

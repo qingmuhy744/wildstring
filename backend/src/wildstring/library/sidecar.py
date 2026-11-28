@@ -41,7 +41,7 @@ MAX_LYRIC_BUNDLE = 2 * 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _TRACK_COVER_RE = re.compile(r"^covers/[0-9a-f]{64}\.jpg$")
 MARKUP = re.compile(
-    r"<\s*/?\s*(?:script|iframe|object|embed|svg|style|link|meta|html|body|form|input)\b|javascript:",
+    r"<\s*(?:/\s*)?(?:script|iframe|object|embed|svg|style|link|meta|html|body|form|input)\b|javascript:",
     re.I,
 )
 ABSOLUTE_PATH = re.compile(r"^(?:/[A-Za-z0-9._~-]+/|[A-Za-z]:[\\/]|\\\\[^\\]+\\)")

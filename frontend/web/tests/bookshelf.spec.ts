@@ -1,7 +1,8 @@
 import { expect, type Page } from '@playwright/test';
-import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { login, manageTab, section, test } from './helpers';
 
 const bookClientHeaders = { 'X-Wildstring-Client': 'web' };
@@ -1432,4 +1433,209 @@ test('书目快捷操作与书库删除走独立确认和个人进度', async ({
   });
   await library.getByRole('button', { name: '删除书库', exact: true }).click();
   await expect(library.getByRole('button', { name: title, exact: false })).toHaveCount(0);
+});
+
+test('书架导入治理：配置、待确认文件和单书快捷处置', async ({ page, isMobile }, info) => {
+  test.setTimeout(60000);
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const source = await mkdtemp(join(tmpdir(), 'wildstring-book-intake-'));
+  const name = `扫描治理 ${info.project.name} ${Date.now()}`;
+  const evidence = fileURLToPath(new URL('../../../artifacts/bookshelf-phase1/', import.meta.url));
+  const headers = bookClientHeaders;
+  const title = '潮汐档案';
+  const long = '这是一份保留原文供管理员对照的长文件名_扫描后可以编辑简介再保存.txt';
+  const note = '[b]一次沿海声音的采集记录。[/b]\n\n仅供试听，请在 24 小时内删除。';
+  try {
+    const first = join(source, title);
+    const second = join(source, '北岸手记');
+    await mkdir(first);
+    await mkdir(second);
+    const sample = new URL('../../../tests/fixtures/audio/playback.mp3', import.meta.url);
+    await Promise.all([
+      copyFile(sample, join(first, '01.mp3')),
+      copyFile(sample, join(second, '01.mp3')),
+      writeFile(join(first, 'metadata.json'), JSON.stringify({ title })),
+      writeFile(join(second, 'metadata.json'), JSON.stringify({ title: '北岸手记' })),
+      writeFile(join(first, long), note),
+      writeFile(join(first, '短篇.txt'), '这份短篇需要由管理员确认后入库。'),
+      writeFile(join(first, '临时备注.txt'), '本书的一条待忽略备注。'),
+      writeFile(join(first, 'Release.txt'), '第一份同类发行说明。'),
+      writeFile(join(second, 'RELEASE.TXT'), '第二份同类发行说明。'),
+      writeFile(join(second, '不要导入.nfo.txt'), '第一章\n匹配规则，即使带章节标题也应跳过。'),
+      mkdir(evidence, { recursive: true }),
+    ]);
+
+    const created = await page.request.post('/api/v1/book-libraries', {
+      headers,
+      data: { name, source_roots: [source], paused_source_roots: [source] },
+    });
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    const base = `/api/v1/book-libraries/${id}`;
+
+    async function capture(view: string, selector: string) {
+      for (const theme of ['light', 'dark'] as const) {
+        await page.evaluate((value) => {
+          localStorage.setItem('wildstring-theme', value);
+          window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+        }, theme);
+        await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        await page
+          .locator(selector)
+          .first()
+          .evaluate((element) => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+        if (isMobile && view === 'queue') {
+          await page.getByRole('button', { name: '保存简介' }).evaluate((element) => {
+            element.scrollIntoView({ block: 'end', behavior: 'instant' });
+          });
+        }
+        await page.screenshot({
+          path: join(evidence, `${info.project.name}-${theme}-${view}.png`),
+          scale: 'css',
+          animations: 'disabled',
+        });
+      }
+    }
+
+    await manageTab(page, '书库与存储');
+    const panel = page.getByRole('region', { name: '书库与存储配置', exact: true });
+    await panel.getByRole('button', { name, exact: false }).click();
+    const mode = panel.getByLabel('外部侧车兼容');
+    const rules = panel.getByLabel('扫描忽略规则');
+    await mode.selectOption('off');
+    await rules.fill('*.nfo.txt');
+    const save = () =>
+      Promise.all([
+        page.waitForResponse((res) => res.url().endsWith(base) && res.request().method() === 'PUT'),
+        panel.getByRole('button', { name: '保存书库' }).click(),
+      ]);
+    const [off] = await save();
+    expect((await off.json()).external_metadata_mode).toBe('off');
+    expect((await off.json()).ignore_patterns).toEqual(['*.nfo.txt']);
+    await mode.selectOption('sanitized');
+    const [sanitized] = await save();
+    expect((await sanitized.json()).external_metadata_mode).toBe('sanitized');
+    await capture('policy', '.music-library-manager form');
+
+    const queue = panel.getByRole('region', { name: /^待确认文件/ });
+    await expect(queue.getByText('此状态下没有文件')).toBeVisible();
+    await Promise.all([
+      page.waitForResponse((res) => res.url().endsWith(`${base}/scan`) && res.status() === 200),
+      panel.getByRole('button', { name: '扫描来源', exact: true }).click(),
+    ]);
+    await expect(queue.getByRole('heading')).toHaveText('待确认文件（5 项待处理）');
+    const longFile = queue.locator('details').filter({ hasText: long });
+    await longFile.locator('summary').click();
+    await expect(longFile.getByText('一次沿海声音的采集记录。', { exact: true })).toBeVisible();
+    await longFile.getByRole('button', { name: '原文', exact: true }).click();
+    await expect(longFile.getByText(/24 小时内删除/)).toBeVisible();
+    await longFile.getByRole('button', { name: '清洗预览' }).click();
+    await longFile.getByRole('button', { name: '吸收为简介' }).click();
+    await longFile.getByLabel('简介', { exact: true }).fill('管理员编辑后的沿海采集记录。');
+    await capture('queue', '.book-intake');
+    await longFile.getByRole('button', { name: '保存简介' }).click();
+    await expect(longFile).toHaveCount(0);
+
+    const release = queue.locator('details').filter({ hasText: `${title}/Release.txt` });
+    await release.locator('summary').click();
+    await release.getByRole('button', { name: '忽略所有同名文件' }).click();
+    await expect(queue.getByRole('heading')).toHaveText('待确认文件（2 项待处理）');
+    await expect(rules).toHaveValue('*.nfo.txt\nRelease.txt');
+    await queue.getByLabel('状态').selectOption('ignored');
+    await expect(queue.locator('details')).toHaveCount(2);
+    await expect(queue.getByText('北岸手记/RELEASE.TXT', { exact: true })).toBeVisible();
+
+    let releaseQueue!: () => void;
+    const held = new Promise<void>((resolve) => (releaseQueue = resolve));
+    await page.route(
+      `**${base}/skipped-files?*`,
+      async (route) => {
+        await held;
+        await route.fulfill({ status: 503, json: { detail: 'book_scan_file_unavailable' } });
+      },
+      { times: 1 },
+    );
+    try {
+      await queue.getByLabel('状态').selectOption('pending');
+      await expect(queue.getByRole('status')).toHaveText('正在加载…');
+    } finally {
+      releaseQueue();
+    }
+    await expect(queue.getByRole('alert')).toContainText('有来源文件无法读取');
+    await queue.getByRole('button', { name: '重试' }).click();
+    await expect(queue.locator('details')).toHaveCount(2);
+
+    await section(page, '书架');
+    await page.getByLabel('书库', { exact: true }).selectOption(id);
+    await page
+      .locator('.bookshelf-grid')
+      .getByRole('button', { name: new RegExp(title) })
+      .click();
+    const detail = page.locator('.book-detail');
+    const accordion = detail.locator('.book-intake-detail');
+    await accordion.locator(':scope > summary').click();
+    const ebook = accordion.locator('details').filter({ hasText: '短篇.txt' });
+    await ebook.locator('summary').click();
+    await ebook.getByRole('button', { name: '作为电子书导入' }).click();
+    await expect(ebook.getByLabel('目标书目')).toHaveValue(/.+/);
+    await capture('detail', '.book-intake-detail');
+    await ebook.getByRole('button', { name: '确认导入' }).click();
+    await expect(detail.getByRole('button', { name: '阅读', exact: true })).toBeVisible();
+    const temporary = accordion.locator('details').filter({ hasText: '临时备注.txt' });
+    await temporary.locator('summary').click();
+    await temporary.getByRole('button', { name: '忽略', exact: true }).click();
+    await expect(accordion).toHaveCount(0);
+    await detail
+      .locator('summary')
+      .filter({ hasText: /^简介$/ })
+      .click();
+    await expect(detail.getByText('管理员编辑后的沿海采集记录。', { exact: true })).toBeVisible();
+    await detail.getByRole('button', { name: '阅读', exact: true }).click();
+    await expect(page.getByRole('article')).toContainText('这份短篇需要由管理员确认后入库。');
+    await page.getByRole('button', { name: '返回书籍' }).click();
+    await page.getByRole('button', { name: '返回书架', exact: true }).click();
+    await page
+      .locator('.bookshelf-grid')
+      .getByRole('button', { name: /北岸手记/ })
+      .click();
+    await expect(detail.getByRole('heading', { name: '北岸手记' })).toBeVisible();
+    await expect(detail.locator('.book-intake-detail')).toHaveCount(0);
+    await writeFile(join(second, '权限备注.txt'), '仅管理员能查看的待处理备注。');
+    expect((await page.request.post(`${base}/scan`, { headers })).ok()).toBeTruthy();
+    const credentials = {
+      username: `intake-${info.project.name}-${Date.now()}`,
+      password: 'disposable-intake-listener-password',
+    };
+    const visitor = await page.request.post('/api/v1/manage/users', {
+      headers,
+      data: { ...credentials, profile: 'listener', library_ids: [] },
+    });
+    expect(visitor.status(), await visitor.text()).toBe(201);
+    expect(
+      (
+        await page.request.put(`${base}/access/${(await visitor.json()).id}`, {
+          headers,
+          data: { granted: true },
+        })
+      ).status(),
+    ).toBe(200);
+    await page.request.post('/api/v1/auth/logout', { headers });
+    expect(
+      (await page.request.post('/api/v1/auth/login', { headers, data: credentials })).status(),
+    ).toBe(200);
+    await page.reload();
+    await section(page, '书架');
+    await page.getByLabel('书库', { exact: true }).selectOption(id);
+    await page
+      .locator('.bookshelf-grid')
+      .getByRole('button', { name: /北岸手记/ })
+      .click();
+    await expect(detail.getByRole('heading', { name: '北岸手记' })).toBeVisible();
+    await expect(detail.locator('.book-intake-detail')).toHaveCount(0);
+    expect((await page.request.get(`${base}/skipped-files`, { headers })).status()).toBe(403);
+    expect(await readFile(join(first, long), 'utf8')).toBe(note);
+  } finally {
+    await rm(source, { recursive: true, force: true });
+  }
 });

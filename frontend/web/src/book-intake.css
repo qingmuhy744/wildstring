@@ -1,0 +1,101 @@
+.book-intake {
+  min-width: 0;
+  margin-block: 1rem;
+  border-block-start: 1px solid var(--border);
+}
+
+.book-intake-header,
+.book-intake-actions,
+.book-intake-target {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
+.book-intake-header {
+  justify-content: space-between;
+  padding-block: 0.75rem;
+}
+
+.book-intake-header label {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.book-intake .book-intake-header select {
+  width: auto;
+}
+
+.music-library-manager select.book-intake-mode,
+.book-intake .book-intake-header select,
+:root[data-theme] .book-intake .book-intake-confirm select {
+  appearance: auto;
+  background-image: none;
+}
+
+.book-intake-detail > summary,
+.book-intake-file > summary {
+  padding-block: 0.75rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.book-intake-file {
+  border-block-start: 1px solid var(--border);
+}
+
+.book-intake-file summary small {
+  margin-inline-start: 0.75rem;
+}
+
+.book-intake-body,
+.book-intake-file-body,
+.book-intake .book-intake-confirm {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.book-intake-file-body {
+  padding-block-end: 0.75rem;
+}
+
+.book-intake-preview {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--surface-subtle);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.book-intake .book-intake-confirm {
+  margin: 0;
+}
+
+.book-intake-confirm textarea,
+.book-intake-confirm select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-input);
+  color: var(--text);
+}
+
+.book-intake-actions button,
+.book-intake-target button,
+.book-intake summary {
+  min-height: var(--target-size, 44px);
+}
+
+.book-intake .book-intake-actions button:is([aria-pressed='true'], [aria-expanded='true']) {
+  background: var(--row-active);
+  border-color: var(--accent-text);
+  color: var(--text);
+}
