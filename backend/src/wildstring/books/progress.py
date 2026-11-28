@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring.books.content import book_record
@@ -263,6 +263,80 @@ def router(database, auth, settings=None):
                 (user["id"], book_id, *fields.values()),
             )
             return {"book_id": book_id, **fields}
+
+    @router.delete("/books/{book_id}/progress", dependencies=client, status_code=204)
+    def clear_progress(
+        book_id: str, user: write, kind: Literal["reading", "listening"] | None = None
+    ):
+        with database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            book_record(db, book_id, user)
+            if kind in (None, "reading"):
+                db.execute(
+                    "DELETE FROM book_reading_progress WHERE book_id=? AND user_id=?",
+                    (book_id, user["id"]),
+                )
+            if kind in (None, "listening"):
+                db.execute(
+                    "DELETE FROM book_listening_progress WHERE book_id=? AND user_id=?",
+                    (book_id, user["id"]),
+                )
+        return Response(status_code=204)
+
+    @router.post("/books/{book_id}/progress/complete", dependencies=client, status_code=204)
+    def complete_book(book_id: str, user: write):
+        with database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            book_record(db, book_id, user)
+            timestamp = time.time()
+            ebook = db.execute(
+                """SELECT c.*,e.cache_key FROM book_ebook_chapters c
+                   JOIN book_ebooks e USING(book_id) WHERE book_id=? ORDER BY spine_index DESC LIMIT 1""",
+                (book_id,),
+            ).fetchone()
+            if ebook:
+                block = max(0, ebook["block_count"] - 1)
+                before = exact_chapter_chars(ebook["cache_key"], ebook["spine_index"], block, 0)
+                offset = max(0, ebook["char_count"] - before) if before is not None else 0
+                db.execute(
+                    """INSERT INTO book_reading_progress(user_id,book_id,spine_index,block_index,
+                        char_offset,chapter_title,overall_ratio,completed,version,updated_at)
+                       VALUES (?,?,?,?,?,?,1,1,1,?)
+                       ON CONFLICT(user_id,book_id) DO UPDATE SET spine_index=excluded.spine_index,
+                        block_index=excluded.block_index,char_offset=excluded.char_offset,
+                        chapter_title=excluded.chapter_title,overall_ratio=1,completed=1,
+                        version=version+1,session_id='',device_id='',sequence=0,updated_at=excluded.updated_at""",
+                    (
+                        user["id"],
+                        book_id,
+                        ebook["spine_index"],
+                        block,
+                        offset,
+                        ebook["title"],
+                        timestamp,
+                    ),
+                )
+            chapter = db.execute(
+                "SELECT * FROM book_audiobook_chapters WHERE book_id=? ORDER BY chapter_index DESC LIMIT 1",
+                (book_id,),
+            ).fetchone()
+            if chapter:
+                db.execute(
+                    """INSERT INTO book_listening_progress(user_id,book_id,chapter_index,chapter_position_ms,
+                        book_position_ms,completed,version,updated_at) VALUES (?,?,?,?,?,1,1,?)
+                       ON CONFLICT(user_id,book_id) DO UPDATE SET chapter_index=excluded.chapter_index,
+                        chapter_position_ms=excluded.chapter_position_ms,book_position_ms=excluded.book_position_ms,
+                        completed=1,version=version+1,session_id='',device_id='',sequence=0,updated_at=excluded.updated_at""",
+                    (
+                        user["id"],
+                        book_id,
+                        chapter["chapter_index"],
+                        chapter["duration_ms"],
+                        chapter["start_book_ms"] + chapter["duration_ms"],
+                        timestamp,
+                    ),
+                )
+        return Response(status_code=204)
 
     @router.get("/books/{book_id}/reading-progress")
     def reading_progress(book_id: str, user: read):

@@ -719,7 +719,16 @@ fun friendlyError(error: Throwable): String = (when (error) {
         401 -> AppLanguage.string(R.string.repo_login_expired_relogin)
         403 -> if (error.response()?.errorBody()?.string()?.contains("https_required") == true) AppLanguage.string(R.string.repo_https_only) else AppLanguage.string(R.string.repo_server_forbidden)
         404 -> AppLanguage.string(R.string.repo_not_found)
-        409 -> AppLanguage.string(R.string.repo_content_changed)
+        409 -> {
+            val detail = error.response()?.errorBody()?.string()
+            AppLanguage.string(
+                when {
+                    detail?.contains("scan_busy") == true -> R.string.books_scan_busy
+                    detail?.contains("library_migration_busy") == true -> R.string.books_migration_busy
+                    else -> R.string.repo_content_changed
+                },
+            )
+        }
         429 -> AppLanguage.string(R.string.repo_rate_limited)
         503 -> AppLanguage.string(R.string.repo_server_unavailable_init_admin)
         else -> AppLanguage.string(R.string.repo_request_failed_code, error.code())

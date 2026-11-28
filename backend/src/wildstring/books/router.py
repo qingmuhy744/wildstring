@@ -26,19 +26,32 @@ LIBRARY_FIELDS = (
 )
 BOOK_FIELDS = (
     "b.id, b.library_id, b.title, b.subtitle, b.authors_json, "
-    "b.cover_path, b.has_ebook, b.has_audiobook"
+    "b.cover_path, b.has_ebook, b.has_audiobook, b.narrators_json, "
+    "b.series_name, b.series_index, b.description, "
+    """(SELECT json_object('format',e.format,'spine_count',e.spine_count,'total_chars',e.total_chars,
+       'chapter_count',(SELECT CASE WHEN COUNT(CASE WHEN c.level>0 THEN 1 END)>0
+                           THEN COUNT(CASE WHEN c.level>0 THEN 1 END) ELSE COUNT(*) END
+                        FROM book_ebook_chapters c WHERE c.book_id=b.id))
+       FROM book_ebooks e WHERE e.book_id=b.id) AS ebook_summary,
+       (SELECT json_object('total_duration_ms',a.total_duration_ms,
+                            'chapter_count',a.chapter_count,'codec_summary',a.codec_summary)
+        FROM book_audiobooks a WHERE a.book_id=b.id) AS audiobook_summary"""
 )
 BOOK_MEDIA_SUFFIXES = {".epub", ".txt", ".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus"}
 
 
 def public_book(row):
     item = dict(row)
-    item["authors"] = json.loads(item.pop("authors_json", "[]"))
+    for key in ("authors", "narrators"):
+        item[key] = json.loads(item.pop(f"{key}_json"))
+    if "tags_json" in item:
+        item["tags"] = json.loads(item.pop("tags_json"))
     item["has_cover"] = bool(item.pop("cover_path", None))
     item["has_ebook"] = bool(item["has_ebook"])
     item["has_audiobook"] = bool(item["has_audiobook"])
     item.pop("progress_at", None)
-    for kind in ("reading_progress", "listening_progress"):
+    item.pop("sort_title", None)
+    for kind in ("reading_progress", "listening_progress", "ebook_summary", "audiobook_summary"):
         item[kind] = json.loads(item[kind]) if item[kind] is not None else None
     return item
 
@@ -385,6 +398,7 @@ def router(
         user: book_reader,
         library_id: str | None = None,
         q: Annotated[str | None, Query(max_length=200)] = None,
+        series_name: Annotated[str | None, Query(max_length=4096)] = None,
         format: Literal["ebook", "audiobook", "audio"] | None = None,
         progress_status: Literal["unread", "in_progress", "finished"] | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -407,6 +421,9 @@ def router(
             library_id,
             library_id,
         ]
+        if series_name is not None:
+            where_clauses.append("b.series_name=? COLLATE NOCASE")
+            params.append(series_name)
         if normalized_format == "ebook":
             where_clauses.append("b.has_ebook=1")
         elif normalized_format == "audiobook":
@@ -416,14 +433,23 @@ def router(
                 r"""(
                     LOWER(b.title) LIKE ? ESCAPE '\'
                     OR LOWER(COALESCE(b.subtitle, '')) LIKE ? ESCAPE '\'
+                    OR LOWER(COALESCE(b.series_name, '')) LIKE ? ESCAPE '\'
                     OR EXISTS (
                         SELECT 1
-                        FROM json_each(CASE WHEN json_valid(b.authors_json) THEN b.authors_json ELSE '[]' END) je
+                        FROM json_each(
+                            CASE WHEN json_valid(b.authors_json) THEN b.authors_json ELSE '[]' END
+                        ) je
+                        WHERE LOWER(CAST(je.value AS TEXT)) LIKE ? ESCAPE '\'
+                        UNION ALL
+                        SELECT 1
+                        FROM json_each(
+                            CASE WHEN json_valid(b.narrators_json) THEN b.narrators_json ELSE '[]' END
+                        ) je
                         WHERE LOWER(CAST(je.value AS TEXT)) LIKE ? ESCAPE '\'
                     )
                 )"""
             )
-            params.extend((like_pattern, like_pattern, like_pattern))
+            params.extend([like_pattern] * 5)
         cte = f"""WITH catalog AS (
             SELECT {BOOK_FIELDS}, b.sort_title, {BOOK_PROGRESS_FIELDS}
             FROM books b JOIN book_libraries l ON l.id=b.library_id
@@ -446,14 +472,22 @@ def router(
             ).fetchone()[0]
             rows = db.execute(
                 f"""{cte}
-                SELECT id, library_id, title, subtitle, authors_json, cover_path,
-                       has_ebook, has_audiobook, resume_kind, progress_status,
-                       reading_progress, listening_progress
-                FROM catalog
+                SELECT * FROM catalog
                 WHERE (? IS NULL OR progress_status=?)
-                ORDER BY progress_at DESC, sort_title, id
+                ORDER BY CASE WHEN ? IS NULL THEN progress_at END DESC,
+                         CASE WHEN ? IS NOT NULL THEN series_index IS NOT NULL END,
+                         CASE WHEN ? IS NOT NULL THEN series_index END, sort_title, id
                 LIMIT ? OFFSET ?""",  # nosec B608
-                (*params, progress_status, progress_status, limit, offset),
+                (
+                    *params,
+                    progress_status,
+                    progress_status,
+                    series_name,
+                    series_name,
+                    series_name,
+                    limit,
+                    offset,
+                ),
             )
             items = [public_book(row) for row in rows]
             return {"items": items, "total": total, "has_more": offset + len(items) < total}
@@ -462,7 +496,8 @@ def router(
     def get_book(book_id: str, user: book_reader):
         with database.connect(scoped=False) as db:
             row = db.execute(
-                f"""SELECT {BOOK_FIELDS}, {BOOK_PROGRESS_FIELDS}
+                f"""SELECT {BOOK_FIELDS}, {BOOK_PROGRESS_FIELDS}, b.publisher,
+                         b.published_year, b.language, b.isbn10, b.isbn13, b.tags_json
                 FROM books b JOIN book_libraries l ON l.id=b.library_id
                 {BOOK_PROGRESS_JOINS}
                 WHERE b.id=? AND {VISIBLE}""",  # nosec B608

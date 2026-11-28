@@ -48,6 +48,27 @@ import org.robolectric.annotation.LooperMode
 )
 @LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 class BookPlaybackSyncConflictTest {
+    @Test fun deletingOneBookClearsOnlyItsCachedRows() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val database = Room.inMemoryDatabaseBuilder(context, QueueDatabase::class.java).build()
+        try {
+            val cache = database.books()
+            cache.saveBooks(listOf(BookEntity("owner", "deleted", "{}"), BookEntity("owner", "kept", "{}")))
+            cache.saveChapters(listOf(BookEbookChapterMetaEntity("owner", "deleted", 0, "Chapter", "key")))
+            cache.saveAudioChapters(listOf(BookAudiobookChapterEntity("owner", "deleted", 0, "{}")))
+            cache.saveProgress(BookProgressSyncEntity("owner", "deleted", "listening", "{}"))
+            cache.saveAnnotation(BookAnnotationSyncEntity("owner", "deleted", "annotation", "{}"))
+            cache.deleteBook("owner", "deleted")
+            assertEquals(listOf("kept"), cache.books("owner").map { it.bookId })
+            assertTrue(cache.chapters("owner", "deleted").isEmpty())
+            assertTrue(cache.audioChapters("owner", "deleted").isEmpty())
+            assertNull(cache.progress("owner", "deleted", "listening"))
+            assertTrue(cache.annotations("owner", "deleted").isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
     @Implements(value = SessionStore::class, isInAndroidSdk = false)
     class MemorySessionKey {
         @Implementation protected fun key(): SecretKey = secret

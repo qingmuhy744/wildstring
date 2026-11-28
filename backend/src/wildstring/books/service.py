@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import time
+import unicodedata
+from bisect import bisect_left, bisect_right
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from uuid import uuid4
@@ -27,10 +29,12 @@ from mutagen.mp4 import MP4
 from wildstring.books.ebooks import (
     AUDIO_SUFFIXES,
     IMAGE_SUFFIXES,
+    decode_text,
     normalized_image,
     parse_ebook,
     tag,
 )
+from wildstring.diagnostics import record_event
 from wildstring.library.import_files import (
     HardlinkError,
     component,
@@ -44,7 +48,9 @@ from wildstring.library.sidecar import (
     BOOK,
     BOOK_ARRAY,
     BOOK_TEXT,
+    DIRECTORY,
     clean_text,
+    export_books,
     read_asset,
     read_manifest,
     restore_book,
@@ -53,6 +59,26 @@ from wildstring.library.sidecar import (
 
 EBOOK_SUFFIXES = {".epub", ".txt"}
 BOOK_AUDIO_SUFFIXES = AUDIO_SUFFIXES & {".m4b", ".m4a", ".mp3", ".flac", ".ogg", ".opus"}
+DESCRIPTION_NAMES = (
+    "desc.txt",
+    "内容简介.txt",
+    "简介.txt",
+    "书籍简介.txt",
+    "作品简介.txt",
+    "description.txt",
+    "synopsis.txt",
+    "readme.txt",
+)
+METADATA_TEXT_NAMES = {*DESCRIPTION_NAMES, "reader.txt"}
+DISC_DIRECTORY = re.compile(r"(?:disc|disk|cd)[ _-]*(\d+)?", re.I)
+SERIES_VOLUME = re.compile(
+    r"(?:(?P<prefix>.*?)\s*[-·：:]?\s*)?"
+    r"(?:第\s*(?P<cn>[零〇一二两三四五六七八九十百\d]+)\s*[卷季部册]"
+    r"|(?:vol(?:ume)?\.?|season|book|part)\s*(?P<en>\d+))"
+    r"(?:\s+.*|\s*[-·：:].*)?",
+    re.I,
+)
+EBOOK_CACHE_REVISION = 2
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +147,143 @@ def _pair_key(title: str, authors: list[str]) -> str | None:
     return f"{author}::{clean}"
 
 
+def _natural_path(path):
+    return [
+        (1, int(part)) if part.isdigit() else (0, part.casefold())
+        for part in re.split(r"([0-9]+)", path.as_posix())
+    ], path.as_posix()
+
+
+def _audio_folder(root, directory):
+    while directory != root and DISC_DIRECTORY.fullmatch(directory.name):
+        directory = directory.parent
+    return directory
+
+
+def _disc_number(path):
+    for parent in path.parents:
+        if match := DISC_DIRECTORY.fullmatch(parent.name):
+            return int(match[1] or 1)
+    return 1
+
+
+def _audio_text(value):
+    value = value.strip()
+    if not value or value.isascii():
+        return value
+    if "\ufffd" in value:
+        return ""
+    if not all(ord(char) <= 255 for char in value):
+        return value
+    raw = value.encode("latin-1")
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            candidate = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        # Require clear UTF-8 mojibake or a run of CJK glyphs from high bytes.
+        han = len(re.findall(r"[\u3400-\u9fff]", candidate))
+        if encoding == "utf-8" or (han >= 2 and han * 2 >= len(candidate)):
+            return candidate
+    if any(128 <= ord(char) < 160 for char in value) or re.search(r"[À-ÿ]{4}", value):
+        return ""
+    return value
+
+
+def _series_volume(folder, parent=None):
+    name = unicodedata.normalize("NFKC", folder.name).strip()
+    match = SERIES_VOLUME.fullmatch(name)
+    if match is not None:
+        prefix = (match["prefix"] or "").strip(" -·：:")
+        value = match["cn"] or match["en"]
+        if value.isdecimal():
+            index = int(value)
+        else:
+            digits = dict(zip("零一二三四五六七八九", range(10), strict=True)) | {"两": 2, "〇": 0}
+            index = digit = 0
+            for char in value:
+                if char in "十百":
+                    index += (digit or 1) * (10 if char == "十" else 100)
+                    digit = 0
+                else:
+                    digit = digits.get(char, 0)
+            index += digit
+        return prefix or folder.parent.name, index
+    if parent is not None:
+        parent_name = unicodedata.normalize("NFKC", parent.name).strip()
+        if parent_name and name.casefold().startswith(parent_name.casefold()):
+            suffix = name[len(parent_name) :].lstrip(" -·：:_")
+            if number_match := re.match(r"([1-9]\d{0,2}|0[1-9]\d?)(?!\d)", suffix):
+                return parent.name.strip(), int(number_match[1])
+    return None
+
+
+def _remap_ebook_anchors(db, book_id, old_blocks, chapters):
+    old_starts = {}
+    for spine, position, blocks in old_blocks:
+        for block in blocks:
+            old_starts[spine, block["block_index"]] = position
+            position += block["char_len"]
+
+    starts, anchors = [], []
+    total = 0
+    for spine, chapter in enumerate(chapters):
+        for block in chapter["blocks"]:
+            starts.append(total)
+            anchors.append((spine, block["block_index"], block["char_len"]))
+            total += block["char_len"]
+
+    def mapped(spine, block, offset, *, end=False):
+        position = min(total, old_starts.get((spine, block), 0) + offset)
+        index = max(0, (bisect_left if end else bisect_right)(starts, position) - 1)
+        new_spine, new_block, length = anchors[index]
+        return new_spine, new_block, min(length, position - starts[index]), position
+
+    for row in db.execute("SELECT * FROM book_reading_progress WHERE book_id=?", (book_id,)):
+        spine, block, offset, position = mapped(
+            row["spine_index"], row["block_index"], row["char_offset"]
+        )
+        db.execute(
+            """UPDATE book_reading_progress SET spine_index=?,block_index=?,char_offset=?,
+               chapter_title=?,overall_ratio=?,version=version+1,session_id='',device_id='',sequence=0
+               WHERE book_id=? AND user_id=?""",
+            (
+                spine,
+                block,
+                offset,
+                chapters[spine]["title"],
+                position / total,
+                book_id,
+                row["user_id"],
+            ),
+        )
+    for row in db.execute(
+        "SELECT * FROM book_bookmarks WHERE book_id=? AND kind='ebook'", (book_id,)
+    ):
+        spine, block, offset, _ = mapped(row["spine_index"], row["block_index"], row["char_offset"])
+        db.execute(
+            "UPDATE book_bookmarks SET spine_index=?,block_index=?,char_offset=? WHERE id=?",
+            (spine, block, offset, row["id"]),
+        )
+    for row in db.execute("SELECT * FROM book_annotations WHERE book_id=?", (book_id,)):
+        spine, block, offset, _ = mapped(
+            row["spine_index"], row["start_block_index"], row["start_char_offset"]
+        )
+        end_spine, end_block, end_offset, _ = mapped(
+            row["spine_index"],
+            row["end_block_index"],
+            row["end_char_offset"],
+            end=row["end_char_offset"] > 0,
+        )
+        if end_spine != spine:
+            raise HTTPException(409, "book_repair_annotation_spans_chapters")
+        db.execute(
+            """UPDATE book_annotations SET spine_index=?,start_block_index=?,start_char_offset=?,
+               end_block_index=?,end_char_offset=? WHERE id=?""",
+            (spine, block, offset, end_block, end_offset, row["id"]),
+        )
+
+
 class Books:
     def __init__(self, database, settings):
         self.database = database
@@ -128,19 +291,38 @@ class Books:
         self.lock = settings.data_dir / "library-scan.lock"
 
     @contextmanager
-    def write(self, library_id, *, timeout: float = 5.0):
+    def write(self, library_id, *, timeout: float = 5.0, operation="write", book_id=None):
+        def migration_busy():
+            with self.database.connect() as db:
+                return (
+                    db.execute(
+                        """SELECT 1 FROM book_library_migrations WHERE library_id=?
+                       AND status IN ('queued','running')""",
+                        (library_id,),
+                    ).fetchone()
+                    is not None
+                )
+
+        def conflict(code):
+            record_event(
+                "books.write_conflict",
+                level="WARNING",
+                task_id=library_id,
+                batch_id=book_id,
+                operation=operation,
+                code=code,
+                http_status=409,
+            )
+            return HTTPException(409, code)
+
         try:
             with FileLock(self.lock, timeout=timeout):
-                with self.database.connect() as db:
-                    if db.execute(
-                        """SELECT 1 FROM book_library_migrations WHERE library_id=?
-                           AND status IN ('queued','running')""",
-                        (library_id,),
-                    ).fetchone():
-                        raise HTTPException(409, "library_migration_busy")
+                if migration_busy():
+                    raise conflict("library_migration_busy")
                 yield
         except Timeout as error:
-            raise HTTPException(409, "scan_busy") from error
+            code = "library_migration_busy" if migration_busy() else "scan_busy"
+            raise conflict(code) from error
 
     def cache(self, key, chapters, images):
         root = self.cache_root / key
@@ -161,14 +343,20 @@ class Books:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _save_cover(self, managed_root: Path, book_id: str, jpeg: bytes) -> None:
+    def _save_cover(self, managed_root: Path, book_id: str, jpeg: bytes, *, refresh=False) -> None:
         relative = Path(book_id) / "cover.jpg"
         write_asset(managed_root, relative, jpeg)
         with self.database.connect(write=True) as db:
             db.execute(
                 "UPDATE books SET cover_path=?,cover_hash=?,updated_at=? "
-                "WHERE id=? AND (cover_path IS NULL OR cover_path='')",
-                (relative.as_posix(), hashlib.sha256(jpeg).hexdigest(), time.time(), book_id),
+                "WHERE id=? AND (? OR cover_path IS NULL OR cover_path='')",
+                (
+                    relative.as_posix(),
+                    hashlib.sha256(jpeg).hexdigest(),
+                    time.time(),
+                    book_id,
+                    refresh,
+                ),
             )
 
     def choose_book(self, library, title, authors, kind, *, allow_auto_pair: bool = True):
@@ -196,6 +384,7 @@ class Books:
         allow_auto_pair: bool = True,
         extract_cover: bool = True,
         remote=None,
+        repair=False,
     ):
         suffix = Path(name).suffix.lower()
         value = digest(source)
@@ -209,7 +398,7 @@ class Books:
         else:
             pair_key = _pair_key(title, authors)
         relative = Path(book_id) / f"ebook-{value[:16]}{suffix}"
-        key = f"{book_id}-{value[:16]}"
+        key = f"{book_id}-{value[:16]}-r{EBOOK_CACHE_REVISION}"
         root = Path(library["managed_root"])
         published: Path | None = None
         if remote is not None:
@@ -235,7 +424,7 @@ class Books:
                         index,
                         chapter.get("href"),
                         chapter["title"],
-                        1,
+                        chapter["level"],
                         len(chapter["blocks"]),
                         count,
                         char_count,
@@ -249,7 +438,8 @@ class Books:
                 ).fetchone()
                 if existing is not None and existing["has_ebook"]:
                     prev_ebook = db.execute(
-                        "SELECT source_path FROM book_ebooks WHERE book_id=?", (book_id,)
+                        "SELECT source_path,sha256,cache_key FROM book_ebooks WHERE book_id=?",
+                        (book_id,),
                     ).fetchone()
                     if (
                         remote is None
@@ -257,6 +447,30 @@ class Books:
                         and prev_ebook["source_path"] != source_path
                     ):
                         raise HTTPException(409, "book_ebook_already_attached")
+                    if repair and prev_ebook["sha256"] != value:
+                        raise HTTPException(409, "book_repair_source_changed")
+                    if (
+                        suffix == ".txt"
+                        and prev_ebook["sha256"] == value
+                        and prev_ebook["cache_key"] != key
+                    ):
+
+                        def cached_blocks():
+                            for old in db.execute(
+                                "SELECT spine_index,start_global_char FROM book_ebook_chapters WHERE book_id=?",
+                                (book_id,),
+                            ):
+                                spine = old["spine_index"]
+                                with open_source(
+                                    self.cache_root, Path(prev_ebook["cache_key"]) / f"{spine}.json"
+                                ) as cached:
+                                    yield (
+                                        spine,
+                                        old["start_global_char"],
+                                        json.load(cached)["blocks"],
+                                    )
+
+                        _remap_ebook_anchors(db, book_id, cached_blocks(), chapters)
                 db.execute(
                     """INSERT INTO books(id,library_id,managed_dir,title,sort_title,authors_json,
                         publisher,language,description,has_ebook,pair_key,created_at,updated_at)
@@ -338,6 +552,9 @@ class Books:
         allow_auto_pair: bool = True,
         extract_cover: bool = True,
         remote=None,
+        repair=False,
+        grouped_discs=False,
+        combine_books=(),
     ):
         entries = []
         embedded_cover: bytes | None = None
@@ -349,15 +566,20 @@ class Books:
                 size = remote.size(relative) if remote else os.fstat(stream.fileno()).st_size
                 tags = audio.tags or {}
 
-                def text(*keys, tags=tags):
+                def text(*keys, clean=True, tags=tags):
                     for key in keys:
                         value = tags.get(key)
                         if value:
-                            return str(value[0] if isinstance(value, list) else value)
+                            raw = str(value[0] if isinstance(value, list) else value)
+                            return _audio_text(raw) if clean else raw
                     return ""
 
                 duration = round(audio.info.length * 1000)
-                track_no = text("tracknumber", "TRCK", "trkn")
+                track_no = number(text("tracknumber", "TRCK"))
+                disc_no = number(text("discnumber", "TPOS"))
+                if isinstance(audio, MP4):
+                    track_no = (tags.get("trkn") or [(0, 0)])[0][0]
+                    disc_no = (tags.get("disk") or [(0, 0)])[0][0]
                 chapter_tags = []
                 if isinstance(tags, ID3):
                     chapter_tags = sorted(
@@ -376,6 +598,7 @@ class Books:
                         chapter_tags = probe_mp4_chapters(stream)
                 if embedded_cover is None and extract_cover:
                     embedded_cover = _extract_embedded_audio_cover(stream, audio=audio)
+                raw_title = text("title", "TIT2", "©nam", clean=False)
                 entries.append(
                     {
                         "relative": relative,
@@ -386,30 +609,36 @@ class Books:
                         "bitrate": getattr(audio.info, "bitrate", None),
                         "sample_rate": getattr(audio.info, "sample_rate", None),
                         "channels": getattr(audio.info, "channels", None),
-                        "title": text("title", "TIT2", "©nam") or relative.stem,
+                        "title": _audio_text(raw_title) or relative.stem,
+                        "raw_title": raw_title or relative.stem,
                         "album": text("album", "TALB", "©alb"),
-                        "author": text("albumartist", "TPE2", "aART", "artist", "TPE1", "©ART"),
-                        "number": number(track_no) or 0,
+                        "author": text("author", "TXXX:AUTHOR", "TXXX:Author", "©aut"),
+                        "narrator": text("narrator", "TXXX:NARRATOR", "TXXX:Narrator", "©nrt"),
+                        "order": (disc_no or _disc_number(relative), track_no or 0),
                         "chapters": chapter_tags,
                     }
                 )
-        entries.sort(
-            key=lambda item: (
-                item["number"],
-                [
-                    (1, int(part)) if part.isdigit() else (0, part.casefold())
-                    for part in re.split(r"(\d+)", item["relative"].as_posix())
-                ],
-            )
+        orders = {item["order"] for item in entries}
+        if len(orders) == len(entries) and all(disc > 0 and track > 0 for disc, track in orders):
+            entries.sort(key=lambda item: item["order"])
+        else:
+            entries.sort(key=lambda item: _natural_path(item["relative"]))
+        first = entries[0]
+        title = (
+            title_default
+            if grouped_discs
+            else first["album"] or (first["title"] if len(entries) == 1 else title_default)
         )
-        title = entries[0]["album"] or (entries[0]["title"] if len(entries) == 1 else title_default)
-        authors = [entries[0]["author"]] if entries[0]["author"] else []
+        authors = list(dict.fromkeys(item["author"] for item in entries if item["author"]))
+        narrators = list(dict.fromkeys(item["narrator"] for item in entries if item["narrator"]))
         if book_id is None:
             book_id, pair_key = self.choose_book(
                 library, title, authors, "audiobook", allow_auto_pair=allow_auto_pair
             )
         else:
             pair_key = _pair_key(title, authors)
+        previous_books = (book_id, *combine_books)
+        placeholders = ",".join("?" for _ in previous_books)
         root = Path(library["managed_root"])
         mode = library["storage_mode"]
         existing_paths: dict[str, tuple[str, str]] = {}
@@ -429,11 +658,11 @@ class Books:
                 existing_paths[row["sha256"]] = (row["managed_path"], row["link_mode"])
                 old_managed_files.add(row["managed_path"])
             for row in db.execute(
-                """SELECT f.source_path, f.sha256, c.start_file_ms, c.end_file_ms, c.title
+                f"""SELECT f.source_path, f.sha256, c.start_file_ms, c.end_file_ms, c.title
                    FROM book_audiobook_chapters c
                    JOIN book_audiobook_files f ON f.book_id=c.book_id AND f.file_index=c.file_index
-                   WHERE c.book_id=?""",
-                (book_id,),
+                   WHERE c.book_id IN ({placeholders})""",  # nosec B608
+                previous_books,
             ):
                 hash_key = (row["sha256"], row["start_file_ms"], row["end_file_ms"])
                 if row["source_path"] is not None:
@@ -498,21 +727,21 @@ class Books:
                 )
                 chapters = sorted(
                     {
-                        start: chapter_title or item["title"]
+                        start: chapter_title or item["raw_title"]
                         for start, chapter_title in item["chapters"]
                         if 0 <= start < duration
                     }.items()
                 )
                 if not chapters or chapters[0][0] != 0:
-                    chapters.insert(0, (0, item["title"]))
+                    chapters.insert(0, (0, item["raw_title"]))
                 for offset, (start, chapter_title) in enumerate(chapters):
                     end = chapters[offset + 1][0] if offset + 1 < len(chapters) else duration
                     hash_key = (item["value"], start, end)
                     effective_title = preserved_by_source.get((source_str, *hash_key))
                     if effective_title is None and hash_key not in claimed_title_hashes:
                         effective_title = preserved_by_hash.get(hash_key)
-                    if effective_title is None:
-                        effective_title = chapter_title
+                    if effective_title is None or (repair and effective_title == chapter_title):
+                        effective_title = _audio_text(chapter_title) or item["title"]
                     chapters_rows.append(
                         (
                             book_id,
@@ -539,14 +768,15 @@ class Books:
             with self.database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 old_chapters = db.execute(
-                    """SELECT c.chapter_index, f.source_path, f.sha256, c.start_file_ms, c.end_file_ms
+                    f"""SELECT c.book_id, c.chapter_index, f.source_path, f.sha256,
+                              c.start_file_ms, c.end_file_ms
                        FROM book_audiobook_chapters c
                        JOIN book_audiobook_files f ON f.book_id=c.book_id AND f.file_index=c.file_index
-                       WHERE c.book_id=?
-                       ORDER BY c.chapter_index""",
-                    (book_id,),
+                       WHERE c.book_id IN ({placeholders})
+                       ORDER BY c.book_id,c.chapter_index""",  # nosec B608
+                    previous_books,
                 ).fetchall()
-                chapter_remap: dict[int, tuple[int, int, int]] = {}
+                chapter_remap: dict[tuple[str, int], tuple[int, int, int]] = {}
                 claimed_new: set[int] = set()
                 unmatched_old = []
                 for old_row in old_chapters:
@@ -561,7 +791,7 @@ class Books:
                         else None
                     )
                     if matched is not None:
-                        chapter_remap[old_row["chapter_index"]] = matched
+                        chapter_remap[old_row["book_id"], old_row["chapter_index"]] = matched
                         claimed_new.add(matched[0])
                     else:
                         unmatched_old.append(old_row)
@@ -578,12 +808,64 @@ class Books:
                         (item for item in candidates if item[0] not in claimed_new),
                         candidates[0],
                     )
-                    chapter_remap[old_row["chapter_index"]] = chosen
+                    chapter_remap[old_row["book_id"], old_row["chapter_index"]] = chosen
                     claimed_new.add(chosen[0])
 
+                if repair and len(chapter_remap) != len(old_chapters):
+                    raise HTTPException(409, "book_repair_source_changed")
+
+                retired_books = []
+                if combine_books:
+                    duplicate_progress = db.execute(
+                        f"""SELECT user_id FROM book_listening_progress
+                            WHERE book_id IN ({placeholders})
+                            GROUP BY user_id HAVING COUNT(*)>1 LIMIT 1""",  # nosec B608
+                        previous_books,
+                    ).fetchone()
+                    if duplicate_progress:
+                        raise HTTPException(409, "book_repair_multiple_audio_books")
+                    target = db.execute("SELECT * FROM books WHERE id=?", (book_id,)).fetchone()
+                    locks = set(json.loads(target["locked_fields_json"]))
+                    overrides = json.loads(target["overrides_json"])
+                    adopted = {}
+                    for identity in combine_books:
+                        other = db.execute("SELECT * FROM books WHERE id=?", (identity,)).fetchone()
+                        other_locks = set(json.loads(other["locked_fields_json"]))
+                        other_overrides = json.loads(other["overrides_json"])
+                        if other["has_ebook"]:
+                            raise HTTPException(409, "book_repair_multiple_audio_books")
+                        for field in other_locks | other_overrides.keys():
+                            column = BOOK_ARRAY.get(field, field)
+                            value = other[column]
+                            if field in locks or field in overrides:
+                                if adopted.get(column, target[column]) != value:
+                                    raise HTTPException(409, "book_repair_multiple_audio_books")
+                            adopted[column] = value
+                        locks.update(other_locks)
+                        overrides.update(other_overrides)
+                        retired_books.append(Path(other["managed_dir"]))
+                        old_managed_files.update(
+                            row[0]
+                            for row in db.execute(
+                                "SELECT managed_path FROM book_audiobook_files WHERE book_id=?",
+                                (identity,),
+                            )
+                        )
+                        if other["cover_path"] and not target["cover_path"]:
+                            adopted.setdefault("cover_path", other["cover_path"])
+                            adopted.setdefault("cover_hash", other["cover_hash"])
+                    adopted["locked_fields_json"] = json.dumps(sorted(locks))
+                    adopted["overrides_json"] = json.dumps(overrides, ensure_ascii=False)
+                    if "title" in adopted:
+                        adopted["sort_title"] = normalize(adopted["title"])
+                    assignments = ",".join(f"{key}=?" for key in adopted)
+                    db.execute(
+                        f"UPDATE books SET {assignments} WHERE id=?",  # nosec B608
+                        (*adopted.values(), book_id),
+                    )
                 db.execute(
                     """INSERT INTO books(id,library_id,managed_dir,title,sort_title,authors_json,
-                        has_audiobook,pair_key,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)
+                        narrators_json,has_audiobook,pair_key,created_at,updated_at) VALUES (?,?,?,?,?,?,?,1,?,?,?)
                        ON CONFLICT(id) DO UPDATE SET has_audiobook=1,updated_at=excluded.updated_at""",
                     (
                         book_id,
@@ -592,11 +874,42 @@ class Books:
                         title,
                         normalize(title),
                         json.dumps(authors, ensure_ascii=False),
+                        json.dumps(narrators, ensure_ascii=False),
                         pair_key,
                         stamp,
                         stamp,
                     ),
                 )
+                if repair or narrators:
+                    book = db.execute("SELECT * FROM books WHERE id=?", (book_id,)).fetchone()
+                    protected = set(json.loads(book["locked_fields_json"])) | set(
+                        json.loads(book["overrides_json"])
+                    )
+                    fields = (
+                        {"narrators_json": json.dumps(narrators, ensure_ascii=False)}
+                        if narrators
+                        else {}
+                    )
+                    if repair and not book["has_ebook"]:
+                        fields |= {
+                            "title": title,
+                            "authors_json": json.dumps(authors, ensure_ascii=False),
+                        }
+                    if not repair and book["narrators_json"] != "[]":
+                        fields.pop("narrators_json", None)
+                    fields = {
+                        key: value
+                        for key, value in fields.items()
+                        if key.removesuffix("_json") not in protected
+                    }
+                    if "title" in fields:
+                        fields["sort_title"] = normalize(title)
+                    if fields:
+                        assignments = ",".join(f"{key}=?" for key in fields)
+                        db.execute(
+                            f"UPDATE books SET {assignments} WHERE id=?",  # nosec B608
+                            (*fields.values(), book_id),
+                        )
                 db.execute(
                     """INSERT INTO book_audiobooks(id,book_id,is_multi_file,total_duration_ms,chapter_count,
                        total_bytes,codec_summary,created_at) VALUES (?,?,?,?,?,?,?,?)
@@ -634,33 +947,42 @@ class Books:
                     remote.register(db, book_id, entries)
                 if chapter_remap:
                     for progress_row in db.execute(
-                        """SELECT user_id, chapter_index, chapter_position_ms, book_position_ms
-                           FROM book_listening_progress WHERE book_id=?""",
-                        (book_id,),
+                        f"""SELECT book_id,user_id,chapter_index,chapter_position_ms,book_position_ms
+                            FROM book_listening_progress WHERE book_id IN ({placeholders})""",  # nosec B608
+                        previous_books,
                     ).fetchall():
-                        mapped = chapter_remap.get(progress_row["chapter_index"])
+                        source_id = progress_row["book_id"]
+                        mapped = chapter_remap.get((source_id, progress_row["chapter_index"]))
                         if mapped is None:
                             continue
                         new_idx, new_start_book_ms, new_dur_ms = mapped
                         new_pos = min(progress_row["chapter_position_ms"], new_dur_ms)
                         new_book_pos = new_start_book_ms + new_pos
-                        if (new_idx, new_pos, new_book_pos) != (
+                        if (book_id, new_idx, new_pos, new_book_pos) != (
+                            source_id,
                             progress_row["chapter_index"],
                             progress_row["chapter_position_ms"],
                             progress_row["book_position_ms"],
                         ):
                             db.execute(
-                                """UPDATE book_listening_progress
-                                   SET chapter_index=?, chapter_position_ms=?, book_position_ms=?
-                                   WHERE user_id=? AND book_id=?""",
-                                (new_idx, new_pos, new_book_pos, progress_row["user_id"], book_id),
+                                """UPDATE book_listening_progress SET book_id=?,chapter_index=?,
+                                   chapter_position_ms=?,book_position_ms=? WHERE user_id=? AND book_id=?""",
+                                (
+                                    book_id,
+                                    new_idx,
+                                    new_pos,
+                                    new_book_pos,
+                                    progress_row["user_id"],
+                                    source_id,
+                                ),
                             )
                     for mark_row in db.execute(
-                        """SELECT id, chapter_index, position_ms
-                           FROM book_bookmarks WHERE book_id=? AND kind='audio'""",
-                        (book_id,),
+                        f"""SELECT book_id,id,chapter_index,position_ms FROM book_bookmarks
+                            WHERE kind='audio' AND book_id IN ({placeholders})""",  # nosec B608
+                        previous_books,
                     ).fetchall():
-                        mapped = chapter_remap.get(mark_row["chapter_index"])
+                        source_id = mark_row["book_id"]
+                        mapped = chapter_remap.get((source_id, mark_row["chapter_index"]))
                         if mapped is None:
                             continue
                         new_idx, _, new_dur_ms = mapped
@@ -669,14 +991,26 @@ class Books:
                             if mark_row["position_ms"] is not None
                             else None
                         )
-                        if (new_idx, new_pos) != (
+                        if (book_id, new_idx, new_pos) != (
+                            source_id,
                             mark_row["chapter_index"],
                             mark_row["position_ms"],
                         ):
                             db.execute(
-                                "UPDATE book_bookmarks SET chapter_index=?, position_ms=? WHERE id=?",
-                                (new_idx, new_pos, mark_row["id"]),
+                                "UPDATE book_bookmarks SET book_id=?,chapter_index=?,position_ms=? WHERE id=?",
+                                (book_id, new_idx, new_pos, mark_row["id"]),
                             )
+                if repair and (
+                    combine_books
+                    or any(old_index != new[0] for (_, old_index), new in chapter_remap.items())
+                ):
+                    db.execute(
+                        """UPDATE book_listening_progress
+                           SET version=version+1,session_id='',device_id='',sequence=0 WHERE book_id=?""",
+                        (book_id,),
+                    )
+                for identity in combine_books:
+                    db.execute("DELETE FROM books WHERE id=?", (identity,))
         except Exception:
             for path in published_paths:
                 path.unlink(missing_ok=True)
@@ -684,6 +1018,9 @@ class Books:
         for stale in old_managed_files - new_managed_files:
             with suppress(OSError):
                 (root / stale).unlink()
+        for directory in retired_books:
+            with suppress(OSError):
+                (root / directory / DIRECTORY / "manifest.json").unlink(missing_ok=True)
         if extract_cover and embedded_cover is not None:
             try:
                 self._save_cover(root, book_id, embedded_cover)
@@ -693,8 +1030,8 @@ class Books:
                 )
         return book_id
 
-    def directory_metadata(self, book_id, root, folder):
-        metadata = {}
+    def directory_metadata(self, book_id, root, folder, defaults=None):
+        metadata = dict(defaults or {})
         for name in ("metadata.opf", "metadata.json"):
             content = read_asset(root, folder / name, 2 * 1024 * 1024)
             if content is None:
@@ -721,11 +1058,29 @@ class Books:
                                 metadata["series_index"] = float(element.get("content", ""))
             except (ValueError, DefusedXmlException, ElementTree.ParseError):
                 continue
-        for name, key in (("reader.txt", "narrators"), ("desc.txt", "description")):
-            if content := read_asset(root, folder / name, 32 * 1024):
-                value = content.decode("utf-8", errors="replace").strip()
-                if clean_text(value):
-                    metadata.setdefault(key, [value] if key == "narrators" else value)
+        with suppress(OSError):
+            names = {entry.name.casefold(): entry.name for entry in (root / folder).iterdir()}
+            for name in ("reader.txt", *DESCRIPTION_NAMES):
+                if name not in names:
+                    continue
+                content = read_asset(root, folder / names[name], 64 * 1024)
+                if content:
+                    with suppress(ValueError):
+                        value, encoding = decode_text(content)
+                        # Big5 bytes can decode as GB18030 with private-use or kana glyphs.
+                        if encoding == "gb18030" and re.search(
+                            r"[\u3040-\u30ff\ue000-\uf8ff]", value
+                        ):
+                            with suppress(UnicodeDecodeError):
+                                traditional = content.decode("big5")
+                                if not re.search(r"[\u3040-\u30ff\ue000-\uf8ff]", traditional):
+                                    value = traditional
+                        value = value.strip()
+                        if clean_text(value):
+                            if name == "reader.txt":
+                                metadata.setdefault("narrators", [value])
+                            else:
+                                metadata.setdefault("description", value)
         fields = {
             key: metadata[key]
             for key in BOOK_TEXT
@@ -764,11 +1119,11 @@ class Books:
                     )
 
     def _apply_folder_cover(
-        self, managed_root: Path, book_id: str, source_root: Path, folder: Path
+        self, managed_root: Path, book_id: str, source_root: Path, folder: Path, *, refresh=False
     ):
         with self.database.connect(scoped=False) as db:
             row = db.execute("SELECT cover_path FROM books WHERE id=?", (book_id,)).fetchone()
-            if row is None or row["cover_path"]:
+            if row is None or (row["cover_path"] and not refresh):
                 return
         for stem in ("cover", "folder", "front"):
             for ext in IMAGE_SUFFIXES:
@@ -776,7 +1131,7 @@ class Books:
                 if raw is not None:
                     try:
                         jpeg = normalized_image(raw)
-                        self._save_cover(managed_root, book_id, jpeg)
+                        self._save_cover(managed_root, book_id, jpeg, refresh=refresh)
                         return
                     except (OSError, ValueError):
                         continue
@@ -945,7 +1300,7 @@ class Books:
                     source_entries.append((key_str, stat_info.st_size, stat_info.st_mtime_ns))
                     if (
                         suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
-                        and path.name not in {"desc.txt", "reader.txt"}
+                        and path.name.casefold() not in METADATA_TEXT_NAMES
                         and key_str not in ebook_sources
                         and key_str not in audio_sources
                     ):
@@ -978,11 +1333,130 @@ class Books:
         )
         return has_unimported, snapshot
 
-    def scan(self, library, *, watched_only: bool = False):
+    def rescan_book(self, library, book_id):
+        """Rebuild one book while its library write lock is held."""
+        identity = library["id"]
+        managed = Path(library["managed_root"])
+        with self.database.connect(scoped=False) as db:
+            roots = [
+                Path(row[0])
+                for row in db.execute(
+                    "SELECT root FROM book_library_sources WHERE library_id=?", (identity,)
+                )
+            ]
+            ebook = db.execute("SELECT * FROM book_ebooks WHERE book_id=?", (book_id,)).fetchone()
+            audio = db.execute(
+                "SELECT * FROM book_audiobook_files WHERE book_id=? ORDER BY file_index", (book_id,)
+            ).fetchall()
+            other_audio = {
+                row[0]
+                for row in db.execute(
+                    """SELECT f.source_path FROM book_audiobook_files f JOIN books b ON b.id=f.book_id
+                   WHERE b.library_id=? AND f.book_id<>?""",
+                    (identity, book_id),
+                )
+            }
+
+        def source(path):
+            match = next((root for root in roots if path.is_relative_to(root)), None)
+            if match is None:
+                raise HTTPException(409, "book_repair_source_changed")
+            return match
+
+        metadata_folders = []
+        audio_relatives = []
+        if audio:
+            if any(not row["source_path"] for row in audio):
+                raise HTTPException(409, "book_repair_source_changed")
+            paths = [Path(row["source_path"]) for row in audio]
+            root = source(paths[0])
+            folder = _audio_folder(root, paths[0].parent)
+            if any(
+                not path.is_relative_to(root) or _audio_folder(root, path.parent) != folder
+                for path in paths
+            ):
+                raise HTTPException(409, "book_repair_source_changed")
+            files = set(paths)
+            for directory, dirs, names in os.walk(folder, followlinks=False):
+                parent = Path(directory)
+                dirs[:] = [
+                    name
+                    for name in dirs
+                    if DISC_DIRECTORY.fullmatch(name) and not (parent / name).is_symlink()
+                ]
+                for name in names:
+                    path = parent / name
+                    if (
+                        not name.startswith(".")
+                        and not path.is_symlink()
+                        and path.suffix.lower() in BOOK_AUDIO_SUFFIXES
+                        and str(path) not in other_audio
+                    ):
+                        files.add(path)
+            audio_relatives = [file.relative_to(root) for file in sorted(files)]
+            self.audiobook(
+                library,
+                root,
+                audio_relatives,
+                folder.name,
+                book_id=book_id,
+                repair=True,
+                extract_cover=False,
+                grouped_discs=any(file.parent != folder for file in files),
+            )
+            metadata_folders.append((root, folder))
+
+        if ebook:
+            path = Path(ebook["source_path"] or ebook["managed_path"])
+            if ebook["source_path"]:
+                root = source(path)
+                relative = path.relative_to(root)
+                if (root, path.parent) not in metadata_folders:
+                    metadata_folders.append((root, path.parent))
+            else:
+                root, relative = managed, path
+            with open_source(root, relative) as stream:
+                self.ebook(
+                    library,
+                    stream,
+                    path.name,
+                    ebook["link_mode"],
+                    ebook["source_path"],
+                    book_id,
+                    extract_cover=False,
+                    repair=True,
+                )
+
+        for root, folder in metadata_folders:
+            relative = folder.relative_to(root)
+            parent = folder.parent if folder.parent != root else None
+            series = _series_volume(folder, parent=parent) if folder != root else None
+            defaults = {"series_name": series[0], "series_index": series[1]} if series else {}
+            self.directory_metadata(book_id, root, relative, defaults)
+        if metadata_folders:
+            root, folder = metadata_folders[0]
+            self._apply_folder_cover(managed, book_id, root, folder.relative_to(root), refresh=True)
+            paths = [Path(ebook["source_path"])] if ebook and ebook["source_path"] else []
+            self._apply_embedded_cover(
+                managed,
+                book_id,
+                root,
+                audio_relatives,
+                [path for path in paths if path.is_relative_to(root)],
+            )
+        export_books(self.database, managed, identity, book_id)
+
+    def scan(self, library, *, watched_only: bool = False, repair: bool = False):
         identity = library["id"]
         job_id = uuid4().hex
-        with self.write(identity, timeout=0.0 if watched_only else 5.0):
+        with self.write(
+            identity, timeout=0.0 if watched_only else 5.0, operation="repair" if repair else "scan"
+        ):
             with self.database.connect(write=True) as db:
+                if not db.execute(
+                    "SELECT 1 FROM book_libraries WHERE id=?", (identity,)
+                ).fetchone():
+                    raise HTTPException(404, "book_library_not_found")
                 query = (
                     "SELECT root FROM book_library_sources WHERE library_id=? AND watch_enabled=1 ORDER BY id"
                     if watched_only
@@ -1031,8 +1505,27 @@ class Books:
                 elif last_error is None:
                     last_error = "book_scan_file_unavailable"
 
+            def publish_progress(status="running"):
+                with self.database.connect(write=True) as db:
+                    db.execute(
+                        """UPDATE book_scan_jobs SET status=?,scanned_files=?,added_books=?,
+                           updated_books=?,paired_books=?,sidecars_applied=?,error_message=?,finished_at=?
+                           WHERE id=?""",
+                        (
+                            status,
+                            scanned,
+                            added,
+                            updated,
+                            paired,
+                            sidecars_applied,
+                            last_error,
+                            None if status == "running" else time.time(),
+                            job_id,
+                        ),
+                    )
+
             try:
-                folder_items = []
+                folder_items = {}
                 for source_root in sources:
                     if not source_root.is_dir() or source_root.is_symlink():
                         failures += 1
@@ -1054,19 +1547,61 @@ class Books:
                                 name.startswith(".")
                                 or path.is_symlink()
                                 or suffix not in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
-                                or path.name in {"desc.txt", "reader.txt"}
+                                or path.name.casefold() in METADATA_TEXT_NAMES
                             ):
                                 continue
-                            scanned += 1
                             if suffix in EBOOK_SUFFIXES:
                                 ebooks.append(path)
                             else:
                                 audio.append(path.relative_to(source_root))
-                        if audio or ebooks:
-                            folder_items.append((source_root, directory, audio, ebooks))
+                        if ebooks:
+                            folder_items.setdefault((source_root, directory), ([], []))[1].extend(
+                                ebooks
+                            )
+                        if audio:
+                            book_directory = _audio_folder(source_root, directory)
+                            folder_items.setdefault((source_root, book_directory), ([], []))[
+                                0
+                            ].extend(audio)
+
+                volumes = {
+                    (root, directory): series
+                    for root, directory in folder_items
+                    if directory != root
+                    and (
+                        series := _series_volume(
+                            directory,
+                            parent=directory.parent if directory.parent != root else None,
+                        )
+                    )
+                }
+                # Fallback for numbered sibling folders (e.g. "01 七星鲁王宫", "02 秦岭神树") under a shared series parent.
+                numbered_by_parent: dict[tuple[Path, Path], list[tuple[Path, int]]] = {}
+                for root, directory in folder_items:
+                    if (
+                        directory == root
+                        or directory.parent == root
+                        or (root, directory) in volumes
+                    ):
+                        continue
+                    normalized_name = unicodedata.normalize("NFKC", directory.name).strip()
+                    if sibling_match := re.match(
+                        r"([1-9]\d{0,2}|0[1-9]\d?)[\s._·-]+.+", normalized_name
+                    ):
+                        numbered_by_parent.setdefault((root, directory.parent), []).append(
+                            (directory, int(sibling_match[1]))
+                        )
+                for (root, parent), items in numbered_by_parent.items():
+                    if len(items) >= 2:
+                        for directory, idx in items:
+                            volumes[root, directory] = (parent.name.strip(), idx)
+                series_by_parent: dict[tuple[Path, Path], set[str]] = {}
+                for (root, directory), series in volumes.items():
+                    series_by_parent.setdefault((root, directory.parent), set()).add(series[0])
 
                 managed_root = Path(library["managed_root"])
-                for source_root, directory, audio, ebooks in folder_items:
+                for (source_root, directory), (audio, ebooks) in folder_items.items():
+                    scanned += len(audio) + len(ebooks)
                     dir_rel = directory.relative_to(source_root)
                     dir_audio_books = {
                         audio_sources[str(source_root / rel)]
@@ -1077,9 +1612,23 @@ class Books:
                         rel for rel in audio if str(source_root / rel) not in audio_sources
                     ]
                     audio_book = next(iter(dir_audio_books)) if len(dir_audio_books) == 1 else None
+                    retired = ()
+                    if repair and len(dir_audio_books) > 1:
+                        with self.database.connect(scoped=False) as db:
+                            candidates = [
+                                row
+                                for row in db.execute(
+                                    "SELECT id,has_ebook FROM books WHERE library_id=? "
+                                    "ORDER BY has_ebook DESC,created_at,id",
+                                    (identity,),
+                                )
+                                if row["id"] in dir_audio_books
+                            ]
+                        audio_book = candidates[0]["id"]
+                        retired = tuple(row["id"] for row in candidates[1:])
                     imported: set[str] = set()
                     newly_paired: set[str] = set()
-                    if new_audio:
+                    if new_audio or (repair and audio_book is not None):
                         try:
                             target_audio_book = audio_book
                             existed_before = target_audio_book is not None
@@ -1091,6 +1640,11 @@ class Books:
                                 book_id=target_audio_book,
                                 allow_auto_pair=len(ebooks) == 0,
                                 extract_cover=False,
+                                repair=repair,
+                                combine_books=retired,
+                                grouped_discs=any(
+                                    (source_root / rel).parent != directory for rel in audio
+                                ),
                             )
                             imported.add(audio_book)
                             if existed_before:
@@ -1109,16 +1663,22 @@ class Books:
                             IndexError,
                         ) as exc:
                             record_failure(exc)
+                            imported.update(dir_audio_books)
+                            if retired:
+                                audio_book = None
                     elif audio_book is not None:
                         imported.add(audio_book)
 
                     for path in ebooks:
                         key_str = str(path)
-                        if key_str in ebook_sources:
-                            imported.add(ebook_sources[key_str])
+                        existing_ebook = ebook_sources.get(key_str)
+                        if existing_ebook is not None and not (
+                            repair and path.suffix.lower() == ".txt"
+                        ):
+                            imported.add(existing_ebook)
                             continue
-                        target_book = None
-                        if len(ebooks) == 1 and audio_book is not None:
+                        target_book = existing_ebook
+                        if target_book is None and len(ebooks) == 1 and audio_book is not None:
                             with self.database.connect(scoped=False) as db:
                                 row = db.execute(
                                     "SELECT has_ebook FROM books WHERE id=?", (audio_book,)
@@ -1136,10 +1696,13 @@ class Books:
                                     target_book,
                                     allow_auto_pair=(target_book is None and len(ebooks) == 1),
                                     extract_cover=False,
+                                    repair=repair,
                                 )
                             imported.add(book_id)
                             ebook_sources[key_str] = book_id
-                            if target_book is not None and book_id == audio_book:
+                            if existing_ebook is not None:
+                                updated += 1
+                            elif target_book is not None and book_id == audio_book:
                                 newly_paired.add(book_id)
                                 paired += 1
                             elif book_id != audio_book:
@@ -1155,13 +1718,68 @@ class Books:
                     for book_id in imported:
                         if book_id in newly_paired:
                             updated += 1
-                        self.directory_metadata(book_id, source_root, dir_rel)
+                        defaults = {}
+                        if series := volumes.get((source_root, directory)):
+                            defaults = {"series_name": series[0], "series_index": series[1]}
+                        else:
+                            parent_series = series_by_parent.get((source_root, directory), set())
+                            for path in ebooks:
+                                if ebook_sources.get(str(path)) != book_id:
+                                    continue
+                                stem_key = normalize(path.stem)
+                                matched_series = next(
+                                    (
+                                        name
+                                        for name in parent_series
+                                        if stem_key == normalize(name)
+                                        or (
+                                            directory != source_root
+                                            and stem_key.startswith(normalize(name))
+                                        )
+                                    ),
+                                    None,
+                                )
+                                if matched_series:
+                                    defaults = {"series_name": matched_series}
+                                    break
+                        self.directory_metadata(book_id, source_root, dir_rel, defaults)
                         if restore_book(self.database, managed_root, book_id, source_root, dir_rel):
                             sidecars_applied += 1
                         self._apply_folder_cover(managed_root, book_id, source_root, dir_rel)
                         self._apply_embedded_cover(
                             managed_root, book_id, source_root, audio, ebooks
                         )
+                        if repair:
+                            export_books(self.database, managed_root, identity, book_id)
+                    publish_progress()
+
+                if repair:
+                    with self.database.connect(scoped=False) as db:
+                        managed_txt = db.execute(
+                            """SELECT e.book_id,e.managed_path,e.link_mode FROM book_ebooks e
+                               JOIN books b ON b.id=e.book_id
+                               WHERE b.library_id=? AND e.format='txt' AND e.source_path IS NULL""",
+                            (identity,),
+                        ).fetchall()
+                    for entry in managed_txt:
+                        scanned += 1
+                        try:
+                            path = Path(entry["managed_path"])
+                            with open_source(managed_root, path) as stream:
+                                self.ebook(
+                                    library,
+                                    stream,
+                                    path.name,
+                                    entry["link_mode"],
+                                    book_id=entry["book_id"],
+                                    extract_cover=False,
+                                    repair=True,
+                                )
+                            updated += 1
+                            export_books(self.database, managed_root, identity, entry["book_id"])
+                        except (OSError, ValueError, HTTPException) as exc:
+                            record_failure(exc)
+                        publish_progress()
 
                 # Recover untracked book folders inside managed_root that already carry .wildstring/.
                 if managed_root.is_dir() and not managed_root.is_symlink():
@@ -1195,34 +1813,13 @@ class Books:
                             ) as exc:
                                 record_failure(exc)
 
+                    publish_progress()
+
                 status = "completed_with_errors" if failures else "completed"
-                error = (last_error or "book_scan_file_unavailable") if failures else None
-                with self.database.connect(write=True) as db:
-                    db.execute(
-                        """UPDATE book_scan_jobs
-                           SET status=?,scanned_files=?,added_books=?,updated_books=?,
-                               paired_books=?,sidecars_applied=?,error_message=?,finished_at=?
-                           WHERE id=?""",
-                        (
-                            status,
-                            scanned,
-                            added,
-                            updated,
-                            paired,
-                            sidecars_applied,
-                            error,
-                            time.time(),
-                            job_id,
-                        ),
-                    )
-            except Exception as exc:
-                with self.database.connect(write=True) as db:
-                    db.execute(
-                        "UPDATE book_scan_jobs SET status='failed',error_message=?,finished_at=? WHERE id=?",
-                        ("book_scan_failed", time.time(), job_id),
-                    )
-                if isinstance(exc, HTTPException):
-                    raise
+                publish_progress(status)
+            except Exception:
+                last_error = "book_scan_failed"
+                publish_progress("failed")
                 raise
         return {
             "id": job_id,

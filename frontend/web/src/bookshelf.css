@@ -248,7 +248,7 @@
   margin: 0;
   list-style: none;
 }
-.bookshelf-grid button {
+.bookshelf-grid button[data-book-id] {
   display: flex;
   align-items: flex-start;
   gap: 0.875rem;
@@ -262,7 +262,7 @@
   background: var(--surface);
   border-color: var(--border);
 }
-.bookshelf-grid button:hover {
+.bookshelf-grid button[data-book-id]:hover {
   background: var(--bg-hover);
 }
 .bookshelf-pagination {
@@ -375,12 +375,6 @@
   font-weight: 600;
   line-height: 1.25;
   text-wrap: balance;
-}
-.book-detail-subtitle {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--muted);
-  text-wrap: pretty;
 }
 .book-detail-meta {
   margin: 0;
@@ -982,11 +976,6 @@
   border-color: var(--border);
   font-weight: 600;
 }
-.book-chapter-num {
-  color: var(--muted);
-  font-size: 0.75rem;
-  flex-shrink: 0;
-}
 .book-chapter-name {
   min-inline-size: 0;
   overflow: hidden;
@@ -1341,4 +1330,138 @@
   .book-edit-label {
     min-inline-size: 0;
   }
+}
+
+.book-detail-information,
+.book-series-list,
+.book-metadata-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.book-detail-information summary,
+.book-metadata-more summary {
+  cursor: pointer;
+  color: var(--muted);
+  inline-size: fit-content;
+  padding-block: 0.45rem;
+}
+
+.book-series-list {
+  list-style: none;
+  padding: 0;
+}
+
+.book-description,
+.book-detail-secondary dd {
+  overflow-wrap: anywhere;
+}
+
+.book-description {
+  white-space: pre-wrap;
+}
+
+.book-detail-secondary {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.book-detail-secondary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+.book-detail-secondary dt {
+  color: var(--muted);
+}
+
+.book-detail-secondary dd {
+  margin: 0;
+}
+
+.book-metadata-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.book-metadata-more[open] summary {
+  margin-block-end: 0.75rem;
+}
+
+.book-metadata-grid .book-edit-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.book-metadata-grid .book-edit-field:has(:is(input[name='title'], textarea)) {
+  grid-column: 1 / -1;
+}
+
+.book-metadata-grid textarea {
+  resize: vertical;
+}
+
+.book-detail-chapter-play[data-level='2'],
+.book-reader-layout .book-reader .book-chapter-list button[data-level='2'] {
+  padding-inline-start: 1.5rem;
+}
+
+.book-detail-chapter-play[data-level='3'],
+.book-reader-layout .book-reader .book-chapter-list button[data-level='3'] {
+  padding-inline-start: 2.25rem;
+}
+
+.bookshelf-grid > li {
+  position: relative;
+}
+
+.book-actions-menu {
+  position: relative;
+}
+
+.book-actions-card {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-end: 0.5rem;
+}
+
+.book-actions-card > button {
+  display: grid;
+  place-items: center;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+  padding: 0;
+  background: var(--surface);
+}
+
+.book-actions-options {
+  position: absolute;
+  inset-inline-end: 0;
+  z-index: 2;
+  display: grid;
+  gap: 0.25rem;
+  inline-size: max-content;
+  max-inline-size: 15rem;
+  padding: 0.5rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.book-actions-manage .book-actions-options {
+  inset-inline-end: auto;
+  inset-inline-start: 0;
+}
+
+.book-actions-options button {
+  min-block-size: 2.75rem;
+  text-align: start;
+  white-space: normal;
+}
+
+.bookshelf-grid [data-book-id] .bookshelf-card-body {
+  padding-inline-end: 2.5rem;
 }

@@ -465,22 +465,28 @@ def parse_epub(stream):
                 blocks = blocks_from_document(document, image_key)
                 title = titles.get(name) or next(
                     (block["text"] for block in blocks if block["tag"].startswith("h")),
-                    f"{len(chapters) + 1}",
+                    "封面"
+                    if not chapters and blocks and all(block["tag"] == "img" for block in blocks)
+                    else None,
                 )
                 parsed_docs[name] = (blocks, title)
             total_blocks += len(blocks)
             if total_blocks > MAX_TOTAL_BLOCKS:
                 raise ValueError("ebook_archive_too_large")
-            chapters.append({"href": name, "title": title, "blocks": blocks})
+            chapters.append(
+                {
+                    "href": name,
+                    "title": title or f"第 {len(chapters) + 1} 段",
+                    "level": 1 if title else 0,
+                    "blocks": blocks,
+                }
+            )
         if not chapters:
             raise ValueError("ebook_archive_invalid")
         return metadata, chapters, images, "utf-8"
 
 
-def parse_txt(stream):
-    data = stream.read(MAX_EBOOK_BYTES + 1)
-    if len(data) > MAX_EBOOK_BYTES:
-        raise ValueError("ebook_too_large")
+def decode_text(data):
     encodings = (
         ("utf-16",)
         if data.startswith((b"\xff\xfe", b"\xfe\xff"))
@@ -496,22 +502,61 @@ def parse_txt(stream):
         raise ValueError("ebook_encoding_unsupported")
     if "\0" in text:
         raise ValueError("ebook_encoding_unsupported")
+    return text, encoding
+
+
+TXT_HEADING = re.compile(
+    r"(?:(?:第[〇零一二三四五六七八九十百千万两0-9０-９]+(?P<unit>[季部篇卷册章节回话幕]))"
+    r"|(?P<english>season|part|volume|book|chapter)\s+\d+)"
+    r"(?:(?:\s+|[:：、.．—-]\s*)[^。！？!?]{1,60}|[^\s。！？!?]{1,30})?",
+    re.IGNORECASE,
+)
+TXT_SPECIAL_HEADING = re.compile(
+    r"(?:序章|序言|楔子|引子|前言|尾声|后记|番外)(?:[：:、 \d][^。！？!?]{0,40})?"
+)
+
+
+def txt_heading_level(line):
+    match = TXT_HEADING.fullmatch(line)
+    if match:
+        unit = match["unit"] or match["english"].lower()
+        if unit in {"季", "部", "篇", "season", "part"}:
+            return 1
+        if unit in {"卷", "册", "volume", "book"}:
+            return 2
+        return 3
+    return 3 if TXT_SPECIAL_HEADING.fullmatch(line) else 0
+
+
+def parse_txt(stream):
+    data = stream.read(MAX_EBOOK_BYTES + 1)
+    if len(data) > MAX_EBOOK_BYTES:
+        raise ValueError("ebook_too_large")
+    text, encoding = decode_text(data)
     chapters = []
     blocks = []
     chars = 0
     title = ""
+    level = 0
     for line in text.splitlines():
         text_line = line.strip()
         if not text_line:
             continue
-        heading = bool(re.fullmatch(r"(?:第.{1,12}[章节卷回].*|chapter\s+\d+.*)", text_line, re.I))
+        heading = txt_heading_level(text_line)
         for start in range(0, len(text_line), 12_000):
             text_block = text_line[start : start + 12_000]
             if blocks and (heading or chars + len(text_block) > 12_000):
-                chapters.append({"title": title or f"{len(chapters) + 1}", "blocks": blocks})
-                blocks, chars, title = [], 0, ""
+                chapters.append(
+                    {
+                        "title": title or f"第 {len(chapters) + 1} 段",
+                        "level": level,
+                        "blocks": blocks,
+                    }
+                )
+                blocks, chars, title, level = [], 0, "", 0
             if heading:
                 title = text_block
+                level = heading
             blocks.append(
                 {
                     "block_index": len(blocks),
@@ -523,9 +568,11 @@ def parse_txt(stream):
                 }
             )
             chars += len(text_block)
-            heading = False
+            heading = 0
     if blocks:
-        chapters.append({"title": title or f"{len(chapters) + 1}", "blocks": blocks})
+        chapters.append(
+            {"title": title or f"第 {len(chapters) + 1} 段", "level": level, "blocks": blocks}
+        )
     if not chapters:
         raise ValueError("ebook_empty")
     return {"authors": []}, chapters, {}, encoding

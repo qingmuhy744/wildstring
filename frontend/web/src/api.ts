@@ -192,7 +192,9 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
           ? body.message
           : '';
     const friendlyRaw = rawMessage && !isCodeLike(rawMessage) ? rawMessage : '';
-    const message = codeMessage(code) || friendlyRaw || i18n.t('api.requestFailed');
+    const messageCode =
+      code === 'scan_busy' && /^\/(?:books|book-libraries)\//.test(path) ? 'book_scan_busy' : code;
+    const message = codeMessage(messageCode) || friendlyRaw || i18n.t('api.requestFailed');
     const retryHeader = Number(response.headers.get('Retry-After'));
     const retryBody = Number(body.detail?.retry_after);
     const retryAfter =
