@@ -2,6 +2,8 @@
 
 package com.wildstring.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -33,6 +35,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuDropdownProvider
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -57,6 +64,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -76,13 +85,21 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.ImageLoader
 import coil.compose.AsyncImage
@@ -91,6 +108,8 @@ import coil.request.ImageRequest
 import coil.size.Size
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonArray
+import com.google.gson.JsonNull
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import com.wildstring.app.data.*
@@ -102,6 +121,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -117,6 +137,8 @@ import okio.BufferedSink
 import okio.source
 import retrofit2.HttpException
 
+private enum class BookAction { Delete, Rescan, ClearProgress, Complete }
+
 @Composable
 internal fun BookshelfScreen(
     vm: MusicViewModel,
@@ -128,7 +150,8 @@ internal fun BookshelfScreen(
     val bookPlaybackState by vm.bookPlayback.state.collectAsStateWithLifecycle()
     val owner = repository.session.storageScope()
     val profileName = repository.session.account?.profile
-    val canUpload = profileName in setOf("owner", "librarian")
+    val canManage = canManageBooks(profileName)
+    val canUpload = canManage
     val canEdit = profileName in setOf("owner", "librarian", "editor")
     val gson = remember { Gson() }
     val context = LocalContext.current
@@ -159,7 +182,71 @@ internal fun BookshelfScreen(
     var coverTargetBookId by remember(owner) { mutableStateOf<String?>(null) }
     var showEdit by rememberSaveable(selectedId) { mutableStateOf(false) }
 
-    val selected = remember(books, selectedId) { selectedId?.let { id -> books?.find { it.id == id } } }
+    var managingBook by remember(owner) { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+
+    fun actOnBook(book: BookSummary, action: BookAction) {
+        scope.launch {
+            managingBook = true
+            actionError = null
+            try {
+                val requestOwner = RequestOwner(repository.session.cacheScope())
+                if (vm.bookPlayback.state.value.book?.id == book.id) vm.bookPlayback.stopAndClose()
+                when (action) {
+                    BookAction.Delete -> {
+                        repository.api().deleteBook(book.id, requestOwner)
+                        if (owner != null) repository.database.books().deleteBook(owner, book.id)
+                        books = books?.filterNot { it.id == book.id }
+                        selectedId = null
+                    }
+                    BookAction.Rescan -> {
+                        repository.api().rescanBook(book.id, requestOwner)
+                        if (owner != null) {
+                            repository.database.books().clearBookChapters(owner, book.id)
+                            repository.database.books().clearBookAudioChapters(owner, book.id)
+                            repository.database.books().clearBookProgress(owner, book.id)
+                        }
+                        coverRev++
+                    }
+                    BookAction.ClearProgress, BookAction.Complete -> {
+                        if (action == BookAction.ClearProgress) repository.api().clearBookProgress(book.id, requestOwner)
+                        else repository.api().completeBook(book.id, requestOwner)
+                        if (owner != null) repository.database.books().clearBookProgress(owner, book.id)
+                    }
+                }
+                reload++
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (cause: Exception) {
+                actionError = friendlyError(cause)
+            } finally {
+                managingBook = false
+            }
+        }
+    }
+
+    val catalogSelection = remember(books, selectedId) { selectedId?.let { id -> books?.find { it.id == id } } }
+    var detail by remember(owner, selectedId) { mutableStateOf<BookSummary?>(null) }
+    val selected = catalogSelection?.let { summary ->
+        detail?.takeIf { it.id == summary.id }?.let {
+            summary.copy(
+                publisher = it.publisher, publishedYear = it.publishedYear, language = it.language,
+                isbn10 = it.isbn10, isbn13 = it.isbn13, tags = it.tags,
+            )
+        } ?: summary
+    }
+
+    LaunchedEffect(owner, selectedId, reload) {
+        val bookId = selectedId ?: return@LaunchedEffect
+        try {
+            detail = repository.api().book(bookId)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: Exception) {
+            detail = null
+        }
+    }
 
     LaunchedEffect(vmState.focusedBookId) {
         val target = vmState.focusedBookId ?: return@LaunchedEffect
@@ -172,8 +259,6 @@ internal fun BookshelfScreen(
     val isActivelyReading = selected != null && reading
     LaunchedEffect(isActivelyReading) { vm.setReadingBook(isActivelyReading) }
     DisposableEffect(Unit) { onDispose { vm.setReadingBook(false) } }
-
-    val scope = rememberCoroutineScope()
 
     fun buildMultipartFromUri(uri: Uri, fieldName: String, fallbackExt: String, allowedMime: (String) -> String): Pair<String, RequestBody> {
         val resolver = context.contentResolver
@@ -341,44 +426,51 @@ internal fun BookshelfScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (book != null) {
-                BookDetailScreen(
-                    vm = vm,
-                    book = book,
-                    allBooks = books.orEmpty(),
-                    bookPlaybackState = bookPlaybackState,
-                    canEdit = canEdit,
-                    canUpload = canUpload,
-                    uploading = uploading,
-                    showEdit = showEdit,
-                    onToggleEdit = { showEdit = !showEdit },
-                    coverRevision = coverRev,
-                    actionError = actionError,
-                    onClearError = { actionError = null },
-                    onBack = {
-                        selectedId = null
-                        initialSpine = null
-                    },
-                    onRead = { spineIndex ->
-                        initialSpine = spineIndex
-                        reading = true
-                    },
-                    onListen = { chapterIndex ->
-                        vm.bookPlayback.open(book, autoplay = true, targetChapterIndex = chapterIndex)
-                    },
-                    onPickCover = {
-                        coverTargetBookId = book.id
-                        selectCover.launch("image/*")
-                    },
-                    onAttachEbook = {
-                        attachTargetBookId = book.id
-                        selectEbook.launch(arrayOf("application/epub+zip", "text/plain"))
-                    },
-                    onRefreshBook = {
-                        coverRev++
-                        reload++
-                    },
-                    onReportError = { actionError = it },
-                )
+                key(book.id) {
+                    BookDetailScreen(
+                        vm = vm,
+                        book = book,
+                        allBooks = books.orEmpty(),
+                        bookPlaybackState = bookPlaybackState,
+                        canEdit = canEdit,
+                        canManage = canManage,
+                        canRescan = bookLibraries.find { it.id == book.libraryId }?.storageBackend != "gdrive",
+                        managing = managingBook,
+                        onAction = { actOnBook(book, it) },
+                        canUpload = canUpload,
+                        uploading = uploading,
+                        showEdit = showEdit,
+                        onToggleEdit = { showEdit = !showEdit },
+                        coverRevision = coverRev,
+                        actionError = actionError,
+                        onClearError = { actionError = null },
+                        onBack = {
+                            selectedId = null
+                            initialSpine = null
+                        },
+                        onRead = { spineIndex ->
+                            initialSpine = spineIndex
+                            reading = true
+                        },
+                        onListen = { chapterIndex ->
+                            vm.bookPlayback.open(book, autoplay = true, targetChapterIndex = chapterIndex)
+                        },
+                        onPickCover = {
+                            coverTargetBookId = book.id
+                            selectCover.launch("image/*")
+                        },
+                        onAttachEbook = {
+                            attachTargetBookId = book.id
+                            selectEbook.launch(arrayOf("application/epub+zip", "text/plain"))
+                        },
+                        onOpenSeriesBook = { selectedId = it },
+                        onRefreshBook = {
+                            coverRev++
+                            reload++
+                        },
+                        onReportError = { actionError = it },
+                    )
+                }
             } else {
                 Spacer(Modifier.height(2.dp))
                 Row(
@@ -551,7 +643,9 @@ internal fun BookshelfScreen(
                     val matchesQuery = q.isEmpty() ||
                         item.title.contains(q, ignoreCase = true) ||
                         item.subtitle?.contains(q, ignoreCase = true) == true ||
-                        item.authors.any { a -> a.contains(q, ignoreCase = true) }
+                        item.authors.any { a -> a.contains(q, ignoreCase = true) } ||
+                        item.narrators.orEmpty().any { it.contains(q, ignoreCase = true) } ||
+                        item.seriesName?.contains(q, ignoreCase = true) == true
                     matchesLib && matchesFmt && matchesStatus && matchesQuery
                 }
 
@@ -706,6 +800,10 @@ private fun BookDetailScreen(
     allBooks: List<BookSummary>,
     bookPlaybackState: BookPlaybackState,
     canEdit: Boolean,
+    canManage: Boolean,
+    canRescan: Boolean,
+    managing: Boolean,
+    onAction: (BookAction) -> Unit,
     canUpload: Boolean,
     uploading: Boolean,
     showEdit: Boolean,
@@ -718,6 +816,7 @@ private fun BookDetailScreen(
     onListen: (Int?) -> Unit,
     onPickCover: () -> Unit,
     onAttachEbook: () -> Unit,
+    onOpenSeriesBook: (String) -> Unit,
     onRefreshBook: () -> Unit,
     onReportError: (String) -> Unit,
 ) {
@@ -729,16 +828,18 @@ private fun BookDetailScreen(
         mutableStateOf(if (book.hasAudiobook) "audio" else "ebook")
     }
     var chapterReload by remember(book.id) { mutableIntStateOf(0) }
+    var actionsOpen by remember(book.id) { mutableStateOf(false) }
+    var confirmDelete by remember(book.id) { mutableStateOf(false) }
     var editingChapter by remember { mutableStateOf<BookAudioChapter?>(null) }
 
-    LaunchedEffect(book.id, book.hasAudiobook, book.hasEbook, chapterReload) {
+    LaunchedEffect(book.id, book.hasAudiobook, book.hasEbook, chapterReload, coverRevision) {
         if (book.hasAudiobook) {
             audioChapters = runCatching { repository.api().bookAudio(book.id).chapters }.getOrElse { emptyList() }
         } else {
             audioChapters = emptyList()
         }
         if (book.hasEbook) {
-            ebookChapters = runCatching { repository.api().bookManifest(book.id).chapters }.getOrElse { emptyList() }
+            ebookChapters = runCatching { repository.api().bookManifest(book.id).chapters.ebookContents() }.getOrElse { emptyList() }
         } else {
             ebookChapters = emptyList()
         }
@@ -761,7 +862,7 @@ private fun BookDetailScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(
                 onClick = onBack,
                 contentPadding = PaddingValues(start = 0.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
@@ -770,6 +871,24 @@ private fun BookDetailScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.books_back))
+            }
+            Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(
+                    onClick = { actionsOpen = true },
+                    enabled = !managing,
+                    modifier = Modifier.testTag("book-progress-actions"),
+                ) { Icon(Icons.Default.MoreHoriz, stringResource(R.string.books_progress_actions)) }
+                DropdownMenu(expanded = actionsOpen, onDismissRequest = { actionsOpen = false }) {
+                    if (book.progressStatus != "finished") DropdownMenuItem(
+                        text = { Text(stringResource(R.string.books_mark_complete)) },
+                        onClick = { actionsOpen = false; onAction(BookAction.Complete) },
+                    )
+                    if (book.progressStatus != "unread" && book.progressStatus != null) DropdownMenuItem(
+                        text = { Text(stringResource(R.string.books_clear_progress)) },
+                        onClick = { actionsOpen = false; onAction(BookAction.ClearProgress) },
+                    )
+                }
             }
         }
 
@@ -806,22 +925,20 @@ private fun BookDetailScreen(
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        book.subtitle?.takeIf { it.isNotBlank() }?.let { sub ->
-                            Text(
-                                sub,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                         if (authorsLine.isNotBlank()) {
                             Text(
-                                authorsLine,
+                                stringResource(R.string.books_credit, stringResource(R.string.books_field_authors), authorsLine),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (book.narrators.orEmpty().isNotEmpty()) {
+                            Text(
+                                stringResource(R.string.books_credit, stringResource(R.string.books_field_narrators), book.narrators.orEmpty().joinToString(" · ")),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (carrierLine.isNotEmpty()) {
@@ -944,6 +1061,49 @@ private fun BookDetailScreen(
             }
         }
 
+        book.seriesName?.let { series ->
+            var expanded by rememberSaveable(book.id, series) { mutableStateOf(false) }
+            val label = book.seriesIndex?.let {
+                "$series · " + stringResource(R.string.books_series_volume, it.toString().removeSuffix(".0"))
+            } ?: series
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics { selected = expanded }) {
+                Text(label, style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"))
+            }
+            if (expanded) {
+                allBooks.filter { it.seriesName.equals(series, ignoreCase = true) }
+                    .sortedWith(compareBy<BookSummary> { it.seriesIndex }.thenBy { it.title })
+                    .forEach { item ->
+                        TextButton(onClick = { onOpenSeriesBook(item.id) }, enabled = item.id != book.id) {
+                            val volume = item.seriesIndex?.let {
+                                " · " + stringResource(R.string.books_series_volume, it.toString().removeSuffix(".0"))
+                            }.orEmpty()
+                            Text(item.title + volume, style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"))
+                        }
+                    }
+            }
+        }
+        book.description?.takeIf { it.isNotBlank() }?.let { description ->
+            var expanded by rememberSaveable(book.id) { mutableStateOf(false) }
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics { selected = expanded }) {
+                Text(stringResource(R.string.books_field_description))
+            }
+            if (expanded) Text(description, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        if (confirmDelete) AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.books_delete_book)) },
+            text = { Text(stringResource(R.string.books_delete_book_confirm, book.title)) },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.books_close)) } },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onAction(BookAction.Delete) }) {
+                    Text(stringResource(R.string.books_delete_book), color = MaterialTheme.colorScheme.error)
+                }
+            },
+        )
+
+        if (!showEdit) BookSecondaryMetadata(book)
+
         actionError?.let { msg ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(msg, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -957,6 +1117,11 @@ private fun BookDetailScreen(
                 book = book,
                 allBooks = allBooks,
                 canEdit = canEdit,
+                canManage = canManage,
+                canRescan = canRescan,
+                managing = managing,
+                onRescan = { onAction(BookAction.Rescan) },
+                onDelete = { confirmDelete = true },
                 canUpload = canUpload,
                 uploading = uploading,
                 onPickCover = onPickCover,
@@ -1112,18 +1277,10 @@ private fun BookDetailScreen(
                                         .heightIn(min = 48.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable { onRead(chapter.index) }
-                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                        .padding(start = 8.dp + ebookIndent(chapter.level), end = 8.dp, top = 10.dp, bottom = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Text(
-                                        "%02d".format(chapter.index + 1),
-                                        style = numberStyle,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.width(numberWidth),
-                                        maxLines = 1,
-                                        softWrap = false,
-                                    )
                                     Text(
                                         chapter.title,
                                         Modifier.weight(1f),
@@ -1199,6 +1356,11 @@ private fun BookEditCard(
     book: BookSummary,
     allBooks: List<BookSummary>,
     canEdit: Boolean,
+    canManage: Boolean,
+    canRescan: Boolean,
+    managing: Boolean,
+    onRescan: () -> Unit,
+    onDelete: () -> Unit,
     canUpload: Boolean,
     uploading: Boolean,
     onPickCover: () -> Unit,
@@ -1248,46 +1410,50 @@ private fun BookEditCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (canEdit) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedTextField(
-                        value = titleInput,
-                        onValueChange = { titleInput = it.take(1000) },
-                        label = { Text(stringResource(R.string.books_book_title_label)) },
-                        singleLine = true,
-                        enabled = !busy,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Button(
-                        enabled = !busy && titleInput.trim().isNotBlank(),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.padding(top = 6.dp).heightIn(min = 52.dp),
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                try {
-                                    repository.api().updateBookMetadata(
-                                        book.id,
-                                        obj("title" to titleInput.trim()),
-                                        RequestOwner(repository.session.cacheScope()),
-                                    )
-                                    onSaved()
-                                } catch (cause: CancellationException) {
-                                    throw cause
-                                } catch (cause: Exception) {
-                                    onReportError(friendlyError(cause))
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        },
-                    ) { Text(stringResource(R.string.books_save)) }
+            if (canManage) {
+                var manageOpen by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { manageOpen = true }, enabled = !busy && !managing) {
+                        Text(stringResource(R.string.books_manage_actions))
+                    }
+                    DropdownMenu(expanded = manageOpen, onDismissRequest = { manageOpen = false }) {
+                        if (canRescan) DropdownMenuItem(
+                            text = { Text(stringResource(R.string.books_rescan_book)) },
+                            onClick = { manageOpen = false; onRescan() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.books_delete_book), color = MaterialTheme.colorScheme.error) },
+                            onClick = { manageOpen = false; onDelete() },
+                        )
+                    }
                 }
+            }
+
+            if (canEdit) {
+                BookMetadataEditor(
+                    book,
+                    busy,
+                    onTitle = { titleInput = it },
+                    onSave = { changes ->
+                        scope.launch {
+                            busy = true
+                            try {
+                                repository.api().updateBookMetadata(
+                                    book.id, changes, RequestOwner(repository.session.cacheScope()),
+                                )
+                                onSaved()
+                            } catch (cause: CancellationException) {
+                                throw cause
+                            } catch (cause: Exception) {
+                                onReportError(friendlyError(cause))
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    repository = repository,
+                    onReportError = onReportError,
+                )
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -1478,6 +1644,8 @@ private fun BookEditCard(
                     }
                 }
 
+            }
+            if (canManage) {
                 if (book.hasEbook && book.hasAudiobook) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Row(
@@ -1583,6 +1751,156 @@ private fun BookEditCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BookSecondaryMetadata(book: BookSummary) {
+    val fields = listOf(
+        R.string.books_field_subtitle to book.subtitle,
+        R.string.books_field_publisher to book.publisher,
+        R.string.books_field_published_year to book.publishedYear?.toString(),
+        R.string.books_field_language to book.language,
+        R.string.books_field_isbn10 to book.isbn10,
+        R.string.books_field_isbn13 to book.isbn13,
+        R.string.books_field_tags to book.tags?.joinToString(" · "),
+        R.string.books_ebook to book.ebookSummary?.let {
+            "${it.format.uppercase()} · ${stringResource(R.string.books_character_count, it.totalChars)}"
+        },
+        R.string.books_audiobook to book.audiobookSummary?.let {
+            listOfNotNull(it.codecSummary?.uppercase(), formatTime(it.totalDurationMs)).joinToString(" · ")
+        },
+    ).filter { !it.second.isNullOrBlank() }
+    if (fields.isEmpty()) return
+
+    var expanded by rememberSaveable(book.id) { mutableStateOf(false) }
+    Column {
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics { selected = expanded }) {
+            Text(stringResource(R.string.books_more_metadata))
+        }
+        if (expanded) for ((label, value) in fields) {
+            Text(
+                stringResource(R.string.books_credit, stringResource(label), value.orEmpty()),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val bookMetadataFields = listOf(
+    "title" to R.string.books_book_title_label,
+    "authors" to R.string.books_field_authors,
+    "narrators" to R.string.books_field_narrators,
+    "series_name" to R.string.books_field_series_name,
+    "series_index" to R.string.books_field_series_index,
+    "description" to R.string.books_field_description,
+    "subtitle" to R.string.books_field_subtitle,
+    "publisher" to R.string.books_field_publisher,
+    "published_year" to R.string.books_field_published_year,
+    "language" to R.string.books_field_language,
+    "isbn10" to R.string.books_field_isbn10,
+    "isbn13" to R.string.books_field_isbn13,
+    "tags" to R.string.books_field_tags,
+)
+private val bookListMetadata = setOf("authors", "narrators", "tags")
+private val bookMetadataSeparators = Regex("[,，、]")
+
+@Composable
+private fun BookMetadataEditor(
+    book: BookSummary,
+    busy: Boolean,
+    onTitle: (String) -> Unit,
+    onSave: (JsonObject) -> Unit,
+    repository: Repository,
+    onReportError: (String) -> Unit,
+) {
+    var loaded by remember(book.id) { mutableStateOf<JsonObject?>(null) }
+    var draft by remember(book.id) { mutableStateOf(emptyMap<String, String>()) }
+    var expanded by rememberSaveable(book.id) { mutableStateOf(false) }
+    var failed by remember(book.id) { mutableStateOf(false) }
+    var attempt by remember(book.id) { mutableIntStateOf(0) }
+    LaunchedEffect(book, attempt) {
+        failed = false
+        try {
+            loaded = repository.api().bookMetadata(book.id)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: Exception) {
+            failed = true
+            onReportError(friendlyError(cause))
+        }
+    }
+    val metadata = loaded
+    if (metadata == null) {
+        if (failed) TextButton(onClick = { attempt++ }) { Text(stringResource(R.string.books_retry)) }
+        else LinearProgressIndicator(Modifier.fillMaxWidth())
+        return
+    }
+
+    val original = bookMetadataFields.associate { (field, _) ->
+        val value = metadata.get(field)?.takeUnless { it.isJsonNull }
+        field to when {
+            value == null -> ""
+            value.isJsonArray -> value.asJsonArray.joinToString(", ") { it.asString }
+            else -> value.asString
+        }
+    }
+    val series = draft["series_index"].orEmpty().trim()
+    val year = draft["published_year"].orEmpty().trim()
+    val valid = draft.getOrDefault("title", original.getValue("title")).isNotBlank() &&
+        (series.isEmpty() || series.toDoubleOrNull()?.let { it in 0.0..9999.0 } == true) &&
+        (year.isEmpty() || year.toIntOrNull()?.let { it in 0..9999 } == true)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        bookMetadataFields.forEachIndexed { index, (field, label) ->
+            if (field == "subtitle") {
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics { selected = expanded }) {
+                    Text(stringResource(R.string.books_more_metadata))
+                }
+            }
+            if (index < 6 || expanded) {
+                OutlinedTextField(
+                    value = draft.getOrDefault(field, original.getValue(field)),
+                    onValueChange = {
+                        draft = draft + (field to it.take(4096))
+                        if (field == "title") onTitle(it)
+                    },
+                    label = { Text(stringResource(label)) },
+                    singleLine = field != "description",
+                    minLines = if (field == "description") 2 else 1,
+                    maxLines = if (field == "description") 4 else 1,
+                    keyboardOptions = when (field) {
+                        "series_index" -> KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        "published_year" -> KeyboardOptions(keyboardType = KeyboardType.Number)
+                        else -> KeyboardOptions.Default
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        Button(
+            enabled = !busy && valid && draft.isNotEmpty(),
+            modifier = Modifier.align(Alignment.End),
+            onClick = {
+                val changes = JsonObject()
+                for ((field, input) in draft) {
+                    val value = input.trim()
+                    if (value == original.getValue(field).trim()) continue
+                    when {
+                        field in bookListMetadata -> changes.add(field, JsonArray().apply {
+                            value.split(bookMetadataSeparators).map(String::trim).filter(String::isNotEmpty).forEach { add(it) }
+                        })
+                        value.isEmpty() -> changes.add(field, JsonNull.INSTANCE)
+                        field == "series_index" -> changes.addProperty(field, value.toDouble())
+                        field == "published_year" -> changes.addProperty(field, value.toInt())
+                        else -> changes.addProperty(field, value)
+                    }
+                }
+                if (changes.size() > 0) onSave(changes)
+            },
+        ) { Text(stringResource(R.string.books_save)) }
     }
 }
 
@@ -1706,6 +2024,7 @@ private fun BookReading(
     var error by remember(book.id) { mutableStateOf(false) }
     var syncConflict by remember(book.id) { mutableStateOf(false) }
     var reloadReader by remember(book.id) { mutableIntStateOf(0) }
+    val topInset = 56.dp
     var showTools by remember(book.id) { mutableStateOf(false) }
     var immersive by rememberSaveable(book.id) { mutableStateOf(false) }
     var showPanel by remember(book.id) { mutableStateOf(false) }
@@ -1715,7 +2034,21 @@ private fun BookReading(
     var searchQuery by remember(book.id) { mutableStateOf("") }
     var searchMatches by remember(book.id) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var selection by remember(book.id, spine) { mutableStateOf<BookSelection?>(null) }
-    var annotation by remember(book.id) { mutableStateOf<BookSelection?>(null) }
+    var annotation by remember(book.id, spine) { mutableStateOf<BookSelection?>(null) }
+    var selectionMenu by remember(book.id) { mutableStateOf<TextContextMenuDataProvider?>(null) }
+    var readerCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val selectionMenuProvider = remember(book.id) {
+        object : TextContextMenuProvider {
+            override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) {
+                selectionMenu = dataProvider
+                try {
+                    awaitCancellation()
+                } finally {
+                    if (selectionMenu === dataProvider) selectionMenu = null
+                }
+            }
+        }
+    }
     var editingAnnotation by remember(book.id) { mutableStateOf<BookAnnotation?>(null) }
     var jump by remember(book.id) { mutableIntStateOf(0) }
     val palette = if (dark) Color(0xFF181614) else Color(0xFFF6F3ED)
@@ -1739,6 +2072,40 @@ private fun BookReading(
         }
     }
 
+    fun saveAnnotation(range: BookSelection, color: String, note: String = "") {
+        val selectedSpine = spine
+        selection = null
+        focus.clearFocus()
+        scope.launch {
+            try {
+                val saved = repository.api().addBookAnnotation(
+                    book.id,
+                    JsonObject().apply {
+                        addProperty("spine_index", selectedSpine)
+                        addProperty("start_block_index", range.block)
+                        addProperty("start_char_offset", range.start)
+                        addProperty("end_block_index", range.block)
+                        addProperty("end_char_offset", range.end)
+                        addProperty("selected_text", range.text)
+                        addProperty("color", color)
+                        if (note.isNotEmpty()) addProperty("note", note)
+                    },
+                    RequestOwner(repository.session.cacheScope()),
+                )
+                annotations = annotations + gson.fromJson(saved, BookAnnotation::class.java)
+                if (owner != null) {
+                    repository.database.books().saveAnnotation(
+                        BookAnnotationSyncEntity(owner, book.id, saved.get("id").asString, saved.toString()),
+                    )
+                }
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (_: Exception) {
+                error = true
+            }
+        }
+    }
+
     LaunchedEffect(book.id, owner, reloadReader) {
         error = false
         syncConflict = false
@@ -1746,15 +2113,20 @@ private fun BookReading(
             val data = try {
                 repository.api().bookManifest(book.id).also { next ->
                     if (owner != null) {
-                        repository.database.books().saveChapters(
-                            next.chapters.map { BookEbookChapterMetaEntity(owner, book.id, it.index, it.title, next.sha256) },
+                        repository.database.books().replaceChapters(
+                            owner, book.id,
+                            next.chapters.map { BookEbookChapterMetaEntity(owner, book.id, it.index, if (next.contentRevision == null) it.title else gson.toJson(it), next.cacheKey) },
                         )
                     }
                 }
             } catch (cause: IOException) {
                 val cache = owner?.let { repository.database.books().chapters(it, book.id) }.orEmpty()
                 if (cache.isEmpty()) throw cause
-                BookManifest(cache.map { BookChapter(it.spineIndex, it.title) }, cache.first().cacheKey)
+                // Revisioned cache rows carry the full chapter in the existing Room title field.
+                BookManifest(cache.map {
+                    if (it.cacheKey.contains(':')) gson.fromJson(it.title, BookChapter::class.java)
+                    else BookChapter(it.spineIndex, it.title)
+                }, cache.first().cacheKey)
             }
             val progress = sync.load()
             if (progress.version > 0) {
@@ -1808,7 +2180,7 @@ private fun BookReading(
         blocks = null
         imageSizes = emptyMap()
         val cacheKey = MessageDigest.getInstance("SHA-256")
-            .digest("${owner.orEmpty()}/${book.id}/${data.sha256}/$spine".toByteArray())
+            .digest("${owner.orEmpty()}/${book.id}/${data.cacheKey}/$spine".toByteArray())
             .joinToString("") { "%02x".format(it) }
         val file = File(File(context.filesDir, "book_cache"), cacheKey)
         try {
@@ -1827,7 +2199,7 @@ private fun BookReading(
             val assetKeys = content.blocks.mapNotNull { it.imageKey }.distinct()
             if (assetKeys.isNotEmpty()) {
                 val base = repository.url("api", "v1", "books", book.id, "ebook", "assets")
-                val cacheScope = "$owner:${book.id}:${data.sha256}"
+                val cacheScope = "$owner:${book.id}:${data.cacheKey}"
                 suspend fun resolveAssetSize(key: String): BookImageSize? = try {
                     val req = ImageRequest.Builder(context)
                         .data("$base/$key")
@@ -1900,7 +2272,8 @@ private fun BookReading(
                 Modifier
                     .fillMaxSize()
                     .background(palette)
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .onGloballyPositioned { readerCoordinates = it },
             ) {
                 val handleStageTap by rememberUpdatedState(newValue = { hadSelectionBeforeTap: Boolean ->
                     if (hadSelectionBeforeTap) {
@@ -1925,7 +2298,6 @@ private fun BookReading(
                         .pointerInput(Unit) { detectTapGestures { handleStageTap(selection != null) } },
                 ) {
                     val wide = maxWidth >= 728.dp && maxHeight >= 480.dp
-                    val topInset = 56.dp
                     val audioBarOpen = book.hasAudiobook && showAudioBar
 
                     Column(
@@ -2092,6 +2464,7 @@ private fun BookReading(
                                                             ink = ink,
                                                             serif = serif,
                                                             highlights = highlights,
+                                                            menuProvider = selectionMenuProvider,
                                                             hasActiveSelection = selection != null,
                                                             onTap = { hadSelection -> handleStageTap(hadSelection) },
                                                         ) { selection = it }
@@ -2179,7 +2552,8 @@ private fun BookReading(
                                                     ink = ink,
                                                     serif = serif,
                                                     highlights = highlights,
-                                                    hasActiveSelection = selection != null,
+                                                    menuProvider = selectionMenuProvider,
+                                                            hasActiveSelection = selection != null,
                                                     onTap = { hadSelection -> handleStageTap(hadSelection) },
                                                 ) { selection = it }
                                             }
@@ -2238,22 +2612,6 @@ private fun BookReading(
                                     }
                                 }
 
-                                if (selection != null) {
-                                    Surface(
-                                        Modifier.align(Alignment.BottomCenter)
-                                            .padding(bottom = if (audioBarOpen && !immersive) 84.dp else 44.dp)
-                                            .pointerInput(Unit) { detectTapGestures {} },
-                                        shape = MaterialTheme.shapes.large,
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        tonalElevation = 2.dp,
-                                    ) {
-                                        TextButton(onClick = {
-                                            annotation = selection
-                                            selection = null
-                                            focus.clearFocus()
-                                        }) { Text(stringResource(R.string.books_annotate)) }
-                                    }
-                                }
                             }
                         }
                     }
@@ -2472,8 +2830,8 @@ private fun BookReading(
                 BookReaderPanel(showPanel, wide, animateReaderUi, panelTitle, close = { showPanel = false }) {
                     when (panelMode) {
                         PanelMode.CONTENTS -> LazyColumn {
-                            items(manifest?.chapters.orEmpty()) { item ->
-                                TextButton(onClick = {
+                            items(manifest?.chapters.orEmpty().ebookContents()) { item ->
+                                TextButton(modifier = Modifier.padding(start = ebookIndent(item.level)), onClick = {
                                     spine = item.index
                                     savePosition(0)
                                     jump++
@@ -2635,6 +2993,59 @@ private fun BookReading(
                     }
                 }
 
+                val selectedRange = selection
+                val menu = selectionMenu
+                val coordinates = readerCoordinates
+                if (selectedRange != null && menu != null && coordinates?.isAttached == true) {
+                    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                    val chrome = with(LocalDensity.current) { if (immersive) 0 else topInset.roundToPx() }
+                    val position = remember(menu, coordinates, gap, chrome) {
+                        object : PopupPositionProvider {
+                            override fun calculatePosition(
+                                anchorBounds: IntRect, windowSize: IntSize,
+                                layoutDirection: LayoutDirection, popupContentSize: IntSize,
+                            ): IntOffset {
+                                val rect = menu.contentBounds(coordinates)
+                                val x = anchorBounds.left + rect.center.x.roundToInt() - popupContentSize.width / 2
+                                val top = anchorBounds.top + rect.top.roundToInt() - popupContentSize.height - gap
+                                val bottom = anchorBounds.top + rect.bottom.roundToInt() + gap
+                                return IntOffset(
+                                    x.coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0)),
+                                    (if (top >= anchorBounds.top + chrome) top else bottom)
+                                        .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)),
+                                )
+                            }
+                        }
+                    }
+                    Popup(
+                        popupPositionProvider = position,
+                        onDismissRequest = { selection = null; focus.clearFocus() },
+                        properties = PopupProperties(focusable = false),
+                    ) {
+                        Surface(
+                            Modifier.testTag("book-selection-toolbar"),
+                            shape = MaterialTheme.shapes.large,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = {
+                                    context.getSystemService(ClipboardManager::class.java)
+                                        .setPrimaryClip(ClipData.newPlainText(book.title, selectedRange.text))
+                                    selection = null
+                                    focus.clearFocus()
+                                }) { Icon(Icons.Default.ContentCopy, stringResource(R.string.books_copy_selection)) }
+                                AnnotationColors(chosen = null) { saveAnnotation(selectedRange, it) }
+                                IconButton(onClick = {
+                                    annotation = selectedRange
+                                    selection = null
+                                    focus.clearFocus()
+                                }) { Icon(Icons.Default.Edit, stringResource(R.string.books_write_annotation)) }
+                            }
+                        }
+                    }
+                }
+
                 annotation?.let { range ->
                     var chosenColor by remember(range) { mutableStateOf("amber") }
                     var noteDraft by remember(range) { mutableStateOf("") }
@@ -2650,24 +3061,7 @@ private fun BookReading(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                listOf(
-                                    "amber" to R.string.books_amber,
-                                    "terracotta" to R.string.books_terracotta,
-                                    "sage" to R.string.books_sage,
-                                    "stone" to R.string.books_stone,
-                                ).forEach { (color, label) ->
-                                    BookChoicePill(
-                                        label = stringResource(label),
-                                        selected = chosenColor == color,
-                                        onClick = { chosenColor = color },
-                                        swatchColor = annotationHighlightColorOrNull(color),
-                                    )
-                                }
-                            }
+                            AnnotationColors(chosenColor) { chosenColor = it }
                             OutlinedTextField(
                                 value = noteDraft,
                                 onValueChange = { noteDraft = it },
@@ -2680,41 +3074,11 @@ private fun BookReading(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                             ) {
-                                TextButton(onClick = { annotation = null }) {
-                                    Text(stringResource(R.string.books_close))
-                                }
                                 Button(
                                     modifier = Modifier.testTag("book-annotation-save"),
                                     onClick = {
-                                        val cleanNote = noteDraft.trim()
-                                        val selectedColor = chosenColor
+                                        saveAnnotation(range, chosenColor, noteDraft.trim())
                                         annotation = null
-                                        scope.launch {
-                                            try {
-                                                val saved = repository.api().addBookAnnotation(
-                                                    book.id,
-                                                    JsonObject().apply {
-                                                        addProperty("spine_index", spine)
-                                                        addProperty("start_block_index", range.block)
-                                                        addProperty("start_char_offset", range.start)
-                                                        addProperty("end_block_index", range.block)
-                                                        addProperty("end_char_offset", range.end)
-                                                        addProperty("selected_text", range.text)
-                                                        addProperty("color", selectedColor)
-                                                        if (cleanNote.isNotEmpty()) addProperty("note", cleanNote)
-                                                    },
-                                                    RequestOwner(repository.session.cacheScope()),
-                                                )
-                                                annotations = annotations + gson.fromJson(saved, BookAnnotation::class.java)
-                                                selection = null
-                                                if (owner != null) {
-                                                    repository.database.books().saveAnnotation(
-                                                        BookAnnotationSyncEntity(owner, book.id, saved.get("id").asString, saved.toString()),
-                                                    )
-                                                }
-                                            } catch (cause: CancellationException) { throw cause }
-                                            catch (_: Exception) { error = true }
-                                        }
                                     },
                                 ) { Text(stringResource(R.string.books_save)) }
                             }
@@ -2737,32 +3101,15 @@ private fun BookReading(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                if (customAnnotationColor.matches(editing.color)) {
-                                    BookChoicePill(
-                                        label = editing.color,
-                                        selected = chosenColor == editing.color,
-                                        onClick = { chosenColor = editing.color },
-                                        swatchColor = annotationHighlightColorOrNull(editing.color),
-                                    )
-                                }
-                                listOf(
-                                    "amber" to R.string.books_amber,
-                                    "terracotta" to R.string.books_terracotta,
-                                    "sage" to R.string.books_sage,
-                                    "stone" to R.string.books_stone,
-                                ).forEach { (color, label) ->
-                                    BookChoicePill(
-                                        label = stringResource(label),
-                                        selected = chosenColor == color,
-                                        onClick = { chosenColor = color },
-                                        swatchColor = annotationHighlightColorOrNull(color),
-                                    )
-                                }
+                            if (customAnnotationColor.matches(editing.color)) {
+                                BookChoicePill(
+                                    label = editing.color,
+                                    selected = chosenColor == editing.color,
+                                    onClick = { chosenColor = editing.color },
+                                    swatchColor = annotationHighlightColorOrNull(editing.color),
+                                )
                             }
+                            AnnotationColors(chosenColor) { chosenColor = it }
                             OutlinedTextField(
                                 value = noteDraft,
                                 onValueChange = { noteDraft = it },
@@ -2775,9 +3122,6 @@ private fun BookReading(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                             ) {
-                                TextButton(onClick = { editingAnnotation = null }) {
-                                    Text(stringResource(R.string.books_close))
-                                }
                                 Button(
                                     modifier = Modifier.testTag("book-annotation-edit-save"),
                                     onClick = {
@@ -2821,6 +3165,12 @@ private fun BookReading(
             }
         }
     }
+}
+
+private fun ebookIndent(level: Int?) = when (level) {
+    2 -> 12.dp
+    3 -> 24.dp
+    else -> 0.dp
 }
 
 private fun progressStatusLabelValue(status: String?): String? = null
@@ -3165,12 +3515,9 @@ private fun BookCompanionAudioBar(
 }
 
 private class ParagraphTouchGate {
-    var active: Boolean = false
     var downWallMs: Long = 0L
     var downEventMs: Long = 0L
-    var lastEventMs: Long = 0L
     var hadSelectionAtDown: Boolean = false
-    var longPressTimeoutMs: Long = 400L
 }
 
 private fun Modifier.readerParagraphTap(
@@ -3183,38 +3530,29 @@ private fun Modifier.readerParagraphTap(
         val downPos = down.position
         val slop = viewConfiguration.touchSlop
         val longPressMs = viewConfiguration.longPressTimeoutMillis
-        gate.active = true
         gate.downWallMs = android.os.SystemClock.uptimeMillis()
         gate.downEventMs = down.uptimeMillis
-        gate.lastEventMs = down.uptimeMillis
         gate.hadSelectionAtDown = hasActiveSelection()
-        gate.longPressTimeoutMs = longPressMs
         var validTap = true
-        try {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.changes.size > 1) validTap = false
-                val tracked = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
-                gate.lastEventMs = tracked.uptimeMillis
-                if ((tracked.position - downPos).getDistance() > slop) validTap = false
-                val heldMs = maxOf(
-                    tracked.uptimeMillis - gate.downEventMs,
-                    android.os.SystemClock.uptimeMillis() - gate.downWallMs,
-                )
-                if (heldMs >= longPressMs) validTap = false
-                if (event.changes.none { it.pressed }) {
-                    val hadSelection = gate.hadSelectionAtDown
-                    gate.active = false
-                    if (validTap && !tracked.isConsumed) {
-                        val mainEvent = awaitPointerEvent(PointerEventPass.Main)
-                        mainEvent.changes.forEach { it.consume() }
-                        onTap(hadSelection)
-                    }
-                    break
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (event.changes.size > 1) validTap = false
+            val tracked = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
+            if ((tracked.position - downPos).getDistance() > slop) validTap = false
+            val heldMs = maxOf(
+                tracked.uptimeMillis - gate.downEventMs,
+                android.os.SystemClock.uptimeMillis() - gate.downWallMs,
+            )
+            if (heldMs >= longPressMs) validTap = false
+            if (event.changes.none { it.pressed }) {
+                val hadSelection = gate.hadSelectionAtDown
+                if (validTap && !tracked.isConsumed) {
+                    val mainEvent = awaitPointerEvent(PointerEventPass.Main)
+                    mainEvent.changes.forEach { it.consume() }
+                    onTap(hadSelection)
                 }
+                break
             }
-        } finally {
-            gate.active = false
         }
     }
 }
@@ -3226,6 +3564,7 @@ private fun BookParagraph(
     ink: Color,
     serif: Boolean,
     highlights: List<BookAnnotation>,
+    menuProvider: TextContextMenuProvider,
     hasActiveSelection: Boolean = false,
     onTap: (Boolean) -> Unit = {},
     select: (BookSelection?) -> Unit,
@@ -3286,32 +3625,29 @@ private fun BookParagraph(
             }
         }
     }
-    BasicTextField(
-        value = TextFieldValue(styled, selection = range),
-        readOnly = true,
-        modifier = Modifier.readerParagraphTap(gate, { latestHasSelection }) { latestOnTap(it) },
-        textStyle = bookStyle(block, size, serif).copy(color = ink),
-        onValueChange = { next ->
-            val heldMs = maxOf(
-                gate.lastEventMs - gate.downEventMs,
-                android.os.SystemClock.uptimeMillis() - gate.downWallMs,
-            )
-            if (!next.selection.collapsed && gate.active && !gate.hadSelectionAtDown && heldMs < gate.longPressTimeoutMs) {
-                range = TextRange.Zero
-                return@BasicTextField
-            }
-            range = next.selection
-            val selected = text.substring(range.min, range.max)
-            select(
-                selected.takeIf { it.isNotBlank() && it.codePointCount(0, it.length) <= 8192 }?.let {
-                    BookSelection(
-                        block.index,
-                        piece.offset + text.codePointCount(0, range.min),
-                        piece.offset + text.codePointCount(0, range.max),
-                        it,
-                    )
-                },
-            )
-        },
-    )
+    CompositionLocalProvider(
+        LocalTextContextMenuToolbarProvider provides menuProvider,
+        LocalTextContextMenuDropdownProvider provides menuProvider,
+    ) {
+        BasicTextField(
+            value = TextFieldValue(styled, selection = range),
+            readOnly = true,
+            modifier = Modifier.readerParagraphTap(gate, { latestHasSelection }) { latestOnTap(it) },
+            textStyle = bookStyle(block, size, serif).copy(color = ink),
+            onValueChange = { next ->
+                range = next.selection
+                val selected = text.substring(range.min, range.max)
+                select(
+                    selected.takeIf { it.isNotBlank() && it.codePointCount(0, it.length) <= 8192 }?.let {
+                        BookSelection(
+                            block.index,
+                            piece.offset + text.codePointCount(0, range.min),
+                            piece.offset + text.codePointCount(0, range.max),
+                            it,
+                        )
+                    },
+                )
+            },
+        )
+    }
 }

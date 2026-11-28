@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from gdrive_test_fixture import drive_fixture
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, TALB, TIT2, TPE1
+from mutagen.id3 import APIC, TALB, TIT2, TPE1, TXXX
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from PIL import Image
@@ -95,7 +95,7 @@ def music_headers(action):
     return HEADERS | {"X-Wildstring-Library": action["library_id"]}
 
 
-def media(name, title):
+def media(name, title, *, book_author=None):
     data = io.BytesIO((AUDIO / name).read_bytes())
     picture = io.BytesIO()
     Image.new("RGB", (40, 40), "#a75231").save(picture, "PNG")
@@ -104,6 +104,8 @@ def media(name, title):
         audio["TIT2"] = TIT2(encoding=3, text=[title])
         audio["TALB"] = TALB(encoding=3, text=[title])
         audio["TPE1"] = TPE1(encoding=3, text=["Reader"])
+        if book_author:
+            audio.tags.add(TXXX(encoding=3, desc="AUTHOR", text=[book_author]))
         audio["APIC:"] = APIC(
             encoding=3, mime="image/png", type=3, desc="", data=picture.getvalue()
         )
@@ -260,7 +262,7 @@ def test_books_scan_local_chapters_autopair_and_original_ranges(cloud, settings)
     remote.folder("story", "Story", "books")
     epub = sample_epub()
     remote.file("epub", "Portable.epub", "story", epub)
-    audio = media("playback.mp3", "Portable EPUB")
+    audio = media("playback.mp3", "Portable EPUB", book_author="Reader")
     remote.file("part1", "01.mp3", "story", audio)
     remote.file("part2", "02.mp3", "story", audio)
     action, _ = library(owner, item, "books", folder_id="books", cache_max_mb=0)
@@ -291,6 +293,27 @@ def test_books_scan_local_chapters_autopair_and_original_ranges(cloud, settings)
     assert owner.get(f"{base}/audiobook/files/0/stream").content == audio
     assert not (settings.data_dir / "remote-cache").exists()
     assert not list((settings.data_dir / "books").rglob("*.epub"))
+
+    repair = owner.post(f"{base}/rescan", headers=HEADERS)
+    assert (repair.status_code, repair.json()["detail"]) == (409, "remote_storage_local_operation")
+    storage = owner.app.state.remote_storage
+    with storage.db.connect(scoped=False) as sql:
+        ebook_ref = sql.execute(
+            "SELECT * FROM remote_media_objects WHERE entity_kind='book_ebook' AND entity_id=?",
+            (book["id"],),
+        ).fetchone()
+    storage.cache.configure(("books", action["library_id"]), limit=1)
+    with storage.cache.writer(ebook_ref) as cached:
+        cached.write(epub)
+    assert list(storage.cache.root.iterdir())
+    assert owner.delete(base, headers=HEADERS).status_code == 204
+    assert not list(storage.cache.root.iterdir())
+    assert remote.content["epub"] == epub
+    assert remote.content["part2"] == audio
+    assert (
+        owner.delete(f"/api/v1/book-libraries/{action['library_id']}", headers=HEADERS).status_code
+        == 204
+    )
 
 
 def test_managed_resumable_uploads_resume_and_validate_location(cloud, settings):

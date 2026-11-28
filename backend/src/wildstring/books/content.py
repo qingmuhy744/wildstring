@@ -4,13 +4,25 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import time
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 
 from wildstring.books.ebooks import (
     IMAGE_SUFFIXES,
@@ -20,6 +32,7 @@ from wildstring.books.ebooks import (
     validate_upload,
 )
 from wildstring.books.service import EBOOK_SUFFIXES, Books
+from wildstring.diagnostics import record_event
 from wildstring.http_cache import private_image_response
 from wildstring.library.fs import open_source
 from wildstring.library.sidecar import export_books, write_asset
@@ -67,7 +80,6 @@ def router(database, settings, auth, transcoding, remote_storage=None):
     service = Books(database, settings)
     read = Annotated[dict, Depends(dependency(auth, "books:read"))]
     upload = Annotated[dict, Depends(dependency(auth, "books:upload_ebook"))]
-    edit = Annotated[dict, Depends(dependency(auth, "books:write"))]
     manage = Annotated[dict, Depends(dependency(auth, "books:manage_libraries"))]
     client = [Depends(auth.require_client)]
     temporary = settings.data_dir / "book_upload"
@@ -91,7 +103,7 @@ def router(database, settings, auth, transcoding, remote_storage=None):
         if suffix is None:
             raise HTTPException(422, "unsupported_ebook_format")
         file.file.seek(0)
-        with service.write(library["id"]):
+        with service.write(library["id"], operation="ebook_upload", book_id=book_id):
             if library["storage_backend"] == "gdrive" and user["profile"] != "owner":
                 raise HTTPException(403, "owner_required")
             if book_id is not None:
@@ -117,15 +129,161 @@ def router(database, settings, auth, transcoding, remote_storage=None):
             finally:
                 path.unlink(missing_ok=True)
 
+    def remove_tree(path, sources, *, base=None):
+        # Registration deconflicts roots. Check again before deletion in case a path changed.
+        if path.is_symlink() or (base is not None and base.is_symlink()):
+            raise HTTPException(409, "book_managed_path_conflict")
+        resolved = path.resolve()
+        if base is not None:
+            resolved_base = base.resolve()
+            if not resolved.is_relative_to(resolved_base) or resolved == resolved_base:
+                raise HTTPException(409, "book_managed_path_conflict")
+        if any(
+            resolved.is_relative_to(source) or source.is_relative_to(resolved) for source in sources
+        ):
+            raise HTTPException(409, "book_managed_path_conflict")
+        # rmtree does not follow symlinks, but a bind mount can be a directory.
+        mountinfo = Path("/proc/self/mountinfo")
+        if mountinfo.is_file():
+            for line in mountinfo.read_text().splitlines():
+                mount = Path(
+                    re.sub(r"\\([0-7]{3})", lambda part: chr(int(part[1], 8)), line.split()[4])
+                )
+                if mount.is_relative_to(resolved):
+                    raise HTTPException(409, "book_managed_path_conflict")
+        with suppress(FileNotFoundError):
+            shutil.rmtree(resolved)
+
+    def delete_records(db, library, book=None):
+        identity = library["id"]
+        root = Path(library["managed_root"])
+        sources = {
+            Path(row[0]).resolve()
+            for row in db.execute(
+                "SELECT root FROM book_library_sources UNION SELECT root FROM library_sources"
+            )
+        }
+        if book:
+            directory = Path(book["managed_dir"])
+            if directory.name != str(directory) or directory.name in ("", ".."):
+                raise HTTPException(409, "book_managed_path_conflict")
+            remove_tree(root / directory, sources, base=root)
+        else:
+            if db.execute(
+                "SELECT 1 FROM book_scan_jobs WHERE library_id=? AND status='running'",
+                (identity,),
+            ).fetchone():
+                raise HTTPException(409, "scan_busy")
+            remove_tree(root, sources)
+
+        for row in db.execute(
+            """SELECT e.cache_key FROM book_ebooks e JOIN books b ON b.id=e.book_id
+               WHERE b.library_id=? AND (? IS NULL OR b.id=?)
+               AND e.cache_key IS NOT NULL AND e.cache_key<>''
+               AND NOT EXISTS (SELECT 1 FROM book_ebooks sibling
+                               WHERE sibling.cache_key=e.cache_key AND sibling.book_id<>e.book_id)""",
+            (identity, book["id"] if book else None, book["id"] if book else None),
+        ):
+            key = Path(row["cache_key"])
+            if key.name != str(key) or key.name in ("", ".."):
+                raise HTTPException(409, "book_managed_path_conflict")
+            remove_tree(service.cache_root / key, sources, base=service.cache_root)
+
+        if library["storage_backend"] == "gdrive":
+            cache = remote_storage.cache
+            if book:
+                params = (identity, book["id"], book["id"])
+                media = db.execute(
+                    """DELETE FROM remote_media_objects WHERE collection='books' AND library_id=?
+                       AND (entity_kind='book_ebook' AND entity_id=? OR
+                            entity_kind='book_audiobook_file' AND substr(entity_id,1,instr(entity_id,':')-1)=?)
+                       RETURNING entity_kind, entity_id""",
+                    params,
+                ).fetchall()
+                for obj in media:
+                    cached = db.execute(
+                        "DELETE FROM remote_media_cache WHERE cache_key=? RETURNING filename",
+                        (cache.key(obj),),
+                    ).fetchone()
+                    if cached:
+                        (cache.root / cached["filename"]).unlink(missing_ok=True)
+            else:
+                cache.trim(db, ("books", identity), 0)
+                db.execute(
+                    "DELETE FROM library_remote_storage WHERE collection='books' AND library_id=?",
+                    (identity,),
+                )
+        if book:
+            db.execute("DELETE FROM books WHERE id=?", (book["id"],))
+        else:
+            db.execute("DELETE FROM book_library_migrations WHERE library_id=?", (identity,))
+            db.execute("DELETE FROM book_libraries WHERE id=?", (identity,))
+
+    @router.delete("/books/{book_id}", dependencies=client, status_code=204)
+    def delete_book(book_id: str, user: manage):
+        with database.connect(scoped=False) as db:
+            book = book_record(db, book_id, user)
+        identity = book["library_id"]
+        with service.write(identity, operation="delete_book", book_id=book_id):
+            cache_guard = (
+                remote_storage.cache.guard if book["storage_backend"] == "gdrive" else nullcontext()
+            )
+            with cache_guard, database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                book = book_record(db, book_id, user)
+                delete_records(db, library_record(db, identity, user), book)
+        record_event("books.deleted", task_id=identity, batch_id=book_id, user_id=user["id"])
+        return Response(status_code=204)
+
+    @router.delete("/book-libraries/{library_id}", dependencies=client, status_code=204)
+    def delete_library(library_id: str, owner: Annotated[dict, Depends(auth.require_owner)]):
+        with service.write(library_id, timeout=0, operation="delete_library"):
+            with database.connect(scoped=False) as db:
+                library = library_record(db, library_id, owner)
+            cache_guard = (
+                remote_storage.cache.guard
+                if library["storage_backend"] == "gdrive"
+                else nullcontext()
+            )
+            with cache_guard, database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                delete_records(db, library)
+        record_event("books.library_deleted", task_id=library_id, user_id=owner["id"])
+        return Response(status_code=204)
+
+    @router.post("/books/{book_id}/rescan", dependencies=client)
+    def rescan_book(book_id: str, user: manage):
+        with database.connect(scoped=False) as db:
+            book = book_record(db, book_id, user)
+        identity = book["library_id"]
+        with service.write(identity, operation="rescan_book", book_id=book_id):
+            with database.connect(scoped=False) as db:
+                book_record(db, book_id, user)
+                library = library_record(db, identity, user)
+            if library["storage_backend"] != "local":
+                raise HTTPException(409, "remote_storage_local_operation")
+            try:
+                service.rescan_book(library, book_id)
+            except (OSError, ValueError) as error:
+                raise HTTPException(422, "book_scan_file_unavailable") from error
+        record_event("books.rescanned", task_id=identity, batch_id=book_id, user_id=user["id"])
+        return {"id": book_id}
+
+    @router.post("/book-libraries/{library_id}/repair", dependencies=client)
+    def repair_library(library_id: str, user: manage):
+        return scan(library_id, user, repair=True)
+
     @router.post("/book-libraries/{library_id}/scan", dependencies=client)
-    def scan(library_id: str, user: manage):
+    def scan(library_id: str, user: manage, repair: bool = False):
         with database.connect(scoped=False) as db:
             library = library_record(db, library_id, user)
         if library["storage_backend"] == "gdrive":
+            if repair:
+                raise HTTPException(409, "remote_storage_local_operation")
             if user["profile"] != "owner":
                 raise HTTPException(403, "owner_required")
             return remote_storage.synchronize("books", library_id)
-        return service.scan(library)
+        return service.scan(library, repair=repair)
 
     @router.post("/book-libraries/{library_id}/export-sidecars", dependencies=client)
     def export_sidecars(library_id: str, user: manage):
@@ -221,6 +379,7 @@ def router(database, settings, auth, transcoding, remote_storage=None):
                 "book_id": book_id,
                 "format": ebook["format"],
                 "sha256": ebook["sha256"],
+                "content_revision": (ebook["cache_key"] or "").rsplit("-", 1)[-1],
                 "total_chars": ebook["total_chars"],
                 "chapters": [dict(row) for row in chapters],
             }
@@ -384,7 +543,7 @@ def router(database, settings, auth, transcoding, remote_storage=None):
         )
 
     @router.post("/books/{book_id}/cover", dependencies=client)
-    def cover_upload(book_id: str, user: edit, file: Annotated[UploadFile, File()]):
+    def cover_upload(book_id: str, user: upload, file: Annotated[UploadFile, File()]):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         data = file.file.read(MAX_IMAGE_BYTES + 1)
@@ -399,7 +558,15 @@ def router(database, settings, auth, transcoding, remote_storage=None):
             raise HTTPException(422, "book_image_invalid") from error
         relative = Path(book["managed_dir"]) / "cover.jpg"
         target_book_id = book["id"]
-        with service.write(book["library_id"]):
+        record_event(
+            "books.cover_upload",
+            task_id=book["library_id"],
+            batch_id=target_book_id,
+            user_id=user["id"],
+            operation="cover_upload",
+            stage="started",
+        )
+        with service.write(book["library_id"], operation="cover_upload", book_id=target_book_id):
             write_asset(Path(book["managed_root"]), relative, jpeg)
             with database.connect(write=True) as db:
                 db.execute(
@@ -415,6 +582,14 @@ def router(database, settings, auth, transcoding, remote_storage=None):
                 export_books(
                     database, Path(book["managed_root"]), book["library_id"], target_book_id
                 )
+        record_event(
+            "books.cover_upload",
+            task_id=book["library_id"],
+            batch_id=target_book_id,
+            user_id=user["id"],
+            operation="cover_upload",
+            stage="completed",
+        )
         return {"id": target_book_id}
 
     @router.get("/books/{book_id}/cover")

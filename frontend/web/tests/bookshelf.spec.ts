@@ -812,15 +812,67 @@ test('书库管理提供跨卷失败、导出反馈和访问受限说明', async
     }
     await route.fulfill({ status: 422, json: { detail: 'hardlink_cross_device' } });
   });
+  await expect(panel.getByText('/audiobooks/source', { exact: false })).toBeVisible();
   await panel.getByRole('button', { name: '迁移书库存储', exact: true }).click();
   const error = panel.getByRole('alert');
   await expect(error).toContainText('同一挂载卷');
+  await expect(error).toContainText('两个独立 bind mount');
   await expect(error).toBeInViewport();
+  await error.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await page.screenshot({ scale: 'css', path: info.outputPath('storage-cross-mount.png') });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.screenshot({ scale: 'css', path: info.outputPath('storage-cross-mount-dark.png') });
   await panel.getByRole('button', { name: '导出便携元数据', exact: true }).click();
   await expect(panel.getByText('已导出 1 份清单')).toBeVisible();
+
+  const trace = 'e1234567890abcdef1234567890abcde';
+  await page.route(`**/api/v1/book-libraries/${id}/scan`, (route) =>
+    route.fulfill({
+      status: 409,
+      headers: { 'X-Wildstring-Trace-Id': trace },
+      json: { detail: 'scan_busy' },
+    }),
+  );
+  await panel.getByRole('button', { name: '扫描来源', exact: true }).click();
+  await expect(panel.getByText('书库正在扫描，完成后重试。', { exact: false })).toContainText(
+    trace,
+  );
+  let status = 'running';
+  await page.route(`**/api/v1/book-libraries/${id}/scans`, (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: 'test-job',
+            status,
+            scanned_files: 8,
+            added_books: 2,
+            updated_books: 1,
+          },
+        ],
+      },
+    }),
+  );
+  const running = panel.getByText('正在扫描 · 已扫描 8 个文件', { exact: false });
+  await expect(running).toBeVisible();
+  await running.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.screenshot({
+      scale: 'css',
+      path: info.outputPath(`alpha3-scan-progress-${theme}.png`),
+    });
+  }
+  for (const [next, label] of [
+    ['completed_with_errors', '部分文件扫描失败'],
+    ['failed', '扫描失败'],
+    ['completed', '扫描完成'],
+  ]) {
+    status = next;
+    await expect(panel.getByText(`${label} · 已扫描 8 个文件`, { exact: false })).toBeVisible({
+      timeout: 7000,
+    });
+  }
 
   await manageTab(page, '元数据来源');
   const sourcesPanel = page.getByRole('region', { name: '元数据来源', exact: true });
@@ -1237,4 +1289,147 @@ test('书架支持超过 100 本书的分页加载与服务端搜索筛选', asy
   await page.getByRole('searchbox', { name: '查找书籍', exact: true }).fill('第101本');
   await expect(page.getByRole('button', { name: '第101本长篇小说', exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: '馆藏样本 001', exact: false })).toHaveCount(0);
+});
+
+test('详情编辑保留署名和系列，目录只显示语义标题', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const series = `风雪来信 ${info.project.name} ${Date.now()}`;
+  const titles = [`${series} 第二卷`, `${series} 第一卷`];
+  for (const [offset, title] of titles.entries()) {
+    const response = await page.request.post('/api/v1/books/upload', {
+      headers: bookClientHeaders,
+      multipart: {
+        file: {
+          name: `${title}.txt`,
+          mimeType: 'text/plain',
+          buffer: Buffer.from(
+            '卷首文字\n第一季\n第一卷\n第一章\n第五个故事，重新回到西沙。\n' + '正文'.repeat(6200),
+          ),
+        },
+      },
+    });
+    expect(response.status()).toBe(201);
+    const { id } = await response.json();
+    expect(
+      (
+        await page.request.patch(`/api/v1/books/${id}/metadata`, {
+          headers: bookClientHeaders,
+          data: {
+            authors: ['林雨'],
+            narrators: ['许舟'],
+            series_name: series,
+            series_index: 2 - offset,
+            description: '沿途寄出的信。',
+            publisher: '青山出版社',
+          },
+        })
+      ).ok(),
+    ).toBeTruthy();
+  }
+  await section(page, '书架');
+  await page.getByRole('button', { name: titles[0] }).click();
+  await expect(page.getByText('作者 · 林雨')).toBeVisible();
+  await expect(page.getByText('演播 · 许舟')).toBeVisible();
+  await page.getByText('简介', { exact: true }).click();
+  await expect(page.getByText('沿途寄出的信。')).toBeVisible();
+  await page.locator('.book-detail-information summary').filter({ hasText: series }).click();
+  const seriesButtons = page.locator('.book-series-list button');
+  await expect(seriesButtons).toHaveText([`${titles[1]} · 第 1 卷`, `${titles[0]} · 第 2 卷`]);
+  await expect(page.locator('.book-detail-chapter-play')).toHaveText([
+    '第一季',
+    '第一卷',
+    '第一章',
+  ]);
+  await expect(page.getByRole('button', { name: '第一卷', exact: true })).toHaveAttribute(
+    'data-level',
+    '2',
+  );
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.screenshot({ scale: 'css', path: info.outputPath(`alpha3-metadata-${theme}.png`) });
+    await page
+      .locator('.book-chapters-section')
+      .evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await page.screenshot({ scale: 'css', path: info.outputPath(`alpha3-contents-${theme}.png`) });
+    await page.getByRole('heading', { name: titles[0], exact: true }).scrollIntoViewIfNeeded();
+  }
+  await page.getByRole('button', { name: '整理与编辑' }).click();
+  await expect(page.getByRole('textbox', { name: '出版社' })).not.toBeVisible();
+  await page.getByText('更多信息', { exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '出版社' })).toHaveValue('青山出版社');
+  await page.getByRole('textbox', { name: '演播', exact: true }).fill('南北');
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.getByRole('textbox', { name: '演播', exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({
+      scale: 'css',
+      path: info.outputPath(`alpha3-metadata-edit-${theme}.png`),
+    });
+  }
+  await page.locator('.book-edit-panel form').first().getByRole('button', { name: '保存' }).click();
+  await expect(page.getByText('演播 · 南北')).toBeVisible();
+  await seriesButtons.first().click();
+  await expect(page.getByRole('heading', { name: titles[1], exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '第一卷', exact: true }).click();
+  await expect(page.getByRole('dialog').getByText('第一卷', { exact: true }).first()).toBeVisible();
+});
+
+test('书目快捷操作与书库删除走独立确认和个人进度', async ({ page, isMobile }, info) => {
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const title = `管理回归 ${info.project.name} ${Date.now()}`;
+  const { id, libraryId } = await uploadReaderFixture(page, title);
+  await section(page, '书架');
+  await page.getByLabel('书库', { exact: true }).selectOption(libraryId);
+  const card = page
+    .locator('.bookshelf-grid li')
+    .filter({ has: page.locator(`[data-book-id="${id}"]`) });
+  const actions = card.getByRole('button', { name: '书目操作' });
+  await actions.click();
+  await page.screenshot({ scale: 'css', path: info.outputPath('management-card-light.png') });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.screenshot({ scale: 'css', path: info.outputPath('management-card-dark.png') });
+  await card.getByRole('button', { name: '标记为已完成' }).click();
+  await expect(card.getByRole('button').first()).toContainText('已完成');
+  await actions.click();
+  await card.getByRole('button', { name: '从继续阅读/收听中移除' }).click();
+  await expect(card.getByRole('button').first()).toContainText('未开始');
+
+  await card.locator('[data-book-id]').click();
+  await page.getByRole('button', { name: '整理与编辑' }).click();
+  const manage = page.locator('.book-edit-panel');
+  const menu = manage.getByRole('button', { name: '书目操作' });
+  await menu.click();
+  const rescan = page.waitForResponse((response) => response.url().endsWith(`/books/${id}/rescan`));
+  await manage.getByRole('button', { name: '重新扫描' }).click();
+  expect((await rescan).status()).toBe(200);
+  await menu.click();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('保留导入源文件');
+    await dialog.dismiss();
+  });
+  await manage.getByRole('button', { name: '删除书目' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  await menu.click();
+  page.once('dialog', (dialog) => dialog.accept());
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/books/${id}`) && response.request().method() === 'DELETE',
+  );
+  await manage.getByRole('button', { name: '删除书目' }).click();
+  expect((await deleted).status()).toBe(204);
+  await expect(page.getByRole('heading', { name: title })).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+  expect((await page.request.get(`/api/v1/books/${id}`)).status()).toBe(404);
+  await manageTab(page, '书库与存储');
+  const library = page.getByRole('region', { name: '书库与存储配置' });
+  await library.getByRole('button', { name: title, exact: false }).click();
+  await library.getByText('书库操作', { exact: true }).click();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('导入源文件会保留');
+    await dialog.accept();
+  });
+  await library.getByRole('button', { name: '删除书库', exact: true }).click();
+  await expect(library.getByRole('button', { name: title, exact: false })).toHaveCount(0);
 });

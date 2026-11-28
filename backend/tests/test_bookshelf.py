@@ -118,6 +118,18 @@ def test_restricted_books_require_a_book_grant_and_hide_paths(settings, authenti
             "title": "Private",
             "subtitle": None,
             "authors": [],
+            "narrators": [],
+            "series_name": None,
+            "series_index": None,
+            "description": None,
+            "ebook_summary": None,
+            "audiobook_summary": None,
+            "publisher": None,
+            "published_year": None,
+            "language": None,
+            "isbn10": None,
+            "isbn13": None,
+            "tags": [],
             "has_cover": False,
             "has_ebook": False,
             "has_audiobook": False,
@@ -255,7 +267,11 @@ def test_upload_scanning_portable_metadata_and_personal_checkpoints(
         assert (
             owner.get(prefix + "/ebook/download", headers={"Range": "bytes=0-2"}).status_code == 206
         )
-        changed = owner.patch(prefix + "/metadata", headers=HEADERS, json={"title": "精选野弦"})
+        changed = owner.patch(
+            prefix + "/metadata",
+            headers=HEADERS,
+            json={"title": "精选野弦", "publisher": None, "series_index": None},
+        )
         assert changed.status_code == 200, changed.text
 
         reader, _ = listener(owner, [])
@@ -282,14 +298,16 @@ def test_upload_scanning_portable_metadata_and_personal_checkpoints(
         assert reader_book["resume_kind"] is None
         assert reader_book["progress_status"] == "unread"
         assert reader_book["reading_progress"] is None
-        assert reader.get(prefix).json() == reader_book
+        reader_detail = reader.get(prefix).json()
+        assert {key: reader_detail[key] for key in reader_book} == reader_book
         details = owner.get(prefix).json()
         assert details["reading_progress"]["spine_index"] == 0
         assert details["reading_progress"]["chapter_title"] == "第一章"
         assert details["reading_progress"]["overall_ratio"] > 0
         assert details["reading_progress"]["completed"] is False
         assert details["listening_progress"] is None
-        assert details == owner.get("/api/v1/books").json()["items"][0]
+        listed = owner.get("/api/v1/books").json()["items"][0]
+        assert {key: details[key] for key in listed} == listed
         annotation = {
             "spine_index": 0,
             "start_block_index": 1,
@@ -337,6 +355,9 @@ def test_upload_scanning_portable_metadata_and_personal_checkpoints(
         path = Path(library["managed_root"]) / identity / ".wildstring" / "manifest.json"
         manifest_text = path.read_text()
         assert "精选野弦" in manifest_text
+        manifest = json.loads(manifest_text)
+        assert {"publisher", "series_index"} <= set(manifest["locked_fields"])
+        assert manifest["publisher"] is manifest["series_index"] is None
         assert "only the owner sees this" not in manifest_text
         assert "session_id" not in manifest_text and "user_id" not in manifest_text
 
@@ -829,7 +850,8 @@ def test_audiobook_incremental_rescan_auto_pair_isolation_and_manual_pair_merge(
         assert not (Path(lib["managed_root"]) / ext_id).exists()
         assert owner.get(f"/api/v1/books/{audio_id}/reading-progress").json()["char_offset"] == 2
         dual = owner.get(f"/api/v1/books/{audio_id}").json()
-        assert dual == owner.get("/api/v1/books", params={"library_id": lib_id}).json()["items"][0]
+        catalog_item = owner.get("/api/v1/books", params={"library_id": lib_id}).json()["items"][0]
+        assert {key: dual[key] for key in catalog_item} == catalog_item
         assert dual["resume_kind"] == "reading"
         assert dual["progress_status"] == "in_progress"
         audio = dual["listening_progress"]
@@ -1444,3 +1466,574 @@ def test_books_catalog_server_search_filters_and_pagination(
         assert {item["id"] for item in page1["items"]}.isdisjoint(
             {item["id"] for item in page2["items"]}
         )
+
+
+def test_scan_groups_discs_and_extracts_series_roles_and_descriptions(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    from mutagen.id3 import TALB, TIT2, TPE1, TPE2, TRCK, TXXX
+    from mutagen.mp3 import MP3
+
+    from wildstring.books.service import _audio_text
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "series-source"
+    series = root / "长篇故事"
+
+    def audio(name, track, *, explicit=False):
+        path = series / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(fixture, path)
+        media = MP3(path)
+        if media.tags is None:
+            media.add_tags()
+        media.tags.add(TRCK(encoding=3, text=[str(track)]))
+        media.tags.add(TPE1(encoding=3, text=["只写艺人"]))
+        media.tags.add(TPE2(encoding=3, text=["只写专辑艺人"]))
+        if explicit:
+            media.tags.add(TXXX(encoding=3, desc="AUTHOR", text=["林雨"]))
+            media.tags.add(TXXX(encoding=3, desc="NARRATOR", text=["许舟"]))
+            media.tags.add(TIT2(encoding=3, text=["有效章节"]))
+        else:
+            media.tags.add(TIT2(encoding=3, text=["\ufffd\ufffd"]))
+        media.tags.add(TALB(encoding=3, text=["\ufffd\ufffd"]))
+        media.save()
+
+    audio("第一卷/DISC/第2回.mp3", 1)
+    audio("第一卷/DISC/第3回.mp3", 3)
+    audio("第一卷/DISC/第25回.mp3", 1)
+    audio("第二卷/CD1/02.mp3", 1, explicit=True)
+    audio("第二卷/CD2/01.mp3", 1)
+    audio("第二卷/CD2/00.mp3", 2)
+    (series / "第一卷/内容简介.txt").write_bytes("第一卷的简介。".encode("gb18030"))
+    (series / "第二卷/简介.txt").write_text("第二卷的简介。")
+    (series / "第一卷/reader.txt").write_bytes("許時".encode("utf-16"))
+    (series / "description.txt").write_bytes("繁體中文簡介。這是一本書的內容簡介。".encode("big5"))
+    (series / "长篇故事.txt").write_text("第一季\n第一卷\n第一章\n正文")
+    (root / "Readme.txt").write_text("目录说明")
+    assert _audio_text("中文书名".encode("gb18030").decode("latin-1")) == "中文书名"
+    assert _audio_text("中文书名".encode().decode("latin-1")) == "中文书名"
+    assert _audio_text("Émile Zola") == "Émile Zola"
+    assert _audio_text("物語") == "物語"
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Series", source_roots=[str(root)])
+        base = f"/api/v1/book-libraries/{lib['id']}"
+        scan = owner.post(base + "/scan", headers=HEADERS)
+        assert scan.json()["added_books"] == 3, scan.text
+        params = {"series_name": "长篇故事"}
+        listing = owner.get("/api/v1/books", params=params).json()["items"]
+        assert [book["series_index"] for book in listing] == [None, 1, 2]
+        full, first, second = listing
+        assert full["ebook_summary"]["chapter_count"] == 3
+        assert full["description"] == "繁體中文簡介。這是一本書的內容簡介。"
+        assert first["title"] == "第一卷"
+        assert first["authors"] == [] and first["narrators"] == ["許時"]
+        assert second["authors"] == ["林雨"] and second["narrators"] == ["许舟"]
+        assert first["description"] == "第一卷的简介。"
+        assert second["description"] == "第二卷的简介。"
+        assert first["audiobook_summary"]["codec_summary"] == "mp3"
+        assert first["audiobook_summary"]["chapter_count"] == 3
+        chapters = owner.get(f"/api/v1/books/{first['id']}/audiobook").json()["chapters"]
+        assert [chapter["title"] for chapter in chapters] == ["第2回", "第3回", "第25回"]
+        chapters = owner.get(f"/api/v1/books/{second['id']}/audiobook").json()["chapters"]
+        assert [chapter["title"] for chapter in chapters] == ["有效章节", "01", "00"]
+        for query in ("许舟", "林雨"):
+            results = owner.get("/api/v1/books", params={"q": query}).json()["items"]
+            assert [book["id"] for book in results] == [second["id"]]
+        prefix = f"/api/v1/books/{second['id']}"
+        assert (
+            owner.patch(
+                prefix + "/metadata",
+                headers=HEADERS,
+                json={"series_name": "手工系列", "series_index": 7, "narrators": ["手改演播"]},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.post(base + "/scan?repair=true", headers=HEADERS).json()["status"] == "completed"
+        )
+        detail = owner.get(prefix).json()
+        assert (detail["series_name"], detail["series_index"], detail["narrators"]) == (
+            "手工系列",
+            7,
+            ["手改演播"],
+        )
+
+
+def test_repair_legacy_discs_and_txt_remaps_personal_anchors(
+    settings, authenticated_client, tmp_path, monkeypatch
+):
+    import shutil
+
+    from mutagen.id3 import TIT2
+    from mutagen.mp3 import MP3
+
+    from wildstring.books import ebooks, service
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "legacy-books"
+    volume = root / "案卷" / "第一卷"
+    legacy_a = volume / "CD1"
+    legacy_b = volume / "CD2"
+    for folder, title in ((legacy_a, "旧盘一"), (legacy_b, "旧盘二")):
+        folder.mkdir(parents=True)
+        path = folder / "01.mp3"
+        shutil.copyfile(fixture, path)
+        media = MP3(path)
+        if media.tags is None:
+            media.add_tags()
+        media.tags.add(TIT2(encoding=3, text=[title]))
+        media.save()
+    (root / "案卷" / "案卷.txt").write_text(
+        "卷首\n第一季\n第一卷\n第一章\n第五个故事，重新回到西沙。\n"
+        + "长" * 12001
+        + "\n第二章\n锚点原文。"
+    )
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Legacy", source_roots=[str(root)])
+        base = f"/api/v1/book-libraries/{lib['id']}"
+        with monkeypatch.context() as legacy:
+            import re
+
+            legacy.setattr(service, "DISC_DIRECTORY", re.compile(r"(?!x)x"))
+            legacy.setattr(service, "EBOOK_CACHE_REVISION", 1)
+            legacy.setattr(
+                ebooks, "txt_heading_level", lambda line: 3 if line in {"第一章", "第二章"} else 0
+            )
+            assert owner.post(base + "/scan", headers=HEADERS).json()["added_books"] == 3
+
+        listing = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+        book = next(item for item in listing if item["has_ebook"])
+        txt = f"/api/v1/books/{book['id']}"
+        audio = next(item for item in listing if item["title"] == "旧盘二")
+        sound = f"/api/v1/books/{audio['id']}"
+        old = owner.get(txt + "/ebook/manifest").json()
+        old_spine = old["chapters"][-1]["spine_index"]
+        session = {
+            "session_id": "legacy-repair-session",
+            "device_id": "reader",
+            "base_version": 0,
+            "sequence": 1,
+        }
+        assert (
+            owner.put(
+                txt + "/reading-progress",
+                headers=HEADERS,
+                json=session | {"spine_index": old_spine, "block_index": 1, "char_offset": 2},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.post(
+                txt + "/bookmarks",
+                headers=HEADERS,
+                json={
+                    "kind": "ebook",
+                    "spine_index": old_spine,
+                    "block_index": 1,
+                    "char_offset": 2,
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            owner.post(
+                txt + "/annotations",
+                headers=HEADERS,
+                json={
+                    "spine_index": old_spine,
+                    "start_block_index": 1,
+                    "start_char_offset": 0,
+                    "end_block_index": 1,
+                    "end_char_offset": 2,
+                    "selected_text": "锚点",
+                    "color": "sage",
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            owner.put(
+                sound + "/listening-progress",
+                headers=HEADERS,
+                json=session | {"chapter_index": 0, "chapter_position_ms": 200},
+            ).status_code
+            == 200
+        )
+        assert (
+            owner.post(
+                sound + "/bookmarks",
+                headers=HEADERS,
+                json={"kind": "audio", "chapter_index": 0, "position_ms": 100},
+            ).status_code
+            == 201
+        )
+        assert (
+            owner.patch(
+                sound + "/audiobook/chapters/0",
+                headers=HEADERS,
+                json={"title": "手工校对"},
+            ).status_code
+            == 200
+        )
+
+        for _ in range(2):
+            repair = owner.post(base + "/repair", headers=HEADERS)
+            assert repair.json()["status"] == "completed", repair.text
+            listing = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+            assert len(listing) == 2
+            sound = "/api/v1/books/" + next(item["id"] for item in listing if item["has_audiobook"])
+            assert [
+                chapter["title"] for chapter in owner.get(sound + "/audiobook").json()["chapters"]
+            ] == ["旧盘一", "手工校对"]
+            progress = owner.get(sound + "/listening-progress").json()
+            assert (progress["chapter_index"], progress["chapter_position_ms"]) == (1, 200)
+            assert progress["version"] == 2
+            mark = owner.get(sound + "/bookmarks").json()["items"][0]
+            assert (mark["chapter_index"], mark["position_ms"]) == (1, 100)
+
+            manifest = owner.get(txt + "/ebook/manifest").json()
+            assert old["content_revision"] != manifest["content_revision"]
+            chapters = manifest["chapters"]
+            assert [chapter["level"] for chapter in chapters] == [0, 1, 2, 3, 0, 0, 3]
+            assert [chapter["title"] for chapter in chapters if chapter["level"]] == [
+                "第一季",
+                "第一卷",
+                "第一章",
+                "第二章",
+            ]
+            progress = owner.get(txt + "/reading-progress").json()
+            assert (progress["spine_index"], progress["block_index"], progress["char_offset"]) == (
+                6,
+                1,
+                2,
+            )
+            bookmark = owner.get(txt + "/bookmarks").json()["items"][0]
+            assert (bookmark["spine_index"], bookmark["block_index"], bookmark["char_offset"]) == (
+                6,
+                1,
+                2,
+            )
+            annotation = owner.get(txt + "/annotations").json()["items"][0]
+            assert (
+                annotation["spine_index"],
+                annotation["selected_text"],
+                annotation["end_char_offset"],
+            ) == (6, "锚点", 2)
+            raw = owner.get(txt + "/ebook/chapters/6").json()["blocks"][1]["text"]
+            assert raw[annotation["start_char_offset"] : annotation["end_char_offset"]] == "锚点"
+        stale = owner.put(
+            txt + "/reading-progress",
+            headers=HEADERS,
+            json=session
+            | {"sequence": 2, "spine_index": old_spine, "block_index": 1, "char_offset": 2},
+        )
+        assert stale.status_code == 409
+
+
+def test_book_scan_reports_progress_and_diagnoses_cover_write_conflict(
+    settings, authenticated_client, tmp_path, monkeypatch, caplog
+):
+    import io
+    import logging
+    from contextlib import contextmanager
+    from threading import Event, Thread
+
+    from PIL import Image
+
+    from wildstring.books.service import Books
+
+    source = tmp_path / "progress-source"
+    for name in ("a", "b"):
+        folder = source / name
+        folder.mkdir(parents=True)
+        (folder / f"{name}.txt").write_text("第一章\n正文")
+    (source / "b" / "broken.epub").write_bytes(b"broken")
+    entered = Event()
+    resume = Event()
+    original_metadata = Books.directory_metadata
+    original_write = Books.write
+
+    def pause_second(self, book_id, root, folder, defaults=None):
+        if folder.name == "b":
+            entered.set()
+            assert resume.wait(10)
+        return original_metadata(self, book_id, root, folder, defaults)
+
+    @contextmanager
+    def write(self, library_id, **kwargs):
+        if kwargs.get("operation") == "cover_upload":
+            kwargs["timeout"] = 0.01
+        with original_write(self, library_id, **kwargs):
+            yield
+
+    monkeypatch.setattr(Books, "directory_metadata", pause_second)
+    monkeypatch.setattr(Books, "write", write)
+    caplog.set_level(logging.WARNING, logger="wildstring.events")
+    cover = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(cover, "PNG")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Scan progress", source_roots=[str(source)])
+        base = f"/api/v1/book-libraries/{lib['id']}"
+        results = []
+        scan = Thread(target=lambda: results.append(owner.post(base + "/scan", headers=HEADERS)))
+        scan.start()
+        try:
+            assert entered.wait(10)
+            latest = owner.get(base + "/scans").json()["items"][0]
+            assert latest["status"] == "running"
+            assert (latest["scanned_files"], latest["added_books"]) == (1, 1)
+            book = owner.get("/api/v1/books", params={"q": "a"}).json()["items"][0]
+            blocked = owner.post(
+                f"/api/v1/books/{book['id']}/cover",
+                headers=HEADERS,
+                files={"file": ("cover.png", cover.getvalue(), "image/png")},
+            )
+            assert (blocked.status_code, blocked.json()["detail"]) == (409, "scan_busy")
+            trace_id = blocked.headers["X-Wildstring-Trace-Id"]
+            assert any(
+                event.get("trace_id") == trace_id
+                and event.get("operation") == "cover_upload"
+                and event.get("batch_id") == book["id"]
+                and event.get("task_id") == lib["id"]
+                and event.get("code") == "scan_busy"
+                for item in caplog.records
+                if (event := getattr(item, "safe_event", None))
+            )
+        finally:
+            resume.set()
+            scan.join(10)
+        assert results[0].json()["status"] == "completed_with_errors"
+        latest = owner.get(base + "/scans").json()["items"][0]
+        assert (latest["scanned_files"], latest["added_books"]) == (3, 2)
+
+        def fail_scan(*args):
+            raise RuntimeError("test scan failure")
+
+        monkeypatch.setattr(Books, "directory_metadata", fail_scan)
+        client = TestClient(owner.app, raise_server_exceptions=False, cookies=owner.cookies)
+        assert client.post(base + "/scan", headers=HEADERS).status_code == 500
+        assert owner.get(base + "/scans").json()["items"][0]["status"] == "failed"
+
+
+def test_book_management_permissions_and_personal_progress(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    from filelock import FileLock
+
+    root = tmp_path / "book-management-source"
+    folder = root / "Story"
+    folder.mkdir(parents=True)
+    audio = folder / "02.mp3"
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3", audio
+    )
+    ebook = folder / "Story.txt"
+    ebook.write_text("第一章\n故事正文。")
+    other = root / "Other"
+    other.mkdir()
+    (other / "Other.txt").write_text("另一册。")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Manage books", source_roots=[str(root)], default_access="all")
+        base = f"/api/v1/book-libraries/{lib['id']}"
+        assert owner.post(base + "/scan", headers=HEADERS).status_code == 200
+        books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+        record = next(book for book in books if book["has_audiobook"])
+        other_book = next(book for book in books if book["id"] != record["id"])
+        book_id = record["id"]
+        path = f"/api/v1/books/{book_id}"
+        actors = {}
+        for profile in ("librarian", "editor", "listener"):
+            credentials = {"username": profile, "password": "book-test-password"}
+            user = owner.post(
+                "/api/v1/manage/users",
+                headers=HEADERS,
+                json=credentials | {"profile": profile, "library_ids": []},
+            )
+            assert user.status_code == 201
+            actor = TestClient(owner.app)
+            assert (
+                actor.post("/api/v1/auth/login", headers=HEADERS, json=credentials).status_code
+                == 200
+            )
+            assert actor.delete(base, headers=HEADERS).status_code == 403
+            assert "managed_root" not in actor.get("/api/v1/book-libraries").json()["items"][0]
+            actors[profile] = actor
+            if profile != "librarian":
+                assert actor.post(path + "/rescan", headers=HEADERS).status_code == 403
+                assert actor.delete(path, headers=HEADERS).status_code == 403
+        assert owner.post(path + "/rescan").status_code == 403
+        librarian = actors["librarian"]
+        guest = actors["listener"]
+        assert guest.post(path + "/progress/complete", headers=HEADERS).status_code == 204
+        assert guest.get(path).json()["progress_status"] == "finished"
+        assert owner.get(path).json()["progress_status"] == "unread"
+        assert (
+            guest.post(
+                path + "/bookmarks",
+                headers=HEADERS,
+                json={
+                    "kind": "ebook",
+                    "spine_index": 0,
+                    "block_index": 1,
+                    "char_offset": 1,
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            guest.post(
+                path + "/annotations",
+                headers=HEADERS,
+                json={
+                    "spine_index": 0,
+                    "start_block_index": 1,
+                    "start_char_offset": 0,
+                    "end_block_index": 1,
+                    "end_char_offset": 2,
+                    "selected_text": "故事",
+                    "color": "sage",
+                },
+            ).status_code
+            == 201
+        )
+        assert guest.delete(path + "/progress?kind=reading", headers=HEADERS).status_code == 204
+        assert guest.get(path).json()["listening_progress"]["completed"]
+        assert guest.get(path).json()["reading_progress"] is None
+        assert guest.delete(path + "/progress", headers=HEADERS).status_code == 204
+        assert guest.get(path).json()["progress_status"] == "unread"
+        assert len(guest.get(path + "/bookmarks").json()["items"]) == 1
+        assert len(guest.get(path + "/annotations").json()["items"]) == 1
+
+        assert (
+            librarian.patch(
+                path + "/metadata", headers=HEADERS, json={"title": "Edited"}
+            ).status_code
+            == 200
+        )
+        assert (
+            librarian.patch(
+                path + "/audiobook/chapters/0", headers=HEADERS, json={"title": "Retain this title"}
+            ).status_code
+            == 200
+        )
+        session = {
+            "session_id": "rescan-book-session",
+            "device_id": "reader",
+            "sequence": 1,
+            "base_version": 0,
+        }
+        assert (
+            guest.put(
+                path + "/listening-progress",
+                headers=HEADERS,
+                json=session | {"chapter_index": 0, "chapter_position_ms": 123},
+            ).status_code
+            == 200
+        )
+        assert (
+            guest.put(
+                path + "/reading-progress",
+                headers=HEADERS,
+                json=session | {"spine_index": 0, "block_index": 1, "char_offset": 2},
+            ).status_code
+            == 200
+        )
+        shutil.copyfile(audio, folder / "01.mp3")
+        (folder / "简介.txt").write_text("新简介。")
+        (other / "简介.txt").write_text("别的书不受影响。")
+        result = librarian.post(path + "/rescan", headers=HEADERS)
+        assert result.status_code == 200, result.text
+        assert librarian.get(path).json()["title"] == "Edited"
+        assert librarian.get(path).json()["description"] == "新简介。"
+        assert not owner.get(f"/api/v1/books/{other_book['id']}").json()["description"]
+        chapters = librarian.get(path + "/audiobook").json()["chapters"]
+        assert len(chapters) == 2 and chapters[1]["title"] == "Retain this title"
+        progress = guest.get(path + "/listening-progress").json()
+        assert (progress["chapter_index"], progress["chapter_position_ms"]) == (1, 123)
+        assert guest.get(path + "/reading-progress").json()["char_offset"] == 2
+        assert guest.get(path + "/annotations").json()["items"][0]["selected_text"] == "故事"
+
+        with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
+            blocked = owner.delete(base, headers=HEADERS)
+            assert blocked.status_code == 409 and blocked.json()["detail"] == "scan_busy"
+        db = Database(settings.data_dir)
+        with db.connect(write=True) as sql:
+            sql.execute(
+                """INSERT INTO book_library_migrations(id,library_id,source_root,target_root,
+                   library_version,created_by,created_at,updated_at) VALUES (?,?,?,?,1,'admin',0,0)""",
+                (
+                    "test-book-migration",
+                    lib["id"],
+                    lib["managed_root"],
+                    str(tmp_path / "unused-target"),
+                ),
+            )
+        blocked = owner.delete(base, headers=HEADERS)
+        assert blocked.status_code == 409 and blocked.json()["detail"] == "library_migration_busy"
+        with db.connect(write=True) as sql:
+            sql.execute(
+                "UPDATE book_library_migrations SET status='completed' WHERE id='test-book-migration'"
+            )
+        with db.connect(scoped=False) as sql:
+            cache_key = sql.execute(
+                "SELECT cache_key FROM book_ebooks WHERE book_id=?", (book_id,)
+            ).fetchone()[0]
+        managed = Path(lib["managed_root"])
+        assert librarian.delete(path, headers=HEADERS).status_code == 204
+        assert owner.get(path).status_code == 404
+        assert not (managed / book_id).exists()
+        assert not (settings.data_dir / "book_cache" / cache_key).exists()
+        assert audio.is_file() and ebook.read_text() == "第一章\n故事正文。"
+        assert owner.delete(base, headers=HEADERS).status_code == 204
+        assert not managed.exists()
+        assert (other / "Other.txt").read_text() == "另一册。"
+        assert audio.is_file()
+
+
+def test_book_series_matches_parent_prefix_volumes_and_omnibus_txt(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    fixture_mp3 = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    source = tmp_path / "series-source"
+    series_dir = source / "盗墓笔记"
+    vol1 = series_dir / "盗墓笔记1七星鲁王宫"
+    vol2 = series_dir / "盗墓笔记2秦岭神树"
+    (vol1 / "DISC").mkdir(parents=True)
+    (vol2 / "DISC").mkdir(parents=True)
+    (series_dir / "盗墓笔记全集.txt").write_text("第一季\n第一卷 七星鲁王\n第一章 血尸\n正文。\n")
+    (vol1 / "内容简介.txt").write_text("七星鲁王宫简介。", encoding="gb18030")
+    shutil.copyfile(fixture_mp3, vol1 / "DISC" / "七星鲁王宫01.mp3")
+    shutil.copyfile(fixture_mp3, vol2 / "DISC" / "秦岭神树01.mp3")
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "系列测试库", source_roots=[str(source)], auto_pair=False)
+        scan = owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS)
+        assert scan.status_code == 200 and scan.json()["status"] == "completed", scan.text
+
+        items = owner.get(
+            "/api/v1/books", params={"library_id": lib["id"], "series_name": "盗墓笔记"}
+        ).json()["items"]
+        assert [(item["title"], item["series_name"], item["series_index"]) for item in items] == [
+            ("盗墓笔记全集", "盗墓笔记", None),
+            ("盗墓笔记1七星鲁王宫", "盗墓笔记", 1.0),
+            ("盗墓笔记2秦岭神树", "盗墓笔记", 2.0),
+        ]
+        assert items[1]["description"] == "七星鲁王宫简介。"
+
+        # Deleting a book whose ebook row has NULL cache_key must not fail.
+        ebook_id = items[0]["id"]
+        with Database(settings.data_dir).connect(write=True) as sql:
+            sql.execute("UPDATE book_ebooks SET cache_key=NULL WHERE book_id=?", (ebook_id,))
+        assert owner.delete(f"/api/v1/books/{ebook_id}", headers=HEADERS).status_code == 204
+        assert (series_dir / "盗墓笔记全集.txt").is_file()

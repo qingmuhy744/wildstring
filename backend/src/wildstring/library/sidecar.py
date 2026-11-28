@@ -984,9 +984,16 @@ def export_books(database, root, library_id, book_id=None):
             for key in ("series_index", "published_year"):
                 if row[key] is not None:
                     manifest[key] = row[key]
-            manifest["locked_fields"] = [
-                key for key in json.loads(row["locked_fields_json"]) if key in manifest
-            ]
+            locks = json.loads(row["locked_fields_json"])
+            for key in locks:
+                if (
+                    key
+                    in (set(BOOK_TEXT) - {"title", "sort_title"})
+                    | {"series_index", "published_year"}
+                    and row[key] is None
+                ):
+                    manifest[key] = None
+            manifest["locked_fields"] = [key for key in locks if key in manifest]
             ebook = db.execute(
                 "SELECT format,sha256 FROM book_ebooks WHERE book_id=?", (identity,)
             ).fetchone()
@@ -1070,15 +1077,22 @@ def restore_book(database, library_root, book_id, source_root, folder):
                 fields[key] = value
         incoming_locks = manifest.get("locked_fields")
         if isinstance(incoming_locks, list):
-            locked.update(
-                key
-                for key in incoming_locks
-                if isinstance(key, str)
-                and key
-                in (set(BOOK_TEXT) - {"sort_title"})
-                | set(BOOK_ARRAY)
-                | {"series_index", "published_year"}
-            )
+            nullable = (set(BOOK_TEXT) - {"title", "sort_title"}) | {
+                "series_index",
+                "published_year",
+            }
+            for key in incoming_locks:
+                if not isinstance(key, str):
+                    continue
+                if (
+                    key in nullable
+                    and key not in protected
+                    and key in manifest
+                    and manifest[key] is None
+                ):
+                    fields[key] = None
+                if key in nullable or key == "title" or key in BOOK_ARRAY:
+                    locked.add(key)
         fields["locked_fields_json"] = json.dumps(sorted(locked))
         if fields:
             sql = ",".join(f"{key}=?" for key in fields)

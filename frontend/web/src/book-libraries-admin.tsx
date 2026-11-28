@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api } from './api';
+import { api, errorCodeMessage } from './api';
 import { FolderPicker } from './folder-picker';
 import {
   createDriveLibrary,
@@ -60,6 +60,15 @@ interface MigrationJob {
   error?: string;
 }
 
+interface ScanJob {
+  id: string;
+  status: 'running' | 'completed' | 'completed_with_errors' | 'failed';
+  scanned_files: number;
+  added_books: number;
+  updated_books: number;
+  error_message?: string | null;
+}
+
 export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   const { t } = useTranslation();
   const id = useId();
@@ -77,6 +86,8 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   const [migrateMode, setMigrateMode] = useState<'copy' | 'hardlink'>('hardlink');
   const [migrateRoot, setMigrateRoot] = useState('');
   const [picker, setPicker] = useState<'source' | 'managed' | 'migrate' | null>(null);
+  const [scanJob, setScanJob] = useState<ScanJob | null>(null);
+  const [scanPending, setScanPending] = useState(false);
   const [jobs, setJobs] = useState<MigrationJob[]>([]);
   const [members, setMembers] = useState<MemberUser[]>([]);
   const [grantedIds, setGrantedIds] = useState<Set<string>>(new Set());
@@ -91,6 +102,7 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
 
   const populateForm = useCallback((library: BookLibrary | null) => {
     setSelectedId(library?.id ?? null);
+    setScanJob(null);
     setBackend(library?.storage_backend || 'local');
     setDrive(defaultDriveDraft);
     setName(library?.name || '');
@@ -168,6 +180,30 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
     };
   }, [canOwner, selectedId, selected?.storage_backend]);
 
+  useEffect(() => {
+    if (!selectedId || selected?.storage_backend === 'gdrive') return;
+    const request = new AbortController();
+    let timer: number | undefined;
+    async function poll() {
+      try {
+        const result = await api<{ items: ScanJob[] }>(`/book-libraries/${selectedId}/scans`, {
+          signal: request.signal,
+        });
+        if (request.signal.aborted) return;
+        const latest = result.items[0] ?? null;
+        setScanJob(latest);
+        timer = window.setTimeout(poll, scanPending || latest?.status === 'running' ? 1000 : 4000);
+      } catch (cause) {
+        if (!request.signal.aborted) setError((cause as Error).message);
+      }
+    }
+    void poll();
+    return () => {
+      request.abort();
+      window.clearTimeout(timer);
+    };
+  }, [selectedId, selected?.storage_backend, scanPending]);
+
   const parsedSources = folders
     .split('\n')
     .map((line) => line.trim())
@@ -204,20 +240,37 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
     }
   }
 
-  async function runScan() {
+  async function deleteLibrary() {
+    if (!selected || !window.confirm(t('bookshelf.confirmDeleteLibrary', { name: selected.name })))
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/book-libraries/${selected.id}`, { method: 'DELETE' });
+      populateForm(null);
+      await loadLibraries(null);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runScan(repair = false) {
     if (!selected) return;
     setBusy(true);
+    setScanPending(true);
     setError('');
     setNotice('');
     try {
-      const result = await api<{ status: string }>(`/book-libraries/${selected.id}/scan`, {
+      await api<ScanJob>(`/book-libraries/${selected.id}/${repair ? 'repair' : 'scan'}`, {
         method: 'POST',
         timeoutMs: 0,
       });
-      setNotice(result.status === 'completed' ? t('bookshelf.scanned') : t('bookshelf.scanErrors'));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('common.actionError'));
     } finally {
+      setScanPending(false);
       setBusy(false);
     }
   }
@@ -449,6 +502,9 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
                     <option value="copy">{t('bookshelf.copy')}</option>
                     <option value="hardlink">{t('bookshelf.hardlink')}</option>
                   </select>
+                  {storageMode === 'hardlink' && (
+                    <p className="muted">{t('bookshelf.hardlinkMountHint')}</p>
+                  )}
                   <label htmlFor={`${id}-managed`}>{t('bookshelf.managedRoot')}</label>
                   <input
                     id={`${id}-managed`}
@@ -496,9 +552,33 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
           {selected.storage_backend !== 'gdrive' && (
             <>
               <h3>{t('bookshelf.maintenanceTitle')}</h3>
+              {scanJob && (
+                <p className="tnum" role="status">
+                  {t(`bookshelf.scanStatus.${scanJob.status}`)} ·{' '}
+                  {t('bookshelf.scanCounts', {
+                    files: scanJob.scanned_files,
+                    added: scanJob.added_books,
+                    updated: scanJob.updated_books,
+                  })}
+                  {scanJob.error_message && scanJob.status !== 'running' && (
+                    <span> · {errorCodeMessage(scanJob.error_message)}</span>
+                  )}
+                </p>
+              )}
               <div className="music-library-actions">
-                <button type="button" disabled={busy || !!activeJob} onClick={() => void runScan()}>
+                <button
+                  type="button"
+                  disabled={busy || !!activeJob || scanJob?.status === 'running'}
+                  onClick={() => void runScan()}
+                >
                   {t('bookshelf.scan')}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !!activeJob || scanJob?.status === 'running'}
+                  onClick={() => void runScan(true)}
+                >
+                  {t('bookshelf.repair')}
                 </button>
                 <button
                   type="button"
@@ -512,6 +592,19 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
                 )}
               </div>
             </>
+          )}
+          {canOwner && (
+            <details className="book-library-delete">
+              <summary>{t('bookshelf.libraryActions')}</summary>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy || !!activeJob || scanJob?.status === 'running'}
+                onClick={() => void deleteLibrary()}
+              >
+                {t('bookshelf.deleteLibrary')}
+              </button>
+            </details>
           )}
           {canOwner && (
             <>
@@ -562,6 +655,9 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
                       <option value="copy">{t('bookshelf.copy')}</option>
                       <option value="hardlink">{t('bookshelf.hardlink')}</option>
                     </select>
+                    {migrateMode === 'hardlink' && (
+                      <p className="muted">{t('bookshelf.hardlinkMountHint')}</p>
+                    )}
                     <label htmlFor={`${id}-migrate-root`}>{t('bookshelf.managedRoot')}</label>
                     <input
                       id={`${id}-migrate-root`}

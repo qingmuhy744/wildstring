@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.books.content import book_record
 from wildstring.books.providers import BookProviders, Provider
 from wildstring.books.service import Books
+from wildstring.diagnostics import record_event
 from wildstring.library.metadata import normalize
 from wildstring.library.sidecar import BOOK_ARRAY, BOOK_TEXT, export_books
 from wildstring.permissions import dependency
@@ -146,7 +147,7 @@ def router(
         locks = values.pop("locked_fields", None)
         if values.get("title") is None:
             values.pop("title", None)
-        with service.write(book["library_id"]):
+        with service.write(book["library_id"], operation="metadata_update", book_id=book_id):
             with database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 book = book_record(db, book_id, user)
@@ -172,6 +173,14 @@ def router(
                     (*fields.values(), book_id),
                 )
             export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
+        record_event(
+            "books.metadata_update",
+            task_id=book["library_id"],
+            batch_id=book_id,
+            user_id=user["id"],
+            operation="metadata_update",
+            stage="completed",
+        )
         return get_metadata(book_id, user)
 
     @router.patch(
@@ -183,7 +192,7 @@ def router(
             raise HTTPException(404, "book_chapter_not_found")
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
-        with service.write(book["library_id"]):
+        with service.write(book["library_id"], operation="chapter_title_update", book_id=book_id):
             with database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 book = book_record(db, book_id, user)

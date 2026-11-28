@@ -6,7 +6,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -20,6 +23,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -206,3 +211,34 @@ private fun readerRevealProgress(visible: Boolean, animate: Boolean, label: Stri
         label = label)
     return if (animate) animated else target
 }
+
+@Composable
+internal fun AnnotationColors(chosen: String?, onChoose: (String) -> Unit) {
+    Row(Modifier.testTag("book-annotation-colors"), horizontalArrangement = Arrangement.Center) {
+        for ((key, label) in readerAnnotationColors) {
+            val description = stringResource(label)
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .selectable(selected = chosen == key, role = if (chosen == null) Role.Button else Role.RadioButton) { onChoose(key) }
+                    .semantics { contentDescription = description },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier.size(24.dp)
+                        .background(annotationHighlightColorOrNull(key) ?: Color.Transparent, CircleShape)
+                        .border(
+                            if (chosen == key) 2.dp else 1.dp,
+                            if (chosen == key) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+                            CircleShape,
+                        ),
+                )
+            }
+        }
+    }
+}
+
+private val readerAnnotationColors = listOf(
+    "amber" to R.string.books_amber, "terracotta" to R.string.books_terracotta,
+    "sage" to R.string.books_sage, "stone" to R.string.books_stone,
+)

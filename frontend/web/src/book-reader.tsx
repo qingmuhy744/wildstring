@@ -18,6 +18,27 @@ export interface Book {
   title: string;
   subtitle?: string;
   authors?: string[];
+  narrators?: string[];
+  series_name?: string | null;
+  series_index?: number | null;
+  description?: string | null;
+  publisher?: string | null;
+  published_year?: number | null;
+  language?: string | null;
+  isbn10?: string | null;
+  isbn13?: string | null;
+  tags?: string[];
+  ebook_summary?: {
+    format: string;
+    chapter_count: number;
+    spine_count: number;
+    total_chars: number;
+  } | null;
+  audiobook_summary?: {
+    total_duration_ms: number;
+    chapter_count: number;
+    codec_summary: string;
+  } | null;
   has_cover?: boolean;
   has_ebook: boolean;
   has_audiobook: boolean;
@@ -149,10 +170,15 @@ interface Block {
   image_key?: string | null;
 }
 export interface EbookChapter {
+  level?: number;
   spine_index: number;
   title: string;
   char_count: number;
   start_global_char: number;
+}
+export function ebookContents(chapters: EbookChapter[]) {
+  const headings = chapters.filter((chapter) => chapter.level !== 0);
+  return headings.length ? headings : chapters;
 }
 interface Bookmark extends Anchor {
   id: string;
@@ -1069,6 +1095,8 @@ export function BookReader({
 
   const spineAnnotations = annotations.filter((ann) => ann.spine_index === spine);
   const noteCount = marks.length + annotations.length;
+  const contents = ebookContents(chapters);
+  const contentsPosition = contents.filter((chapter) => chapter.spine_index <= spine).length - 1;
   const activeChapter =
     chapters.find((chapter) => chapter.spine_index === spine) || chapters[spine];
 
@@ -1257,11 +1285,16 @@ export function BookReader({
             {panel === 'contents' &&
               (chapters.length ? (
                 <ul className="book-chapter-list">
-                  {chapters.map((chapter) => (
+                  {contents.map((chapter) => (
                     <li key={chapter.spine_index}>
                       <button
                         type="button"
-                        aria-current={chapter.spine_index === spine ? 'true' : undefined}
+                        data-level={chapter.level}
+                        aria-current={
+                          chapter.spine_index === contents[contentsPosition]?.spine_index
+                            ? 'true'
+                            : undefined
+                        }
                         onClick={() => {
                           jump({
                             spine_index: chapter.spine_index,
@@ -1271,9 +1304,6 @@ export function BookReader({
                           dismissPanel();
                         }}
                       >
-                        <span className="book-chapter-num tnum">
-                          {String(chapter.spine_index + 1).padStart(2, '0')}
-                        </span>
                         <span className="book-chapter-name">{chapter.title}</span>
                       </button>
                     </li>
@@ -1787,8 +1817,13 @@ export function BookReader({
         <div className="book-reader-rail book-reader-footer-inner">
           {chapters.length ? (
             <span className="book-reader-progress muted tnum">
-              {t('bookshelf.chapterProgress', { current: spine + 1, total: chapters.length })}
-              {activeChapter?.title ? ` · ${activeChapter.title}` : ''}
+              {contentsPosition >= 0 &&
+                t('bookshelf.chapterProgress', {
+                  current: contentsPosition + 1,
+                  total: contents.length,
+                })}
+              {activeChapter?.title &&
+                `${contentsPosition >= 0 ? ' · ' : ''}${activeChapter.title}`}
             </span>
           ) : (
             <span />
@@ -1864,6 +1899,7 @@ export interface BookAudioSession {
     align?: AudioAlignment,
   ) => void;
   close: () => void;
+  discard: () => void;
   choose: (next: number, play?: boolean) => void;
   seekBy: (seconds: number) => void;
   seekToChapterMs: (chapterMs: number) => void;
@@ -2025,18 +2061,22 @@ export function useBookAudioSession({
     [checkpoint, current, index, rate],
   );
 
-  const close = useCallback(() => {
-    save();
-    audio.current?.pause();
-    pendingChapter.current = null;
-    alignment.current = null;
-    autoplay.current = false;
-    setManualStart(false);
-    setPlaying(false);
-    setTimer(0);
-    setBook(null);
-    setChapters(null);
-  }, [save]);
+  const close = useCallback(
+    (saveProgress = true) => {
+      if (saveProgress) save();
+      touched.current = false;
+      audio.current?.pause();
+      pendingChapter.current = null;
+      alignment.current = null;
+      autoplay.current = false;
+      setManualStart(false);
+      setPlaying(false);
+      setTimer(0);
+      setBook(null);
+      setChapters(null);
+    },
+    [save],
+  );
 
   useEffect(() => {
     const rising = activeElsewhere && !prevElsewhere.current;
@@ -2176,6 +2216,7 @@ export function useBookAudioSession({
     audio,
     open,
     close,
+    discard: () => close(false),
     choose,
     seekBy,
     seekToChapterMs,

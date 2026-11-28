@@ -69,7 +69,7 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
-    @GET("api/v1/books") suspend fun books(@Query("library_id") libraryId: String? = null, @Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): BookItems<BookSummary>
+    @GET("api/v1/books") suspend fun books(@Query("library_id") libraryId: String? = null, @Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0, @Query("series_name") seriesName: String? = null, @Query("q") query: String? = null): BookItems<BookSummary>
     @GET("api/v1/book-libraries") suspend fun bookLibraries(): BookItems<BookLibrary>
     @GET("api/v1/books/{id}") suspend fun book(@Path("id") id: String): BookSummary
     @GET("api/v1/books/metadata/sources") suspend fun bookMetadataSources(): BookItems<BookMetadataSource>
@@ -79,6 +79,11 @@ interface Api {
         @Query("sources") sources: String? = null,
         @Query("q") q: String? = null,
     ): BookItems<BookMetadataCandidate>
+    @DELETE("api/v1/books/{id}") suspend fun deleteBook(@Path("id") id: String, @Tag owner: RequestOwner)
+    @POST("api/v1/books/{id}/rescan") suspend fun rescanBook(@Path("id") id: String, @Tag owner: RequestOwner): JsonObject
+    @DELETE("api/v1/books/{id}/progress") suspend fun clearBookProgress(@Path("id") id: String, @Tag owner: RequestOwner)
+    @POST("api/v1/books/{id}/progress/complete") suspend fun completeBook(@Path("id") id: String, @Tag owner: RequestOwner)
+    @GET("api/v1/books/{id}/metadata") suspend fun bookMetadata(@Path("id") id: String): JsonObject
     @PATCH("api/v1/books/{id}/metadata") suspend fun updateBookMetadata(
         @Path("id") id: String, @Body body: JsonObject, @Tag owner: RequestOwner,
     ): JsonObject

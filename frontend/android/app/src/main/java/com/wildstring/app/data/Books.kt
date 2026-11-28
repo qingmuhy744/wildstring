@@ -14,6 +14,8 @@ import java.util.UUID
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 
+internal fun canManageBooks(profile: String?): Boolean = profile == "owner" || profile == "librarian"
+
 data class BookItems<T>(val items: List<T> = emptyList())
 data class BookSummary(
     val id: String,
@@ -28,6 +30,18 @@ data class BookSummary(
     @SerializedName("resume_kind") val resumeKind: String? = null,
     @SerializedName("reading_progress") val readingProgress: BookCarrierProgress? = null,
     @SerializedName("listening_progress") val listeningProgress: BookCarrierProgress? = null,
+    val narrators: List<String>? = null,
+    @SerializedName("series_name") val seriesName: String? = null,
+    @SerializedName("series_index") val seriesIndex: Double? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    @SerializedName("published_year") val publishedYear: Int? = null,
+    val language: String? = null,
+    val isbn10: String? = null,
+    val isbn13: String? = null,
+    val tags: List<String>? = null,
+    @SerializedName("ebook_summary") val ebookSummary: BookEbookSummary? = null,
+    @SerializedName("audiobook_summary") val audiobookSummary: BookAudioSummary? = null,
 )
 data class BookCarrierProgress(
     @SerializedName("chapter_title") val chapterTitle: String?,
@@ -39,6 +53,7 @@ data class BookLibrary(
     val id: String,
     val name: String,
     @SerializedName("storage_mode") val storageMode: String = "copy",
+    @SerializedName("storage_backend") val storageBackend: String? = null,
 )
 data class BookMetadataSource(
     val id: String,
@@ -46,8 +61,28 @@ data class BookMetadataSource(
     val kind: String = "builtin",
     val enabled: Boolean = true,
 )
-data class BookChapter(@SerializedName("spine_index") val index: Int, val title: String)
-data class BookManifest(val chapters: List<BookChapter>, val sha256: String)
+data class BookEbookSummary(
+    val format: String,
+    @SerializedName("chapter_count") val chapterCount: Int,
+    @SerializedName("total_chars") val totalChars: Int,
+)
+data class BookAudioSummary(
+    @SerializedName("total_duration_ms") val totalDurationMs: Long,
+    @SerializedName("chapter_count") val chapterCount: Int,
+    @SerializedName("codec_summary") val codecSummary: String?,
+)
+data class BookChapter(@SerializedName("spine_index") val index: Int, val title: String, val level: Int? = null)
+data class BookManifest(
+    val chapters: List<BookChapter>,
+    val sha256: String,
+    @SerializedName("content_revision") val contentRevision: String? = null,
+) {
+    val cacheKey: String get() = if (contentRevision == null) sha256 else "$sha256:$contentRevision"
+}
+
+internal fun List<BookChapter>.ebookContents(): List<BookChapter> =
+    filter { it.level != 0 }.ifEmpty { this }
+
 data class BookRun(
     val text: String,
     val bold: Boolean = false,
@@ -136,6 +171,13 @@ interface BookshelfDao {
     suspend fun chapters(owner: String, bookId: String): List<BookEbookChapterMetaEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveChapters(chapters: List<BookEbookChapterMetaEntity>)
+    @Query("DELETE FROM bookshelf_ebook_chapters WHERE owner = :owner AND bookId = :bookId")
+    suspend fun clearBookChapters(owner: String, bookId: String)
+    @Transaction
+    suspend fun replaceChapters(owner: String, bookId: String, chapters: List<BookEbookChapterMetaEntity>) {
+        clearBookChapters(owner, bookId)
+        saveChapters(chapters)
+    }
     @Query("SELECT * FROM bookshelf_audio_chapters WHERE owner = :owner AND bookId = :bookId ORDER BY chapterIndex")
     suspend fun audioChapters(owner: String, bookId: String): List<BookAudiobookChapterEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -165,6 +207,20 @@ interface BookshelfDao {
     suspend fun clearProgress(owner: String)
     @Query("DELETE FROM bookshelf_annotations WHERE owner = :owner")
     suspend fun clearOwnerAnnotations(owner: String)
+    @Query("DELETE FROM bookshelf_books WHERE owner = :owner AND bookId = :bookId")
+    suspend fun deleteSummary(owner: String, bookId: String)
+    @Query("DELETE FROM bookshelf_audio_chapters WHERE owner = :owner AND bookId = :bookId")
+    suspend fun clearBookAudioChapters(owner: String, bookId: String)
+    @Query("DELETE FROM bookshelf_progress WHERE owner = :owner AND bookId = :bookId")
+    suspend fun clearBookProgress(owner: String, bookId: String)
+    @Transaction
+    suspend fun deleteBook(owner: String, bookId: String) {
+        deleteSummary(owner, bookId)
+        clearBookChapters(owner, bookId)
+        clearBookAudioChapters(owner, bookId)
+        clearBookProgress(owner, bookId)
+        clearAnnotations(owner, bookId)
+    }
     @Transaction
     suspend fun clearOwner(owner: String) {
         clearBooks(owner)

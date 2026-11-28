@@ -1130,7 +1130,7 @@ class Management:
             try:
                 books_service.scan(book_library, watched_only=True)
             except HTTPException as error:
-                if error.status_code == 409:
+                if error.status_code in (404, 409):
                     continue
                 raise
             except OSError:

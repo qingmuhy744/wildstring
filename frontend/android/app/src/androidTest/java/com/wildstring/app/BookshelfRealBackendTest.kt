@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.core.view.ViewCompat
@@ -111,19 +112,28 @@ class BookshelfRealBackendTest {
         compose.onNodeWithText("Chapter 1 — A Window").assertIsDisplayed()
         compose.onNodeWithText("Chapter 2 — The Door").assertIsDisplayed()
         capture("book-detail-light.png")
-        compose.onNodeWithTag("books-edit-toggle").performClick()
+        compose.onNodeWithText(uiString(R.string.books_more_metadata)).performScrollTo().performClick()
+        compose.onNodeWithText(uiString(R.string.books_ebook) + " · EPUB", substring = true).assertExists()
+        compose.onNodeWithText(uiString(R.string.books_more_metadata)).performClick()
+        compose.onNodeWithTag("books-edit-toggle").performScrollTo().performClick()
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("books-edit-panel").fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("books-source-chip-itunes").fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onNodeWithText(uiString(R.string.books_field_publisher)).assertDoesNotExist()
+        compose.onNodeWithText(uiString(R.string.books_more_metadata)).performScrollTo().performClick()
+        compose.onNodeWithText(uiString(R.string.books_field_publisher)).assertExists()
+        compose.onNodeWithText(uiString(R.string.books_more_metadata)).performClick()
         compose.onNodeWithTag("books-source-chip-openlibrary").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("books-source-chip-google_books").assertDoesNotExist()
         capture("book-detail-edit-light.png")
         compose.runOnIdle { vm.settings.appearance("dark") }
         compose.waitForIdle()
-        capture("book-detail-edit-dark.png")
+        capture("book-detail-edit-dark.png") { frame ->
+            android.graphics.Color.red(frame.getPixel(frame.width / 2, frame.height / 14)) < 64
+        }
         compose.runOnIdle { vm.settings.appearance("light") }
         compose.waitForIdle()
         compose.onNodeWithTag("books-edit-toggle").performScrollTo().performClick()
@@ -190,8 +200,28 @@ class BookshelfRealBackendTest {
         compose.onNodeWithText("Chapter 1 — A Window").performClick()
         compose.waitUntil(15_000) { compose.onAllNodes(chapter).fetchSemanticsNodes().isNotEmpty() }
         val first = compose.onNode(chapter)
-        first.performSemanticsAction(SemanticsActions.SetSelection) { select -> assertTrue(select(0, 7, false)) }
-        compose.onNodeWithText(uiString(R.string.books_annotate)).performClick()
+        first.performTouchInput { longClick(Offset(20f, centerY)) }
+        val toolbar = compose.onNodeWithTag("book-selection-toolbar")
+        compose.waitUntil(5_000) { toolbar.isDisplayed() }
+        val toolbarBounds = toolbar.fetchSemanticsNode().boundsInWindow
+        val selectionBounds = first.fetchSemanticsNode().boundsInWindow
+        assertTrue("Toolbar stays near the first line", kotlin.math.abs(toolbarBounds.center.y - selectionBounds.center.y) < 2 * toolbarBounds.height)
+        capture("reader-selection-toolbar.png")
+        compose.onNodeWithContentDescription(uiString(R.string.books_sage)).performClick()
+        toolbar.assertDoesNotExist()
+        compose.waitUntil(10_000) {
+            runBlocking { vm.repository.api().bookAnnotations(bookId).items }.any {
+                it.selectedText == "Chapter" && it.color == "sage" && it.note == null
+            }
+        }
+        first.performTouchInput { longClick(Offset(20f, centerY)) }
+        compose.onNodeWithContentDescription(uiString(R.string.books_write_annotation)).performClick()
+        toolbar.assertDoesNotExist()
+        val colors = listOf(R.string.books_amber, R.string.books_terracotta, R.string.books_sage, R.string.books_stone)
+            .map { compose.onNodeWithContentDescription(uiString(it)).assertIsDisplayed().getBoundsInRoot() }
+        assertTrue(colors.zipWithNext().all { (a, b) -> a.top == b.top && a.right <= b.left })
+        compose.onAllNodesWithText(uiString(R.string.books_close), substring = false).assertCountEquals(1)
+        capture("reader-annotation-dialog.png")
         compose.onNodeWithTag("book-annotation-note-input").performTextReplacement("窗边批注")
         compose.activityRule.scenario.onActivity { activity ->
             WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
@@ -201,11 +231,11 @@ class BookshelfRealBackendTest {
                 ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
             }
         }
-        compose.onNodeWithText(uiString(R.string.books_amber)).performClick()
+        compose.onNodeWithContentDescription(uiString(R.string.books_amber)).performClick()
         compose.onNodeWithTag("book-annotation-save").assertIsDisplayed().performClick()
         compose.waitUntil(10_000) {
             runBlocking { vm.repository.api().bookAnnotations(bookId).items }.any {
-                it.startBlock == 0 && it.startOffset == 0 && it.endOffset == 7 && it.color == "amber" && it.note == "窗边批注"
+                it.startBlock == 0 && it.startOffset == 0 && it.selectedText == "Chapter" && it.color == "amber" && it.note == "窗边批注"
             }
         }
         compose.onNodeWithContentDescription(uiString(R.string.books_tools)).performClick()
@@ -251,7 +281,34 @@ class BookshelfRealBackendTest {
         compose.onNode(hasText(uiString(R.string.books_contents)) and hasClickAction()).performClick()
         compose.onNodeWithText("Chapter 2 — The Door").assertIsDisplayed()
         capture("reader-contents-dark.png")
+        compose.onNode(hasText("Chapter 1 — A Window", substring = false) and hasClickAction()).performClick()
+        compose.waitUntil(15_000) { first.isDisplayed() }
+        first.performTouchInput { longClick(Offset(20f, centerY)) }
+        toolbar.assertIsDisplayed()
+        capture("reader-selection-toolbar-dark.png")
+        compose.onNodeWithContentDescription(uiString(R.string.books_write_annotation)).performClick()
+        compose.onAllNodesWithText(uiString(R.string.books_close), substring = false).assertCountEquals(1)
+        val dialogSurface = classicDarkColors.surfaceContainerLow.toArgb()
+        val dialogDrawn: (Bitmap) -> Boolean = { frame ->
+            frame.getPixel(frame.width / 2 + 100, frame.height / 2 - 100) == dialogSurface
+        }
+        capture("reader-annotation-dialog-dark.png", dialogDrawn)
         compose.onNodeWithText(uiString(R.string.books_close)).performClick()
+        compose.onNodeWithContentDescription(uiString(R.string.books_tools)).performClick()
+        compose.onNodeWithText(uiString(R.string.books_annotations), substring = false).performClick()
+        compose.onAllNodesWithContentDescription(uiString(R.string.books_edit_note)).onFirst().performClick()
+        val editDialog = hasAnyAncestor(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, uiString(R.string.books_edit_note)))
+        val editClose = hasText(uiString(R.string.books_close), substring = false) and editDialog
+        compose.onAllNodes(editClose).assertCountEquals(1)
+        val editColors = listOf(R.string.books_amber, R.string.books_terracotta, R.string.books_sage, R.string.books_stone)
+            .map { compose.onNode(hasContentDescription(uiString(it)) and editDialog).assertIsDisplayed().getBoundsInRoot() }
+        assertTrue(editColors.zipWithNext().all { (a, b) -> a.top == b.top && a.right <= b.left })
+        capture("reader-annotation-edit-dark.png", dialogDrawn)
+        compose.onNode(editClose).performClick()
+        compose.onNodeWithText(uiString(R.string.books_close), substring = false).performClick()
+        first.performTouchInput { longClick(Offset(20f, centerY)) }
+        compose.onNodeWithContentDescription(uiString(R.string.books_copy_selection)).performClick()
+        toolbar.assertDoesNotExist()
         compose.onNodeWithContentDescription(uiString(R.string.books_back)).performClick()
         compose.onNodeWithText(uiString(R.string.books_back)).performClick()
         compose.waitUntil(15_000) { compose.onAllNodesWithTag("book-card-resume-$bookId").fetchSemanticsNodes().isNotEmpty() }
@@ -259,6 +316,21 @@ class BookshelfRealBackendTest {
         compose.runOnIdle { vm.settings.appearance("light") }
         compose.waitForIdle()
         capture("bookshelf-in-progress-light.png")
+        compose.onAllNodes(book).onFirst().performClick()
+        compose.onNodeWithTag("book-progress-actions").performScrollTo().performClick()
+        capture("book-progress-actions.png")
+        compose.onNodeWithText(uiString(R.string.books_mark_complete)).performClick()
+        compose.waitUntil(10_000) {
+            runBlocking { vm.repository.api().book(bookId).progressStatus } == "finished" &&
+                compose.onAllNodesWithText(uiString(R.string.books_status_finished), substring = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("book-progress-actions").performClick()
+        compose.onNodeWithText(uiString(R.string.books_clear_progress)).performClick()
+        compose.waitUntil(10_000) {
+            runBlocking { vm.repository.api().book(bookId).progressStatus } == "unread"
+        }
+
         } finally {
             compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("system") }
         }

@@ -1440,7 +1440,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <Bookshelf
                 key={currentUser.id}
                 owner={currentUser.profile === 'owner'}
-                canEdit={currentUser.profile !== 'listener'}
+                canEdit={['owner', 'librarian', 'editor'].includes(currentUser.profile)}
+                canManage={['owner', 'librarian'].includes(currentUser.profile)}
                 canUpload={canImport}
                 audioSession={bookAudio}
                 focusedBook={focusedAudioBook}
