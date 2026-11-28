@@ -224,22 +224,25 @@ def router(database, settings, auth, transcoding, remote_storage=None):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         identity = book["library_id"]
-        with service.write(identity, operation="delete_book", book_id=book_id):
+        target_book_id = book["id"]
+        with service.write(identity, operation="delete_book", book_id=target_book_id):
             cache_guard = (
                 remote_storage.cache.guard if book["storage_backend"] == "gdrive" else nullcontext()
             )
             with cache_guard, database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
-                book = book_record(db, book_id, user)
+                book = book_record(db, target_book_id, user)
                 delete_records(db, library_record(db, identity, user), book)
-        record_event("books.deleted", task_id=identity, batch_id=book_id, user_id=user["id"])
+        record_event("books.deleted", task_id=identity, batch_id=target_book_id, user_id=user["id"])
         return Response(status_code=204)
 
     @router.delete("/book-libraries/{library_id}", dependencies=client, status_code=204)
     def delete_library(library_id: str, owner: Annotated[dict, Depends(auth.require_owner)]):
-        with service.write(library_id, timeout=0, operation="delete_library"):
+        with database.connect(scoped=False) as db:
+            target_library_id = library_record(db, library_id, owner)["id"]
+        with service.write(target_library_id, timeout=0, operation="delete_library"):
             with database.connect(scoped=False) as db:
-                library = library_record(db, library_id, owner)
+                library = library_record(db, target_library_id, owner)
             cache_guard = (
                 remote_storage.cache.guard
                 if library["storage_backend"] == "gdrive"
@@ -248,7 +251,7 @@ def router(database, settings, auth, transcoding, remote_storage=None):
             with cache_guard, database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
                 delete_records(db, library)
-        record_event("books.library_deleted", task_id=library_id, user_id=owner["id"])
+        record_event("books.library_deleted", task_id=target_library_id, user_id=owner["id"])
         return Response(status_code=204)
 
     @router.post("/books/{book_id}/rescan", dependencies=client)
@@ -256,18 +259,19 @@ def router(database, settings, auth, transcoding, remote_storage=None):
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
         identity = book["library_id"]
-        with service.write(identity, operation="rescan_book", book_id=book_id):
+        target_book_id = book["id"]
+        with service.write(identity, operation="rescan_book", book_id=target_book_id):
             with database.connect(scoped=False) as db:
-                book_record(db, book_id, user)
+                book = book_record(db, target_book_id, user)
                 library = library_record(db, identity, user)
             if library["storage_backend"] != "local":
                 raise HTTPException(409, "remote_storage_local_operation")
             try:
-                service.rescan_book(library, book_id)
+                service.rescan_book(library, book["id"])
             except (OSError, ValueError) as error:
                 raise HTTPException(422, "book_scan_file_unavailable") from error
-        record_event("books.rescanned", task_id=identity, batch_id=book_id, user_id=user["id"])
-        return {"id": book_id}
+        record_event("books.rescanned", task_id=identity, batch_id=book["id"], user_id=user["id"])
+        return {"id": book["id"]}
 
     @router.post("/book-libraries/{library_id}/repair", dependencies=client)
     def repair_library(library_id: str, user: manage):
@@ -282,7 +286,7 @@ def router(database, settings, auth, transcoding, remote_storage=None):
                 raise HTTPException(409, "remote_storage_local_operation")
             if user["profile"] != "owner":
                 raise HTTPException(403, "owner_required")
-            return remote_storage.synchronize("books", library_id)
+            return remote_storage.synchronize("books", library["id"])
         return service.scan(library, repair=repair)
 
     @router.post("/book-libraries/{library_id}/export-sidecars", dependencies=client)

@@ -147,10 +147,11 @@ def router(
         locks = values.pop("locked_fields", None)
         if values.get("title") is None:
             values.pop("title", None)
-        with service.write(book["library_id"], operation="metadata_update", book_id=book_id):
+        target_book_id = book["id"]
+        with service.write(book["library_id"], operation="metadata_update", book_id=target_book_id):
             with database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
-                book = book_record(db, book_id, user)
+                book = book_record(db, target_book_id, user)
                 overrides = json.loads(book["overrides_json"]) | values
                 fields = dict(values)
                 for key, column in BOOK_ARRAY.items():
@@ -170,18 +171,18 @@ def router(
                 assignments = ",".join(f"{key}=?" for key in fields)
                 db.execute(
                     f"UPDATE books SET {assignments} WHERE id=?",  # nosec B608
-                    (*fields.values(), book_id),
+                    (*fields.values(), book["id"]),
                 )
-            export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
+            export_books(database, Path(book["managed_root"]), book["library_id"], book["id"])
         record_event(
             "books.metadata_update",
             task_id=book["library_id"],
-            batch_id=book_id,
+            batch_id=book["id"],
             user_id=user["id"],
             operation="metadata_update",
             stage="completed",
         )
-        return get_metadata(book_id, user)
+        return get_metadata(book["id"], user)
 
     @router.patch(
         "/books/{book_id}/audiobook/chapters/{chapter_index}",
@@ -192,18 +193,21 @@ def router(
             raise HTTPException(404, "book_chapter_not_found")
         with database.connect(scoped=False) as db:
             book = book_record(db, book_id, user)
-        with service.write(book["library_id"], operation="chapter_title_update", book_id=book_id):
+        target_book_id = book["id"]
+        with service.write(
+            book["library_id"], operation="chapter_title_update", book_id=target_book_id
+        ):
             with database.connect(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
-                book = book_record(db, book_id, user)
+                book = book_record(db, target_book_id, user)
                 row = db.execute(
                     """UPDATE book_audiobook_chapters SET title=? WHERE book_id=? AND chapter_index=?
                        RETURNING chapter_index,title""",
-                    (body.title, book_id, chapter_index),
+                    (body.title, book["id"], chapter_index),
                 ).fetchone()
                 if row is None:
                     raise HTTPException(404, "book_chapter_not_found")
-            export_books(database, Path(book["managed_root"]), book["library_id"], book_id)
+            export_books(database, Path(book["managed_root"]), book["library_id"], book["id"])
         return dict(row)
 
     return router
