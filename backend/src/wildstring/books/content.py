@@ -23,6 +23,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.ebooks import (
     IMAGE_SUFFIXES,
@@ -31,11 +32,13 @@ from wildstring.books.ebooks import (
     normalized_image,
     validate_upload,
 )
+from wildstring.books.intake import IgnorePattern, ignore_pending, ignored_path, unique_patterns
 from wildstring.books.service import EBOOK_SUFFIXES, Books
 from wildstring.diagnostics import record_event
 from wildstring.http_cache import private_image_response
 from wildstring.library.fs import open_source
-from wildstring.library.sidecar import export_books, write_asset
+from wildstring.library.import_files import HardlinkError
+from wildstring.library.sidecar import clean_text, export_books, write_asset
 from wildstring.library.streaming import AudioResponse
 from wildstring.library.upload import save_upload_to_temp
 from wildstring.permissions import dependency
@@ -45,6 +48,19 @@ VISIBLE = """(
         SELECT 1 FROM book_library_access a WHERE a.user_id=? AND a.library_id=l.id
     )
 )"""
+
+
+SkippedStatus = Literal["pending", "ignored", "absorbed_description", "imported_ebook"]
+SKIPPED_FIELDS = """id, book_id, relative_path, file_size, reason, status,
+                    preview_text, cleaned_preview, updated_at"""
+
+
+class SkippedFileResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    action: Literal["absorb_description", "import_ebook", "ignore"]
+    book_id: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, min_length=1, max_length=16000)
+    add_pattern: IgnorePattern | None = None
 
 
 def book_record(db, identity, user):
@@ -311,6 +327,176 @@ def router(database, settings, auth, transcoding, remote_storage=None):
                 (library_id,),
             )
             return {"items": [dict(row) for row in rows]}
+
+    @router.get("/book-libraries/{library_id}/skipped-files", dependencies=client)
+    def skipped_files(
+        library_id: str,
+        user: manage,
+        status: SkippedStatus | Literal["all"] = "pending",
+        book_id: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        with database.connect(scoped=False) as db:
+            library = library_record(db, library_id, user)
+            args = (library["id"], book_id, book_id)
+            counts = {
+                row["status"]: row["count"]
+                for row in db.execute(
+                    """SELECT status,COUNT(*) AS count FROM book_scan_skipped_files
+                       WHERE library_id=? AND (? IS NULL OR book_id=?) GROUP BY status""",
+                    args,
+                )
+            }
+            rows = db.execute(
+                f"""SELECT {SKIPPED_FIELDS} FROM book_scan_skipped_files
+                    WHERE library_id=? AND (? IS NULL OR book_id=?) AND (?='all' OR status=?)
+                    ORDER BY updated_at DESC,id LIMIT ? OFFSET ?""",  # nosec B608
+                (*args, status, status, limit, offset),
+            ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": sum(counts.values()) if status == "all" else counts.get(status, 0),
+            "pending_count": counts.get("pending", 0),
+        }
+
+    @router.post(
+        "/book-libraries/{library_id}/skipped-files/{item_id}/resolve", dependencies=client
+    )
+    def resolve_skipped_file(
+        library_id: str, item_id: str, body: SkippedFileResolution, user: manage
+    ):
+        with database.connect(scoped=False) as db:
+            library = library_record(db, library_id, user)
+        identity = library["id"]
+        if library["storage_backend"] != "local":
+            raise HTTPException(409, "remote_storage_local_operation")
+        with service.write(identity, operation="resolve_skipped_file"):
+            with database.connect(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                library = library_record(db, identity, user)
+                if library["storage_backend"] != "local":
+                    raise HTTPException(409, "remote_storage_local_operation")
+                item = db.execute(
+                    "SELECT * FROM book_scan_skipped_files WHERE library_id=? AND id=?",
+                    (identity, item_id),
+                ).fetchone()
+                if item is None:
+                    raise HTTPException(404, "book_skipped_file_not_found")
+                if item["status"] != "pending":
+                    raise HTTPException(409, "book_skipped_file_resolved")
+                stamp = time.time()
+                if body.action == "ignore":
+                    if body.add_pattern is not None:
+                        pattern = body.add_pattern
+                        bracket = pattern.partition("[")[2].removeprefix("!").removeprefix("]")
+                        if not ignored_path(Path(item["relative_path"]), [pattern]) and not (
+                            "*" in pattern or "?" in pattern or "]" in bracket
+                        ):
+                            raise HTTPException(422, "book_ignore_pattern_invalid")
+                        old_patterns = json.loads(library["ignore_patterns_json"])
+                        patterns = unique_patterns([*old_patterns, pattern])
+                        if len(patterns) > 64:
+                            raise HTTPException(422, "book_ignore_pattern_limit")
+                        if patterns != old_patterns:
+                            db.execute(
+                                """UPDATE book_libraries SET ignore_patterns_json=?,version=version+1,updated_at=?
+                                   WHERE id=?""",
+                                (json.dumps(patterns, ensure_ascii=False), stamp, identity),
+                            )
+                        ignore_pending(db, identity, [pattern], stamp)
+                    db.execute(
+                        "UPDATE book_scan_skipped_files SET status='ignored',updated_at=? WHERE id=?",
+                        (stamp, item["id"]),
+                    )
+                    return {"id": item["id"], "status": "ignored", "book_id": item["book_id"]}
+
+                target = body.book_id
+                if body.action == "absorb_description":
+                    target = target or item["book_id"]
+                    if target is None:
+                        raise HTTPException(422, "book_skipped_file_book_required")
+                book = book_record(db, target, user) if target is not None else None
+                if book is not None and book["library_id"] != identity:
+                    raise HTTPException(404, "book_not_found")
+                book_id = book["id"] if book is not None else None
+
+                if body.action == "absorb_description":
+                    description = (
+                        body.description or item["cleaned_preview"] or item["preview_text"]
+                    )
+                    if not description.strip() or not clean_text(description):
+                        raise HTTPException(422, "book_skipped_file_description_invalid")
+                    overrides = json.loads(book["overrides_json"]) | {"description": description}
+                    locks = set(json.loads(book["locked_fields_json"])) | {"description"}
+                    db.execute(
+                        """UPDATE books SET description=?,overrides_json=?,locked_fields_json=?,updated_at=?
+                           WHERE id=?""",
+                        (
+                            description,
+                            json.dumps(overrides, ensure_ascii=False),
+                            json.dumps(sorted(locks)),
+                            stamp,
+                            book_id,
+                        ),
+                    )
+                else:
+                    registered = db.execute(
+                        "SELECT 1 FROM book_library_sources WHERE library_id=? AND root=?",
+                        (identity, item["source_root"]),
+                    ).fetchone()
+                    if registered is None:
+                        raise HTTPException(409, "book_skipped_file_source_changed")
+                    imported = db.execute(
+                        """SELECT b.id FROM books b JOIN book_ebooks e ON e.book_id=b.id
+                           WHERE b.library_id=? AND e.source_path=?""",
+                        (identity, item["source_path"]),
+                    ).fetchone()
+
+            managed = Path(library["managed_root"])
+            if body.action == "import_ebook":
+                source_root = Path(item["source_root"])
+                relative = Path(item["relative_path"])
+                if imported is not None:
+                    if book_id is not None and book_id != imported["id"]:
+                        raise HTTPException(409, "book_ebook_already_attached")
+                    book_id = imported["id"]
+                else:
+                    try:
+                        with open_source(source_root, relative) as stream:
+                            stat = os.fstat(stream.fileno())
+                            if (stat.st_size, stat.st_mtime_ns) != (
+                                item["file_size"],
+                                item["source_mtime_ns"],
+                            ):
+                                raise HTTPException(409, "book_skipped_file_source_changed")
+                            book_id = service.ebook(
+                                library,
+                                stream,
+                                relative.name,
+                                library["storage_mode"],
+                                item["source_path"],
+                                book_id,
+                                allow_auto_pair=False,
+                            )
+                    except HardlinkError as error:
+                        raise HTTPException(422, error.code) from error
+                    except OSError as error:
+                        raise HTTPException(409, "book_skipped_file_source_changed") from error
+                    except ValueError as error:
+                        raise HTTPException(422, "book_scan_file_unavailable") from error
+                service.apply_import_metadata(library, book_id, source_root, relative.parent)
+                status = "imported_ebook"
+            else:
+                status = "absorbed_description"
+
+            export_books(database, managed, identity, book_id)
+            with database.connect(write=True) as db:
+                db.execute(
+                    "UPDATE book_scan_skipped_files SET status=?,book_id=?,updated_at=? WHERE id=?",
+                    (status, book_id, time.time(), item["id"]),
+                )
+        return {"id": item["id"], "status": status, "book_id": book_id}
 
     def default_upload_library(db_user):
         with database.connect(scoped=False) as db:

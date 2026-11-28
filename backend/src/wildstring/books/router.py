@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.books.content import VISIBLE
 from wildstring.books.content import router as content_router
+from wildstring.books.intake import IgnorePatterns, ignore_pending, unique_patterns
 from wildstring.books.metadata import router as metadata_router
 from wildstring.books.pairing import router as pairing_router
 from wildstring.books.progress import BOOK_PROGRESS_FIELDS, BOOK_PROGRESS_JOINS
@@ -22,7 +23,8 @@ from wildstring.library.storage import LibraryStorage, MigrationInput, overlappi
 from wildstring.permissions import dependency
 
 LIBRARY_FIELDS = (
-    "l.id, l.name, l.storage_mode, l.storage_backend, l.default_access, l.auto_pair, l.version"
+    "l.id, l.name, l.storage_mode, l.storage_backend, l.default_access, l.auto_pair, l.version, "
+    "l.external_metadata_mode, l.ignore_patterns_json"
 )
 BOOK_FIELDS = (
     "b.id, b.library_id, b.title, b.subtitle, b.authors_json, "
@@ -69,6 +71,8 @@ class BookLibraryInput(BaseModel):
     storage_mode: Literal["copy", "hardlink"] = "copy"
     default_access: Literal["all", "restricted"] = "restricted"
     auto_pair: bool = Field(default=True, strict=True)
+    external_metadata_mode: Literal["off", "sanitized"] = "sanitized"
+    ignore_patterns: IgnorePatterns = Field(default_factory=list)
 
 
 class BookLibraryUpdate(BaseModel):
@@ -84,6 +88,8 @@ class BookLibraryUpdate(BaseModel):
     storage_mode: Literal["copy", "hardlink"] | None = None
     default_access: Literal["all", "restricted"] | None = None
     auto_pair: bool | None = Field(default=None, strict=True)
+    external_metadata_mode: Literal["off", "sanitized"] | None = None
+    ignore_patterns: IgnorePatterns | None = None
     version: int = Field(ge=1, strict=True)
 
 
@@ -124,6 +130,7 @@ def _check_book_source_overlaps(
 
 def _serialize_library(db, row, *, owner: bool, remote_storage=None) -> dict:
     item = dict(row, auto_pair=bool(row["auto_pair"]))
+    item["ignore_patterns"] = json.loads(item.pop("ignore_patterns_json"))
     if item["storage_backend"] == "gdrive" and remote_storage is not None:
         binding = remote_storage.lookup(db, "books", item["id"]) if owner else None
         item["ebook_upload_enabled"] = bool(
@@ -209,8 +216,9 @@ def router(
             except OSError:
                 raise HTTPException(503, "library_storage_unavailable") from None
             db.execute(
-                """INSERT INTO book_libraries(id,name,managed_root,storage_mode,default_access,auto_pair,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?)""",
+                """INSERT INTO book_libraries(id,name,managed_root,storage_mode,default_access,auto_pair,
+                    external_metadata_mode,ignore_patterns_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     identity,
                     body.name,
@@ -218,6 +226,8 @@ def router(
                     body.storage_mode,
                     body.default_access,
                     body.auto_pair,
+                    body.external_metadata_mode,
+                    json.dumps(unique_patterns(body.ignore_patterns), ensure_ascii=False),
                     stamp,
                     stamp,
                 ),
@@ -266,15 +276,21 @@ def router(
             except OSError as error:
                 raise HTTPException(422, "hardlink_not_supported") from error
         stamp = time.time()
+        identity = old["id"]
+        patterns = (
+            unique_patterns(body.ignore_patterns) if body.ignore_patterns is not None else None
+        )
         with database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
-            storage.check_busy(db, library_id)
-            _check_book_source_overlaps(db, catalog, storage, sources, library_id=library_id)
+            storage.check_busy(db, identity)
+            _check_book_source_overlaps(db, catalog, storage, sources, library_id=identity)
             if not db.execute(
                 """UPDATE book_libraries
                 SET name=?,
                     default_access=COALESCE(?, default_access),
                     auto_pair=COALESCE(?, auto_pair),
+                    external_metadata_mode=COALESCE(?, external_metadata_mode),
+                    ignore_patterns_json=COALESCE(?, ignore_patterns_json),
                     version=version+1,
                     updated_at=?
                 WHERE id=? AND version=?""",
@@ -282,8 +298,10 @@ def router(
                     body.name,
                     body.default_access,
                     body.auto_pair,
+                    body.external_metadata_mode,
+                    json.dumps(patterns, ensure_ascii=False) if patterns is not None else None,
                     stamp,
-                    library_id,
+                    identity,
                     body.version,
                 ),
             ).rowcount:
@@ -292,15 +310,15 @@ def router(
                 r["root"]: dict(r)
                 for r in db.execute(
                     "SELECT id, root, watch_enabled FROM book_library_sources WHERE library_id=?",
-                    (library_id,),
+                    (identity,),
                 )
             }
-            db.execute("DELETE FROM book_library_sources WHERE library_id=?", (library_id,))
+            db.execute("DELETE FROM book_library_sources WHERE library_id=?", (identity,))
             db.executemany(
                 "INSERT INTO book_library_sources(library_id,id,root,watch_enabled) VALUES (?,?,?,?)",
                 [
                     (
-                        library_id,
+                        identity,
                         previous.get(str(source), {}).get("id", uuid4().hex),
                         str(source),
                         int(str(source) not in paused)
@@ -310,9 +328,16 @@ def router(
                     for source in sources
                 ],
             )
+            db.execute(
+                """DELETE FROM book_scan_skipped_files WHERE library_id=? AND status='pending'
+                   AND source_root NOT IN (SELECT root FROM book_library_sources WHERE library_id=?)""",
+                (identity, identity),
+            )
+            if patterns is not None:
+                ignore_pending(db, identity, patterns, stamp)
             row = db.execute(
                 f"SELECT {LIBRARY_FIELDS}, l.managed_root FROM book_libraries l WHERE l.id=?",  # nosec B608
-                (library_id,),
+                (identity,),
             ).fetchone()
             return _serialize_library(db, row, owner=True, remote_storage=catalog.remote_storage)
 

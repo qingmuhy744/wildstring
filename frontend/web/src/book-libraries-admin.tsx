@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, errorCodeMessage } from './api';
+import { BookIntakeQueue } from './book-intake';
 import { FolderPicker } from './folder-picker';
 import {
   createDriveLibrary,
@@ -26,6 +27,8 @@ interface BookLibrary {
   remote?: DriveBinding;
   default_access: 'restricted' | 'all';
   auto_pair: boolean;
+  external_metadata_mode: 'sanitized' | 'off';
+  ignore_patterns: string[];
   version: number;
   managed_root?: string;
   sources?: BookLibrarySource[];
@@ -74,9 +77,13 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   const id = useId();
   const [libraries, setLibraries] = useState<BookLibrary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
   const [name, setName] = useState('');
   const [defaultAccess, setDefaultAccess] = useState<'restricted' | 'all'>('restricted');
   const [autoPair, setAutoPair] = useState(true);
+  const [metadataMode, setMetadataMode] =
+    useState<BookLibrary['external_metadata_mode']>('sanitized');
+  const [ignoreRules, setIgnoreRules] = useState('');
   const [folders, setFolders] = useState('');
   const [paused, setPaused] = useState<string[]>([]);
   const [managedRoot, setManagedRoot] = useState('');
@@ -101,13 +108,16 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   const activeJob = jobs.find((job) => job.status === 'queued' || job.status === 'running') ?? null;
 
   const populateForm = useCallback((library: BookLibrary | null) => {
-    setSelectedId(library?.id ?? null);
+    selectedIdRef.current = library?.id ?? null;
+    setSelectedId(selectedIdRef.current);
     setScanJob(null);
     setBackend(library?.storage_backend || 'local');
     setDrive(defaultDriveDraft);
     setName(library?.name || '');
     setDefaultAccess(library?.default_access || 'restricted');
     setAutoPair(library?.auto_pair ?? true);
+    setMetadataMode(library?.external_metadata_mode ?? 'sanitized');
+    setIgnoreRules(library?.ignore_patterns?.join('\n') ?? '');
     setFolders(library?.sources?.map((src) => src.root).join('\n') || '');
     setPaused(
       library?.sources?.filter((src) => src.watch_enabled === 0).map((src) => src.root) || [],
@@ -225,6 +235,15 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
                 name,
                 default_access: defaultAccess,
                 auto_pair: autoPair,
+                ...(backend === 'local'
+                  ? {
+                      external_metadata_mode: metadataMode,
+                      ignore_patterns: ignoreRules
+                        .split('\n')
+                        .map((line) => line.trim())
+                        .filter(Boolean),
+                    }
+                  : {}),
                 source_roots: parsedSources,
                 paused_source_roots: paused.filter((root) => parsedSources.includes(root)),
                 ...(!selected && managedRoot.trim() ? { managed_root: managedRoot.trim() } : {}),
@@ -365,6 +384,11 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
   return (
     <section
       className="management-card music-library-manager"
+      onFocus={(event) => {
+        if (event.target.matches(':focus-visible')) {
+          event.target.scrollIntoView({ block: 'nearest' });
+        }
+      }}
       aria-label={t('bookshelf.configAria')}
     >
       <h2>{t('bookshelf.configAria')}</h2>
@@ -455,6 +479,28 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
           )}
           {backend === 'local' && (
             <>
+              <label htmlFor={`${id}-metadata-mode`}>{t('bookshelf.intake.metadataMode')}</label>
+              <select
+                id={`${id}-metadata-mode`}
+                className="book-intake-mode"
+                value={metadataMode}
+                onChange={(event) =>
+                  setMetadataMode(event.target.value as BookLibrary['external_metadata_mode'])
+                }
+                disabled={busy}
+              >
+                <option value="sanitized">{t('bookshelf.intake.sanitized')}</option>
+                <option value="off">{t('bookshelf.intake.off')}</option>
+              </select>
+              <label htmlFor={`${id}-ignore-rules`}>{t('bookshelf.intake.ignoreRules')}</label>
+              <textarea
+                id={`${id}-ignore-rules`}
+                value={ignoreRules}
+                onChange={(event) => setIgnoreRules(event.target.value)}
+                placeholder={t('bookshelf.intake.ignoreHint')}
+                rows={3}
+                disabled={busy}
+              />
               <div className="library-folder-heading">
                 <label htmlFor={`${id}-sources`}>{t('bookshelf.sources')}</label>
                 <button type="button" disabled={busy} onClick={() => setPicker('source')}>
@@ -532,6 +578,31 @@ export function BookLibraryManager({ canOwner }: { canOwner: boolean }) {
             )}
           </div>
         </form>
+      )}
+
+      {selected && selected.storage_backend !== 'gdrive' && (
+        <BookIntakeQueue
+          key={selected.id}
+          libraryId={selected.id}
+          updateKey={`${selected.version}:${scanJob?.id}:${scanJob?.status}`}
+          onResolved={({ add_pattern }) => {
+            if (add_pattern && canOwner) {
+              void api<{ items: BookLibrary[] }>('/book-libraries')
+                .then(({ items }) => {
+                  setLibraries(items);
+                  const saved = items.find((library) => library.id === selected.id);
+                  if (saved && selectedIdRef.current === saved.id) {
+                    setIgnoreRules((draft) =>
+                      draft === selected.ignore_patterns.join('\n')
+                        ? saved.ignore_patterns.join('\n')
+                        : draft,
+                    );
+                  }
+                })
+                .catch((cause: Error) => setError(cause.message));
+            }
+          }}
+        />
       )}
 
       {selected && (

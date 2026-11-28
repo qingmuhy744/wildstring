@@ -238,3 +238,41 @@ TABLES = (
         google_books INTEGER NOT NULL DEFAULT 0 CHECK(google_books IN (0,1))
     )""",
 )
+
+
+def migrate_intake(db):
+    db.execute("BEGIN IMMEDIATE")
+    columns = {row[1] for row in db.execute("PRAGMA table_info(book_libraries)")}
+    if "external_metadata_mode" not in columns:
+        db.execute(
+            """ALTER TABLE book_libraries ADD COLUMN external_metadata_mode TEXT NOT NULL
+               DEFAULT 'sanitized' CHECK(external_metadata_mode IN ('off','sanitized'))"""
+        )
+    if "ignore_patterns_json" not in columns:
+        db.execute(
+            "ALTER TABLE book_libraries ADD COLUMN ignore_patterns_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS book_scan_skipped_files (
+            id TEXT PRIMARY KEY,
+            library_id TEXT NOT NULL REFERENCES book_libraries(id) ON DELETE CASCADE,
+            book_id TEXT REFERENCES books(id) ON DELETE SET NULL,
+            source_root TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            source_mtime_ns INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending','absorbed_description','imported_ebook','ignored')),
+            preview_text TEXT NOT NULL,
+            cleaned_preview TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            UNIQUE(library_id,source_path)
+        )"""
+    )
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS book_scan_skipped_by_library_status
+           ON book_scan_skipped_files(library_id,status,book_id)"""
+    )
+    db.execute("PRAGMA user_version = 65")
+    db.commit()

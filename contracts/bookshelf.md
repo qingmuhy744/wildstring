@@ -6,9 +6,9 @@
 
 每个书库有独立托管根目录、库级存储模式、访问设置和自动配对选项。扫描来源统一保存在 `book_library_sources`，每个目录一条，拥有稳定来源 ID 和独立监听开关。配置删除不应删除源文件。
 
-`GET /api/v1/book-libraries` 返回可访问书库的 ID、名称、存储模式、访问策略（`default_access`）、自动配对状态和版本；仅当调用者为 `owner` 时额外返回 `managed_root` 与每条扫描来源 `{id, root, watch_enabled}`，不向普通成员暴露服务器物理路径。所有者可访问全部书库，其他已登录账号可以访问 `default_access=all` 的库和明确授权的 `restricted` 库。默认访问策略为 `restricted`。
+`GET /api/v1/book-libraries` 返回可访问书库的 ID、名称、存储模式、访问策略（`default_access`）、自动配对状态、外部侧车策略 `external_metadata_mode`、扫描忽略规则 `ignore_patterns` 和版本；仅当调用者为 `owner` 时额外返回 `managed_root` 与每条扫描来源 `{id, root, watch_enabled}`，不向普通成员暴露服务器物理路径。所有者可访问全部书库，其他已登录账号可以访问 `default_access=all` 的库和明确授权的 `restricted` 库。默认访问策略为 `restricted`。
 
-`POST /api/v1/book-libraries` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?}`，`PUT /api/v1/book-libraries/{library_id}` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?, version}` 更新书库名称、默认访问策略、自动配对、扫描来源与每条目录的 `watch_enabled` 自动监听开关（变更 `managed_root` 或 `storage_mode` 需走存储迁移并返回 409 `library_migration_required`）。后台监听循环按 `watch_enabled=1` 目录的文件快照变化自动增量扫描入库，未开启监听的目录仅在手动扫描时纳入。来源可以留空，默认开启自动配对。省略托管目录时使用服务端运行目录下的 `books/<library_id>`。自定义绝对目录须可写且为空，来源须为现存绝对目录。书库与音乐库的托管目录、扫描来源、已保留的迁移目录，以及运行数据、播客和 Web 目录按[共享存储边界](storage-and-podcast-resources.md)校验。硬链接预检和现有库的显式模式迁移使用共享存储契约。
+`POST /api/v1/book-libraries` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?}`，`PUT /api/v1/book-libraries/{library_id}` 由所有者提交 `{name, source_roots?, paused_source_roots?, managed_root?, storage_mode?, default_access?, auto_pair?, external_metadata_mode?, ignore_patterns?, version}` 更新书库名称、默认访问策略、自动配对、扫描来源与每条目录的 `watch_enabled` 自动监听开关（变更 `managed_root` 或 `storage_mode` 需走存储迁移并返回 409 `library_migration_required`）。后台监听循环按 `watch_enabled=1` 目录的文件快照变化自动增量扫描入库，未开启监听的目录仅在手动扫描时纳入。来源可以留空，默认开启自动配对。省略托管目录时使用服务端运行目录下的 `books/<library_id>`。自定义绝对目录须可写且为空，来源须为现存绝对目录。书库与音乐库的托管目录、扫描来源、已保留的迁移目录，以及运行数据、播客和 Web 目录按[共享存储边界](storage-and-podcast-resources.md)校验。硬链接预检和现有库的显式模式迁移使用共享存储契约。
 
 `GET /api/v1/book-libraries/{library_id}/access` 由所有者查看书库的默认策略与当前明确授权账号列表；`PUT /api/v1/book-libraries/{library_id}/access/{user_id}` 由所有者用 `{granted: true|false}` 保存或收回单个账号的明确授权。操作幂等。建库和授权写请求沿用客户端标头检查。撤销明确授权后，公开库的访问仍由库策略提供。
 
@@ -39,6 +39,21 @@
 伴随文本仅从 `desc.txt` 读取简介、从 `reader.txt` 读取演播，文件名匹配忽略大小写。单份资料读取上限为 64 KiB，支持 UTF-8、GB18030、Big5 和带 BOM 的 UTF-16。识别出的卷、册、部、季目录为书目补齐系列名和卷号，已锁定或手动覆盖的字段优先。
 
 扫描与监听共用 TXT 准入规则。已跟踪的 TXT 继续处理。普通 TXT 位于有声书目录（含分盘目录及归并书目目录）或含非隐藏、非符号链接子目录的目录时，首次入库需达到 16 KiB，或在前 16 KiB 解码文本中出现至少一条语义章节标题。独立叶子目录的普通 TXT 可直接扫描入库。直传沿用上传规则。
+
+本地库的 `external_metadata_mode` 默认是 `sanitized`。扫描读取 `metadata.opf` 和 Audiobookshelf `metadata.json`，将 `series: ["系列 #1.5"]` 的首个有效条目映射到系列名与卷号，将 `publishedYear` 映射到年份。外部简介转成纯文本，纯转码器签名被丢弃；多卷系列中仅包含系列父目录名的 ABS 作者列表也被丢弃。`off` 跳过这两种外部侧车，`desc.txt`、`reader.txt` 和 WildString 便携侧车仍可使用。已锁定或手动覆盖的字段优先。关闭兼容性对后续读取生效。
+
+`ignore_patterns` 默认是空列表，最多 64 条，每条去掉首尾空白后须为 1–200 字符，按大小写不敏感去重。扫描和监听用同一个 glob 判定，匹配来源相对路径或文件名。编辑时省略这两个配置字段会保留原值。规则匹配的文件不参与扫描准入，新规则匹配的既有待处理项转为已忽略。
+
+### 扫描待确认文件
+
+短 TXT 被扫描门禁跳过时进入待确认队列，归属目录唯一书目时关联该书。记录包含最多 800 个字符的原文预览及清洗预览，清洗会去除 BBCode、图片引用和常见试听或版权免责声明。文件大小与修改时间均未变化时保留人工处置，源文件消失或已在扫描中导入时清理待处理项。扫描和队列处置只读取来源目录。
+
+以下端点均要求 `books:manage_libraries`、目标书库访问授权及 `X-Wildstring-Client`。
+
+- `GET /api/v1/book-libraries/{library_id}/skipped-files` 支持 `status=pending|ignored|absorbed_description|imported_ebook|all`（默认 `pending`）、`book_id`、`limit`（1–100，默认 25）和 `offset`。返回 `{items, total, pending_count}`，计数按书目筛选，`total` 还受状态筛选。项目提供 ID、书目 ID、状态、原因、大小、预览、更新时间与 `relative_path`。
+- `POST /api/v1/book-libraries/{library_id}/skipped-files/{item_id}/resolve` 接收 `action` 并返回 `{id, status, book_id}`。用 `absorb_description` 将编辑后的 `description` 或预览保存为简介，写入覆盖与锁定字段并导出便携侧车，`book_id` 默认取关联书目。用 `import_ebook` 将仍可安全打开的已注册来源 TXT 按书库存储模式导入，显式提供同库 `book_id` 时配对，省略时创建独立书目。用 `ignore` 忽略该项，附带 `add_pattern` 可加入书库规则并忽略其他匹配的待处理项。Drive 书库调用本地处置返回 409 `remote_storage_local_operation`。
+
+Web 管理中心可维护规则并按状态查看、预览和处置文件。具备书库管理权限的账号在有该书待处理项时可从单书详情直接处置。
 
 本地封面依次匹配 `cover`、`folder`、`front`、实际目录名和书名，文件名与图片扩展名均忽略大小写，并跳过隐藏文件和符号链接。扫描封面的上限为 64 MiB 与 8000 万像素，按 EXIF 方向缩放至 1600×1600 以内。HTTP 封面上传及 EPUB 图片上限为 8 MiB 与 2400 万像素。
 

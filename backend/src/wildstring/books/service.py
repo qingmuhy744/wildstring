@@ -35,6 +35,7 @@ from wildstring.books.ebooks import (
     tag,
     txt_heading_level,
 )
+from wildstring.books.intake import cleaned_preview, ignore_pending, ignored_path, plain_description
 from wildstring.diagnostics import record_event
 from wildstring.library.import_files import (
     HardlinkError,
@@ -155,7 +156,9 @@ def _audio_folder(root, directory):
     return directory
 
 
-def _source_layout(root: Path, suffixes: set[str]) -> tuple[dict[Path, list[Path]], set[Path]]:
+def _source_layout(
+    root: Path, suffixes: set[str], patterns: list[str]
+) -> tuple[dict[Path, list[Path]], set[Path]]:
     folders: dict[Path, list[Path]] = {}
     restricted_txt_dirs: set[Path] = set()
     for folder, dirs, names in os.walk(root, followlinks=False):
@@ -171,6 +174,8 @@ def _source_layout(root: Path, suffixes: set[str]) -> tuple[dict[Path, list[Path
             path = directory / name
             suffix = path.suffix.lower()
             if name.startswith(".") or suffix not in suffixes or path.is_symlink():
+                continue
+            if ignored_path(path.relative_to(root), patterns):
                 continue
             folders.setdefault(directory, []).append(path)
             if suffix in BOOK_AUDIO_SUFFIXES:
@@ -1093,22 +1098,63 @@ class Books:
                 )
         return book_id
 
-    def directory_metadata(self, book_id, root, folder, defaults=None):
+    def directory_metadata(self, library, book_id, root, folder, defaults=None):
         metadata = dict(defaults or {})
-        for name in ("metadata.opf", "metadata.json"):
+        patterns = json.loads(library["ignore_patterns_json"])
+        external_names = (
+            ("metadata.opf", "metadata.json")
+            if library["external_metadata_mode"] == "sanitized"
+            else ()
+        )
+        for name in external_names:
+            if ignored_path(folder / name, patterns):
+                continue
             content = read_asset(root, folder / name, 2 * 1024 * 1024)
             if content is None:
                 continue
             try:
                 if name.endswith(".json"):
                     payload = json.loads(content)
-                    if isinstance(payload, dict):
-                        metadata.update(payload)
+                    if not isinstance(payload, dict):
+                        continue
+                    if isinstance(series := payload.get("series"), list):
+                        for entry in series:
+                            if not clean_text(entry) or not entry.strip():
+                                continue
+                            parts = re.fullmatch(r"(.+?)\s*#(\d+(?:\.\d+)?)", entry.strip())
+                            payload.setdefault(
+                                "series_name", parts[1].strip() if parts else entry.strip()
+                            )
+                            if parts:
+                                payload.setdefault("series_index", float(parts[2]))
+                            break
+                    if "publishedYear" in payload:
+                        year = payload["publishedYear"]
+                        if isinstance(year, str) and re.fullmatch(r"[0-9]{4}", year.strip()):
+                            year = int(year)
+                        payload.setdefault("published_year", year)
+                    authors = payload.get("authors")
+                    if (
+                        folder != Path(".")
+                        and defaults
+                        and "series_index" in defaults
+                        and isinstance(authors, list)
+                        and len(authors) == 1
+                        and isinstance(authors[0], str)
+                        and normalize(authors[0].strip()) == normalize((root / folder).parent.name)
+                    ):
+                        payload.pop("authors")
+                    metadata.update(payload)
                 else:
                     parser = ElementTree.fromstring(content)
                     for element in parser.iter():
                         key = tag(element)
-                        if key in BOOK_TEXT and key != "sort_title" and clean_text(element.text):
+                        if key == "description":
+                            inner = (element.text or "") + "".join(
+                                ElementTree.tostring(child, encoding="unicode") for child in element
+                            )
+                            metadata[key] = inner
+                        elif key in BOOK_TEXT and key != "sort_title" and clean_text(element.text):
                             metadata[key] = element.text.strip()
                         elif key == "creator" and clean_text(element.text):
                             metadata.setdefault("authors", []).append(element.text.strip())
@@ -1121,10 +1167,16 @@ class Books:
                                 metadata["series_index"] = float(element.get("content", ""))
             except (ValueError, DefusedXmlException, ElementTree.ParseError):
                 continue
+        if "description" in metadata:
+            raw = metadata.pop("description")
+            if isinstance(raw, str):
+                value = plain_description(raw)
+                if value and clean_text(value):
+                    metadata["description"] = value
         with suppress(OSError):
             names = {entry.name.casefold(): entry.name for entry in (root / folder).iterdir()}
             for name in ("reader.txt", *DESCRIPTION_NAMES):
-                if name not in names:
+                if name not in names or ignored_path(folder / names[name], patterns):
                     continue
                 content = read_asset(root, folder / names[name], 64 * 1024)
                 if content:
@@ -1181,8 +1233,27 @@ class Books:
                         (*fields.values(), book_id),
                     )
 
+    def apply_import_metadata(self, library, book_id, root, folder):
+        directory = root / folder
+        parent = directory.parent if directory.parent != root else None
+        series = _series_volume(directory, parent=parent) if directory != root else None
+        defaults = {"series_name": series[0], "series_index": series[1]} if series else None
+        managed = Path(library["managed_root"])
+        self.directory_metadata(library, book_id, root, folder, defaults)
+        restore_book(self.database, managed, book_id, root, folder)
+        self._apply_folder_cover(
+            managed, book_id, root, folder, patterns=json.loads(library["ignore_patterns_json"])
+        )
+
     def _apply_folder_cover(
-        self, managed_root: Path, book_id: str, source_root: Path, folder: Path, *, refresh=False
+        self,
+        managed_root: Path,
+        book_id: str,
+        source_root: Path,
+        folder: Path,
+        *,
+        patterns: list[str],
+        refresh=False,
     ):
         with self.database.connect(scoped=False) as db:
             row = db.execute("SELECT cover_path,title FROM books WHERE id=?", (book_id,)).fetchone()
@@ -1204,6 +1275,7 @@ class Books:
             stem = entry.stem.casefold()
             if (
                 stem in stems
+                and not ignored_path(entry.relative_to(source_root), patterns)
                 and entry.suffix.casefold() in IMAGE_SUFFIXES
                 and not entry.name.startswith(".")
                 and not entry.is_symlink()
@@ -1312,7 +1384,7 @@ class Books:
         return True
 
     def watch_probe(self, library) -> tuple[bool, tuple]:
-        """Snapshot watched roots and check untracked media against scan rules."""
+        """Snapshot watched sources and detect new media or queue changes."""
         identity = library["id"]
         with self.database.connect(scoped=False) as db:
             sources = [
@@ -1348,17 +1420,34 @@ class Books:
                 )
             }
 
+            skipped = {
+                row["source_path"]: row
+                for row in db.execute(
+                    """SELECT source_path,source_root,file_size,source_mtime_ns,status
+                       FROM book_scan_skipped_files WHERE library_id=?""",
+                    (identity,),
+                )
+            }
+
+        patterns = json.loads(library["ignore_patterns_json"])
         watched_suffixes = EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES | IMAGE_SUFFIXES | {".opf", ".json"}
         has_unimported = False
         source_entries: list[tuple[str, int, int]] = []
         txt_contexts = []
+        probed_roots = set()
         for source_root in sources:
             if not source_root.is_dir() or source_root.is_symlink():
                 continue
-            folders, restricted_txt_dirs = _source_layout(source_root, watched_suffixes)
+            probed_roots.add(str(source_root))
+            folders, restricted_txt_dirs = _source_layout(source_root, watched_suffixes, patterns)
             txt_contexts.append(tuple(sorted(restricted_txt_dirs)))
             for paths in folders.values():
                 for path in paths:
+                    if library["external_metadata_mode"] == "off" and path.name.casefold() in {
+                        "metadata.opf",
+                        "metadata.json",
+                    }:
+                        continue
                     suffix = path.suffix.lower()
                     try:
                         stat_info = path.stat(follow_symlinks=False)
@@ -1367,16 +1456,30 @@ class Books:
                     key_str = str(path)
                     source_entries.append((key_str, stat_info.st_size, stat_info.st_mtime_ns))
                     if (
-                        not has_unimported
-                        and suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
+                        suffix in EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
+                        and path.name.casefold() not in METADATA_TEXT_NAMES
                         and key_str not in ebook_sources
                         and key_str not in audio_sources
-                        and (
-                            suffix != ".txt"
-                            or _scan_txt(source_root, path, ebook_sources, restricted_txt_dirs)
-                        )
                     ):
-                        has_unimported = True
+                        known = skipped.get(key_str)
+                        same = known is not None and (
+                            known["file_size"],
+                            known["source_mtime_ns"],
+                        ) == (stat_info.st_size, stat_info.st_mtime_ns)
+                        if not same or (
+                            known["status"] == "pending"
+                            and _scan_txt(source_root, path, ebook_sources, restricted_txt_dirs)
+                        ):
+                            has_unimported = True
+
+        if not has_unimported:
+            seen = {path for path, _, _ in source_entries}
+            has_unimported = any(
+                row["status"] == "pending"
+                and row["source_root"] in probed_roots
+                and (path not in seen or path in ebook_sources)
+                for path, row in skipped.items()
+            )
 
         managed_entries: list[tuple[str, int, int]] = []
         managed_root = Path(library["managed_root"])
@@ -1403,6 +1506,8 @@ class Books:
             tuple(source_entries),
             tuple(managed_entries),
             tuple(txt_contexts),
+            tuple(patterns),
+            library["external_metadata_mode"],
         )
         return has_unimported, snapshot
 
@@ -1438,6 +1543,7 @@ class Books:
 
         metadata_folders = []
         audio_relatives = []
+        patterns = json.loads(library["ignore_patterns_json"])
         if audio:
             if any(not row["source_path"] for row in audio):
                 raise HTTPException(409, "book_repair_source_changed")
@@ -1464,6 +1570,7 @@ class Books:
                         and not path.is_symlink()
                         and path.suffix.lower() in BOOK_AUDIO_SUFFIXES
                         and str(path) not in other_audio
+                        and not ignored_path(path.relative_to(root), patterns)
                     ):
                         files.add(path)
             audio_relatives = [file.relative_to(root) for file in sorted(files)]
@@ -1505,10 +1612,12 @@ class Books:
             parent = folder.parent if folder.parent != root else None
             series = _series_volume(folder, parent=parent) if folder != root else None
             defaults = {"series_name": series[0], "series_index": series[1]} if series else {}
-            self.directory_metadata(book_id, root, relative, defaults)
+            self.directory_metadata(library, book_id, root, relative, defaults)
         if metadata_folders:
             root, folder = metadata_folders[0]
-            self._apply_folder_cover(managed, book_id, root, folder.relative_to(root), refresh=True)
+            self._apply_folder_cover(
+                managed, book_id, root, folder.relative_to(root), patterns=patterns, refresh=True
+            )
             paths = [Path(ebook["source_path"])] if ebook and ebook["source_path"] else []
             self._apply_embedded_cover(
                 managed,
@@ -1519,6 +1628,107 @@ class Books:
             )
         export_books(self.database, managed, identity, book_id)
 
+    def _update_skipped_files(
+        self, library_id, previous, skipped_files, scanned_roots, ebook_sources, audio_sources
+    ):
+        owners: dict[Path, set[str]] = {}
+        roots = sorted((Path(root) for root in scanned_roots), key=lambda path: -len(path.parts))
+        for source, book_id in audio_sources.items():
+            folder = Path(source).parent
+            root = next((root for root in roots if folder.is_relative_to(root)), None)
+            if root is not None:
+                owners.setdefault(_audio_folder(root, folder), set()).add(book_id)
+        for source, book_id in ebook_sources.items():
+            owners.setdefault(Path(source).parent, set()).add(book_id)
+
+        rows = []
+        seen = set()
+        for root, path in skipped_files:
+            relative = path.relative_to(root)
+            try:
+                with open_source(root, relative) as stream:
+                    stat = os.fstat(stream.fileno())
+                    data = stream.read(TXT_SCAN_BYTES)
+            except OSError:
+                continue
+            decoded = ""
+            with suppress(ValueError):
+                decoded = decode_text(data)[0]
+            preview = decoded[:800]
+            cleaned = cleaned_preview(decoded)[:800]
+            candidates = owners.get(path.parent, set()) | owners.get(
+                _audio_folder(root, path.parent), set()
+            )
+            rows.append(
+                (
+                    uuid4().hex,
+                    library_id,
+                    next(iter(candidates)) if len(candidates) == 1 else None,
+                    str(root),
+                    str(path),
+                    relative.as_posix(),
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    preview,
+                    cleaned,
+                    time.time(),
+                )
+            )
+            seen.add(str(path))
+
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT ignore_patterns_json FROM book_libraries WHERE id=?", (library_id,)
+            ).fetchone()
+            if current is None:
+                return
+            patterns = json.loads(current["ignore_patterns_json"])
+            registered = {
+                row[0]
+                for row in db.execute(
+                    "SELECT root FROM book_library_sources WHERE library_id=?", (library_id,)
+                )
+            }
+            db.executemany(
+                """INSERT INTO book_scan_skipped_files
+                   (id,library_id,book_id,source_root,source_path,relative_path,file_size,source_mtime_ns,
+                    reason,status,preview_text,cleaned_preview,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,'txt_admission','pending',?,?,?)
+                   ON CONFLICT(library_id,source_path) DO UPDATE SET
+                       book_id=excluded.book_id, file_size=excluded.file_size,
+                       source_mtime_ns=excluded.source_mtime_ns, status='pending',
+                       preview_text=excluded.preview_text, cleaned_preview=excluded.cleaned_preview,
+                       updated_at=excluded.updated_at
+                   WHERE book_scan_skipped_files.file_size<>excluded.file_size
+                      OR book_scan_skipped_files.source_mtime_ns<>excluded.source_mtime_ns
+                      OR (book_scan_skipped_files.status='pending' AND book_scan_skipped_files.book_id IS NOT excluded.book_id)""",
+                [
+                    row
+                    for row in rows
+                    if row[3] in registered and not ignored_path(Path(row[5]), patterns)
+                ],
+            )
+            db.executemany(
+                "DELETE FROM book_scan_skipped_files WHERE id=? AND status='pending'",
+                [
+                    (row["id"],)
+                    for source, row in previous.items()
+                    if source in ebook_sources
+                    or row["source_root"] not in registered
+                    or (
+                        row["source_root"] in scanned_roots
+                        and source not in seen
+                        and not (
+                            ignored_path(Path(source).relative_to(row["source_root"]), patterns)
+                            and Path(source).is_file()
+                            and not Path(source).is_symlink()
+                        )
+                    )
+                ],
+            )
+            ignore_pending(db, library_id, patterns)
+
     def scan(self, library, *, watched_only: bool = False, repair: bool = False):
         identity = library["id"]
         job_id = uuid4().hex
@@ -1526,10 +1736,20 @@ class Books:
             identity, timeout=0.0 if watched_only else 5.0, operation="repair" if repair else "scan"
         ):
             with self.database.connect(write=True) as db:
-                if not db.execute(
-                    "SELECT 1 FROM book_libraries WHERE id=?", (identity,)
-                ).fetchone():
+                library = db.execute(
+                    "SELECT * FROM book_libraries WHERE id=?", (identity,)
+                ).fetchone()
+                if library is None:
                     raise HTTPException(404, "book_library_not_found")
+                patterns = json.loads(library["ignore_patterns_json"])
+                skipped = {
+                    row["source_path"]: row
+                    for row in db.execute(
+                        """SELECT id,source_path,source_root,book_id,file_size,source_mtime_ns,status
+                           FROM book_scan_skipped_files WHERE library_id=?""",
+                        (identity,),
+                    )
+                }
                 query = (
                     "SELECT root FROM book_library_sources WHERE library_id=? AND watch_enabled=1 ORDER BY id"
                     if watched_only
@@ -1599,13 +1819,16 @@ class Books:
 
             try:
                 folder_items = {}
+                skipped_files = []
+                scanned_roots = set()
                 for source_root in sources:
                     if not source_root.is_dir() or source_root.is_symlink():
                         failures += 1
                         last_error = last_error or "book_scan_file_unavailable"
                         continue
+                    scanned_roots.add(str(source_root))
                     folders, restricted_txt_dirs = _source_layout(
-                        source_root, EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES
+                        source_root, EBOOK_SUFFIXES | BOOK_AUDIO_SUFFIXES, patterns
                     )
                     for directory, paths in folders.items():
                         audio = []
@@ -1614,10 +1837,24 @@ class Books:
                             suffix = path.suffix.lower()
                             if suffix in BOOK_AUDIO_SUFFIXES:
                                 audio.append(path.relative_to(source_root))
-                            elif suffix != ".txt" or _scan_txt(
-                                source_root, path, ebook_sources, restricted_txt_dirs
-                            ):
+                            elif suffix != ".txt" or str(path) in ebook_sources:
                                 ebooks.append(path)
+                            elif path.name.casefold() not in METADATA_TEXT_NAMES:
+                                previous = skipped.get(str(path))
+                                if previous is not None and previous["status"] != "pending":
+                                    try:
+                                        stat = path.stat(follow_symlinks=False)
+                                    except OSError:
+                                        continue
+                                    if (stat.st_size, stat.st_mtime_ns) == (
+                                        previous["file_size"],
+                                        previous["source_mtime_ns"],
+                                    ):
+                                        continue
+                                if _scan_txt(source_root, path, ebook_sources, restricted_txt_dirs):
+                                    ebooks.append(path)
+                                else:
+                                    skipped_files.append((source_root, path))
                         if ebooks:
                             folder_items.setdefault((source_root, directory), ([], []))[1].extend(
                                 ebooks
@@ -1806,16 +2043,22 @@ class Books:
                                 if matched_series:
                                     defaults = {"series_name": matched_series}
                                     break
-                        self.directory_metadata(book_id, source_root, dir_rel, defaults)
+                        self.directory_metadata(library, book_id, source_root, dir_rel, defaults)
                         if restore_book(self.database, managed_root, book_id, source_root, dir_rel):
                             sidecars_applied += 1
-                        self._apply_folder_cover(managed_root, book_id, source_root, dir_rel)
+                        self._apply_folder_cover(
+                            managed_root, book_id, source_root, dir_rel, patterns=patterns
+                        )
                         self._apply_embedded_cover(
                             managed_root, book_id, source_root, audio, ebooks
                         )
                         if repair:
                             export_books(self.database, managed_root, identity, book_id)
                     publish_progress()
+
+                self._update_skipped_files(
+                    identity, skipped, skipped_files, scanned_roots, ebook_sources, audio_sources
+                )
 
                 if repair:
                     with self.database.connect(scoped=False) as db:
