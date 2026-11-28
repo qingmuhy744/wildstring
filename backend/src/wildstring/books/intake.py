@@ -28,8 +28,7 @@ _DISCLAIMER = re.compile(
     r"版权(?:归|声明)|如有侵权.{0,20}(?:联系|删除)|原抓作品.{0,12}严禁转载|"
     r"for (?:preview|evaluation|listening) (?:use |test )?only|"
     r"only used for listening test|commercial purposes are strictly prohibited|"
-    r"delete .{0,16}within 24 hours|all (?:rights reserved|copyrights belong)|"
-    r"^warning:?\s*$",
+    r"delete .{0,16}within 24 hours|all (?:rights reserved|copyrights belong)",
     re.I,
 )
 
@@ -103,7 +102,12 @@ def cleaned_preview(value: str) -> str:
     value = _BBCODE_TAGS.sub("", _BBCODE_IMAGES.sub("", value))
     paragraphs = re.split(r"\n[ \t]*\n", value.replace("\r\n", "\n"))
     cleaned = (
-        "\n".join(line for line in paragraph.splitlines() if not _DISCLAIMER.search(line)).strip()
+        "\n".join(
+            line
+            for line in paragraph.splitlines()
+            if line.strip().casefold() not in {"warning", "warning:"}
+            and not _DISCLAIMER.search(line)
+        ).strip()
         for paragraph in paragraphs
     )
     return "\n\n".join(filter(None, cleaned))
