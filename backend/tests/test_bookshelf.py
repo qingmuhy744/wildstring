@@ -1507,10 +1507,10 @@ def test_scan_groups_discs_and_extracts_series_roles_and_descriptions(
     audio("第二卷/CD1/02.mp3", 1, explicit=True)
     audio("第二卷/CD2/01.mp3", 1)
     audio("第二卷/CD2/00.mp3", 2)
-    (series / "第一卷/内容简介.txt").write_bytes("第一卷的简介。".encode("gb18030"))
-    (series / "第二卷/简介.txt").write_text("第二卷的简介。")
+    (series / "第一卷/desc.txt").write_bytes("第一卷的简介。".encode("gb18030"))
+    (series / "第二卷/desc.txt").write_text("第二卷的简介。")
     (series / "第一卷/reader.txt").write_bytes("許時".encode("utf-16"))
-    (series / "description.txt").write_bytes("繁體中文簡介。這是一本書的內容簡介。".encode("big5"))
+    (series / "desc.txt").write_bytes("繁體中文簡介。這是一本書的內容簡介。".encode("big5"))
     (series / "长篇故事.txt").write_text("第一季\n第一卷\n第一章\n正文")
     (root / "Readme.txt").write_text("目录说明")
     assert _audio_text("中文书名".encode("gb18030").decode("latin-1")) == "中文书名"
@@ -1561,6 +1561,220 @@ def test_scan_groups_discs_and_extracts_series_roles_and_descriptions(
             7,
             ["手改演播"],
         )
+
+
+def test_scan_and_watch_share_txt_admission(settings, authenticated_client, tmp_path):
+    import shutil
+
+    from wildstring.books.service import Books
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "mixed-books"
+    series = root / "Series"
+    audio = series / "Story"
+    disc = audio / "DISC"
+    disc.mkdir(parents=True)
+    shutil.copyfile(fixture, disc / "01.mp3")
+    leaf = root / "Short stories"
+    (leaf / ".hidden").mkdir(parents=True)
+    (leaf / "linked").symlink_to(disc, target_is_directory=True)
+    (leaf / "Short.txt").write_text("A short story.")
+
+    with authenticated_client(settings) as owner:
+        owner.app.state.management.stop()
+        lib = create_library(owner, "Mixed books", source_roots=[str(root)])
+        service = Books(Database(settings.data_dir), settings)
+        base = f"/api/v1/book-libraries/{lib['id']}/scan"
+        first = owner.post(base, headers=HEADERS)
+        assert first.json()["added_books"] == 2, first.text
+
+        (audio / "内容简介.txt").write_text(
+            "[img]https://example.invalid/dead.jpg[/img]\n请于试听后24小时内删除"
+        )
+        (audio / "下载说明.txt").write_text("请查看下载说明。")
+        (audio / "description.txt").write_text("Release group information.")
+        (disc / "Notes.txt").write_text("Disc notes.")
+        (series / "Readme.txt").write_bytes(b"x" * (16 * 1024 - 1))
+        (leaf / "Visible child").mkdir()
+        assert service.watch_probe(lib)[0] is False
+        repair = owner.post(base, params={"repair": "true"}, headers=HEADERS)
+        assert repair.json()["status"] == "completed", repair.text
+        assert repair.json()["added_books"] == 0
+        assert repair.json()["updated_books"] == 2
+        books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+        assert {item["title"] for item in books} == {"Story", "Short"}
+        assert all(item["description"] is None for item in books)
+        assert service.watch_probe(lib)[0] is False
+
+        (audio / "Story.txt").write_text("  Chapter 1\nStory body.")
+        assert service.watch_probe(lib)[0] is True
+        paired = owner.post(base, headers=HEADERS)
+        assert paired.json()["paired_books"] == 1, paired.text
+        assert service.watch_probe(lib)[0] is False
+
+        (series / "Omnibus.txt").write_bytes(b"x" * (16 * 1024))
+        assert service.watch_probe(lib)[0] is True
+        omnibus = owner.post(base, headers=HEADERS)
+        assert omnibus.json()["added_books"] == 1, omnibus.text
+        assert service.watch_probe(lib)[0] is False
+        books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+        assert {item["title"] for item in books if item["has_ebook"]} == {
+            "Story",
+            "Short",
+            "Omnibus",
+        }
+
+        (leaf / "Another.txt").write_text("Another short story.")
+        pending, snapshot = service.watch_probe(lib)
+        assert pending is False
+        (leaf / "Visible child").rmdir()
+        pending, leaf_snapshot = service.watch_probe(lib)
+        assert pending is True and leaf_snapshot != snapshot
+        assert owner.post(base, headers=HEADERS).json()["added_books"] == 1
+        assert service.watch_probe(lib)[0] is False
+
+
+def test_audiobook_repeated_tag_titles_use_filenames_and_repair_legacy_chapters(
+    settings, authenticated_client, tmp_path
+):
+    import shutil
+
+    from mutagen.id3 import CHAP, TIT2
+    from mutagen.mp3 import MP3
+
+    fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/audio/playback.mp3"
+    root = tmp_path / "audiobooks"
+    folder = root / "天坑宝藏"
+    folder.mkdir(parents=True)
+    for name, title in (
+        ("第0回", "花絮"),
+        ("第1回", "天坑宝藏"),
+        ("第2回", " 天坑宝藏 "),
+        ("第3回", "天坑宝藏"),
+        ("第4回", "天坑宝藏"),
+    ):
+        path = folder / f"{name}.mp3"
+        shutil.copyfile(fixture, path)
+        media = MP3(path)
+        media.tags.add(TIT2(encoding=3, text=[title]))
+        if name == "第4回":
+            media.tags.add(
+                CHAP(
+                    element_id="embedded",
+                    start_time=0,
+                    end_time=100,
+                    sub_frames=[TIT2(encoding=3, text=["内嵌章名"])],
+                )
+            )
+        media.save()
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Repeated titles", source_roots=[str(root)])
+        base = f"/api/v1/book-libraries/{lib['id']}/scan"
+        assert owner.post(base, headers=HEADERS).json()["added_books"] == 1
+        book = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"][0]
+        path = f"/api/v1/books/{book['id']}"
+
+        def chapter_titles():
+            return [
+                chapter["title"] for chapter in owner.get(path + "/audiobook").json()["chapters"]
+            ]
+
+        assert chapter_titles() == ["花絮", "第1回", "第2回", "第3回", "内嵌章名"]
+        assert (
+            owner.patch(
+                path + "/audiobook/chapters/3", headers=HEADERS, json={"title": "手工校对"}
+            ).status_code
+            == 200
+        )
+        for endpoint, params, chapter_index in (
+            (base, {"repair": "true"}, 1),
+            (path + "/rescan", {}, 2),
+        ):
+            with Database(settings.data_dir).connect(write=True) as db:
+                db.execute(
+                    "UPDATE book_audiobook_chapters SET title=? WHERE book_id=? AND chapter_index=?",
+                    ("天坑宝藏", book["id"], chapter_index),
+                )
+            assert chapter_titles()[chapter_index] == "天坑宝藏"
+            result = owner.post(endpoint, params=params, headers=HEADERS)
+            assert result.status_code == 200, result.text
+            assert chapter_titles() == ["花絮", "第1回", "第2回", "手工校对", "内嵌章名"]
+
+
+def test_scan_folder_covers_match_names_and_accept_high_resolution_jpeg(
+    settings, authenticated_client, tmp_path
+):
+    from io import BytesIO
+
+    from PIL import Image
+
+    root = tmp_path / "cover-books"
+    named = root / "Named folder"
+    titled = root / "Other folder"
+    large = root / "Large folder"
+    unmatched = root / "Unmatched folder"
+    for folder, title in (
+        (named, "Named Book"),
+        (titled, "围城"),
+        (large, "Large Book"),
+        (unmatched, "Unmatched Book"),
+    ):
+        folder.mkdir(parents=True)
+        (folder / f"{title}.txt").write_text("Short text.")
+        Image.new("RGB", (20, 20), "red").save(folder / "Back.jpg")
+        Image.new("RGB", (20, 20), "red").save(folder / "Inlay.jpg")
+    Image.new("RGB", (20, 20), "green").save(named / "Cover.JPG")
+    Image.new("RGB", (20, 20), "blue").save(named / "NAMED FOLDER.jpg")
+    Image.new("RGB", (20, 20), "blue").save(titled / "围城.jpg")
+    Image.new("RGB", (20, 20), "red").save(titled / "._Cover.jpg")
+    (titled / "Folder.jpg").symlink_to(titled / "Back.jpg")
+    exif = Image.Exif()
+    exif[274] = 6
+    with Image.new("L", (6464, 9758), 180) as source:
+        source.save(large / "Front.jpg", exif=exif)
+
+    with authenticated_client(settings) as owner:
+        lib = create_library(owner, "Local covers", source_roots=[str(root)])
+        scan = owner.post(f"/api/v1/book-libraries/{lib['id']}/scan", headers=HEADERS)
+        assert scan.json()["status"] == "completed", scan.text
+        books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
+        covers = {item["title"]: f"/api/v1/books/{item['id']}/cover" for item in books}
+        for title, color, minimum in (("Named Book", 1, 120), ("围城", 2, 250)):
+            response = owner.get(covers[title])
+            assert response.status_code == 200, response.text
+            with Image.open(BytesIO(response.content)) as cover:
+                pixel = cover.getpixel((0, 0))
+                assert pixel[color] >= minimum and sum(pixel) - pixel[color] <= 5
+        assert owner.get(covers["Unmatched Book"]).status_code == 404
+
+        named_book_id = next(item["id"] for item in books if item["title"] == "Named Book")
+        (named / "Cover.JPG").unlink()
+        assert (
+            owner.post(f"/api/v1/books/{named_book_id}/rescan", headers=HEADERS).status_code == 200
+        )
+        with Image.open(BytesIO(owner.get(covers["Named Book"]).content)) as cover:
+            assert cover.getpixel((0, 0))[2] >= 250
+
+        response = owner.get(covers["Large Book"])
+        assert response.status_code == 200, response.text
+        with Image.open(BytesIO(response.content)) as cover:
+            assert cover.format == "JPEG"
+            assert cover.width == 1600 and abs(cover.height - 1060) <= 1
+            assert cover.getexif().get(274, 1) == 1
+        jpeg = (large / "Front.jpg").read_bytes()
+        rejected_pixels = owner.post(
+            covers["Large Book"], headers=HEADERS, files={"file": ("large.jpg", jpeg, "image/jpeg")}
+        )
+        assert rejected_pixels.status_code == 422
+        assert rejected_pixels.json()["detail"] == "book_image_invalid"
+        rejected_bytes = owner.post(
+            covers["Large Book"],
+            headers=HEADERS,
+            files={"file": ("large.jpg", jpeg.ljust(8 * 1024 * 1024 + 1, b"\0"), "image/jpeg")},
+        )
+        assert rejected_bytes.status_code == 413
+        assert rejected_bytes.json()["detail"] == "cover_too_large"
 
 
 def test_repair_legacy_discs_and_txt_remaps_personal_anchors(
@@ -1847,6 +2061,7 @@ def test_book_management_permissions_and_personal_progress(
         assert owner.post(base + "/scan", headers=HEADERS).status_code == 200
         books = owner.get("/api/v1/books", params={"library_id": lib["id"]}).json()["items"]
         record = next(book for book in books if book["has_audiobook"])
+        assert record["has_ebook"]
         other_book = next(book for book in books if book["id"] != record["id"])
         book_id = record["id"]
         path = f"/api/v1/books/{book_id}"
@@ -1952,8 +2167,8 @@ def test_book_management_permissions_and_personal_progress(
             == 200
         )
         shutil.copyfile(audio, folder / "01.mp3")
-        (folder / "简介.txt").write_text("新简介。")
-        (other / "简介.txt").write_text("别的书不受影响。")
+        (folder / "desc.txt").write_text("新简介。")
+        (other / "desc.txt").write_text("别的书不受影响。")
         result = librarian.post(path + "/rescan", headers=HEADERS)
         assert result.status_code == 200, result.text
         assert librarian.get(path).json()["title"] == "Edited"
@@ -2018,7 +2233,7 @@ def test_book_series_matches_parent_prefix_volumes_and_omnibus_txt(
     (vol1 / "DISC").mkdir(parents=True)
     (vol2 / "DISC").mkdir(parents=True)
     (series_dir / "盗墓笔记全集.txt").write_text("第一季\n第一卷 七星鲁王\n第一章 血尸\n正文。\n")
-    (vol1 / "内容简介.txt").write_text("七星鲁王宫简介。", encoding="gb18030")
+    (vol1 / "desc.txt").write_text("七星鲁王宫简介。", encoding="gb18030")
     shutil.copyfile(fixture_mp3, vol1 / "DISC" / "七星鲁王宫01.mp3")
     shutil.copyfile(fixture_mp3, vol2 / "DISC" / "秦岭神树01.mp3")
 

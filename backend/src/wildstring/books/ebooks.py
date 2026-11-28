@@ -20,6 +20,7 @@ MAX_SPINE_ITEMS = 1000
 MAX_TOTAL_BLOCKS = 200_000
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_IMAGE_PIXELS = 24_000_000
 AUDIO_SUFFIXES = {
     ".mp3",
     ".m4a",
@@ -130,16 +131,18 @@ def asset_path(base, value):
     return None if name == ".." or name.startswith("../") else name
 
 
-def normalized_image(data: bytes) -> bytes:
-    if len(data) > MAX_IMAGE_BYTES:
+def normalized_image(
+    data: bytes, *, max_bytes: int = MAX_IMAGE_BYTES, max_pixels: int = MAX_IMAGE_PIXELS
+) -> bytes:
+    if len(data) > max_bytes:
         raise ValueError("book_image_invalid")
     try:
         with Image.open(io.BytesIO(data)) as source:
-            if (
-                source.format not in {"JPEG", "PNG", "WEBP"}
-                or source.width * source.height > 24_000_000
-            ):
+            pixels = source.width * source.height
+            if source.format not in {"JPEG", "PNG", "WEBP"} or pixels > max_pixels:
                 raise ValueError("book_image_invalid")
+            if source.format == "JPEG" and pixels > MAX_IMAGE_PIXELS:
+                source.draft("RGB", (1600, 1600))
             image = ImageOps.exif_transpose(source).convert("RGB")
             image.thumbnail((1600, 1600))
             output = io.BytesIO()
