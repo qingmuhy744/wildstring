@@ -1864,12 +1864,14 @@ def test_book_management_permissions_and_personal_progress(
                 actor.post("/api/v1/auth/login", headers=HEADERS, json=credentials).status_code
                 == 200
             )
-            assert actor.delete(base, headers=HEADERS).status_code == 403
+            deleted_library = actor.delete(base, headers=HEADERS)
+            assert deleted_library.status_code == 403
             assert "managed_root" not in actor.get("/api/v1/book-libraries").json()["items"][0]
             actors[profile] = actor
             if profile != "librarian":
                 assert actor.post(path + "/rescan", headers=HEADERS).status_code == 403
-                assert actor.delete(path, headers=HEADERS).status_code == 403
+                deleted_book = actor.delete(path, headers=HEADERS)
+                assert deleted_book.status_code == 403
         assert owner.post(path + "/rescan").status_code == 403
         librarian = actors["librarian"]
         guest = actors["listener"]
@@ -1905,10 +1907,12 @@ def test_book_management_permissions_and_personal_progress(
             ).status_code
             == 201
         )
-        assert guest.delete(path + "/progress?kind=reading", headers=HEADERS).status_code == 204
+        cleared_reading = guest.delete(path + "/progress?kind=reading", headers=HEADERS)
+        assert cleared_reading.status_code == 204
         assert guest.get(path).json()["listening_progress"]["completed"]
         assert guest.get(path).json()["reading_progress"] is None
-        assert guest.delete(path + "/progress", headers=HEADERS).status_code == 204
+        cleared_all = guest.delete(path + "/progress", headers=HEADERS)
+        assert cleared_all.status_code == 204
         assert guest.get(path).json()["progress_status"] == "unread"
         assert len(guest.get(path + "/bookmarks").json()["items"]) == 1
         assert len(guest.get(path + "/annotations").json()["items"]) == 1
@@ -1988,12 +1992,14 @@ def test_book_management_permissions_and_personal_progress(
                 "SELECT cache_key FROM book_ebooks WHERE book_id=?", (book_id,)
             ).fetchone()[0]
         managed = Path(lib["managed_root"])
-        assert librarian.delete(path, headers=HEADERS).status_code == 204
+        removed_book = librarian.delete(path, headers=HEADERS)
+        assert removed_book.status_code == 204
         assert owner.get(path).status_code == 404
         assert not (managed / book_id).exists()
         assert not (settings.data_dir / "book_cache" / cache_key).exists()
         assert audio.is_file() and ebook.read_text() == "第一章\n故事正文。"
-        assert owner.delete(base, headers=HEADERS).status_code == 204
+        removed_lib = owner.delete(base, headers=HEADERS)
+        assert removed_lib.status_code == 204
         assert not managed.exists()
         assert (other / "Other.txt").read_text() == "另一册。"
         assert audio.is_file()
@@ -2035,5 +2041,6 @@ def test_book_series_matches_parent_prefix_volumes_and_omnibus_txt(
         ebook_id = items[0]["id"]
         with Database(settings.data_dir).connect(write=True) as sql:
             sql.execute("UPDATE book_ebooks SET cache_key=NULL WHERE book_id=?", (ebook_id,))
-        assert owner.delete(f"/api/v1/books/{ebook_id}", headers=HEADERS).status_code == 204
+        removed_ebook = owner.delete(f"/api/v1/books/{ebook_id}", headers=HEADERS)
+        assert removed_ebook.status_code == 204
         assert (series_dir / "盗墓笔记全集.txt").is_file()
